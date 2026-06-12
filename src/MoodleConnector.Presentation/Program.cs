@@ -190,6 +190,7 @@ builder.Services.AddOpenIddict()
         options.DisableAccessTokenEncryption();
         options.SetAccessTokenLifetime(TimeSpan.FromMinutes(Math.Max(5, oauthOptions.AccessTokenMinutes)));
         options.SetRefreshTokenLifetime(TimeSpan.FromDays(Math.Max(1, oauthOptions.RefreshTokenDays)));
+        options.RegisterResources(oauthAudience);
         options.RegisterScopes(GetMcpOauthScopes(oauthOptions));
 
         options.AddEncryptionCertificate(oauthEncryptionCertificate)
