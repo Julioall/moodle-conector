@@ -6,7 +6,8 @@ public static class ConnectorDbContextSchemaInitializer
 {
     private static readonly string[] SchemaScriptPaths =
     [
-        Path.Combine("Database", "Scripts", "001_initial_schema.sql")
+        Path.Combine("Database", "Scripts", "001_initial_schema.sql"),
+        Path.Combine("Database", "Scripts", "002_openiddict_table_names.sql")
     ];
 
     public static async Task ApplyVersionedSchemaAsync(
