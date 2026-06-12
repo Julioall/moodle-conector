@@ -204,7 +204,12 @@ jobs:
         run: dotnet restore MoodleConnector.slnx
 
       - name: Test
-        run: dotnet test MoodleConnector.slnx --configuration Release --no-restore
+        run: |
+          unset APP_DOMAIN
+          unset OAUTH_ISSUER
+          unset OAUTH_AUDIENCE
+          unset OAUTH_CHATGPT_REDIRECT_URI
+          dotnet test MoodleConnector.slnx --configuration Release --no-restore
 
       - name: Configure SSH auth
         run: |
