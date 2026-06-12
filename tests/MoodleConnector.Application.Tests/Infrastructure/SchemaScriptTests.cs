@@ -19,8 +19,8 @@ public sealed class SchemaScriptTests
         Assert.Contains("connector_clients", sql, StringComparison.Ordinal);
         Assert.Contains("moodle_pending_actions", sql, StringComparison.Ordinal);
         Assert.Contains("moodle_audit_logs", sql, StringComparison.Ordinal);
-        Assert.Contains("\"OAuthApplications\"", sql, StringComparison.Ordinal);
-        Assert.Contains("\"OAuthTokens\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"OpenIddictApplications\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"OpenIddictTokens\"", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
 }

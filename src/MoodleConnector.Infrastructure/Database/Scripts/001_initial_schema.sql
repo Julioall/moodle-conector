@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS moodle_user_links (
     CONSTRAINT "PK_moodle_user_links" PRIMARY KEY ("Id")
 );
 
-CREATE TABLE IF NOT EXISTS "OAuthApplications" (
+CREATE TABLE IF NOT EXISTS "OpenIddictApplications" (
     "Id" text NOT NULL,
     "ApplicationType" text,
     "ClientId" text,
@@ -99,10 +99,10 @@ CREATE TABLE IF NOT EXISTS "OAuthApplications" (
     "RedirectUris" text,
     "Requirements" text,
     "Settings" text,
-    CONSTRAINT "PK_OAuthApplications" PRIMARY KEY ("Id")
+    CONSTRAINT "PK_OpenIddictApplications" PRIMARY KEY ("Id")
 );
 
-CREATE TABLE IF NOT EXISTS "OAuthScopes" (
+CREATE TABLE IF NOT EXISTS "OpenIddictScopes" (
     "Id" text NOT NULL,
     "ConcurrencyToken" text,
     "Description" text,
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS "OAuthScopes" (
     "Name" text,
     "Properties" text,
     "Resources" text,
-    CONSTRAINT "PK_OAuthScopes" PRIMARY KEY ("Id")
+    CONSTRAINT "PK_OpenIddictScopes" PRIMARY KEY ("Id")
 );
 
 CREATE TABLE IF NOT EXISTS user_accounts (
@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS user_accounts (
     CONSTRAINT "PK_user_accounts" PRIMARY KEY ("Id")
 );
 
-CREATE TABLE IF NOT EXISTS "OAuthAuthorizations" (
+CREATE TABLE IF NOT EXISTS "OpenIddictAuthorizations" (
     "Id" text NOT NULL,
     "ApplicationId" text,
     "ConcurrencyToken" text,
@@ -137,11 +137,11 @@ CREATE TABLE IF NOT EXISTS "OAuthAuthorizations" (
     "Status" text,
     "Subject" text,
     "Type" text,
-    CONSTRAINT "PK_OAuthAuthorizations" PRIMARY KEY ("Id"),
-    CONSTRAINT "FK_OAuthAuthorizations_OAuthApplications_ApplicationId" FOREIGN KEY ("ApplicationId") REFERENCES "OAuthApplications" ("Id")
+    CONSTRAINT "PK_OpenIddictAuthorizations" PRIMARY KEY ("Id"),
+    CONSTRAINT "FK_OpenIddictAuthorizations_OpenIddictApplications_ApplicationId" FOREIGN KEY ("ApplicationId") REFERENCES "OpenIddictApplications" ("Id")
 );
 
-CREATE TABLE IF NOT EXISTS "OAuthTokens" (
+CREATE TABLE IF NOT EXISTS "OpenIddictTokens" (
     "Id" text NOT NULL,
     "ApplicationId" text,
     "AuthorizationId" text,
@@ -155,9 +155,9 @@ CREATE TABLE IF NOT EXISTS "OAuthTokens" (
     "Status" text,
     "Subject" text,
     "Type" text,
-    CONSTRAINT "PK_OAuthTokens" PRIMARY KEY ("Id"),
-    CONSTRAINT "FK_OAuthTokens_OAuthApplications_ApplicationId" FOREIGN KEY ("ApplicationId") REFERENCES "OAuthApplications" ("Id"),
-    CONSTRAINT "FK_OAuthTokens_OAuthAuthorizations_AuthorizationId" FOREIGN KEY ("AuthorizationId") REFERENCES "OAuthAuthorizations" ("Id")
+    CONSTRAINT "PK_OpenIddictTokens" PRIMARY KEY ("Id"),
+    CONSTRAINT "FK_OpenIddictTokens_OpenIddictApplications_ApplicationId" FOREIGN KEY ("ApplicationId") REFERENCES "OpenIddictApplications" ("Id"),
+    CONSTRAINT "FK_OpenIddictTokens_OpenIddictAuthorizations_AuthorizationId" FOREIGN KEY ("AuthorizationId") REFERENCES "OpenIddictAuthorizations" ("Id")
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "IX_connector_clients_ApiKeyHash" ON connector_clients ("ApiKeyHash");
@@ -169,9 +169,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS "IX_moodle_confirmed_actions_PendingActionId" 
 CREATE INDEX IF NOT EXISTS "IX_moodle_pending_actions_CorrelationId" ON moodle_pending_actions ("CorrelationId");
 CREATE INDEX IF NOT EXISTS "IX_moodle_pending_actions_CreatedBySubject_Status" ON moodle_pending_actions ("CreatedBySubject", "Status");
 CREATE UNIQUE INDEX IF NOT EXISTS "IX_moodle_user_links_Subject_MoodleAlias" ON moodle_user_links ("Subject", "MoodleAlias");
-CREATE INDEX IF NOT EXISTS "IX_OAuthAuthorizations_ApplicationId" ON "OAuthAuthorizations" ("ApplicationId");
-CREATE INDEX IF NOT EXISTS "IX_OAuthTokens_ApplicationId" ON "OAuthTokens" ("ApplicationId");
-CREATE INDEX IF NOT EXISTS "IX_OAuthTokens_AuthorizationId" ON "OAuthTokens" ("AuthorizationId");
+CREATE INDEX IF NOT EXISTS "IX_OpenIddictAuthorizations_ApplicationId" ON "OpenIddictAuthorizations" ("ApplicationId");
+CREATE INDEX IF NOT EXISTS "IX_OpenIddictTokens_ApplicationId" ON "OpenIddictTokens" ("ApplicationId");
+CREATE INDEX IF NOT EXISTS "IX_OpenIddictTokens_AuthorizationId" ON "OpenIddictTokens" ("AuthorizationId");
 CREATE UNIQUE INDEX IF NOT EXISTS "IX_user_accounts_Email" ON user_accounts ("Email");
 
 INSERT INTO "moodle_connector_schema_versions" ("Version", "Description", "AppliedAt")
