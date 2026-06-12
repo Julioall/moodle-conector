@@ -1488,6 +1488,10 @@ static async Task SeedChatGptOAuthClientAsync(
         return;
     }
 
+    var publicBaseUrl = BuildPublicBaseUrlFromAppDomain(appDomain) ??
+                        (environment.IsEnvironment("Testing") ? "http://localhost" : string.Empty);
+    var oauthAudience = ResolveOAuthAudience(oauth, publicBaseUrl, "/mcp");
+
     var manager = services.GetRequiredService<IOpenIddictApplicationManager>();
     var descriptor = new OpenIddictApplicationDescriptor
     {
@@ -1507,6 +1511,7 @@ static async Task SeedChatGptOAuthClientAsync(
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Scopes.Profile);
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + "offline_access");
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + oauth.ScopeName);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Resource + oauthAudience);
     descriptor.Requirements.Add(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange);
 
     var existing = await manager.FindByClientIdAsync(descriptor.ClientId);
