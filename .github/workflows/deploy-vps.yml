@@ -1,0 +1,456 @@
+name: Deploy Moodle Connector to VPS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - src/**
+      - tests/**
+      - Dockerfile
+      - docker-compose.yml
+      - Caddyfile
+      - .dockerignore
+      - MoodleConnector.slnx
+      - .github/workflows/deploy-vps.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vps-moodle-connector
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: ${{ vars.DOTNET_VERSION || '10.0.x' }}
+  VPS_APP_DIR: ${{ vars.VPS_APP_DIR || '/opt/moodle-connector' }}
+  VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
+  APP_PORT: ${{ vars.APP_PORT || '8787' }}
+  APP_DOMAIN: ${{ vars.APP_DOMAIN || secrets.APP_DOMAIN || 'novascript.com.br' }}
+  COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES || 'https' }}
+  CADDYFILE: ${{ vars.CADDYFILE || './Caddyfile' }}
+  MCP_REQUIRE_JWT: ${{ vars.MCP_REQUIRE_JWT || 'true' }}
+  MCP_REQUIRE_API_KEY: ${{ vars.MCP_REQUIRE_API_KEY || 'false' }}
+  OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || 'chatgpt-mcp' }}
+  OAUTH_SCOPE_NAME: ${{ vars.OAUTH_SCOPE_NAME || 'moodle-mcp-audience' }}
+  OAUTH_REQUIRE_HTTPS_METADATA: ${{ vars.OAUTH_REQUIRE_HTTPS_METADATA || 'true' }}
+  OAUTH_ACCESS_TOKEN_MINUTES: ${{ vars.OAUTH_ACCESS_TOKEN_MINUTES || '60' }}
+  OAUTH_REFRESH_TOKEN_DAYS: ${{ vars.OAUTH_REFRESH_TOKEN_DAYS || '30' }}
+  OAUTH_KEY_STORAGE_PATH: ${{ vars.OAUTH_KEY_STORAGE_PATH || '/app/data/oauth' }}
+  OAUTH_CERTIFICATE_YEARS: ${{ vars.OAUTH_CERTIFICATE_YEARS || '5' }}
+  RATE_LIMIT_WINDOW_SECONDS: ${{ vars.RATE_LIMIT_WINDOW_SECONDS || '60' }}
+  RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT || '12' }}
+  RATE_LIMIT_ADMIN_API_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_ADMIN_API_PERMIT_LIMIT || '30' }}
+  RATE_LIMIT_MCP_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_MCP_PERMIT_LIMIT || '120' }}
+  MOODLE_API_HTTP_TIMEOUT_SECONDS: ${{ vars.MOODLE_API_HTTP_TIMEOUT_SECONDS || '30' }}
+  MOODLE_API_HTTP_RETRY_COUNT: ${{ vars.MOODLE_API_HTTP_RETRY_COUNT || '2' }}
+  MOODLE_API_CIRCUIT_BREAKER_HANDLED_EVENTS: ${{ vars.MOODLE_API_CIRCUIT_BREAKER_HANDLED_EVENTS || '5' }}
+  MOODLE_API_CIRCUIT_BREAKER_DURATION_SECONDS: ${{ vars.MOODLE_API_CIRCUIT_BREAKER_DURATION_SECONDS || '30' }}
+  MOODLE_PROXY_HTTP_TIMEOUT_SECONDS: ${{ vars.MOODLE_PROXY_HTTP_TIMEOUT_SECONDS || '30' }}
+  MOODLE_PROXY_HTTP_RETRY_COUNT: ${{ vars.MOODLE_PROXY_HTTP_RETRY_COUNT || '2' }}
+  MOODLE_PROXY_CIRCUIT_BREAKER_HANDLED_EVENTS: ${{ vars.MOODLE_PROXY_CIRCUIT_BREAKER_HANDLED_EVENTS || '5' }}
+  MOODLE_PROXY_CIRCUIT_BREAKER_DURATION_SECONDS: ${{ vars.MOODLE_PROXY_CIRCUIT_BREAKER_DURATION_SECONDS || '30' }}
+  POSTGRES_DB: ${{ vars.POSTGRES_DB || 'moodle_connector' }}
+  POSTGRES_USER: ${{ vars.POSTGRES_USER || 'moodle_connector' }}
+  COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME || 'moodle-connector' }}
+  VPS_AUTH_SECRET: ${{ secrets.VPS_SSH_KEY }}
+
+jobs:
+  deploy:
+    name: Test, sync and restart containers
+    runs-on: ubuntu-latest
+    environment: moodle-connector
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate VPS secrets
+        env:
+          OAUTH_ISSUER: ${{ vars.OAUTH_ISSUER || secrets.OAUTH_ISSUER || '' }}
+          OAUTH_AUDIENCE: ${{ vars.OAUTH_AUDIENCE || secrets.OAUTH_AUDIENCE || '' }}
+          OAUTH_CHATGPT_REDIRECT_URI: ${{ vars.OAUTH_CHATGPT_REDIRECT_URI || secrets.OAUTH_CHATGPT_REDIRECT_URI || '' }}
+          MOODLE_API_BASE_URL: ${{ secrets.MOODLE_API_BASE_URL }}
+          MOODLE_API_SERVICE_TOKEN: ${{ secrets.MOODLE_API_SERVICE_TOKEN }}
+          MOODLE_API_WRITE_SERVICE_TOKEN: ${{ secrets.MOODLE_API_WRITE_SERVICE_TOKEN }}
+          MOODLE_PROXY_BASE_URL: ${{ secrets.MOODLE_PROXY_BASE_URL }}
+          MOODLE_PROXY_API_KEY: ${{ secrets.MOODLE_PROXY_API_KEY }}
+        run: |
+          has_newline() {
+            case "$1" in
+              *$'\n'*|*$'\r'*) return 0 ;;
+              *) return 1 ;;
+            esac
+          }
+
+          require_bool() {
+            case "$2" in
+              true|false) return 0 ;;
+              *) echo "::error::$1 must be true or false" && exit 1 ;;
+            esac
+          }
+
+          require_int_range() {
+            name="$1"
+            value="$2"
+            min="$3"
+            max="$4"
+
+            case "$value" in
+              ''|*[!0-9]*) echo "::error::$name must be an integer" && exit 1 ;;
+            esac
+
+            if [ "$value" -lt "$min" ] || [ "$value" -gt "$max" ]; then
+              echo "::error::$name must be between $min and $max"
+              exit 1
+            fi
+          }
+
+          test -n "${{ secrets.VPS_HOST }}" || (echo "::error::Configure VPS_HOST" && exit 1)
+          test -n "${{ secrets.VPS_USER }}" || (echo "::error::Configure VPS_USER" && exit 1)
+          test -n "$VPS_AUTH_SECRET" || (echo "::error::Configure VPS_SSH_KEY with a private key or SSH password" && exit 1)
+          test -n "${{ secrets.POSTGRES_PASSWORD }}" || (echo "::error::Configure POSTGRES_PASSWORD" && exit 1)
+          test -n "${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}" || (echo "::error::Configure CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64" && exit 1)
+          test -n "${{ secrets.ADMIN_API_KEY }}" || (echo "::error::Configure ADMIN_API_KEY" && exit 1)
+
+          require_bool MCP_REQUIRE_JWT "$MCP_REQUIRE_JWT"
+          require_bool MCP_REQUIRE_API_KEY "$MCP_REQUIRE_API_KEY"
+          require_bool OAUTH_REQUIRE_HTTPS_METADATA "$OAUTH_REQUIRE_HTTPS_METADATA"
+          require_int_range APP_PORT "$APP_PORT" 1 65535
+          require_int_range VPS_SSH_PORT "$VPS_SSH_PORT" 1 65535
+          require_int_range OAUTH_ACCESS_TOKEN_MINUTES "$OAUTH_ACCESS_TOKEN_MINUTES" 5 1440
+          require_int_range OAUTH_REFRESH_TOKEN_DAYS "$OAUTH_REFRESH_TOKEN_DAYS" 1 3650
+          require_int_range OAUTH_CERTIFICATE_YEARS "$OAUTH_CERTIFICATE_YEARS" 1 20
+          require_int_range RATE_LIMIT_WINDOW_SECONDS "$RATE_LIMIT_WINDOW_SECONDS" 1 3600
+          require_int_range RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT "$RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT" 1 1000
+          require_int_range RATE_LIMIT_ADMIN_API_PERMIT_LIMIT "$RATE_LIMIT_ADMIN_API_PERMIT_LIMIT" 1 1000
+          require_int_range RATE_LIMIT_MCP_PERMIT_LIMIT "$RATE_LIMIT_MCP_PERMIT_LIMIT" 1 10000
+          require_int_range MOODLE_API_HTTP_TIMEOUT_SECONDS "$MOODLE_API_HTTP_TIMEOUT_SECONDS" 1 300
+          require_int_range MOODLE_API_HTTP_RETRY_COUNT "$MOODLE_API_HTTP_RETRY_COUNT" 0 5
+          require_int_range MOODLE_API_CIRCUIT_BREAKER_HANDLED_EVENTS "$MOODLE_API_CIRCUIT_BREAKER_HANDLED_EVENTS" 0 50
+          require_int_range MOODLE_API_CIRCUIT_BREAKER_DURATION_SECONDS "$MOODLE_API_CIRCUIT_BREAKER_DURATION_SECONDS" 5 300
+          require_int_range MOODLE_PROXY_HTTP_TIMEOUT_SECONDS "$MOODLE_PROXY_HTTP_TIMEOUT_SECONDS" 1 300
+          require_int_range MOODLE_PROXY_HTTP_RETRY_COUNT "$MOODLE_PROXY_HTTP_RETRY_COUNT" 0 5
+          require_int_range MOODLE_PROXY_CIRCUIT_BREAKER_HANDLED_EVENTS "$MOODLE_PROXY_CIRCUIT_BREAKER_HANDLED_EVENTS" 0 50
+          require_int_range MOODLE_PROXY_CIRCUIT_BREAKER_DURATION_SECONDS "$MOODLE_PROXY_CIRCUIT_BREAKER_DURATION_SECONDS" 5 300
+
+          key_bytes="$(printf '%s' "${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}" | base64 -d 2>/dev/null | wc -c | tr -d ' ')"
+          if [ "$key_bytes" != "32" ]; then
+            echo "::error::CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 must decode to exactly 32 bytes."
+            exit 1
+          fi
+
+          if [ "$MCP_REQUIRE_JWT" = "true" ]; then
+            if [ -z "$APP_DOMAIN" ] && { [ -z "$OAUTH_ISSUER" ] || [ -z "$OAUTH_AUDIENCE" ]; }; then
+              echo "::error::Configure APP_DOMAIN or both OAUTH_ISSUER and OAUTH_AUDIENCE when MCP_REQUIRE_JWT=true."
+              exit 1
+            fi
+
+            if [ -z "$OAUTH_CHATGPT_REDIRECT_URI" ]; then
+              echo "::error::Configure OAUTH_CHATGPT_REDIRECT_URI with the exact callback shown by ChatGPT."
+              exit 1
+            fi
+          fi
+
+          if [ "$OAUTH_REQUIRE_HTTPS_METADATA" = "true" ]; then
+            if [ -n "$OAUTH_ISSUER" ] && ! printf '%s' "$OAUTH_ISSUER" | grep -q '^https://'; then
+              echo "::error::OAUTH_ISSUER must use https:// when OAUTH_REQUIRE_HTTPS_METADATA=true."
+              exit 1
+            fi
+
+            if [ -n "$OAUTH_AUDIENCE" ] && ! printf '%s' "$OAUTH_AUDIENCE" | grep -q '^https://'; then
+              echo "::error::OAUTH_AUDIENCE must use https:// when OAUTH_REQUIRE_HTTPS_METADATA=true."
+              exit 1
+            fi
+
+            if [ -n "$OAUTH_CHATGPT_REDIRECT_URI" ] && ! printf '%s' "$OAUTH_CHATGPT_REDIRECT_URI" | grep -q '^https://'; then
+              echo "::error::OAUTH_CHATGPT_REDIRECT_URI must use https:// when OAUTH_REQUIRE_HTTPS_METADATA=true."
+              exit 1
+            fi
+          fi
+
+          if [ "$MCP_REQUIRE_JWT" != "true" ] && [ "$MCP_REQUIRE_API_KEY" != "true" ]; then
+            echo "::error::At least one auth method must be enabled (MCP_REQUIRE_JWT or MCP_REQUIRE_API_KEY)."
+            exit 1
+          fi
+
+          for value in \
+            "$APP_DOMAIN" \
+            "$OAUTH_ISSUER" \
+            "$OAUTH_AUDIENCE" \
+            "$OAUTH_CHATGPT_REDIRECT_URI" \
+            "$MOODLE_API_BASE_URL" \
+            "$MOODLE_API_SERVICE_TOKEN" \
+            "$MOODLE_API_WRITE_SERVICE_TOKEN" \
+            "$MOODLE_PROXY_BASE_URL" \
+            "$MOODLE_PROXY_API_KEY" \
+            "${{ secrets.POSTGRES_PASSWORD }}" \
+            "${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}" \
+            "${{ secrets.ADMIN_API_KEY }}"
+          do
+            if has_newline "$value"; then
+              echo "::error::Secrets and deploy variables must not contain line breaks."
+              exit 1
+            fi
+          done
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore MoodleConnector.slnx
+
+      - name: Test
+        run: dotnet test MoodleConnector.slnx --configuration Release --no-restore
+
+      - name: Configure SSH auth
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "$VPS_SSH_PORT" "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+          if printf '%s' "$VPS_AUTH_SECRET" | grep -q "BEGIN .*PRIVATE KEY"; then
+            printf '%s\n' "$VPS_AUTH_SECRET" > ~/.ssh/deploy_key
+            chmod 600 ~/.ssh/deploy_key
+            echo "VPS_AUTH_MODE=key" >> "$GITHUB_ENV"
+          else
+            sudo apt-get install -y sshpass
+            echo "VPS_AUTH_MODE=password" >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare remote host
+        run: |
+          REMOTE_PREPARE="set -euo pipefail
+            SUDO=''
+            if [ \"\$(id -u)\" -ne 0 ]; then SUDO='sudo'; fi
+
+            fix_docker_repo_for_debian() {
+              if [ ! -r /etc/os-release ]; then
+                return 0
+              fi
+
+              . /etc/os-release
+              if [ \"\${ID:-}\" != 'debian' ]; then
+                return 0
+              fi
+
+              changed=0
+              for apt_list in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+                [ -f \"\$apt_list\" ] || continue
+
+                if grep -q 'download.docker.com/linux/ubuntu' \"\$apt_list\"; then
+                  echo \"Fixing Docker APT repository distro in \$apt_list (ubuntu -> debian)\"
+                  \$SUDO sed -i 's#download.docker.com/linux/ubuntu#download.docker.com/linux/debian#g' \"\$apt_list\"
+                  changed=1
+                fi
+
+                if grep -Eq 'download\\.docker\\.com/linux/(ubuntu|debian)[[:space:]]+trixie([[:space:]]|\$)' \"\$apt_list\"; then
+                  echo \"Fixing Docker APT repository codename in \$apt_list (trixie -> bookworm)\"
+                  \$SUDO sed -E -i 's#(download\\.docker\\.com/linux/(ubuntu|debian)[[:space:]]+)trixie([[:space:]]|\$)#\\1bookworm\\3#g' \"\$apt_list\"
+                  changed=1
+                fi
+              done
+
+              if [ \"\$changed\" -eq 1 ]; then
+                echo 'Docker APT repository configuration adjusted for Debian compatibility'
+              fi
+            }
+
+            apt_update_safe() {
+              if \$SUDO apt-get update; then
+                return 0
+              fi
+
+              fix_docker_repo_for_debian
+              if \$SUDO apt-get update; then
+                return 0
+              fi
+
+              return 1
+            }
+
+            if ! command -v rsync >/dev/null 2>&1; then
+              if command -v apt-get >/dev/null 2>&1; then
+                apt_update_safe
+                \$SUDO apt-get install -y rsync curl ca-certificates
+              else
+                echo 'rsync is required on the VPS'
+                exit 1
+              fi
+            fi
+
+            if ! command -v curl >/dev/null 2>&1; then
+              if command -v apt-get >/dev/null 2>&1; then
+                apt_update_safe
+                \$SUDO apt-get install -y curl ca-certificates
+              else
+                echo 'curl is required on the VPS'
+                exit 1
+              fi
+            fi
+
+            if ! command -v docker >/dev/null 2>&1; then
+              fix_docker_repo_for_debian
+              curl -fsSL https://get.docker.com | \$SUDO sh
+            fi
+
+            if ! docker compose version >/dev/null 2>&1; then
+              echo 'Docker Compose plugin is required on the VPS'
+              exit 1
+            fi
+
+            \$SUDO mkdir -p '$VPS_APP_DIR'
+            \$SUDO chown -R '${{ secrets.VPS_USER }}': '$VPS_APP_DIR'"
+
+          if [ "$VPS_AUTH_MODE" = "key" ]; then
+            ssh -i ~/.ssh/deploy_key -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_PREPARE"
+          else
+            sshpass -p "$VPS_AUTH_SECRET" ssh -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_PREPARE"
+          fi
+
+      - name: Sync repository to VPS
+        run: |
+          RSYNC_EXCLUDES=(
+            --exclude ".git/"
+            --exclude ".github/"
+            --exclude ".vs/"
+            --exclude ".vscode/"
+            --exclude "**/bin/"
+            --exclude "**/obj/"
+            --exclude "publish/"
+            --exclude "TestResults/"
+            --exclude ".env"
+            --exclude ".env.*"
+          )
+
+          if [ "$VPS_AUTH_MODE" = "key" ]; then
+            rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -p $VPS_SSH_PORT" \
+              "${RSYNC_EXCLUDES[@]}" ./ "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$VPS_APP_DIR/"
+          else
+            sshpass -p "$VPS_AUTH_SECRET" rsync -az --delete -e "ssh -p $VPS_SSH_PORT" \
+              "${RSYNC_EXCLUDES[@]}" ./ "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$VPS_APP_DIR/"
+          fi
+
+      - name: Write production env
+        env:
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64: ${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          MOODLE_API_BASE_URL: ${{ secrets.MOODLE_API_BASE_URL }}
+          MOODLE_API_SERVICE_TOKEN: ${{ secrets.MOODLE_API_SERVICE_TOKEN }}
+          MOODLE_API_WRITE_SERVICE_TOKEN: ${{ secrets.MOODLE_API_WRITE_SERVICE_TOKEN }}
+          MOODLE_PROXY_BASE_URL: ${{ secrets.MOODLE_PROXY_BASE_URL }}
+          MOODLE_PROXY_API_KEY: ${{ secrets.MOODLE_PROXY_API_KEY }}
+          OAUTH_ISSUER: ${{ vars.OAUTH_ISSUER || secrets.OAUTH_ISSUER || '' }}
+          OAUTH_AUDIENCE: ${{ vars.OAUTH_AUDIENCE || secrets.OAUTH_AUDIENCE || '' }}
+          OAUTH_CHATGPT_REDIRECT_URI: ${{ vars.OAUTH_CHATGPT_REDIRECT_URI || secrets.OAUTH_CHATGPT_REDIRECT_URI || '' }}
+        run: |
+          ENV_FILE="$(mktemp)"
+          OAUTH_ISSUER_EFFECTIVE="${OAUTH_ISSUER:-https://$APP_DOMAIN}"
+          OAUTH_AUDIENCE_EFFECTIVE="${OAUTH_AUDIENCE:-https://$APP_DOMAIN/mcp}"
+          CONNECTION_STRING="Host=postgres;Port=5432;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+
+          {
+            printf 'APP_PORT=%s\n' "$APP_PORT"
+            printf 'APP_DOMAIN=%s\n' "$APP_DOMAIN"
+            printf 'COMPOSE_PROFILES=%s\n' "$COMPOSE_PROFILES"
+            printf 'CADDYFILE=%s\n' "$CADDYFILE"
+            printf 'POSTGRES_DB=%s\n' "$POSTGRES_DB"
+            printf 'POSTGRES_USER=%s\n' "$POSTGRES_USER"
+            printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD"
+            printf 'Postgres__ConnectionString=%s\n' "$CONNECTION_STRING"
+            printf 'ConnectorSecrets__EncryptionKeyBase64=%s\n' "$CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64"
+            printf 'AdminApi__ApiKey=%s\n' "$ADMIN_API_KEY"
+            printf 'McpServerSecurity__RequireJwt=%s\n' "$MCP_REQUIRE_JWT"
+            printf 'McpServerSecurity__RequireApiKey=%s\n' "$MCP_REQUIRE_API_KEY"
+            printf 'OAuth__Issuer=%s\n' "$OAUTH_ISSUER_EFFECTIVE"
+            printf 'OAuth__Audience=%s\n' "$OAUTH_AUDIENCE_EFFECTIVE"
+            printf 'OAuth__ChatGptClientId=%s\n' "$OAUTH_CLIENT_ID"
+            printf 'OAuth__ChatGptRedirectUri=%s\n' "$OAUTH_CHATGPT_REDIRECT_URI"
+            printf 'OAuth__ScopeName=%s\n' "$OAUTH_SCOPE_NAME"
+            printf 'OAuth__RequireHttpsMetadata=%s\n' "$OAUTH_REQUIRE_HTTPS_METADATA"
+            printf 'OAuth__AccessTokenMinutes=%s\n' "$OAUTH_ACCESS_TOKEN_MINUTES"
+            printf 'OAuth__RefreshTokenDays=%s\n' "$OAUTH_REFRESH_TOKEN_DAYS"
+            printf 'OAuth__KeyStoragePath=%s\n' "$OAUTH_KEY_STORAGE_PATH"
+            printf 'OAuth__CertificateYears=%s\n' "$OAUTH_CERTIFICATE_YEARS"
+            printf 'RateLimiting__WindowSeconds=%s\n' "$RATE_LIMIT_WINDOW_SECONDS"
+            printf 'RateLimiting__PortalAuthPermitLimit=%s\n' "$RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT"
+            printf 'RateLimiting__AdminApiPermitLimit=%s\n' "$RATE_LIMIT_ADMIN_API_PERMIT_LIMIT"
+            printf 'RateLimiting__McpPermitLimit=%s\n' "$RATE_LIMIT_MCP_PERMIT_LIMIT"
+            printf 'MoodleApi__BaseUrl=%s\n' "$MOODLE_API_BASE_URL"
+            printf 'MoodleApi__ServiceToken=%s\n' "$MOODLE_API_SERVICE_TOKEN"
+            printf 'MoodleApi__WriteServiceToken=%s\n' "$MOODLE_API_WRITE_SERVICE_TOKEN"
+            printf 'MoodleApi__UseStubData=false\n'
+            printf 'MoodleApi__HttpTimeoutSeconds=%s\n' "$MOODLE_API_HTTP_TIMEOUT_SECONDS"
+            printf 'MoodleApi__HttpRetryCount=%s\n' "$MOODLE_API_HTTP_RETRY_COUNT"
+            printf 'MoodleApi__CircuitBreakerHandledEventsAllowedBeforeBreaking=%s\n' "$MOODLE_API_CIRCUIT_BREAKER_HANDLED_EVENTS"
+            printf 'MoodleApi__CircuitBreakerDurationSeconds=%s\n' "$MOODLE_API_CIRCUIT_BREAKER_DURATION_SECONDS"
+            printf 'MoodleProxy__BaseUrl=%s\n' "$MOODLE_PROXY_BASE_URL"
+            printf 'MoodleProxy__ApiKey=%s\n' "$MOODLE_PROXY_API_KEY"
+            printf 'MoodleProxy__UseStubData=false\n'
+            printf 'MoodleProxy__HttpTimeoutSeconds=%s\n' "$MOODLE_PROXY_HTTP_TIMEOUT_SECONDS"
+            printf 'MoodleProxy__HttpRetryCount=%s\n' "$MOODLE_PROXY_HTTP_RETRY_COUNT"
+            printf 'MoodleProxy__CircuitBreakerHandledEventsAllowedBeforeBreaking=%s\n' "$MOODLE_PROXY_CIRCUIT_BREAKER_HANDLED_EVENTS"
+            printf 'MoodleProxy__CircuitBreakerDurationSeconds=%s\n' "$MOODLE_PROXY_CIRCUIT_BREAKER_DURATION_SECONDS"
+          } > "$ENV_FILE"
+
+          if [ "$VPS_AUTH_MODE" = "key" ]; then
+            scp -i ~/.ssh/deploy_key -P "$VPS_SSH_PORT" "$ENV_FILE" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$VPS_APP_DIR/.env.production"
+          else
+            sshpass -p "$VPS_AUTH_SECRET" scp -P "$VPS_SSH_PORT" "$ENV_FILE" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$VPS_APP_DIR/.env.production"
+          fi
+
+          rm -f "$ENV_FILE"
+
+      - name: Build and restart containers
+        timeout-minutes: 20
+        run: |
+          REMOTE_SCRIPT="$(cat <<EOF
+          set -euo pipefail
+          cd '$VPS_APP_DIR'
+          export COMPOSE_PROJECT_NAME='$COMPOSE_PROJECT_NAME'
+          DOCKER='docker'
+          if ! docker info >/dev/null 2>&1; then
+            DOCKER='sudo docker'
+          fi
+
+          \$DOCKER compose --env-file .env.production down --remove-orphans || true
+          \$DOCKER rm -f moodle-connector-app moodle-connector-caddy >/dev/null 2>&1 || true
+          \$DOCKER compose --env-file .env.production up -d --build --remove-orphans
+          \$DOCKER compose --env-file .env.production ps
+          \$DOCKER image prune -f
+
+          sleep 5
+          curl --fail --show-error --silent http://127.0.0.1:$APP_PORT/health
+          if [ -n '$APP_DOMAIN' ] && printf '%s' '$COMPOSE_PROFILES' | grep -Eq '(^|,)https(,|$)'; then
+            HTTPS_OK=0
+            i=1
+            while [ "\$i" -le 18 ]; do
+              if curl --fail --show-error --silent https://'$APP_DOMAIN'/health >/dev/null; then
+                HTTPS_OK=1
+                break
+              fi
+              echo "Waiting for TLS certificate on attempt \$i/18..."
+              sleep 10
+              i=\$((i + 1))
+            done
+
+            if [ "\$HTTPS_OK" -ne 1 ]; then
+              echo "HTTPS healthcheck failed after retries. Recent Caddy logs:"
+              \$DOCKER compose --env-file .env.production logs --tail=120 caddy || true
+              exit 1
+            fi
+          fi
+          EOF
+          )"
+
+          if [ "$VPS_AUTH_MODE" = "key" ]; then
+            ssh -i ~/.ssh/deploy_key -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
+          else
+            sshpass -p "$VPS_AUTH_SECRET" ssh -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
+          fi

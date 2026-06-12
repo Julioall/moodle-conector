@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moodle Connector — Portal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .tab-active   { border-bottom: 2px solid #f86000; color: #f86000; font-weight: 600; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #a8a29e; }
+    .tab-inactive:hover { color: #fff7ed; }
+    .step-done    { background: #171717; color: #f98012; box-shadow: inset 0 0 0 1px #f98012; }
+    .step-active  { background: #f98012; color: #fff; }
+    .step-pending { background: #262626; color: #a3a3a3; }
+    .step-line-done   { background: #f98012; }
+    .step-line-pending { background: #262626; }
+    .api-key-box { font-family: 'Courier New', monospace; word-break: break-all; }
+    input { background: #2a2521; color: #fff7ed; }
+    input::placeholder { color: #8c837a; }
+    input:focus { outline: none; box-shadow: 0 0 0 3px rgba(248,96,0,0.22); }
+  </style>
+</head>
+<body class="min-h-screen bg-[#f86000] flex items-center justify-center p-4">
+
+  <div class="w-full max-w-md">
+
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-32 h-24">
+        <img src="/logo.png" alt="Moodle Connector" class="max-w-full max-h-full object-contain" />
+      </div>
+      <div class="flex items-center justify-center gap-2">
+        <h1 class="text-2xl font-bold text-white tracking-tight">Moodle</h1>
+        <h1 class="text-2xl font-bold text-[#1f1b18] tracking-tight">Connector</h1>
+      </div>
+
+    </div>
+
+    <!-- Progress steps -->
+    <div class="flex items-center justify-center mb-6 px-4" id="progress-steps">
+      <div class="flex items-center gap-0">
+        <div class="flex flex-col items-center">
+          <div id="step-circle-1" class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all step-active">1</div>
+          <span class="text-xs text-orange-100 mt-1 whitespace-nowrap">Conta</span>
+        </div>
+        <div id="step-line-1" class="w-16 h-0.5 mb-4 transition-all step-line-pending"></div>
+        <div class="flex flex-col items-center">
+          <div id="step-circle-2" class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all step-pending">2</div>
+          <span class="text-xs text-orange-100 mt-1 whitespace-nowrap">Moodle</span>
+        </div>
+        <div id="step-line-2" class="w-16 h-0.5 mb-4 transition-all step-line-pending"></div>
+        <div class="flex flex-col items-center">
+          <div id="step-circle-3" class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all step-pending">3</div>
+          <span class="text-xs text-orange-100 mt-1 whitespace-nowrap">API Key</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-[#1f1b18] text-orange-50 rounded-2xl shadow-2xl overflow-hidden border border-[#3a332d]">
+
+      <!-- ── STEP 1: Conta ────────────────────────────── -->
+      <div id="step-1">
+        <!-- Tabs -->
+        <div class="flex border-b border-[#3a332d] bg-[#171412]">
+          <button id="tab-register-btn" onclick="switchTab('register')"
+            class="flex-1 py-4 text-sm transition-all tab-active">
+            Criar conta
+          </button>
+          <button id="tab-login-btn" onclick="switchTab('login')"
+            class="flex-1 py-4 text-sm transition-all tab-inactive">
+            Entrar
+          </button>
+        </div>
+
+        <div class="p-8">
+
+          <!-- Register form -->
+          <form id="form-register" onsubmit="handleRegister(event)">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                  Nome completo
+                </label>
+                <input id="reg-name" type="text" placeholder="Seu nome" required
+                  class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                  E-mail
+                </label>
+                <input id="reg-email" type="email" placeholder="seu@email.com" required
+                  class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                  Senha
+                </label>
+                <input id="reg-password" type="password" placeholder="Mínimo 12 caracteres" required
+                  class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+              </div>
+              <div id="reg-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
+              <button type="submit" id="reg-submit"
+                class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-semibold py-2.5 px-4 rounded-lg text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                Criar conta
+              </button>
+            </div>
+          </form>
+
+          <!-- Login form (hidden initially) -->
+          <form id="form-login" class="hidden" onsubmit="handleLogin(event)">
+            <div class="space-y-4">
+              <div>
+                <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                  E-mail
+                </label>
+                <input id="login-email" type="email" placeholder="seu@email.com" required
+                  class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                  Senha
+                </label>
+                <input id="login-password" type="password" placeholder="Sua senha" required
+                  class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+              </div>
+              <div id="login-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
+              <button type="submit" id="login-submit"
+                class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-semibold py-2.5 px-4 rounded-lg text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                Entrar
+              </button>
+            </div>
+          </form>
+
+        </div>
+      </div>
+
+      <!-- ── STEP 2: Moodle ──────────────────────────── -->
+      <div id="step-2" class="hidden p-8">
+        <div class="mb-6">
+          <div class="flex items-center gap-2 mb-1">
+            <svg class="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
+            <span class="font-semibold text-orange-50" id="step2-greeting">Olá!</span>
+          </div>
+          <h2 class="text-xl font-bold text-white">Conectar ao Moodle</h2>
+          <p class="text-sm text-stone-300 mt-1">
+            Cadastre um Moodle com alias. Use nomes como Goias, Nacional ou CTM para selecionar pelo prompt.
+          </p>
+        </div>
+
+        <!-- Moodle URL badge -->
+        <div id="moodle-url-badge" class="hidden mb-5 flex items-center gap-2 bg-[#2a2521] border border-orange-700/50 rounded-lg px-4 py-2.5">
+          <svg class="w-4 h-4 text-orange-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+          </svg>
+          <span class="text-xs text-orange-300 break-all" id="moodle-url-text"></span>
+        </div>
+
+        <form id="form-moodle" onsubmit="handleConnectMoodle(event)">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                Alias do Moodle
+              </label>
+              <input id="moodle-alias" type="text" placeholder="Goias, Nacional, CTM..." required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+              <p class="text-xs text-stone-400 mt-1">Quando esse nome for mencionado no prompt, o conector usa este Moodle.</p>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                URL base do Moodle
+              </label>
+              <input id="moodle-base-url" type="url" placeholder="https://ead.exemplo.com" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                Usuário do Moodle
+              </label>
+              <input id="moodle-username" type="text" placeholder="seu.usuario" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                Senha do Moodle
+              </label>
+              <input id="moodle-password" type="password" placeholder="Sua senha do Moodle" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <input id="moodle-isdefault" type="checkbox" checked
+                class="w-4 h-4 rounded accent-orange-500" />
+              <div>
+                <label for="moodle-isdefault" class="text-sm font-medium text-orange-50 cursor-pointer">
+                  Definir como Moodle padrão
+                </label>
+                <p class="text-xs text-stone-400">Usado quando nenhum alias for mencionado no prompt</p>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <input id="moodle-canwrite" type="checkbox"
+                class="w-4 h-4 rounded accent-orange-500" />
+              <div>
+                <label for="moodle-canwrite" class="text-sm font-medium text-orange-50 cursor-pointer">
+                  Habilitar permissão de escrita
+                </label>
+                <p class="text-xs text-stone-400">Permite envio de tarefas e outras ações de escrita</p>
+              </div>
+            </div>
+            <div id="moodle-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
+            <button type="submit" id="moodle-submit"
+              class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-semibold py-2.5 px-4 rounded-lg text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+              Adicionar Moodle e obter API Key
+            </button>
+            <button type="button" onclick="handleLogout()"
+              class="w-full text-stone-400 hover:text-orange-50 text-sm py-1 transition-all">
+              Sair
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ── STEP 3: API Key ─────────────────────────── -->
+      <div id="step-3" class="hidden p-8">
+        <div class="text-center mb-6">
+          <div class="inline-flex items-center justify-center w-14 h-14 bg-neutral-950 border border-orange-500 rounded-full mb-4">
+            <svg class="w-7 h-7 text-orange-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
+          </div>
+          <h2 class="text-xl font-bold text-white">Tudo pronto!</h2>
+          <p class="text-sm text-stone-300 mt-1">Seu conector Moodle está configurado.</p>
+        </div>
+
+        <div id="connections-list" class="mb-5 space-y-2"></div>
+
+        <!-- API Key display -->
+        <div class="mb-5">
+          <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-2">
+            Sua API Key do Conector
+          </label>
+          <div class="relative">
+            <div id="api-key-display"
+              class="api-key-box w-full px-4 py-3 bg-[#2a2521] border border-[#4a4038] rounded-lg text-sm text-orange-50 pr-20 select-all">
+            </div>
+            <button onclick="copyApiKey()"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-neutral-800 hover:bg-neutral-700 text-orange-300 border border-neutral-700 font-semibold px-3 py-1.5 rounded-md transition-all"
+              id="copy-btn">
+              Copiar
+            </button>
+          </div>
+          <p class="text-xs text-amber-200 bg-amber-950 border border-amber-800 rounded-lg px-3 py-2 mt-2">
+            ⚠️ Guarde esta chave em local seguro. Ela não será exibida novamente se você perder o acesso à conta.
+          </p>
+        </div>
+
+        <!-- Usage instructions -->
+        <div class="bg-[#2a2521] rounded-xl border border-[#4a4038] p-4 mb-5">
+          <p class="text-xs font-semibold text-stone-300 uppercase tracking-wide mb-2">Como usar</p>
+          <p class="text-sm text-stone-300 mb-2">
+            Adicione o header abaixo em todas as requisições ao endpoint MCP:
+          </p>
+          <code class="block text-xs bg-black text-orange-300 border border-neutral-800 rounded-lg px-4 py-3 break-all">
+            X-Mcp-Api-Key: <span id="api-key-inline" class="text-neutral-100"></span>
+          </code>
+          <p class="text-xs text-neutral-500 mt-2">
+            Endpoint MCP: <code class="text-orange-100">/mcp</code>
+          </p>
+        </div>
+
+        <div class="flex gap-3">
+          <button onclick="handleConnectAgain()"
+            class="flex-1 border border-[#4a4038] hover:border-orange-500 hover:text-orange-400 text-stone-300 text-sm font-medium py-2.5 rounded-lg transition-all">
+            Adicionar outro Moodle
+          </button>
+          <button onclick="handleLogout()"
+            class="flex-1 border border-[#4a4038] hover:border-red-300 hover:text-red-400 text-stone-300 text-sm font-medium py-2.5 rounded-lg transition-all">
+            Sair
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /card -->
+
+    <p class="text-center text-orange-100 text-xs mt-6 opacity-70">
+      Moodle MCP Connector &mdash; <span id="footer-moodle-host"></span>
+    </p>
+
+  </div><!-- /max-w -->
+
+  <script>
+    // ── State ────────────────────────────────────────────────────────────────
+    const state = {
+      step: 1,
+      userName: null,
+      apiKey: null,
+      moodleUrl: null,
+      moodleConnections: [],
+    };
+
+    // ── Boot ─────────────────────────────────────────────────────────────────
+    async function boot() {
+      try {
+        const info = await api('/api/info');
+        if (info.defaultMoodleBaseUrl) {
+          state.moodleUrl = info.defaultMoodleBaseUrl;
+          const host = new URL(info.defaultMoodleBaseUrl).hostname;
+          document.getElementById('footer-moodle-host').textContent = host;
+          const badge = document.getElementById('moodle-url-badge');
+          badge.classList.remove('hidden');
+          document.getElementById('moodle-url-text').textContent = info.defaultMoodleBaseUrl;
+          document.getElementById('moodle-base-url').value = info.defaultMoodleBaseUrl;
+        }
+      } catch {}
+
+      try {
+        const me = await api('/api/account/me');
+        state.userName = me.name;
+        const requestedStep = new URLSearchParams(window.location.search).get('step');
+        if (requestedStep === 'moodle') {
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+
+        if (me.hasMoodleConnected && me.apiKey && requestedStep !== 'moodle') {
+          state.apiKey = me.apiKey;
+          state.moodleConnections = me.moodleConnections || [];
+          goToStep(3);
+        } else {
+          goToStep(2);
+        }
+        return;
+      } catch {
+        // Sessao ausente ou expirada.
+      }
+
+      goToStep(1);
+    }
+
+    // ── Navigation ───────────────────────────────────────────────────────────
+    function goToStep(n) {
+      state.step = n;
+      document.getElementById('step-1').classList.toggle('hidden', n !== 1);
+      document.getElementById('step-2').classList.toggle('hidden', n !== 2);
+      document.getElementById('step-3').classList.toggle('hidden', n !== 3);
+      updateProgress(n);
+
+      if (n === 2 && state.userName) {
+        document.getElementById('step2-greeting').textContent = `Olá, ${state.userName}!`;
+      }
+      if (n === 3 && state.apiKey) {
+        document.getElementById('api-key-display').textContent = state.apiKey;
+        document.getElementById('api-key-inline').textContent = state.apiKey;
+        renderConnections();
+      }
+    }
+
+    function renderConnections() {
+      const el = document.getElementById('connections-list');
+      const connections = state.moodleConnections || [];
+      if (!connections.length) {
+        el.innerHTML = '';
+        return;
+      }
+
+      el.innerHTML = `
+        <div class="text-xs font-semibold text-stone-300 uppercase tracking-wide">Moodles cadastrados</div>
+        ${connections.map(conn => `
+          <div class="border border-[#4a4038] rounded-lg px-4 py-3 bg-[#2a2521]">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="font-semibold text-orange-50">${escapeHtml(conn.alias)} ${conn.isDefault ? '<span class="text-xs text-orange-300">(padrão)</span>' : ''}</div>
+                <div class="text-xs text-stone-300 break-all">${escapeHtml(conn.baseUrl)}</div>
+              </div>
+              <span class="text-xs ${conn.canWrite ? 'text-amber-300' : 'text-stone-400'}">${conn.canWrite ? 'escrita' : 'leitura'}</span>
+            </div>
+          </div>
+        `).join('')}
+      `;
+    }
+
+    function updateProgress(active) {
+      const circles = [1, 2, 3];
+      circles.forEach(i => {
+        const el = document.getElementById(`step-circle-${i}`);
+        el.className = 'w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all ';
+        if (i < active)      el.className += 'step-done';
+        else if (i === active) el.className += 'step-active';
+        else                 el.className += 'step-pending';
+        if (i < 3) {
+          const line = document.getElementById(`step-line-${i}`);
+          line.className = 'w-16 h-0.5 mb-4 transition-all ' + (i < active ? 'step-line-done' : 'step-line-pending');
+        }
+      });
+    }
+
+    // ── Tabs ─────────────────────────────────────────────────────────────────
+    function switchTab(tab) {
+      const isRegister = tab === 'register';
+      document.getElementById('form-register').classList.toggle('hidden', !isRegister);
+      document.getElementById('form-login').classList.toggle('hidden', isRegister);
+      document.getElementById('tab-register-btn').className = `flex-1 py-4 text-sm transition-all ${isRegister ? 'tab-active' : 'tab-inactive'}`;
+      document.getElementById('tab-login-btn').className = `flex-1 py-4 text-sm transition-all ${isRegister ? 'tab-inactive' : 'tab-active'}`;
+    }
+
+    // ── Handlers ─────────────────────────────────────────────────────────────
+    async function handleRegister(e) {
+      e.preventDefault();
+      const btn = document.getElementById('reg-submit');
+      const errEl = document.getElementById('reg-error');
+      setLoading(btn, true);
+      hideError(errEl);
+
+      const name = document.getElementById('reg-name').value.trim();
+      const email = document.getElementById('reg-email').value.trim();
+      const password = document.getElementById('reg-password').value;
+
+      try {
+        const res = await api('/api/account/register', {
+          method: 'POST',
+          body: { name, email, password }
+        });
+        window.location.href = res.redirectUrl || `/auth/login?email=${encodeURIComponent(email)}&returnUrl=${encodeURIComponent('/?step=moodle')}`;
+      } catch (err) {
+        showError(errEl, err.message || 'Erro ao criar conta. Tente novamente.');
+      } finally {
+        setLoading(btn, false);
+      }
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('login-submit');
+      const errEl = document.getElementById('login-error');
+      setLoading(btn, true);
+      hideError(errEl);
+
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+
+      try {
+        const res = await api('/api/account/login', {
+          method: 'POST',
+          body: { email, password }
+        });
+        state.userName = res.name;
+        goToStep(2);
+      } catch (err) {
+        showError(errEl, err.message || 'Erro ao entrar. Verifique seus dados.');
+      } finally {
+        setLoading(btn, false);
+      }
+    }
+
+    async function handleConnectMoodle(e) {
+      e.preventDefault();
+      const btn = document.getElementById('moodle-submit');
+      const errEl = document.getElementById('moodle-error');
+      setLoading(btn, true, 'Validando no Moodle…');
+      hideError(errEl);
+
+      const moodleUsername = document.getElementById('moodle-username').value.trim();
+      const moodlePassword = document.getElementById('moodle-password').value;
+      const moodleAlias = document.getElementById('moodle-alias').value.trim();
+      const moodleBaseUrl = document.getElementById('moodle-base-url').value.trim();
+      const isDefault = document.getElementById('moodle-isdefault').checked;
+      const canWrite = document.getElementById('moodle-canwrite').checked;
+
+      try {
+        const res = await api('/api/account/connect-moodle', {
+          method: 'POST',
+          body: { moodleAlias, moodleBaseUrl, moodleUsername, moodlePassword, isDefault, canWrite }
+        });
+        state.apiKey = res.apiKey;
+        const me = await api('/api/account/me');
+        state.moodleConnections = me.moodleConnections || [];
+        goToStep(3);
+      } catch (err) {
+        showError(errEl, err.message || 'Erro ao conectar ao Moodle. Verifique suas credenciais.');
+      } finally {
+        setLoading(btn, false, 'Adicionar Moodle e obter API Key');
+      }
+    }
+
+    function handleLogout() {
+      state.userName = null;
+      state.apiKey = null;
+      state.moodleConnections = [];
+      window.location.href = '/auth/logout';
+    }
+
+    function handleConnectAgain() {
+      document.getElementById('moodle-alias').value = '';
+      document.getElementById('moodle-base-url').value = state.moodleUrl || '';
+      document.getElementById('moodle-username').value = '';
+      document.getElementById('moodle-password').value = '';
+      document.getElementById('moodle-isdefault').checked = !(state.moodleConnections || []).length;
+      document.getElementById('moodle-canwrite').checked = false;
+      hideError(document.getElementById('moodle-error'));
+      goToStep(2);
+    }
+
+    async function copyApiKey() {
+      const key = state.apiKey;
+      if (!key) return;
+      try {
+        await navigator.clipboard.writeText(key);
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copiado!';
+        btn.classList.replace('bg-neutral-800', 'bg-orange-500');
+        btn.classList.replace('text-orange-300', 'text-white');
+        btn.classList.replace('border-neutral-700', 'border-orange-500');
+        setTimeout(() => {
+          btn.textContent = 'Copiar';
+          btn.classList.replace('bg-orange-500', 'bg-neutral-800');
+          btn.classList.replace('text-white', 'text-orange-300');
+          btn.classList.replace('border-orange-500', 'border-neutral-700');
+        }, 2000);
+      } catch {
+        // fallback: select text
+        document.getElementById('api-key-display').focus();
+      }
+    }
+
+    // ── API helper ───────────────────────────────────────────────────────────
+    async function api(url, opts = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+
+      const fetchOpts = {
+        method: opts.method || 'GET',
+        headers,
+        credentials: 'include',
+      };
+      if (opts.body) {
+        fetchOpts.body = JSON.stringify(opts.body);
+      }
+
+      const res = await fetch(url, fetchOpts);
+
+      let data;
+      try { data = await res.json(); } catch { data = {}; }
+
+      if (!res.ok) {
+        throw new Error(data.error || data.title || (res.status === 401 ? 'Sessão expirada. Faça login novamente.' : `Erro ${res.status}`));
+      }
+
+      return data;
+    }
+
+    // ── UI helpers ───────────────────────────────────────────────────────────
+    function setLoading(btn, loading, defaultText) {
+      btn.disabled = loading;
+      if (loading) {
+        btn.dataset.original = btn.textContent;
+        btn.innerHTML = `<span class="inline-flex items-center gap-2">
+          <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+          ${defaultText || 'Aguarde…'}</span>`;
+      } else {
+        btn.textContent = defaultText || btn.dataset.original || 'Enviar';
+      }
+    }
+
+    function showError(el, msg) {
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    function hideError(el) {
+      el.textContent = '';
+      el.classList.add('hidden');
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    // ── Start ────────────────────────────────────────────────────────────────
+    boot();
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,725 @@
+using System.ComponentModel;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using MediatR;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Contents;
+using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
+
+namespace MoodleConnector.Presentation.Tools;
+
+[McpServerToolType]
+public sealed class MoodleCourseContentsTools(
+    IMediator mediator,
+    IMoodleConnectionSelection moodleSelection,
+    IMoodleUserResolver moodleUserResolver)
+{
+    private static readonly string[] ResourceModuleTypes = ["resource", "page", "url", "book", "folder", "label"];
+    private static readonly string[] AllowedModuleTypes =
+    [
+        "resource",
+        "page",
+        "url",
+        "book",
+        "folder",
+        "label",
+        "assign",
+        "quiz",
+        "scorm",
+        "forum"
+    ];
+
+    [McpServerTool(
+        Name = "listar_conteudos_curso",
+        Title = "Listar Conteudos Curso",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lista a estrutura de secoes e modulos de um curso Moodle. URLs sao sanitizadas e arquivos nao sao baixados.")]
+    public Task<CallToolResult> ListarConteudosCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Filtro opcional por tipo de modulo: resource, page, url, book, folder, label, assign, quiz, scorm ou forum.")]
+        string? tipoModulo = null,
+        [Description("Quando true, inclui itens ocultos que o Moodle retornar para o usuario.")]
+        bool incluirOcultos = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsWithOptionalTypeCoreAsync(
+            courseId,
+            tipoModulo,
+            incluirOcultos,
+            onlyWithFiles: false,
+            moodleAlias,
+            cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "list_course_contents",
+        Title = "List Course Contents",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lists Moodle course sections and modules. URLs are sanitized and files are not downloaded.")]
+    public Task<CallToolResult> ListCourseContentsAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("Optional module type filter: resource, page, url, book, folder, label, assign, quiz, scorm, or forum.")]
+        string? moduleType = null,
+        [Description("When true, includes hidden items Moodle returns for the user.")]
+        bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsWithOptionalTypeCoreAsync(
+            courseId,
+            moduleType,
+            includeHidden,
+            onlyWithFiles: false,
+            moodleAlias,
+            cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "consultar_modulo_curso",
+        Title = "Consultar Modulo Curso",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CourseModuleDetailsResponse>))]
+    [Description("Consulta um modulo de curso por cmid ou instance id, sem baixar arquivos.")]
+    public Task<CallToolResult> ConsultarModuloCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Identificador do modulo no curso. Pode ser cmid ou instance id.")]
+        string moduleId,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return GetModuleCoreAsync(courseId, moduleId, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "get_course_module",
+        Title = "Get Course Module",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CourseModuleDetailsResponse>))]
+    [Description("Gets a course module by cmid or instance id without downloading files.")]
+    public Task<CallToolResult> GetCourseModuleAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("Course module identifier. Can be cmid or instance id.")]
+        string moduleId,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return GetModuleCoreAsync(courseId, moduleId, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "listar_recursos_curso",
+        Title = "Listar Recursos Curso",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lista recursos de conteudo do curso: arquivos, paginas, URLs, livros, pastas e rotulos.")]
+    public Task<CallToolResult> ListarRecursosCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Quando true, inclui itens ocultos que o Moodle retornar para o usuario.")]
+        bool incluirOcultos = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, ResourceModuleTypes, incluirOcultos, onlyWithFiles: false, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "list_course_resources",
+        Title = "List Course Resources",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lists course content resources: files, pages, URLs, books, folders, and labels.")]
+    public Task<CallToolResult> ListCourseResourcesAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("When true, includes hidden items Moodle returns for the user.")]
+        bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, ResourceModuleTypes, includeHidden, onlyWithFiles: false, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "listar_arquivos_curso",
+        Title = "Listar Arquivos Curso",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lista modulos que possuem arquivos retornados pelo Moodle, sem baixar o conteudo.")]
+    public Task<CallToolResult> ListarArquivosCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Quando true, inclui itens ocultos que o Moodle retornar para o usuario.")]
+        bool incluirOcultos = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, [], incluirOcultos, onlyWithFiles: true, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "list_course_files",
+        Title = "List Course Files",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lists modules that include files returned by Moodle without downloading file contents.")]
+    public Task<CallToolResult> ListCourseFilesAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("When true, includes hidden items Moodle returns for the user.")]
+        bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, [], includeHidden, onlyWithFiles: true, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "listar_paginas_curso",
+        Title = "Listar Paginas Curso",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lista paginas Moodle de um curso.")]
+    public Task<CallToolResult> ListarPaginasCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Quando true, inclui itens ocultos que o Moodle retornar para o usuario.")]
+        bool incluirOcultos = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, ["page"], incluirOcultos, onlyWithFiles: false, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "list_course_pages",
+        Title = "List Course Pages",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lists Moodle pages in a course.")]
+    public Task<CallToolResult> ListCoursePagesAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("When true, includes hidden items Moodle returns for the user.")]
+        bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, ["page"], includeHidden, onlyWithFiles: false, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "listar_urls_curso",
+        Title = "Listar URLs Curso",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lista modulos URL de um curso com links sanitizados.")]
+    public Task<CallToolResult> ListarUrlsCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Quando true, inclui itens ocultos que o Moodle retornar para o usuario.")]
+        bool incluirOcultos = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, ["url"], incluirOcultos, onlyWithFiles: false, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "list_course_urls",
+        Title = "List Course URLs",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
+    [Description("Lists course URL modules with sanitized links.")]
+    public Task<CallToolResult> ListCourseUrlsAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("When true, includes hidden items Moodle returns for the user.")]
+        bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListContentsCoreAsync(courseId, ["url"], includeHidden, onlyWithFiles: false, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "auditar_estrutura_curso",
+        Title = "Auditar Estrutura Curso",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CourseStructureAuditResponse>))]
+    [Description("Audita a estrutura do curso em modo leitura, apontando secoes vazias e modulos sem descricao ou datas.")]
+    public Task<CallToolResult> AuditarEstruturaCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Quando true, inclui itens ocultos que o Moodle retornar para o usuario.")]
+        bool incluirOcultos = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return AuditCourseStructureCoreAsync(courseId, incluirOcultos, moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "audit_course_structure",
+        Title = "Audit Course Structure",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CourseStructureAuditResponse>))]
+    [Description("Audits course structure in read-only mode, highlighting empty sections and modules without descriptions or dates.")]
+    public Task<CallToolResult> AuditCourseStructureAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("When true, includes hidden items Moodle returns for the user.")]
+        bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return AuditCourseStructureCoreAsync(courseId, includeHidden, moodleAlias, cancellationToken);
+    }
+
+    private Task<CallToolResult> ListContentsWithOptionalTypeCoreAsync(
+        string courseId,
+        string? moduleType,
+        bool includeHidden,
+        bool onlyWithFiles,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        if (!TryParseModuleType(moduleType, out var moduleTypes, out var error))
+        {
+            return Task.FromResult(Error<ListCourseContentsResponse>(error));
+        }
+
+        return ListContentsCoreAsync(courseId, moduleTypes, includeHidden, onlyWithFiles, moodleAlias, cancellationToken);
+    }
+
+    private async Task<CallToolResult> ListContentsCoreAsync(
+        string courseId,
+        IReadOnlyCollection<string> moduleTypes,
+        bool includeHidden,
+        bool onlyWithFiles,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+        {
+            return Error<ListCourseContentsResponse>("Informe um identificador de curso.");
+        }
+
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return Error<ListCourseContentsResponse>("Usuario nao autenticado para consultar conteudos.");
+        }
+
+        CourseContentsSummary? contents;
+        try
+        {
+            contents = await mediator.Send(
+                new ListCourseContentsQuery(
+                    moodleUserId.Value.ToString(),
+                    courseId,
+                    moduleTypes,
+                    includeHidden,
+                    onlyWithFiles),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return Error<ListCourseContentsResponse>("Nao foi possivel listar conteudos no Moodle neste momento.");
+        }
+
+        if (contents is null)
+        {
+            return Error<ListCourseContentsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+        }
+
+        return ContentsSuccess(contents);
+    }
+
+    private async Task<CallToolResult> GetModuleCoreAsync(
+        string courseId,
+        string moduleId,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+        {
+            return Error<CourseModuleDetailsResponse>("Informe um identificador de curso.");
+        }
+
+        if (string.IsNullOrWhiteSpace(moduleId))
+        {
+            return Error<CourseModuleDetailsResponse>("Informe um identificador de modulo.");
+        }
+
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return Error<CourseModuleDetailsResponse>("Usuario nao autenticado para consultar modulo.");
+        }
+
+        CourseModuleSummary? module;
+        try
+        {
+            module = await mediator.Send(
+                new GetCourseModuleQuery(moodleUserId.Value.ToString(), courseId, moduleId),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return Error<CourseModuleDetailsResponse>("Nao foi possivel consultar o modulo no Moodle neste momento.");
+        }
+
+        if (module is null)
+        {
+            return Error<CourseModuleDetailsResponse>("Modulo nao encontrado no curso informado.");
+        }
+
+        var data = new CourseModuleDetailsResponse(ToModuleItem(module));
+        var response = new ToolResponse<CourseModuleDetailsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = $"Modulo encontrado: {module.Name} ({module.ModuleType}, ID: {module.ModuleId})." }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private async Task<CallToolResult> AuditCourseStructureCoreAsync(
+        string courseId,
+        bool includeHidden,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+        {
+            return Error<CourseStructureAuditResponse>("Informe um identificador de curso.");
+        }
+
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return Error<CourseStructureAuditResponse>("Usuario nao autenticado para auditar estrutura do curso.");
+        }
+
+        CourseStructureAuditSummary? audit;
+        try
+        {
+            audit = await mediator.Send(
+                new AuditCourseStructureQuery(moodleUserId.Value.ToString(), courseId, includeHidden),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return Error<CourseStructureAuditResponse>("Nao foi possivel auditar a estrutura do curso no Moodle neste momento.");
+        }
+
+        if (audit is null)
+        {
+            return Error<CourseStructureAuditResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+        }
+
+        var data = ToAuditResponse(audit);
+        var response = new ToolResponse<CourseStructureAuditResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildAuditNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private static CallToolResult ContentsSuccess(CourseContentsSummary contents)
+    {
+        var data = ToContentsResponse(contents);
+        var response = new ToolResponse<ListCourseContentsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildContentsNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private static bool TryParseModuleType(string? value, out IReadOnlyCollection<string> moduleTypes, out string error)
+    {
+        moduleTypes = [];
+        error = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        var normalized = value.Trim().ToLowerInvariant();
+        if (!AllowedModuleTypes.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+        {
+            error = "Tipo de modulo invalido. Use resource, page, url, book, folder, label, assign, quiz, scorm ou forum.";
+            return false;
+        }
+
+        moduleTypes = [normalized];
+        return true;
+    }
+
+    private static string BuildContentsNarration(ListCourseContentsResponse response)
+    {
+        if (response.ModuleCount == 0)
+        {
+            return "Nao encontrei modulos para os filtros informados.";
+        }
+
+        return $"Encontrei {response.ModuleCount} modulo(s) em {response.SectionCount} secao(oes) do curso {response.CourseId}.";
+    }
+
+    private static string BuildAuditNarration(CourseStructureAuditResponse response)
+    {
+        return $"Auditoria concluida: {response.EmptySectionCount} secao(oes) vazia(s), {response.ModulesWithoutDescriptionCount} modulo(s) sem descricao e {response.ModulesWithoutDatesCount} modulo(s) sem datas retornadas.";
+    }
+
+    private static ListCourseContentsResponse ToContentsResponse(CourseContentsSummary contents)
+    {
+        var sections = contents.Sections.Select(ToSectionItem).ToArray();
+        return new ListCourseContentsResponse(
+            contents.CourseId,
+            contents.ModuleTypeFilters,
+            contents.IncludeHidden,
+            contents.OnlyWithFiles,
+            sections.Length,
+            sections.Sum(section => section.ModuleCount),
+            sections);
+    }
+
+    private static SectionItem ToSectionItem(CourseSectionSummary section)
+    {
+        return new SectionItem(
+            section.SectionId,
+            section.SectionNumber,
+            section.Name,
+            section.Summary,
+            section.Visible,
+            section.ModuleCount,
+            section.IsEmpty,
+            section.Modules.Select(ToModuleItem).ToArray());
+    }
+
+    private static ModuleItem ToModuleItem(CourseModuleSummary module)
+    {
+        return new ModuleItem(
+            module.ModuleId,
+            module.InstanceId,
+            module.ModuleType,
+            module.Name,
+            module.Url,
+            module.Visible,
+            module.UserVisible,
+            module.Description,
+            module.AvailabilityInfo,
+            module.Dates.Select(date => new ModuleDateItem(date.Label, date.Date)).ToArray(),
+            module.Files.Select(file => new ModuleFileItem(
+                file.Type,
+                file.FileName,
+                file.FilePath,
+                file.FileSize,
+                file.MimeType,
+                file.FileUrl,
+                file.IsExternalFile)).ToArray());
+    }
+
+    private static CourseStructureAuditResponse ToAuditResponse(CourseStructureAuditSummary audit)
+    {
+        return new CourseStructureAuditResponse(
+            audit.CourseId,
+            audit.SectionCount,
+            audit.ModuleCount,
+            audit.EmptySectionCount,
+            audit.ModulesWithoutDescriptionCount,
+            audit.ModulesWithoutDatesCount,
+            audit.Findings.Select(finding => new CourseStructureFindingItem(
+                finding.Code,
+                finding.Severity,
+                finding.Message,
+                finding.SectionId,
+                finding.ModuleId,
+                finding.ModuleType)).ToArray());
+    }
+
+    private static CallToolResult Error<T>(string message)
+    {
+        var response = new ToolResponse<T>(
+            "error",
+            Data: default,
+            Warnings: [message],
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = message }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = true
+        };
+    }
+
+    public sealed record ListCourseContentsResponse(
+        [property: JsonPropertyName("courseId")] string CourseId,
+        [property: JsonPropertyName("moduleTypeFilters")] IReadOnlyCollection<string> ModuleTypeFilters,
+        [property: JsonPropertyName("includeHidden")] bool IncludeHidden,
+        [property: JsonPropertyName("onlyWithFiles")] bool OnlyWithFiles,
+        [property: JsonPropertyName("sectionCount")] int SectionCount,
+        [property: JsonPropertyName("moduleCount")] int ModuleCount,
+        [property: JsonPropertyName("sections")] IReadOnlyList<SectionItem> Sections);
+
+    public sealed record SectionItem(
+        [property: JsonPropertyName("sectionId")] string SectionId,
+        [property: JsonPropertyName("sectionNumber")] int? SectionNumber,
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("summary")] string? Summary,
+        [property: JsonPropertyName("visible")] bool? Visible,
+        [property: JsonPropertyName("moduleCount")] int ModuleCount,
+        [property: JsonPropertyName("isEmpty")] bool IsEmpty,
+        [property: JsonPropertyName("modules")] IReadOnlyList<ModuleItem> Modules);
+
+    public sealed record ModuleItem(
+        [property: JsonPropertyName("moduleId")] string ModuleId,
+        [property: JsonPropertyName("instanceId")] string? InstanceId,
+        [property: JsonPropertyName("moduleType")] string ModuleType,
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("url")] string? Url,
+        [property: JsonPropertyName("visible")] bool? Visible,
+        [property: JsonPropertyName("userVisible")] bool? UserVisible,
+        [property: JsonPropertyName("description")] string? Description,
+        [property: JsonPropertyName("availabilityInfo")] string? AvailabilityInfo,
+        [property: JsonPropertyName("dates")] IReadOnlyList<ModuleDateItem> Dates,
+        [property: JsonPropertyName("files")] IReadOnlyList<ModuleFileItem> Files);
+
+    public sealed record ModuleDateItem(
+        [property: JsonPropertyName("label")] string Label,
+        [property: JsonPropertyName("date")] DateTimeOffset Date);
+
+    public sealed record ModuleFileItem(
+        [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("fileName")] string? FileName,
+        [property: JsonPropertyName("filePath")] string? FilePath,
+        [property: JsonPropertyName("fileSize")] long? FileSize,
+        [property: JsonPropertyName("mimeType")] string? MimeType,
+        [property: JsonPropertyName("fileUrl")] string? FileUrl,
+        [property: JsonPropertyName("isExternalFile")] bool? IsExternalFile);
+
+    public sealed record CourseModuleDetailsResponse(
+        [property: JsonPropertyName("module")] ModuleItem Module);
+
+    public sealed record CourseStructureAuditResponse(
+        [property: JsonPropertyName("courseId")] string CourseId,
+        [property: JsonPropertyName("sectionCount")] int SectionCount,
+        [property: JsonPropertyName("moduleCount")] int ModuleCount,
+        [property: JsonPropertyName("emptySectionCount")] int EmptySectionCount,
+        [property: JsonPropertyName("modulesWithoutDescriptionCount")] int ModulesWithoutDescriptionCount,
+        [property: JsonPropertyName("modulesWithoutDatesCount")] int ModulesWithoutDatesCount,
+        [property: JsonPropertyName("findings")] IReadOnlyList<CourseStructureFindingItem> Findings);
+
+    public sealed record CourseStructureFindingItem(
+        [property: JsonPropertyName("code")] string Code,
+        [property: JsonPropertyName("severity")] string Severity,
+        [property: JsonPropertyName("message")] string Message,
+        [property: JsonPropertyName("sectionId")] string? SectionId,
+        [property: JsonPropertyName("moduleId")] string? ModuleId,
+        [property: JsonPropertyName("moduleType")] string? ModuleType);
+}
