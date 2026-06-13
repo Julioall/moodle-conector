@@ -563,7 +563,9 @@ Metadados MCP:
 Descricao:
 
 - Cria um job interno em `grading_batch` e itens em `grading_item` a partir das entregas retornadas pelas queries de submissao existentes.
-- No MVP inicial, nao baixa anexos, nao executa extracao de texto e nao gera feedback por IA.
+- Quando `includeSubmissionFiles=true`, baixa os anexos retornados pela submissao com `fileUrl`, respeita os limites de arquivo configurados e persiste `GradingArtifact` com o resultado da extracao.
+- O orquestrador inline do MVP processa itens pendentes logo apos a criacao do lote: se houver texto extraido, gera um parecer preliminar revisavel; se nao houver conteudo legivel, marca o item como bloqueado.
+- Nota sugerida confiavel continua dependente de rubrica/criterios e escala disponiveis.
 - Nao escreve nota ou feedback no Moodle.
 - Limita `maxItems` entre 1 e 400 e retorna warnings quando o lote foi truncado ou alguma tarefa nao foi encontrada.
 

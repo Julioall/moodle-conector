@@ -244,7 +244,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
                 ModifiedAt: null,
                 AttemptNumber: null,
                 FileCount: 0,
-                HasOnlineText: false);
+                HasOnlineText: false,
+                Files: []);
         }
 
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
@@ -265,7 +266,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             submission.ModifiedAt,
             submission.AttemptNumber,
             submission.FileCount,
-            submission.HasOnlineText);
+            submission.HasOnlineText,
+            submission.Files ?? []);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter)

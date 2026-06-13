@@ -10,6 +10,8 @@ public interface IGradingReviewRepository
 
     Task AddItemAsync(AssistedGradingItem item, CancellationToken cancellationToken);
 
+    Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken);
+
     Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<AssistedGradingItem>> ListItemsByBatchAsync(

@@ -14,6 +14,8 @@ namespace MoodleConnector.Application.Grading;
 public sealed class LocalGradingBatchOrchestrator(
     IGradingReviewRepository repository,
     IOptions<GradingLimitsOptions> limits,
+    IGradingContextBuilder contextBuilder,
+    IGradingAnalysisService analysisService,
     ILogger<LocalGradingBatchOrchestrator> logger)
     : IGradingBatchOrchestrator
 {
@@ -49,6 +51,20 @@ public sealed class LocalGradingBatchOrchestrator(
             "Lote {BatchId} com {TotalItems} itens enfileirado para processamento inline (MVP).",
             batchId,
             totalItems);
+
+        var items = await repository.ListItemsByBatchAsync(
+            batchId,
+            page: 1,
+            pageSize: maxItems,
+            cancellationToken);
+
+        foreach (var item in items.Where(item => item.Status == GradingItemStatus.Pending))
+        {
+            await ProcessItemAsync(item, cancellationToken);
+        }
+
+        UpdateBatchCounters(batch, items);
+        await repository.SaveChangesAsync(cancellationToken);
     }
 
     public async Task CancelAsync(Guid batchId, CancellationToken cancellationToken)
@@ -96,5 +112,94 @@ public sealed class LocalGradingBatchOrchestrator(
             batch.FailedItems,
             IsQueued: batch.Status is GradingBatchStatus.Pending or GradingBatchStatus.Processing,
             LastError: null);
+    }
+
+    private async Task ProcessItemAsync(
+        AssistedGradingItem item,
+        CancellationToken cancellationToken)
+    {
+        var context = await contextBuilder.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: true),
+            cancellationToken);
+
+        var readableText = FirstReadableText(context);
+        if (string.IsNullOrWhiteSpace(readableText))
+        {
+            item.BlockAnalysis("Submissao sem conteudo legivel para correcao assistida.");
+            return;
+        }
+
+        if (context.Blockers.Count > 0)
+        {
+            item.SetDraft(
+                suggestedGrade: null,
+                confidence: 0m,
+                BuildPreliminaryFeedback(context, readableText));
+            return;
+        }
+
+        var result = await analysisService.AnalyzeAsync(
+            new GradingAnalysisRequest(
+                AssignmentName: $"Tarefa {context.AssignmentId}",
+                MaxGrade: context.MaxGrade ?? 0m,
+                ActivityDescription: context.AssignmentStatement,
+                RubricOrCriteria: context.RubricDescription ?? context.Criteria,
+                TeacherInstructions: context.TeacherInstructions,
+                SubmissionText: readableText,
+                FileHashes: context.AttachedFiles
+                    .Select(file => file.Sha256)
+                    .Where(hash => !string.IsNullOrWhiteSpace(hash))
+                    .Select(hash => hash!)
+                    .ToArray()),
+            cancellationToken);
+
+        if (!string.IsNullOrWhiteSpace(result.FeedbackToStudent))
+        {
+            item.SetDraft(result.SuggestedGrade, result.Confidence, result.FeedbackToStudent);
+            return;
+        }
+
+        item.BlockAnalysis(
+            result.Blocks.Count > 0
+                ? string.Join(" ", result.Blocks)
+                : "Analise de correcao assistida nao gerou feedback revisavel.");
+    }
+
+    private static string? FirstReadableText(GradingContext context)
+    {
+        if (!string.IsNullOrWhiteSpace(context.SubmissionText))
+        {
+            return context.SubmissionText;
+        }
+
+        return context.AttachedFiles
+            .Select(file => file.ExtractedText)
+            .FirstOrDefault(text => !string.IsNullOrWhiteSpace(text));
+    }
+
+    private static string BuildPreliminaryFeedback(GradingContext context, string readableText)
+    {
+        var snippet = readableText.Length > 500
+            ? readableText[..500]
+            : readableText;
+
+        return "Parecer preliminar para revisao do professor/tutor. " +
+            "A submissao possui conteudo legivel, mas ainda faltam criterios, rubrica ou escala de nota para sugerir nota com seguranca. " +
+            $"Trecho inicial analisado: {snippet}";
+    }
+
+    private static void UpdateBatchCounters(
+        AssistedGradingBatch batch,
+        IReadOnlyList<AssistedGradingItem> items)
+    {
+        var readyItems = items.Count(item =>
+            item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit);
+        var blockedItems = items.Count(item => item.Status == GradingItemStatus.Blocked);
+        var failedItems = items.Count(item => item.Status == GradingItemStatus.Failed);
+        var processedItems = readyItems + blockedItems + failedItems +
+            items.Count(item => item.Status == GradingItemStatus.Committed);
+
+        batch.UpdateCounters(processedItems, readyItems, blockedItems, failedItems);
     }
 }

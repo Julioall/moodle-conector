@@ -3,8 +3,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using MediatR;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 using MoodleConnector.Domain.Grading;
@@ -119,9 +121,14 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     ICurrentUserContext currentUser,
     IMoodleUserResolver moodleUserResolver,
     IMoodleAuditLogRepository auditLogs,
-    IGradingBatchOrchestrator orchestrator)
+    IGradingBatchOrchestrator orchestrator,
+    IMoodleSubmissionFileGateway fileGateway,
+    IDocumentExtractionService extractionService,
+    IOptions<GradingLimitsOptions>? limits = null)
     : IRequestHandler<CreateAssistedGradingBatchCommand, CreateAssistedGradingBatchResult>
 {
+    private readonly GradingLimitsOptions _limits = limits?.Value ?? new GradingLimitsOptions();
+
     public async Task<CreateAssistedGradingBatchResult> Handle(
         CreateAssistedGradingBatchCommand request,
         CancellationToken cancellationToken)
@@ -195,7 +202,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                         submissionsPage.AssignmentId,
                         submission.SubmissionId,
                         submission.UserId,
-                        submission.AttemptNumber));
+                        submission.AttemptNumber,
+                        submission.Files ?? []));
                     if (selectedItems.Count >= safeMaxItems)
                     {
                         break;
@@ -226,15 +234,24 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         await repository.AddBatchAsync(batch, cancellationToken);
         foreach (var seed in selectedItems)
         {
-            await repository.AddItemAsync(
-                AssistedGradingItem.Create(
-                    batch.Id,
-                    ParsePositiveLong(seed.CourseId, "courseId"),
-                    ParsePositiveLong(seed.AssignmentId, "assignmentId"),
-                    ParseNullablePositiveLong(seed.SubmissionId, "submissionId"),
-                    ParsePositiveLong(seed.StudentId, "studentId"),
-                    seed.AttemptNumber),
-                cancellationToken);
+            var item = AssistedGradingItem.Create(
+                batch.Id,
+                ParsePositiveLong(seed.CourseId, "courseId"),
+                ParsePositiveLong(seed.AssignmentId, "assignmentId"),
+                ParseNullablePositiveLong(seed.SubmissionId, "submissionId"),
+                ParsePositiveLong(seed.StudentId, "studentId"),
+                seed.AttemptNumber);
+
+            await repository.AddItemAsync(item, cancellationToken);
+            if (request.IncludeSubmissionFiles)
+            {
+                await AddSubmissionFileArtifactsAsync(
+                    request.UserExternalId,
+                    item.Id,
+                    seed.Files,
+                    warnings,
+                    cancellationToken);
+            }
         }
 
         await repository.SaveChangesAsync(cancellationToken);
@@ -298,12 +315,79 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         return string.IsNullOrWhiteSpace(value) ? null : ParsePositiveLong(value, parameterName);
     }
 
+    private async Task AddSubmissionFileArtifactsAsync(
+        string userExternalId,
+        Guid gradingItemId,
+        IReadOnlyList<AssignmentSubmissionFile> files,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var maxFiles = Math.Clamp(_limits.MaxFilesPerSubmission, 0, 100);
+        var maxBytes = Math.Max(1, _limits.MaxFileSizeMb) * 1024L * 1024L;
+
+        foreach (var file in files.Take(maxFiles))
+        {
+            try
+            {
+                var download = await fileGateway.DownloadFileAsync(
+                    userExternalId,
+                    file.FileUrl,
+                    file.Filename,
+                    maxBytes,
+                    cancellationToken);
+                var extraction = await extractionService.ExtractAsync(
+                    download.Filename,
+                    download.MimeType,
+                    download.Content,
+                    cancellationToken);
+
+                await repository.AddArtifactAsync(
+                    new GradingArtifact(
+                        Guid.NewGuid(),
+                        gradingItemId,
+                        "submission_file",
+                        download.Filename,
+                        download.MimeType,
+                        download.Sha256Hex,
+                        download.SizeBytes,
+                        extraction.ExtractionStatus,
+                        extraction.ExtractedText,
+                        extraction.ErrorMessage,
+                        DateTimeOffset.UtcNow),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Arquivo {file.Filename} nao foi extraido: {ex.Message}");
+                await repository.AddArtifactAsync(
+                    new GradingArtifact(
+                        Id: Guid.NewGuid(),
+                        GradingItemId: gradingItemId,
+                        ArtifactType: "submission_file",
+                        Filename: file.Filename,
+                        MimeType: file.MimeType,
+                        Sha256: null,
+                        SizeBytes: file.SizeBytes,
+                        ExtractionStatus: ExtractionStatus.Failed,
+                        ExtractedTextRef: null,
+                        SummaryRef: ex.Message,
+                        CreatedAt: DateTimeOffset.UtcNow),
+                    cancellationToken);
+            }
+        }
+    }
+
     private sealed record AssistedGradingItemSeed(
         string CourseId,
         string AssignmentId,
         string? SubmissionId,
         string StudentId,
-        int? AttemptNumber);
+        int? AttemptNumber,
+        IReadOnlyList<AssignmentSubmissionFile> Files);
 }
 
 public sealed class GetAssistedGradingItemQueryHandler(

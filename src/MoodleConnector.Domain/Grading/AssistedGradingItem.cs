@@ -102,6 +102,20 @@ public sealed class AssistedGradingItem
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void BlockAnalysis(string reason)
+    {
+        var message = string.IsNullOrWhiteSpace(reason)
+            ? "Nao foi possivel processar a submissao para correcao assistida."
+            : reason.Trim();
+
+        SuggestedGrade = null;
+        Confidence = 0m;
+        DraftFeedback = message;
+        Status = GradingItemStatus.Blocked;
+        CommitStatus = GradingCommitStatus.NotReady;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void ApplyTeacherReview(
         decimal? finalGrade,
         string finalFeedback,

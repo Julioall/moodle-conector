@@ -99,6 +99,12 @@ public sealed class GradingContextBuilderTests
         public Task AddItemAsync(AssistedGradingItem item, CancellationToken cancellationToken)
             => Task.CompletedTask;
 
+        public Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
+        {
+            Artifacts.Add(artifact);
+            return Task.CompletedTask;
+        }
+
         public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
             => Task.FromResult<AssistedGradingItem?>(null);
 

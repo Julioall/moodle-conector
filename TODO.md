@@ -1067,9 +1067,10 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [x] Criar `consultar_status_lote_correcao`.
 - [x] Criar `cancelar_lote_correcao_assistida`.
 - [x] Criar `consultar_item_correcao_assistida`.
-- [ ] Baixar anexos.
-- [ ] Extrair texto.
-- [ ] Gerar feedback e nota sugerida.
+- [x] Baixar anexos retornados por `mod_assign_get_submissions` quando houver `fileUrl`.
+- [x] Extrair texto e persistir `GradingArtifact.ExtractedTextRef`.
+- [x] Gerar parecer preliminar revisavel quando houver texto extraido.
+- [ ] Gerar nota sugerida confiavel quando rubrica/criterios e escala estiverem disponiveis.
 - [ ] Permitir professor copiar o feedback manualmente.
 - [ ] Validar qualidade pedagógica com tutores.
 - [ ] Não criar UI complexa nesta fase.

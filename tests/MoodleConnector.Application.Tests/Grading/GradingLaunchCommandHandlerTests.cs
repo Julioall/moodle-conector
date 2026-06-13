@@ -243,6 +243,11 @@ public sealed class GradingLaunchCommandHandlerTests
             return Task.CompletedTask;
         }
 
+        public Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
         public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
         {
             return Task.FromResult(Items.SingleOrDefault(item => item.Id == id));

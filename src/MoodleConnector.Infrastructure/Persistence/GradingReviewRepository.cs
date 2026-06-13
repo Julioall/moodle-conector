@@ -21,6 +21,11 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         await dbContext.GradingItems.AddAsync(item, cancellationToken);
     }
 
+    public async Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
+    {
+        await dbContext.GradingArtifacts.AddAsync(artifact, cancellationToken);
+    }
+
     public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
     {
         return dbContext.GradingItems.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);

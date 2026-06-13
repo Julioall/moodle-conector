@@ -38,7 +38,14 @@ public sealed record AssignmentSubmissionSummary(
     DateTimeOffset? ModifiedAt,
     int? AttemptNumber,
     int FileCount,
-    bool HasOnlineText);
+    bool HasOnlineText,
+    IReadOnlyList<AssignmentSubmissionFile>? Files = null);
+
+public sealed record AssignmentSubmissionFile(
+    string Filename,
+    string? MimeType,
+    long? SizeBytes,
+    string FileUrl);
 
 public sealed record AssignmentSubmissionRecord(
     string SubmissionId,
@@ -49,4 +56,5 @@ public sealed record AssignmentSubmissionRecord(
     DateTimeOffset? ModifiedAt,
     int? AttemptNumber,
     int FileCount,
-    bool HasOnlineText);
+    bool HasOnlineText,
+    IReadOnlyList<AssignmentSubmissionFile>? Files = null);

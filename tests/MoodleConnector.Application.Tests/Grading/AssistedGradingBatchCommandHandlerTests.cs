@@ -21,7 +21,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeCurrentUserContext("teacher-1"),
             new FakeMoodleUserResolver(321),
             new FakeAuditLogRepository(),
-            orchestrator);
+            orchestrator,
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService());
 
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -47,6 +49,46 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreateBatch_ComArquivosDeSubmissao_BaixaExtraiEPersisteArtefato()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var fileGateway = new FakeSubmissionFileGateway();
+        var extraction = new FakeDocumentExtractionService();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            orchestrator,
+            fileGateway,
+            extraction);
+
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: ["9001"],
+                MaxItems: 25,
+                OnlyAwaitingGrading: true,
+                IncludeSubmissionFiles: true),
+            CancellationToken.None);
+
+        var artifact = Assert.Single(repository.Artifacts);
+        Assert.Equal(repository.Items.Single().Id, artifact.GradingItemId);
+        Assert.Equal("submission_file", artifact.ArtifactType);
+        Assert.Equal("entrega.txt", artifact.Filename);
+        Assert.Equal("Texto extraido real da submissao.", artifact.ExtractedTextRef);
+        Assert.Equal("succeeded", artifact.ExtractionStatus);
+        Assert.Equal("https://moodle.example/pluginfile.php/entrega.txt", fileGateway.LastFileUrl);
+        Assert.Equal("entrega.txt", extraction.LastFilename);
+        Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
+    }
+
+    [Fact]
     public async Task CreateBatch_RespeitaMaxItemsESubmissionIds()
     {
         var repository = new FakeGradingReviewRepository();
@@ -58,7 +100,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeCurrentUserContext("teacher-1"),
             new FakeMoodleUserResolver(321),
             new FakeAuditLogRepository(),
-            orchestrator);
+            orchestrator,
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService());
 
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -279,6 +323,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         public List<AssistedGradingItem> Items { get; } = [];
 
+        public List<GradingArtifact> Artifacts { get; } = [];
+
         public int SaveChangesCount { get; private set; }
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
@@ -295,6 +341,12 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public Task AddItemAsync(AssistedGradingItem item, CancellationToken cancellationToken)
         {
             Items.Add(item);
+            return Task.CompletedTask;
+        }
+
+        public Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
+        {
+            Artifacts.Add(artifact);
             return Task.CompletedTask;
         }
 
@@ -326,7 +378,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             Guid gradingItemId,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult<IReadOnlyList<GradingArtifact>>([]);
+            return Task.FromResult<IReadOnlyList<GradingArtifact>>(Artifacts
+                .Where(artifact => artifact.GradingItemId == gradingItemId)
+                .ToArray());
         }
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)
@@ -497,7 +551,15 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                         ModifiedAt: new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero),
                         AttemptNumber: 0,
                         FileCount: 1,
-                        HasOnlineText: true),
+                        HasOnlineText: true,
+                        Files:
+                        [
+                            new AssignmentSubmissionFile(
+                                "entrega.txt",
+                                "text/plain",
+                                31,
+                                "https://moodle.example/pluginfile.php/entrega.txt")
+                        ]),
                     new AssignmentSubmissionSummary(
                         "102",
                         "Bruno Lima",
@@ -513,6 +575,51 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                         FileCount: 0,
                         HasOnlineText: true)
                 ]);
+        }
+    }
+
+    private sealed class FakeSubmissionFileGateway : IMoodleSubmissionFileGateway
+    {
+        public string? LastFileUrl { get; private set; }
+
+        public Task<SubmissionFileDownloadResult> DownloadFileAsync(
+            string userExternalId,
+            string fileUrl,
+            string filename,
+            long maxBytes,
+            CancellationToken cancellationToken)
+        {
+            LastFileUrl = fileUrl;
+            return Task.FromResult(new SubmissionFileDownloadResult(
+                filename,
+                "text/plain",
+                31,
+                "sha-1",
+                "Texto extraido real da submissao."u8.ToArray(),
+                Truncated: false));
+        }
+    }
+
+    private sealed class FakeDocumentExtractionService : IDocumentExtractionService
+    {
+        public string? LastFilename { get; private set; }
+
+        public Task<DocumentExtractionResult> ExtractAsync(
+            string filename,
+            string mimeType,
+            byte[] content,
+            CancellationToken cancellationToken)
+        {
+            LastFilename = filename;
+            return Task.FromResult(new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.Succeeded,
+                "Texto extraido real da submissao.",
+                WordCount: 5,
+                CharCount: 31,
+                Truncated: false,
+                ErrorMessage: null));
         }
     }
 }

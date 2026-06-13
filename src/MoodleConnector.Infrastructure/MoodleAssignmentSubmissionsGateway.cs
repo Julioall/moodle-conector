@@ -74,10 +74,22 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
     {
         var fileCount = 0;
         var hasOnlineText = false;
+        var files = new List<AssignmentSubmissionFile>();
         foreach (var plugin in dto.Plugins ?? [])
         {
-            fileCount += (plugin.FileAreas ?? [])
-                .Sum(fileArea => fileArea.Files?.Count ?? 0);
+            foreach (var fileArea in plugin.FileAreas ?? [])
+            {
+                foreach (var file in fileArea.Files ?? [])
+                {
+                    fileCount++;
+                    var submissionFile = ToSubmissionFile(file);
+                    if (submissionFile is not null)
+                    {
+                        files.Add(submissionFile);
+                    }
+                }
+            }
+
             hasOnlineText = hasOnlineText ||
                 string.Equals(plugin.Type, "onlinetext", StringComparison.OrdinalIgnoreCase) &&
                 (plugin.EditorFields?.Count ?? 0) > 0;
@@ -92,7 +104,29 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
             ToDateTimeOffset(dto.TimeModified),
             ToNullableInt(dto.AttemptNumber),
             fileCount,
-            hasOnlineText);
+            hasOnlineText,
+            files);
+    }
+
+    private static AssignmentSubmissionFile? ToSubmissionFile(JsonElement file)
+    {
+        var fileUrl = GetString(file, "fileurl");
+        if (string.IsNullOrWhiteSpace(fileUrl))
+        {
+            return null;
+        }
+
+        var filename = GetString(file, "filename");
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            filename = GetString(file, "filepath")?.Trim('/') ?? "submission-file";
+        }
+
+        return new AssignmentSubmissionFile(
+            filename,
+            GetString(file, "mimetype"),
+            GetNullableLong(file, "filesize"),
+            fileUrl);
     }
 
     private static string BuildMoodleGetUrl(string baseUrl, string token, string wsFunction, IReadOnlyDictionary<string, string> parameters)
@@ -139,6 +173,31 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
         {
             JsonValueKind.Number when value.TryGetInt32(out var number) => number,
             JsonValueKind.String when int.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) => number,
+            _ => null
+        };
+    }
+
+    private static string? GetString(JsonElement element, string propertyName)
+    {
+        return element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty(propertyName, out var property) &&
+            property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : null;
+    }
+
+    private static long? GetNullableLong(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number when property.TryGetInt64(out var number) => number,
+            JsonValueKind.String when long.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) => number,
             _ => null
         };
     }
