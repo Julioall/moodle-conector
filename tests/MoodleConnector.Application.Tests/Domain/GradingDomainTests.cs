@@ -1,0 +1,60 @@
+using MoodleConnector.Domain.Grading;
+
+namespace MoodleConnector.Application.Tests.Domain;
+
+public sealed class GradingDomainTests
+{
+    [Fact]
+    public void AssistedGradingBatch_Create_IniciaContadoresEStatus()
+    {
+        var batch = AssistedGradingBatch.Create(
+            courseId: 10,
+            assignmentIds: [501, 502],
+            createdBySubject: "teacher-1",
+            createdByMoodleUserId: 321,
+            totalItems: 25);
+
+        Assert.NotEqual(Guid.Empty, batch.Id);
+        Assert.Equal(10, batch.CourseId);
+        Assert.Equal([501, 502], batch.AssignmentIds);
+        Assert.Equal("teacher-1", batch.CreatedBySubject);
+        Assert.Equal(GradingBatchStatus.Pending, batch.Status);
+        Assert.Equal(25, batch.TotalItems);
+        Assert.Equal(0, batch.ProcessedItems);
+        Assert.Equal(0, batch.ReadyItems);
+        Assert.Equal(0, batch.BlockedItems);
+        Assert.Equal(0, batch.FailedItems);
+    }
+
+    [Fact]
+    public void AssistedGradingItem_ApplyTeacherReview_SeparaNotaSugeridaDeNotaFinal()
+    {
+        var item = AssistedGradingItem.Create(
+            batchId: Guid.NewGuid(),
+            courseId: 10,
+            assignmentId: 501,
+            submissionId: 9001,
+            moodleUserId: 101,
+            attemptNumber: 0);
+
+        item.SetDraft(
+            suggestedGrade: 7.5m,
+            confidence: 0.82m,
+            draftFeedback: "Feedback sugerido.");
+
+        item.ApplyTeacherReview(
+            finalGrade: 8.0m,
+            finalFeedback: "Feedback revisado pelo professor.",
+            reviewedBySubject: "teacher-1",
+            reviewedByMoodleUserId: 321);
+
+        Assert.Equal(7.5m, item.SuggestedGrade);
+        Assert.Equal(8.0m, item.FinalGrade);
+        Assert.Equal("Feedback revisado pelo professor.", item.FinalFeedback);
+        Assert.Equal(GradingReviewStatus.Reviewed, item.ReviewStatus);
+        Assert.Equal(GradingItemStatus.ReadyToCommit, item.Status);
+        Assert.Equal(GradingCommitStatus.Pending, item.CommitStatus);
+        Assert.Equal("teacher-1", item.ReviewedBySubject);
+        Assert.NotNull(item.ReviewedAt);
+    }
+}

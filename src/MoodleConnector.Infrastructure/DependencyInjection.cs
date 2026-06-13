@@ -69,6 +69,7 @@ public static class DependencyInjection
 
         services.AddMemoryCache();
         services.AddScoped<IPendingMoodleActionRepository, PendingMoodleActionRepository>();
+        services.AddScoped<IGradingReviewRepository, GradingReviewRepository>();
         services.AddScoped<IMoodleAuditLogRepository, MoodleAuditLogRepository>();
         services.AddScoped<IAuthorizationAuditService, AuthorizationAuditService>();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
@@ -96,6 +97,14 @@ public static class DependencyInjection
 
         services
             .AddHttpClient<IMoodleAssignmentSubmissionsGateway, MoodleAssignmentSubmissionsGateway>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+
+        services
+            .AddHttpClient<IMoodleAssignmentGradingGateway, MoodleAssignmentGradingGateway>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+
+        services
+            .AddHttpClient<IMoodleGradingCapabilitiesGateway, MoodleGradingCapabilitiesGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
 
         services

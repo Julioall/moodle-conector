@@ -64,6 +64,15 @@ Este catálogo reflete o estado real do repositório.
 | `list_submissions_awaiting_grading` | List Submissions Awaiting Grading | `SensitiveRead` | Sim | Não | Implementada |
 | `consultar_status_submissao` | Consultar Status Submissao | `SensitiveRead` | Sim | Não | Implementada |
 | `get_submission_status` | Get Submission Status | `SensitiveRead` | Sim | Não | Implementada |
+| `descobrir_funcoes_moodle_correcao` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Implementada |
+| `criar_lote_correcao_assistida` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
+| `consultar_status_lote_correcao` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `consultar_item_correcao_assistida` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
+| `atualizar_rascunho_correcao` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Implementada |
+| `criar_previa_lancamento_lote` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
+| `confirmar_lancamento_lote_moodle` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
+| `consultar_auditoria_correcao` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `preparar_acao_demo` | Preparar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
 | `confirmar_acao_demo` | Confirmar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
 
@@ -489,6 +498,217 @@ Descrição:
 
 - Alias de consulta individual de status da submissão por estudante.
 - Usa o mesmo contrato de `consultar_entrega_aluno`.
+
+## `descobrir_funcoes_moodle_correcao` / `discover_moodle_grading_functions`
+
+Descricao:
+
+- Consulta `core_webservice_get_site_info` no Moodle atual e classifica as funcoes necessarias para o MVP de correcao assistida.
+- Verifica leitura de submissoes, status de submissao, notas, arquivos e escrita de notas individual/lote.
+- Nao baixa anexos, nao lista estudantes e nao executa escrita no Moodle.
+- Nao retorna token, senha, URL privada com token ou dados pessoais de estudantes.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `criar_lote_correcao_assistida`
+
+Descricao:
+
+- Cria um job interno em `grading_batch` e itens em `grading_item` a partir das entregas retornadas pelas queries de submissao existentes.
+- No MVP inicial, nao baixa anexos, nao executa extracao de texto e nao gera feedback por IA.
+- Nao escreve nota ou feedback no Moodle.
+- Limita `maxItems` entre 1 e 400 e retorna warnings quando o lote foi truncado ou alguma tarefa nao foi encontrada.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador numerico do curso nesta versao inicial. |
+| `assignmentIds` | `string[]` | Identificadores numericos das tarefas Moodle. |
+| `submissionIds` | `string[]?` | Submissoes especificas a incluir. Quando vazio, usa o filtro de entregas. |
+| `maxItems` | `int` | Limite do lote, de 1 a 400. |
+| `onlyAwaitingGrading` | `bool` | Quando true, cria itens apenas para entregas aguardando correcao. |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `false` |
+| `Destructive` | `false` |
+| `Idempotent` | `false` |
+| `OpenWorld` | `false` |
+
+## `consultar_status_lote_correcao`
+
+Descricao:
+
+- Consulta um lote interno criado por `criar_lote_correcao_assistida`.
+- Retorna contadores do lote e uma pagina de itens sem anexar template de UI.
+- Nao consulta o Moodle e nao executa escrita.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `batchJobId` | `Guid` | Identificador do lote. |
+| `pagina` | `int` | Pagina de itens, iniciando em 1. |
+| `tamanhoPagina` | `int` | Tamanho da pagina, de 1 a 100. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `consultar_item_correcao_assistida`
+
+Descricao:
+
+- Consulta os dados minimos de um item de correcao assistida salvo em `grading_item`.
+- Retorna status, revisao, nota sugerida/final e feedback de rascunho/final quando existirem.
+- Nao retorna anexos completos, e-mail do estudante ou dados sensiveis desnecessarios.
+- Nao executa escrita no Moodle.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `gradingItemId` | `Guid` | Identificador do item retornado por `consultar_status_lote_correcao`. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `atualizar_rascunho_correcao`
+
+Descricao:
+
+- Salva a revisao humana de nota, feedback, decisao e observacoes internas em `grading_item`.
+- Nao escreve no Moodle; apenas prepara o item para uma futura previa/confirmacao de lancamento.
+- Usa `expectedReviewStatus` para evitar sobrescrita acidental. Repetir o mesmo payload apos uma primeira gravacao retorna o mesmo resultado sem nova persistencia.
+- Se o item foi revisado com conteudo diferente desde a ultima leitura, a tool retorna erro controlado e orienta consultar novamente.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `gradingItemId` | `Guid` | Identificador do item de correcao. |
+| `finalGrade` | `decimal?` | Nota final revisada. |
+| `finalFeedback` | `string` | Feedback final revisado. |
+| `teacherDecision` | `string` | Decisao do professor/tutor, por exemplo `approved` ou `needs_changes`. |
+| `reviewNotes` | `string?` | Observacoes internas da revisao. |
+| `expectedReviewStatus` | `string` | Status visto antes da edicao; use `NotReviewed` para rascunho ainda nao revisado. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `false` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `criar_previa_lancamento_lote`
+
+Descricao:
+
+- Gera a previa consolidada dos itens revisados e prontos para lancamento.
+- Cria uma `PendingMoodleAction` com texto de confirmacao literal e expiracao curta.
+- Nao escreve no Moodle; a escrita oficial fica bloqueada ate a chamada de confirmacao.
+- Filtra itens sem revisao final, sem nota final ou sem feedback final e retorna avisos.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `batchJobId` | `Guid` | Identificador do lote de correcao assistida. |
+| `gradingItemIds` | `IReadOnlyCollection<Guid>?` | Subconjunto opcional de itens do lote. |
+| `onlyReviewed` | `bool` | Quando verdadeiro, inclui somente itens revisados e prontos. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `false` |
+| `Destructive` | `false` |
+| `Idempotent` | `false` |
+| `OpenWorld` | `false` |
+
+## `confirmar_lancamento_lote_moodle`
+
+Descricao:
+
+- Confirma uma acao pendente criada por `criar_previa_lancamento_lote`.
+- Exige o texto literal de confirmacao e o escopo server-side `moodle.write`.
+- Exige `Features:AssignmentGradeWriteEnabled=true`; quando houver feedback, exige tambem `Features:AssignmentFeedbackWriteEnabled=true`.
+- Bloqueia o envio se `mod_assign_save_grade` nao estiver disponivel no catalogo de funcoes do servico Moodle autorizado.
+- Envia cada item por `mod_assign_save_grade` usando `IMoodleAssignmentGradingGateway`.
+- Registra `commit_succeeded`, `commit_failed` ou `commit_blocked` em `moodle_audit_logs` por item.
+- Repeticoes com o mesmo `pendingActionId` ignoram itens ja marcados como enviados com sucesso.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `pendingActionId` | `Guid` | Identificador da acao pendente retornada pela previa. |
+| `confirmationText` | `string` | Texto exato de confirmacao exigido pela acao pendente. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `false` |
+| `Destructive` | `true` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `consultar_auditoria_correcao`
+
+Descricao:
+
+- Consulta eventos sanitizados de auditoria por `auditId`/correlation id.
+- Retorna eventos paginados de criacao/confirmacao/commit vinculados ao mesmo fluxo.
+- Nao escreve no Moodle e nao altera estado interno.
+- Nesta versao, a consulta por `batchJobId` ainda nao foi implementada.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `auditId` | `string` | AuditId/correlation id retornado pela confirmacao de lancamento. |
+| `pagina` | `int` | Pagina de eventos, iniciando em 1. |
+| `tamanhoPagina` | `int` | Tamanho da pagina, de 1 a 100. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
 
 ## `preparar_acao_demo`
 

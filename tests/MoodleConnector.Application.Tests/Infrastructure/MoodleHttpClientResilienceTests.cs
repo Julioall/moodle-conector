@@ -18,11 +18,17 @@ public sealed class MoodleHttpClientResilienceTests
 
         var coursesClient = httpClientFactory.CreateClient("IMoodleCoursesGateway");
         var currentUserClient = httpClientFactory.CreateClient("IMoodleCurrentUserIdGateway");
+        var assignmentGradingClient = httpClientFactory.CreateClient("IMoodleAssignmentGradingGateway");
+        var gradingCapabilitiesClient = httpClientFactory.CreateClient("IMoodleGradingCapabilitiesGateway");
         var proxyClient = httpClientFactory.CreateClient("IMoodleProxyGateway");
 
         Assert.Equal(TimeSpan.FromSeconds(7), coursesClient.Timeout);
         Assert.Equal(TimeSpan.FromSeconds(7), currentUserClient.Timeout);
         Assert.Equal(new Uri("https://moodle.tests/"), currentUserClient.BaseAddress);
+        Assert.Equal(TimeSpan.FromSeconds(7), assignmentGradingClient.Timeout);
+        Assert.Equal(new Uri("https://moodle.tests/"), assignmentGradingClient.BaseAddress);
+        Assert.Equal(TimeSpan.FromSeconds(7), gradingCapabilitiesClient.Timeout);
+        Assert.Equal(new Uri("https://moodle.tests/"), gradingCapabilitiesClient.BaseAddress);
         Assert.Equal(TimeSpan.FromSeconds(11), proxyClient.Timeout);
         Assert.Equal(new Uri("https://proxy.tests/"), proxyClient.BaseAddress);
     }

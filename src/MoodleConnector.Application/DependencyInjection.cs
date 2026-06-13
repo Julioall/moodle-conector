@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.PendingActions;
 
 namespace MoodleConnector.Application;
@@ -9,6 +10,7 @@ public static class DependencyInjection
     {
         services.AddMediatR(cfg =>
             cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
+        services.AddOptions<AssignmentWriteFeatureOptions>();
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();
 

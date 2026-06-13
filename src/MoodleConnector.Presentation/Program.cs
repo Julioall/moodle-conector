@@ -15,11 +15,13 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using MoodleConnector.Application;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Infrastructure;
 using MoodleConnector.Presentation.Configuration;
 using MoodleConnector.Presentation.Security;
 using MoodleConnector.Presentation.Tools;
+using MoodleConnector.Presentation.Tools.Grading;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.Threading.RateLimiting;
@@ -49,6 +51,10 @@ builder.Services
 builder.Services
     .AddOptions<FeatureOptions>()
     .Bind(builder.Configuration.GetSection(FeatureOptions.SectionName));
+
+builder.Services
+    .AddOptions<AssignmentWriteFeatureOptions>()
+    .Bind(builder.Configuration.GetSection(AssignmentWriteFeatureOptions.SectionName));
 
 builder.Services
     .AddOptions<PendingActionOptions>()
@@ -235,7 +241,8 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleParticipantsTools>()
     .WithTools<MoodleCourseContentsTools>()
     .WithTools<MoodleCourseActivitiesTools>()
-    .WithTools<MoodleAssignmentSubmissionsTools>();
+    .WithTools<MoodleAssignmentSubmissionsTools>()
+    .WithTools<MoodleGradingTools>();
 
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();
 if (featureOptions.DemoToolsEnabled)
