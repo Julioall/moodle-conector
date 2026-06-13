@@ -1,0 +1,141 @@
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
+
+namespace MoodleConnector.Application.Tests.Grading;
+
+public sealed class GradingAnalysisServiceTests
+{
+    private readonly StructuredGradingAnalysisService _sut = new();
+
+    [Fact]
+    public async Task AnalyzeAsync_SubmissaoVazia_RetornaBlockedEmptySubmission()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 01",
+            MaxGrade: 10m,
+            ActivityDescription: "Descricao da atividade.",
+            RubricOrCriteria: "Criterio A; Criterio B",
+            TeacherInstructions: null,
+            SubmissionText: "",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.BlockedEmptySubmission, result.AnalysisStatus);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Equal(0m, result.Confidence);
+        Assert.NotEmpty(result.Blocks);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_SemCriterios_RetornaBlockedMissingCriteria()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 01",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: null,
+            TeacherInstructions: null,
+            SubmissionText: "O estudante respondeu a atividade com um texto abrangente.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.BlockedMissingCriteria, result.AnalysisStatus);
+        Assert.Null(result.SuggestedGrade);
+        Assert.NotEmpty(result.FeedbackToStudent ?? string.Empty);
+        Assert.NotEmpty(result.Blocks);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_EscalaInvalida_RetornaBlockedUnknownScale()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 01",
+            MaxGrade: 0m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Criterio A",
+            TeacherInstructions: null,
+            SubmissionText: "Resposta do estudante.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.BlockedUnknownScale, result.AnalysisStatus);
+        Assert.Null(result.SuggestedGrade);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_SubmissaoComCriterios_RetornaDraftComNotaSugerida()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 01",
+            MaxGrade: 10m,
+            ActivityDescription: "Analise de riscos em ambiente industrial.",
+            RubricOrCriteria: "Identifica riscos fisicos; Descreve medidas preventivas; Utiliza normas tecnicas",
+            TeacherInstructions: "Linguagem acolhedora.",
+            SubmissionText: "O estudante identificou os principais riscos fisicos no ambiente industrial. " +
+                            "Foram descritas diversas medidas preventivas conforme as normas tecnicas vigentes. " +
+                            "A abordagem foi clara e bem estruturada.",
+            FileHashes: ["abc123", "def456"]);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        Assert.NotNull(result.SuggestedGrade);
+        Assert.True(result.SuggestedGrade >= 0m);
+        Assert.True(result.SuggestedGrade <= 10m);
+        Assert.True(result.Confidence > 0m);
+        Assert.NotEmpty(result.FeedbackToStudent!);
+        Assert.NotEmpty(result.PrivateNotesToTeacher!);
+        Assert.Equal(3, result.CriterionAnalysis.Count);
+        Assert.Empty(result.Blocks);
+
+        // Feedback nao deve expor dados PII ou tokens
+        Assert.DoesNotContain("token", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_CriteriosComBarraVertical_ParseaCorretamente()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 02",
+            MaxGrade: 100m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Criterio 1 | Criterio 2 | Criterio 3 | Criterio 4",
+            TeacherInstructions: null,
+            SubmissionText: "Resposta com conteudo relevante sobre os criterios propostos.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        Assert.Equal(4, result.CriterionAnalysis.Count);
+        Assert.All(result.CriterionAnalysis, c =>
+        {
+            Assert.NotNull(c.CriterionId);
+            Assert.NotNull(c.CriterionText);
+            Assert.NotNull(c.MaxPoints);
+            Assert.NotNull(c.SuggestedPoints);
+        });
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_SubmissaoSemCoberturaDeCriterios_MarcarParaRevisao()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 03",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Identificacao de riscos quimicos especificos",
+            TeacherInstructions: null,
+            SubmissionText: "O aluno fez uma entrega genérica sem mencionar nenhum aspecto especifico.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        var criterion = Assert.Single(result.CriterionAnalysis);
+        Assert.True(criterion.TeacherReviewRequired);
+    }
+}

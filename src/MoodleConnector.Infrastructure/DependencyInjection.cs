@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Infrastructure.DocumentExtraction;
 using Polly;
 using Polly.Extensions.Http;
 
@@ -106,6 +107,12 @@ public static class DependencyInjection
         services
             .AddHttpClient<IMoodleGradingCapabilitiesGateway, MoodleGradingCapabilitiesGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
+
+        services
+            .AddHttpClient<IMoodleSubmissionFileGateway, MoodleSubmissionFileGateway>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+
+        services.AddSingleton<IDocumentExtractionService, DocumentExtractionService>();
 
         services
             .AddHttpClient<IMoodleAccessTokenProvider, MoodleAccessTokenProvider>(ConfigureMoodleApiClient)

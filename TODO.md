@@ -79,7 +79,7 @@ Situação confirmada no repositório:
 - [ ] Verificar em ambiente Moodle real se `mod_assign_get_submission_status`, `mod_assign_get_grades`, `mod_assign_save_grade` e `mod_assign_save_grades` estão habilitadas no serviço externo.
 - [ ] Criar serviço de **extração de conteúdo** para PDF, DOCX, PPTX, XLSX, TXT, HTML, ODT e imagens.
 - [ ] Criar estrutura de **pacote de correção** com enunciado, critérios, rubrica, anexos, materiais e submissão.
-- [ ] Criar motor de **análise por critério** com evidências, lacunas e nota sugerida.
+- [x] Criar motor de **análise por critério** com evidências, lacunas e nota sugerida.
 - [x] Criar tool real de **lançamento de nota e feedback** no Moodle.
 - [x] Reusar a confirmação humana obrigatória já existente antes de qualquer escrita no Moodle.
 - [x] Expandir auditoria existente para registrar commit por item, nota final, feedback final e retorno/falha do Moodle.
@@ -180,9 +180,9 @@ AVA Moodle
 - [x] `GradingTools`: nova família de tools MCP em `src/MoodleConnector.Presentation/Tools/Grading`.
 - [x] `IMoodleAssignmentGradingGateway`: gateway inicial para `mod_assign_save_grade`.
 - [ ] Expandir `IMoodleAssignmentGradingGateway` para `mod_assign_save_grades` depois de testar falhas parciais e comportamento transacional.
-- [ ] `IMoodleSubmissionFileGateway`: gateway para anexos via Moodle/pluginfile.
-- [ ] `IDocumentExtractionService`: extração de texto e metadados.
-- [ ] `IGradingAnalysisService`: análise por critério e geração de rascunho.
+- [x] `IMoodleSubmissionFileGateway`: gateway para anexos via Moodle/pluginfile.
+- [x] `IDocumentExtractionService`: extração de texto e metadados.
+- [x] `IGradingAnalysisService`: análise por critério e geração de rascunho.
 - [ ] `IGradingBatchOrchestrator`: criação e controle de lotes.
 - [x] `IGradingReviewRepository`: persistência de rascunhos e decisões do professor.
 - [x] Reusar `IPendingActionService` e `IActionConfirmationService` para prévia/confirmação.
@@ -1145,10 +1145,10 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [ ] Descobrir funções Moodle disponíveis.
 - [ ] Validar permissões/capabilities reais para professor/tutor corrigir atividades.
 - [ ] Definir token de escrita: usuário autenticado vs. `WriteServiceToken`.
-- [ ] Implementar download seguro de anexos.
-- [ ] Implementar extração de texto.
+- [x] Implementar download seguro de anexos.
+- [x] Implementar extração de texto.
 - [ ] Implementar pacote de correção para uma entrega.
-- [ ] Implementar análise por critério para uma entrega.
+- [x] Implementar análise por critério para uma entrega.
 - [x] Implementar revisão humana.
 - [x] Implementar confirmação explícita.
 - [x] Implementar auditoria de commit Moodle.

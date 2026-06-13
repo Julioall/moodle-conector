@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.PendingActions;
 
 namespace MoodleConnector.Application;
@@ -13,6 +15,7 @@ public static class DependencyInjection
         services.AddOptions<AssignmentWriteFeatureOptions>();
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();
+        services.AddSingleton<IGradingAnalysisService, StructuredGradingAnalysisService>();
 
         return services;
     }
