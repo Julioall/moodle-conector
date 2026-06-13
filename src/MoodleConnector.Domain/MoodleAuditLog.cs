@@ -6,6 +6,8 @@ public sealed class MoodleAuditLog
 
     public string CorrelationId { get; init; } = string.Empty;
 
+    public Guid? BatchJobId { get; init; }
+
     public string ToolName { get; init; } = string.Empty;
 
     public ToolRiskLevel RiskLevel { get; init; }

@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using OpenIddict.EntityFrameworkCore.Models;
+using System.Text.Json;
 using MoodleConnector.Domain;
+using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -12,6 +15,10 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
     public DbSet<MoodleUserLink> MoodleUserLinks => Set<MoodleUserLink>();
+    public DbSet<AssistedGradingBatch> GradingBatches => Set<AssistedGradingBatch>();
+    public DbSet<AssistedGradingItem> GradingItems => Set<AssistedGradingItem>();
+    public DbSet<GradingArtifact> GradingArtifacts => Set<GradingArtifact>();
+    public DbSet<GradingEvidence> GradingEvidence => Set<GradingEvidence>();
     public DbSet<OpenIddictEntityFrameworkCoreApplication> OAuthApplications => Set<OpenIddictEntityFrameworkCoreApplication>();
     public DbSet<OpenIddictEntityFrameworkCoreAuthorization> OAuthAuthorizations => Set<OpenIddictEntityFrameworkCoreAuthorization>();
     public DbSet<OpenIddictEntityFrameworkCoreScope> OAuthScopes => Set<OpenIddictEntityFrameworkCoreScope>();
@@ -81,6 +88,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         auditLog.ToTable("moodle_audit_logs");
         auditLog.HasKey(x => x.Id);
         auditLog.Property(x => x.CorrelationId).HasMaxLength(64).IsRequired();
+        auditLog.Property(x => x.BatchJobId);
         auditLog.Property(x => x.ToolName).HasMaxLength(120).IsRequired();
         auditLog.Property(x => x.RiskLevel).HasConversion<int>().IsRequired();
         auditLog.Property(x => x.ActorSubject).HasMaxLength(200).IsRequired();
@@ -91,6 +99,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         auditLog.Property(x => x.Status).HasMaxLength(80).IsRequired();
         auditLog.Property(x => x.ErrorCode).HasMaxLength(120);
         auditLog.HasIndex(x => x.CorrelationId);
+        auditLog.HasIndex(x => new { x.BatchJobId, x.CreatedAt });
         auditLog.HasIndex(x => new { x.ActorSubject, x.CreatedAt });
 
         var moodleUserLink = modelBuilder.Entity<MoodleUserLink>();
@@ -100,5 +109,72 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleUserLink.Property(x => x.Email).HasMaxLength(320);
         moodleUserLink.Property(x => x.MoodleAlias).HasMaxLength(64).IsRequired();
         moodleUserLink.HasIndex(x => new { x.Subject, x.MoodleAlias }).IsUnique();
+
+        ConfigureGrading(modelBuilder);
+    }
+
+    private static void ConfigureGrading(ModelBuilder modelBuilder)
+    {
+        var batch = modelBuilder.Entity<AssistedGradingBatch>();
+        batch.ToTable("grading_batch");
+        batch.HasKey(x => x.Id);
+        batch.Property(x => x.AssignmentIds)
+            .HasColumnName("AssignmentIdsJson")
+            .HasColumnType("jsonb")
+            .HasConversion(
+                ids => JsonSerializer.Serialize(ids, (JsonSerializerOptions?)null),
+                json => JsonSerializer.Deserialize<long[]>(json, (JsonSerializerOptions?)null) ?? Array.Empty<long>())
+            .Metadata.SetValueComparer(new ValueComparer<IReadOnlyList<long>>(
+                (left, right) => left != null && right != null && left.SequenceEqual(right),
+                value => value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
+                value => value.ToArray()));
+        batch.Property(x => x.CreatedBySubject).HasMaxLength(200).IsRequired();
+        batch.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
+        batch.HasIndex(x => new { x.CreatedBySubject, x.Status });
+        batch.HasIndex(x => new { x.CourseId, x.Status });
+
+        var item = modelBuilder.Entity<AssistedGradingItem>();
+        item.ToTable("grading_item");
+        item.HasKey(x => x.Id);
+        item.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
+        item.Property(x => x.ReviewStatus).HasConversion<string>().HasMaxLength(80).IsRequired();
+        item.Property(x => x.CommitStatus).HasConversion<string>().HasMaxLength(80).IsRequired();
+        item.Property(x => x.TeacherDecision).HasMaxLength(80);
+        item.Property(x => x.ReviewedBySubject).HasMaxLength(200);
+        item.Property(x => x.IdempotencyKey).HasMaxLength(64);
+        item.HasOne<AssistedGradingBatch>()
+            .WithMany()
+            .HasForeignKey(x => x.BatchId)
+            .OnDelete(DeleteBehavior.Cascade);
+        item.HasIndex(x => new { x.BatchId, x.Status });
+        item.HasIndex(x => new { x.AssignmentId, x.MoodleUserId });
+        item.HasIndex(x => x.ReviewStatus);
+        item.HasIndex(x => x.CommitStatus);
+        item.HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+        var artifact = modelBuilder.Entity<GradingArtifact>();
+        artifact.ToTable("grading_artifact");
+        artifact.HasKey(x => x.Id);
+        artifact.Property(x => x.ArtifactType).HasMaxLength(80).IsRequired();
+        artifact.Property(x => x.Filename).HasMaxLength(512);
+        artifact.Property(x => x.MimeType).HasMaxLength(160);
+        artifact.Property(x => x.Sha256).HasMaxLength(64);
+        artifact.Property(x => x.ExtractionStatus).HasMaxLength(80).IsRequired();
+        artifact.HasOne<AssistedGradingItem>()
+            .WithMany()
+            .HasForeignKey(x => x.GradingItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+        artifact.HasIndex(x => x.GradingItemId);
+        artifact.HasIndex(x => x.Sha256).HasFilter("\"Sha256\" IS NOT NULL");
+
+        var evidence = modelBuilder.Entity<GradingEvidence>();
+        evidence.ToTable("grading_evidence");
+        evidence.HasKey(x => x.Id);
+        evidence.Property(x => x.CriterionId).HasMaxLength(120);
+        evidence.HasOne<AssistedGradingItem>()
+            .WithMany()
+            .HasForeignKey(x => x.GradingItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+        evidence.HasIndex(x => x.GradingItemId);
     }
 }

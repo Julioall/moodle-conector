@@ -261,6 +261,48 @@ public sealed class PendingActionServicesTests
             return Task.CompletedTask;
         }
 
+        public Task<IReadOnlyList<MoodleAuditLog>> ListByCorrelationIdAsync(
+            string correlationId,
+            int page,
+            int pageSize,
+            CancellationToken cancellationToken)
+        {
+            var items = Logs
+                .Where(log => log.CorrelationId == correlationId)
+                .OrderBy(log => log.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToArray();
+            return Task.FromResult<IReadOnlyList<MoodleAuditLog>>(items);
+        }
+
+        public Task<int> CountByCorrelationIdAsync(
+            string correlationId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Logs.Count(log => log.CorrelationId == correlationId));
+        }
+
+        public Task<IReadOnlyList<MoodleAuditLog>> ListByBatchJobIdAsync(
+            Guid batchJobId,
+            int page,
+            int pageSize,
+            CancellationToken cancellationToken)
+        {
+            var items = Logs
+                .Where(log => log.BatchJobId == batchJobId)
+                .OrderBy(log => log.CreatedAt)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToArray();
+            return Task.FromResult<IReadOnlyList<MoodleAuditLog>>(items);
+        }
+
+        public Task<int> CountByBatchJobIdAsync(Guid batchJobId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Logs.Count(log => log.BatchJobId == batchJobId));
+        }
+
         public Task SaveChangesAsync(CancellationToken cancellationToken)
         {
             return Task.CompletedTask;

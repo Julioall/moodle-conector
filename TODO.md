@@ -53,8 +53,8 @@ Situação confirmada no repositório:
   - `ActionConfirmationService`;
   - `moodle_pending_actions`;
   - `moodle_audit_logs`.
-- [ ] Ainda não existe tool real para lançar nota/feedback no Moodle.
-- [ ] Ainda não existe gateway chamando `mod_assign_save_grade` ou `mod_assign_save_grades`.
+- [x] Existe tool real para lançar nota/feedback no Moodle após prévia e confirmação literal.
+- [x] Criar gateway chamando `mod_assign_save_grade` para escrita individual controlada.
 
 ### 1.2 Pontos fortes já existentes
 
@@ -80,9 +80,10 @@ Situação confirmada no repositório:
 - [ ] Criar serviço de **extração de conteúdo** para PDF, DOCX, PPTX, XLSX, TXT, HTML, ODT e imagens.
 - [ ] Criar estrutura de **pacote de correção** com enunciado, critérios, rubrica, anexos, materiais e submissão.
 - [ ] Criar motor de **análise por critério** com evidências, lacunas e nota sugerida.
-- [ ] Criar tool real de **lançamento de nota e feedback** no Moodle.
-- [ ] Reusar a confirmação humana obrigatória já existente antes de qualquer escrita no Moodle.
-- [ ] Expandir auditoria existente para registrar lote, item, versão do rascunho, nota final, feedback final e retorno do Moodle.
+- [x] Criar tool real de **lançamento de nota e feedback** no Moodle.
+- [x] Reusar a confirmação humana obrigatória já existente antes de qualquer escrita no Moodle.
+- [x] Expandir auditoria existente para registrar commit por item, nota final, feedback final e retorno/falha do Moodle.
+- [ ] Expandir auditoria existente para registrar criação de lote, versão do rascunho e revisão humana.
 
 ### 1.4 Viabilidade técnica
 
@@ -124,7 +125,7 @@ Não recomendado:
 - [ ] Não processar 400 entregas diretamente na janela do chat.
 - [ ] Não retornar 400 feedbacks completos de uma só vez.
 - [ ] Não fazer uma chamada de tool por estudante comandada pelo modelo.
-- [ ] Não lançar notas em lote sem prévia revisável e confirmação explícita.
+- [x] Não lançar notas em lote sem prévia revisável e confirmação explícita.
 
 Recomendado:
 
@@ -134,8 +135,8 @@ Recomendado:
 - [ ] Retornar sumários paginados.
 - [ ] Abrir revisão individual sob demanda.
 - [ ] Permitir confirmação por subconjuntos revisados.
-- [ ] Usar idempotência para evitar duplicidade de lançamento.
-- [ ] Registrar auditoria por estudante, atividade e tentativa.
+- [x] Usar idempotência para evitar duplicidade de lançamento no fluxo MVP de confirmação.
+- [x] Registrar auditoria por estudante, atividade e tentativa no commit Moodle.
 
 ---
 
@@ -176,15 +177,16 @@ AVA Moodle
 - [x] `MoodleConnector.Application`: concentra casos de uso, comandos, queries, orquestração de correção e regras de negócio.
 - [x] `MoodleConnector.Infrastructure`: encapsula PostgreSQL, Moodle REST, download de arquivos, tokens e persistência.
 - [x] `MoodleConnector.Domain`: entidades e value objects de lote, item, evidência, artefato, auditoria e status.
-- [ ] `GradingTools`: nova família de tools MCP em `src/MoodleConnector.Presentation/Tools/Grading`.
-- [ ] `IMoodleAssignmentGradingGateway`: gateway para `mod_assign_save_grade`/`mod_assign_save_grades`.
+- [x] `GradingTools`: nova família de tools MCP em `src/MoodleConnector.Presentation/Tools/Grading`.
+- [x] `IMoodleAssignmentGradingGateway`: gateway inicial para `mod_assign_save_grade`.
+- [ ] Expandir `IMoodleAssignmentGradingGateway` para `mod_assign_save_grades` depois de testar falhas parciais e comportamento transacional.
 - [ ] `IMoodleSubmissionFileGateway`: gateway para anexos via Moodle/pluginfile.
 - [ ] `IDocumentExtractionService`: extração de texto e metadados.
 - [ ] `IGradingAnalysisService`: análise por critério e geração de rascunho.
 - [ ] `IGradingBatchOrchestrator`: criação e controle de lotes.
-- [ ] `IGradingReviewRepository`: persistência de rascunhos e decisões do professor.
-- [ ] Reusar `IPendingActionService` e `IActionConfirmationService` para prévia/confirmação.
-- [ ] Reusar `IMoodleAuditLogRepository` e criar eventos específicos de correção quando necessário.
+- [x] `IGradingReviewRepository`: persistência de rascunhos e decisões do professor.
+- [x] Reusar `IPendingActionService` e `IActionConfirmationService` para prévia/confirmação.
+- [x] Reusar `IMoodleAuditLogRepository` e criar eventos específicos de correção para commit Moodle.
 - [ ] `app-ui`: painel opcional de revisão dentro do ChatGPT, depois do MVP.
 
 ### 2.3 Arquitetura conforme GPT Apps / OpenAI Apps SDK
@@ -204,7 +206,7 @@ AVA Moodle
 - [ ] Usar `readOnlyHint: true` em tools de consulta.
 - [ ] Usar `readOnlyHint: false` em tools que criam job, rascunho, ação pendente ou escrita no Moodle.
 - [ ] Usar `openWorldHint: false` para escrita no Moodle institucional, pois a ação fica em sistema privado/fechado e não publica na internet aberta.
-- [ ] Usar `destructiveHint: true` em `confirmar_lancamento_lote_moodle`, salvo se o handler provar que nunca sobrescreve nota/feedback existente e que o efeito é reversível.
+- [x] Usar `destructiveHint: true` em `confirmar_lancamento_lote_moodle`, salvo se o handler provar que nunca sobrescreve nota/feedback existente e que o efeito é reversível.
 - [ ] Usar `idempotentHint: true` somente quando houver chave de idempotência, versão de rascunho, `pendingActionId` ou semântica comprovadamente retry-safe.
 - [ ] No MVP, manter o OAuth atual com `moodle-mcp-audience` e autorização server-side por claims internas.
 - [ ] Para escrita, exigir:
@@ -227,13 +229,13 @@ Adicionar um conjunto menor de tools canônicas para correção assistida, sem r
 
 Implementação no repo:
 
-- [ ] Criar `src/MoodleConnector.Presentation/Tools/Grading/MoodleGradingTools.cs`.
-- [ ] Registrar `MoodleGradingTools` em `src/MoodleConnector.Presentation/Program.cs` com `.WithTools<MoodleGradingTools>()`.
-- [ ] Criar comandos/queries em `src/MoodleConnector.Application/Grading`.
-- [ ] Criar entidades de domínio em `src/MoodleConnector.Domain/Grading`.
-- [ ] Criar gateways Moodle em `src/MoodleConnector.Infrastructure`.
-- [ ] Registrar novos serviços em `src/MoodleConnector.Infrastructure/DependencyInjection.cs` e/ou `src/MoodleConnector.Application/DependencyInjection.cs`.
-- [ ] Atualizar `tests/MoodleConnector.Application.Tests/Tools/McpToolMetadataTests.cs` para incluir `MoodleGradingTools` e diferenciar tools de leitura, preparo de escrita e confirmação.
+- [x] Criar `src/MoodleConnector.Presentation/Tools/Grading/MoodleGradingTools.cs`.
+- [x] Registrar `MoodleGradingTools` em `src/MoodleConnector.Presentation/Program.cs` com `.WithTools<MoodleGradingTools>()`.
+- [x] Criar comandos/queries em `src/MoodleConnector.Application/Grading`.
+- [x] Criar entidades de domínio em `src/MoodleConnector.Domain/Grading`.
+- [x] Criar gateways Moodle em `src/MoodleConnector.Infrastructure`.
+- [x] Registrar novos serviços em `src/MoodleConnector.Infrastructure/DependencyInjection.cs` e/ou `src/MoodleConnector.Application/DependencyInjection.cs`.
+- [x] Atualizar `tests/MoodleConnector.Application.Tests/Tools/McpToolMetadataTests.cs` para incluir `MoodleGradingTools` e diferenciar tools de leitura, preparo de escrita e confirmação.
 - [ ] Manter `search` e `fetch` existentes; as tools de correção complementam o padrão, não substituem.
 
 ### 3.2 Tools canônicas propostas
@@ -366,16 +368,10 @@ Implementação no repo:
 **Tipo:** leitura
 **Objetivo:** consultar auditoria de uma ação.
 
-- [ ] Entrada:
-  - `auditId` ou `batchJobId`
-- [ ] Saída:
-  - histórico;
-  - usuário revisor;
-  - data/hora;
-  - versão do rascunho;
-  - arquivos analisados;
-  - hash;
-  - resultado do envio ao Moodle.
+- [x] Entrada por `auditId`.
+- [x] Entrada por `batchJobId`.
+- [x] Saída com histórico, ator, data/hora e resultado do envio ao Moodle.
+- [ ] Saída com versão do rascunho, arquivos analisados e hash.
 
 ### 3.3 Matriz de metadados Apps SDK
 
@@ -574,12 +570,13 @@ grading_evidence (
 
 Relação com estruturas existentes:
 
-- [ ] `grading_batch` e `grading_item` guardam o ciclo de correção assistida.
-- [ ] `grading_artifact` guarda metadados/hash de arquivos e referências ao texto extraído.
-- [ ] `grading_evidence` guarda evidências por critério.
-- [ ] `moodle_pending_actions.PayloadJson` guarda o payload final a lançar.
-- [ ] `moodle_pending_actions.PreviewJson` guarda a prévia sanitizada.
-- [ ] `moodle_audit_logs` guarda criação de lote, revisão, confirmação, commit e falhas.
+- [x] `grading_batch` e `grading_item` guardam o ciclo de correção assistida.
+- [x] `grading_artifact` guarda metadados/hash de arquivos e referências ao texto extraído.
+- [x] `grading_evidence` guarda evidências por critério.
+- [x] `moodle_pending_actions.PayloadJson` guarda o payload final a lançar.
+- [x] `moodle_pending_actions.PreviewJson` guarda a prévia sanitizada.
+- [x] `moodle_audit_logs` guarda confirmação, commit e falhas de lançamento.
+- [ ] `moodle_audit_logs` guarda criação de lote e revisão humana.
 
 ---
 
@@ -723,10 +720,10 @@ moodle-conector/
 
 Notas de integração:
 
-- [ ] A classe `MoodleGradingTools` deve usar `[McpServerToolType]`, como as tools atuais.
-- [ ] Se o arquivo ficar em subpasta `Tools/Grading`, manter namespace compatível ou atualizar os `using` de `Program.cs`.
-- [ ] Registrar a classe em `Program.cs` com `mcpServerBuilder.WithTools<MoodleGradingTools>()`.
-- [ ] Atualizar `McpToolMetadataTests`: tools de consulta continuam `ReadOnly=true`; tools internas de preparo/rascunho usam `ReadOnly=false`, `Destructive=false`, `OpenWorld=false`; `confirmar_lancamento_lote_moodle` usa `ReadOnly=false`, `Destructive=true`, `Idempotent=true` e `OpenWorld=false`.
+- [x] A classe `MoodleGradingTools` deve usar `[McpServerToolType]`, como as tools atuais.
+- [x] Se o arquivo ficar em subpasta `Tools/Grading`, manter namespace compatível ou atualizar os `using` de `Program.cs`.
+- [x] Registrar a classe em `Program.cs` com `mcpServerBuilder.WithTools<MoodleGradingTools>()`.
+- [x] Atualizar `McpToolMetadataTests`: tools de consulta continuam `ReadOnly=true`; tools internas de preparo/rascunho usam `ReadOnly=false`, `Destructive=false`, `OpenWorld=false`; `confirmar_lancamento_lote_moodle` usa `ReadOnly=false`, `Destructive=true`, `Idempotent=true` e `OpenWorld=false`.
 
 ### 7.2 Registro de tool de leitura — exemplo C#
 
@@ -784,11 +781,13 @@ public async Task<CallToolResult> ConfirmarLancamentoLoteMoodleAsync(
 
 Notas para o projeto:
 
-- [ ] A tool de escrita deve chamar `IActionConfirmationService.ConfirmAsync`.
-- [ ] Usar `requiredScope: "moodle.write"` no MVP.
-- [ ] Além do escopo, validar `CanWrite = true`, feature flag e permissão Moodle real.
-- [ ] Só depois da confirmação chamar `IMoodleAssignmentGradingGateway`.
-- [ ] Registrar sucesso/falha em `moodle_audit_logs`.
+- [x] A tool de escrita deve chamar `IActionConfirmationService.ConfirmAsync`.
+- [x] Usar `requiredScope: "moodle.write"` no MVP.
+- [x] Além do escopo, validar `CanWrite = true` e feature flags antes da escrita.
+- [x] Validar disponibilidade de `mod_assign_save_grade` no catálogo de funções antes do envio.
+- [ ] Validar permissão Moodle real do professor/tutor no curso e na atividade.
+- [x] Só depois da confirmação chamar `IMoodleAssignmentGradingGateway`.
+- [x] Registrar sucesso/falha em `moodle_audit_logs`.
 
 ---
 
@@ -824,13 +823,13 @@ Checklist prático de descoberta:
 
 ### 8.3 Recomendação para lançamento
 
-- [ ] Usar `mod_assign_save_grade` para envio individual.
+- [x] Usar `mod_assign_save_grade` para envio individual.
 - [ ] Usar `mod_assign_save_grades` para envio em lote, se habilitado e testado.
 - [ ] Enviar em chunks.
 - [ ] Tratar escala 0–10, 0–100, conceito ou rubrica conforme configuração da atividade.
 - [ ] Validar nota máxima antes do commit.
 - [ ] Não sobrescrever feedback existente sem confirmação explícita adicional.
-- [ ] No MVP, preferir envio individual com `mod_assign_save_grade` para simplificar auditoria e idempotência.
+- [x] No MVP, preferir envio individual com `mod_assign_save_grade` para simplificar auditoria e idempotência.
 - [ ] Só usar lote Moodle nativo (`mod_assign_save_grades`) depois de testar falhas parciais e comportamento transacional.
 
 ---
@@ -925,9 +924,9 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 ### 11.2 Autorização
 
-- [ ] Validar `currentUser.HasScope("moodle.write")` para qualquer commit no Moodle.
-- [ ] Validar conexão `ConnectorClients.CanWrite = true`.
-- [ ] Validar `Features:AssignmentGradeWriteEnabled` e/ou `Features:AssignmentFeedbackWriteEnabled`.
+- [x] Validar `currentUser.HasScope("moodle.write")` para qualquer commit no Moodle.
+- [x] Validar conexão `ConnectorClients.CanWrite = true`.
+- [x] Validar `Features:AssignmentGradeWriteEnabled` e/ou `Features:AssignmentFeedbackWriteEnabled`.
 - [ ] Validar se o professor/tutor tem permissão no curso.
 - [ ] Validar se o professor/tutor pode corrigir a atividade.
 - [ ] Validar se o estudante pertence à turma.
@@ -1052,10 +1051,10 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 ### Fase 1 — MVP sem escrita no Moodle
 
-- [ ] Criar entidades/DTOs mínimos de correção em C#.
-- [ ] Criar `criar_lote_correcao_assistida` para lotes pequenos inicialmente.
-- [ ] Criar `consultar_status_lote_correcao`.
-- [ ] Criar `consultar_item_correcao_assistida`.
+- [x] Criar entidades/DTOs mínimos de correção em C#.
+- [x] Criar `criar_lote_correcao_assistida` para lotes pequenos inicialmente.
+- [x] Criar `consultar_status_lote_correcao`.
+- [x] Criar `consultar_item_correcao_assistida`.
 - [ ] Baixar anexos.
 - [ ] Extrair texto.
 - [ ] Gerar feedback e nota sugerida.
@@ -1065,21 +1064,23 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 ### Fase 2 — Rascunho revisável
 
-- [ ] Criar `atualizar_rascunho_correcao`.
-- [ ] Persistir rascunhos em tabelas `grading_*`.
+- [x] Criar `atualizar_rascunho_correcao`.
+- [x] Persistir rascunhos em tabelas `grading_*`.
 - [ ] Criar painel de revisão somente se a revisão via tools ficar ruim para o professor.
-- [ ] Salvar edições do professor.
-- [ ] Separar nota sugerida de nota final.
-- [ ] Marcar item como revisado.
+- [x] Salvar edições do professor.
+- [x] Separar nota sugerida de nota final.
+- [x] Marcar item como revisado.
 
 ### Fase 3 — Escrita controlada no Moodle
 
-- [ ] Criar `criar_previa_lancamento_lote`.
-- [ ] Criar `confirmar_lancamento_lote_moodle`.
-- [ ] Reusar `PendingActionService` e `ActionConfirmationService`.
-- [ ] Integrar com `mod_assign_save_grade` ou `mod_assign_save_grades`.
-- [ ] Implementar idempotência.
-- [ ] Expandir auditoria existente.
+- [x] Criar `criar_previa_lancamento_lote`.
+- [x] Criar `confirmar_lancamento_lote_moodle`.
+- [x] Reusar `PendingActionService` e `ActionConfirmationService`.
+- [x] Integrar com `mod_assign_save_grade` ou `mod_assign_save_grades`.
+- [x] Implementar idempotência no retry por `pendingActionId` e status de item já lançado.
+- [x] Expandir auditoria existente para commit Moodle.
+- [x] Criar `consultar_auditoria_correcao` por `auditId`.
+- [ ] Expandir auditoria para criação de lote e revisão humana.
 - [ ] Testar em sandbox.
 - [ ] Fazer piloto com turma pequena.
 
@@ -1119,12 +1120,12 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 ### 14.2 Escrita controlada
 
-- [ ] O professor revisa nota e feedback antes do envio.
-- [ ] O sistema exibe prévia completa.
-- [ ] O sistema exige confirmação literal.
-- [ ] O sistema envia nota/feedback ao Moodle.
-- [ ] O sistema registra auditoria.
-- [ ] O sistema evita duplicidade com idempotência.
+- [x] O professor revisa nota e feedback antes do envio.
+- [x] O sistema exibe prévia completa.
+- [x] O sistema exige confirmação literal.
+- [x] O sistema envia nota/feedback ao Moodle.
+- [x] O sistema registra auditoria de commit Moodle.
+- [x] O sistema evita duplicidade com idempotência.
 
 ### 14.3 Escala
 
@@ -1132,7 +1133,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [ ] O processamento ocorre por fila.
 - [ ] O professor consegue revisar por páginas/filtros.
 - [ ] Falhas parciais não bloqueiam todo o lote.
-- [ ] Lançamento parcial é auditável.
+- [x] Lançamento parcial é auditável no commit Moodle.
 - [ ] O sistema respeita limites de Moodle, arquivos e IA.
 
 ---
@@ -1148,10 +1149,10 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [ ] Implementar extração de texto.
 - [ ] Implementar pacote de correção para uma entrega.
 - [ ] Implementar análise por critério para uma entrega.
-- [ ] Implementar revisão humana.
-- [ ] Implementar confirmação explícita.
-- [ ] Implementar auditoria.
-- [ ] Implementar escrita controlada individual com `mod_assign_save_grade`.
+- [x] Implementar revisão humana.
+- [x] Implementar confirmação explícita.
+- [x] Implementar auditoria de commit Moodle.
+- [x] Implementar escrita controlada individual com `mod_assign_save_grade`.
 
 ### P1 — Importante
 
@@ -1193,31 +1194,32 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 ## 17. Definition of Done técnico
 
-- [ ] Tools registradas no MCP Server.
-- [ ] `Program.cs` registra `MoodleGradingTools` via `.WithTools<MoodleGradingTools>()`.
-- [ ] Tools implementadas em C# no padrão `[McpServerTool]`.
-- [ ] Schemas validados.
-- [ ] Scripts SQL versionados adicionados em `src/MoodleConnector.Infrastructure/Database/Scripts`.
-- [ ] `ConnectorDbContextSchemaInitializer` executa os novos scripts.
-- [ ] Serviços registrados em `DependencyInjection`.
-- [ ] `McpToolMetadataTests` cobre a nova família de tools e permite escrita apenas nas tools de preparo/confirmação.
+- [x] Tools registradas no MCP Server.
+- [x] `Program.cs` registra `MoodleGradingTools` via `.WithTools<MoodleGradingTools>()`.
+- [x] Tools implementadas em C# no padrão `[McpServerTool]`.
+- [x] Schemas validados.
+- [x] Scripts SQL versionados adicionados em `src/MoodleConnector.Infrastructure/Database/Scripts`.
+- [x] `ConnectorDbContextSchemaInitializer` executa os novos scripts.
+- [x] Serviços registrados em `DependencyInjection`.
+- [x] `McpToolMetadataTests` cobre a nova família de tools e permite escrita apenas nas tools de preparo/confirmação.
 - [ ] `search` e `fetch` continuam presentes, read-only e compatíveis com company knowledge/deep research.
-- [ ] `confirmar_lancamento_lote_moodle` expõe metadata conservadora: `ReadOnly=false`, `Destructive=true`, `Idempotent=true`, `OpenWorld=false`.
-- [ ] Tools que criam job ou pending action não são marcadas como idempotentes sem chave de idempotência.
+- [x] `confirmar_lancamento_lote_moodle` expõe metadata conservadora: `ReadOnly=false`, `Destructive=true`, `Idempotent=true`, `OpenWorld=false`.
+- [x] Tools que criam job ou pending action não são marcadas como idempotentes sem chave de idempotência.
 - [ ] OAuth funcionando.
-- [ ] Autorização server-side validando `moodle.write`, `CanWrite`, feature flag e permissão Moodle.
+- [x] Autorização server-side validando `moodle.write`, `CanWrite` e feature flag.
+- [ ] Autorização server-side validando permissão Moodle real no curso/atividade.
 - [ ] UI opcional, se existir, usa render tool separada, `_meta.ui.resourceUri`, CSP mínima e URI versionada.
 - [ ] Fila processando lotes.
 - [ ] Download de anexos testado.
 - [ ] Extração testada.
 - [ ] Análise estruturada testada.
-- [ ] Prévia de lançamento testada.
-- [ ] Confirmação literal testada.
+- [x] Prévia de lançamento testada.
+- [x] Confirmação literal testada.
 - [ ] Envio ao Moodle testado em sandbox.
 - [ ] Endpoint `/mcp` reescaneado no ChatGPT Developer Mode após mudança de tool metadata.
-- [ ] Auditoria testada.
-- [ ] `dotnet build` sem erros.
-- [ ] `dotnet test` passando.
+- [x] Auditoria de commit Moodle testada.
+- [x] `dotnet build` sem erros.
+- [x] `dotnet test` passando.
 - [ ] Testes de carga executados.
 - [ ] Documentação de operação criada.
 - [ ] Piloto pedagógico aprovado.
