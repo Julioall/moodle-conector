@@ -2,6 +2,8 @@ using System.Text.Json;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.Submissions;
+using MoodleConnector.Domain;
 using MoodleConnector.Presentation.Tools.Grading;
 
 namespace MoodleConnector.Application.Tests.Tools.Grading;
@@ -75,6 +77,32 @@ public sealed class MoodleGradingToolsTests
         var data = structured.GetProperty("data");
         Assert.Equal("00000000-0000-0000-0000-000000000123", data.GetProperty("batchJobId").GetString());
         Assert.Equal(2, data.GetProperty("acceptedItems").GetInt32());
+    }
+
+    [Fact]
+    public async Task Deve_listar_entregas_corrigiveis_com_contadores()
+    {
+        var mediator = new FakeMediator();
+        var selection = new FakeMoodleConnectionSelection();
+        var sut = new MoodleGradingTools(mediator, selection, new FakeMoodleUserResolver(321));
+
+        var result = await sut.ListarEntregasCorrigiveisAsync(
+            "10",
+            ["501"],
+            onlyAwaitingGrading: true,
+            page: 1,
+            perPage: 25,
+            moodleAlias: "goias");
+
+        Assert.False(result.IsError ?? false);
+        Assert.Equal("goias", selection.Alias);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var data = structured.GetProperty("data");
+        Assert.Equal(1, data.GetProperty("totalItems").GetInt32());
+        Assert.Equal(1, data.GetProperty("counters").GetProperty("awaitingGrading").GetInt32());
+        Assert.Equal(1, data.GetProperty("items").GetArrayLength());
+        Assert.Equal("501", data.GetProperty("items")[0].GetProperty("assignmentId").GetString());
     }
 
     [Fact]
@@ -301,6 +329,40 @@ public sealed class MoodleGradingToolsTests
                     Warnings: []));
             }
 
+            if (request is ListAssignmentSubmissionsQuery)
+            {
+                return Task.FromResult((TResponse)(object)new AssignmentSubmissionsPage(
+                    "10",
+                    "501",
+                    "42",
+                    "Tarefa 1",
+                    Page: 1,
+                    PageSize: 100,
+                    Filter: AssignmentSubmissionFilter.NeedsGrading,
+                    IncludeLate: true,
+                    IncludeUngraded: true,
+                    Since: null,
+                    Before: null,
+                    Total: 1,
+                    HasMore: false,
+                    [
+                        new AssignmentSubmissionSummary(
+                            "101",
+                            "Ana Souza",
+                            "9001",
+                            "submitted",
+                            "notgraded",
+                            Submitted: true,
+                            Late: false,
+                            NeedsGrading: true,
+                            SubmittedAt: new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero),
+                            ModifiedAt: new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero),
+                            AttemptNumber: 0,
+                            FileCount: 1,
+                            HasOnlineText: true)
+                    ]));
+            }
+
             if (request is GetAssistedGradingBatchStatusQuery statusQuery)
             {
                 LastStatusQuery = statusQuery;
@@ -444,6 +506,40 @@ public sealed class MoodleGradingToolsTests
                     BlockedItems: 0,
                     Status: "Pending",
                     Warnings: []));
+            }
+
+            if (request is ListAssignmentSubmissionsQuery)
+            {
+                return Task.FromResult<object?>(new AssignmentSubmissionsPage(
+                    "10",
+                    "501",
+                    "42",
+                    "Tarefa 1",
+                    Page: 1,
+                    PageSize: 100,
+                    Filter: AssignmentSubmissionFilter.NeedsGrading,
+                    IncludeLate: true,
+                    IncludeUngraded: true,
+                    Since: null,
+                    Before: null,
+                    Total: 1,
+                    HasMore: false,
+                    [
+                        new AssignmentSubmissionSummary(
+                            "101",
+                            "Ana Souza",
+                            "9001",
+                            "submitted",
+                            "notgraded",
+                            Submitted: true,
+                            Late: false,
+                            NeedsGrading: true,
+                            SubmittedAt: new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero),
+                            ModifiedAt: new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero),
+                            AttemptNumber: 0,
+                            FileCount: 1,
+                            HasOnlineText: true)
+                    ]));
             }
 
             if (request is GetAssistedGradingBatchStatusQuery statusQuery)

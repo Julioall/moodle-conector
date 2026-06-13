@@ -245,7 +245,7 @@ Implementação no repo:
 **Tipo:** leitura
 **Objetivo:** listar entregas de uma ou mais atividades que podem entrar em lote de correção.
 
-- [ ] Entrada:
+- [x] Entrada:
   - `courseId`
   - `assignmentIds`
   - `status`
@@ -253,7 +253,7 @@ Implementação no repo:
   - `includeLate`
   - `page`
   - `perPage`
-- [ ] Saída:
+- [x] Saída:
   - lista paginada de entregas;
   - contadores;
   - alertas;

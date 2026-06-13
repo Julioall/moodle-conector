@@ -6,7 +6,9 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.Submissions;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
@@ -50,6 +52,47 @@ public sealed class MoodleGradingTools(
         CancellationToken cancellationToken = default)
     {
         return DiscoverCoreAsync(moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "listar_entregas_corrigiveis",
+        Title = "Listar Entregas Corrigiveis",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListarEntregasCorrigiveisResponse>))]
+    [Description("Lista entregas corrigiveis de uma ou mais tarefas, com contadores e paginação agregada para preparo de lote.")]
+    public Task<CallToolResult> ListarEntregasCorrigiveisAsync(
+        [Description("Identificador do curso Moodle.")]
+        string courseId,
+        [Description("Identificadores das tarefas Moodle.")]
+        string[] assignmentIds,
+        [Description("Filtro de status: all, submitted, pending, late, awaiting_grading.")]
+        string status = "awaiting_grading",
+        [Description("Quando true, força filtro apenas para entregas aguardando correção.")]
+        bool onlyAwaitingGrading = true,
+        [Description("Quando false, remove entregas atrasadas da lista.")]
+        bool includeLate = true,
+        [Description("Página de resultados, iniciando em 1.")]
+        int page = 1,
+        [Description("Tamanho da página, de 1 a 100.")]
+        int perPage = 25,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrão do usuário.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListarEntregasCorrigiveisCoreAsync(
+            courseId,
+            assignmentIds,
+            status,
+            onlyAwaitingGrading,
+            includeLate,
+            page,
+            perPage,
+            moodleAlias,
+            cancellationToken);
     }
 
     [McpServerTool(
@@ -353,6 +396,159 @@ public sealed class MoodleGradingTools(
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = BuildCreateBatchNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private async Task<CallToolResult> ListarEntregasCorrigiveisCoreAsync(
+        string courseId,
+        IReadOnlyList<string> assignmentIds,
+        string status,
+        bool onlyAwaitingGrading,
+        bool includeLate,
+        int page,
+        int perPage,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+        {
+            return Error<ListarEntregasCorrigiveisResponse>("Informe um identificador de curso.");
+        }
+
+        var normalizedAssignmentIds = assignmentIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedAssignmentIds.Length == 0)
+        {
+            return Error<ListarEntregasCorrigiveisResponse>("Informe pelo menos uma tarefa para listar entregas corrigiveis.");
+        }
+
+        if (!TryParseSubmissionFilter(status, out var parsedFilter))
+        {
+            return Error<ListarEntregasCorrigiveisResponse>("Filtro de status invalido. Use all, submitted, pending, late ou awaiting_grading.");
+        }
+
+        var filter = onlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : parsedFilter;
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(perPage, 1, 100);
+
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return Error<ListarEntregasCorrigiveisResponse>("Usuario nao autenticado para listar entregas corrigiveis.");
+        }
+
+        var items = new List<EntregaCorrigivelItem>();
+        var warnings = new List<string>();
+
+        foreach (var assignmentId in normalizedAssignmentIds)
+        {
+            var requestPage = 1;
+            while (true)
+            {
+                AssignmentSubmissionsPage? submissions;
+                try
+                {
+                    submissions = await mediator.Send(
+                        new ListAssignmentSubmissionsQuery(
+                            moodleUserId.Value.ToString(),
+                            courseId,
+                            assignmentId,
+                            filter,
+                            requestPage,
+                            100,
+                            Since: null,
+                            Before: null,
+                            IncludeLate: includeLate,
+                            IncludeUngraded: true),
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    warnings.Add($"Nao foi possivel listar entregas da tarefa {assignmentId} neste momento.");
+                    break;
+                }
+
+                if (submissions is null)
+                {
+                    warnings.Add($"Tarefa {assignmentId} nao encontrada para o usuario atual.");
+                    break;
+                }
+
+                foreach (var submission in submissions.Submissions)
+                {
+                    items.Add(new EntregaCorrigivelItem(
+                        submissions.CourseId,
+                        submissions.AssignmentId,
+                        submission.SubmissionId,
+                        submission.UserId,
+                        submission.FullName,
+                        submission.Status,
+                        submission.GradingStatus,
+                        submission.Submitted,
+                        submission.NeedsGrading,
+                        submission.Late,
+                        submission.AttemptNumber,
+                        submission.SubmittedAt,
+                        submission.ModifiedAt,
+                        submission.FileCount,
+                        submission.HasOnlineText));
+                }
+
+                if (!submissions.HasMore)
+                {
+                    break;
+                }
+
+                requestPage++;
+            }
+        }
+
+        var orderedItems = items
+            .OrderBy(item => item.StudentName ?? item.StudentId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.AssignmentId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var pagedItems = orderedItems
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .ToArray();
+
+        var data = new ListarEntregasCorrigiveisResponse(
+            safePage,
+            safePageSize,
+            orderedItems.Length,
+            HasMore: safePage * safePageSize < orderedItems.Length,
+            new EntregaCorrigivelContadores(
+                Total: orderedItems.Length,
+                AwaitingGrading: orderedItems.Count(item => item.NeedsGrading),
+                Submitted: orderedItems.Count(item => item.Submitted),
+                NotSubmitted: orderedItems.Count(item => !item.Submitted),
+                Late: orderedItems.Count(item => item.Late)),
+            new EntregaCorrigivelPermissoes(
+                CanCreateBatch: true,
+                CanCommitToMoodle: false),
+            pagedItems);
+
+        var response = new ToolResponse<ListarEntregasCorrigiveisResponse>(
+            "ok",
+            data,
+            warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildListarEntregasCorrigiveisNarration(data) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
@@ -726,6 +922,12 @@ public sealed class MoodleGradingTools(
         return $"Lote de correcao assistida criado com {response.AcceptedItems} item(ns) aceito(s). BatchJobId: {response.BatchJobId}.";
     }
 
+    private static string BuildListarEntregasCorrigiveisNarration(ListarEntregasCorrigiveisResponse response)
+    {
+        var suffix = response.HasMore ? " Ha mais entregas para consultar." : string.Empty;
+        return $"Entregas corrigiveis: {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is).{suffix}";
+    }
+
     private static string BuildBatchStatusNarration(AssistedGradingBatchStatusResult response)
     {
         var suffix = response.HasMore ? " Ha mais itens para consultar." : string.Empty;
@@ -798,4 +1000,77 @@ public sealed class MoodleGradingTools(
         [property: JsonPropertyName("name")] string Name,
         [property: JsonPropertyName("purpose")] string Purpose,
         [property: JsonPropertyName("available")] bool Available);
+
+    public sealed record ListarEntregasCorrigiveisResponse(
+        [property: JsonPropertyName("page")] int Page,
+        [property: JsonPropertyName("perPage")] int PerPage,
+        [property: JsonPropertyName("totalItems")] int TotalItems,
+        [property: JsonPropertyName("hasMore")] bool HasMore,
+        [property: JsonPropertyName("counters")] EntregaCorrigivelContadores Counters,
+        [property: JsonPropertyName("permissions")] EntregaCorrigivelPermissoes Permissions,
+        [property: JsonPropertyName("items")] IReadOnlyList<EntregaCorrigivelItem> Items);
+
+    public sealed record EntregaCorrigivelContadores(
+        [property: JsonPropertyName("total")] int Total,
+        [property: JsonPropertyName("awaitingGrading")] int AwaitingGrading,
+        [property: JsonPropertyName("submitted")] int Submitted,
+        [property: JsonPropertyName("notSubmitted")] int NotSubmitted,
+        [property: JsonPropertyName("late")] int Late);
+
+    public sealed record EntregaCorrigivelPermissoes(
+        [property: JsonPropertyName("canCreateBatch")] bool CanCreateBatch,
+        [property: JsonPropertyName("canCommitToMoodle")] bool CanCommitToMoodle);
+
+    public sealed record EntregaCorrigivelItem(
+        [property: JsonPropertyName("courseId")] string CourseId,
+        [property: JsonPropertyName("assignmentId")] string AssignmentId,
+        [property: JsonPropertyName("submissionId")] string? SubmissionId,
+        [property: JsonPropertyName("studentId")] string StudentId,
+        [property: JsonPropertyName("studentName")] string? StudentName,
+        [property: JsonPropertyName("submissionStatus")] string SubmissionStatus,
+        [property: JsonPropertyName("gradingStatus")] string? GradingStatus,
+        [property: JsonPropertyName("submitted")] bool Submitted,
+        [property: JsonPropertyName("needsGrading")] bool NeedsGrading,
+        [property: JsonPropertyName("late")] bool Late,
+        [property: JsonPropertyName("attemptNumber")] int? AttemptNumber,
+        [property: JsonPropertyName("submittedAt")] DateTimeOffset? SubmittedAt,
+        [property: JsonPropertyName("modifiedAt")] DateTimeOffset? ModifiedAt,
+        [property: JsonPropertyName("fileCount")] int FileCount,
+        [property: JsonPropertyName("hasOnlineText")] bool HasOnlineText);
+
+    private static bool TryParseSubmissionFilter(string? value, out AssignmentSubmissionFilter filter)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            filter = AssignmentSubmissionFilter.All;
+            return true;
+        }
+
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "all":
+            case "todos":
+                filter = AssignmentSubmissionFilter.All;
+                return true;
+            case "submitted":
+            case "entregues":
+                filter = AssignmentSubmissionFilter.Submitted;
+                return true;
+            case "pending":
+            case "pendentes":
+                filter = AssignmentSubmissionFilter.NotSubmitted;
+                return true;
+            case "late":
+            case "atrasadas":
+                filter = AssignmentSubmissionFilter.Late;
+                return true;
+            case "awaiting_grading":
+            case "aguardando_correcao":
+                filter = AssignmentSubmissionFilter.NeedsGrading;
+                return true;
+            default:
+                filter = AssignmentSubmissionFilter.All;
+                return false;
+        }
+    }
 }
