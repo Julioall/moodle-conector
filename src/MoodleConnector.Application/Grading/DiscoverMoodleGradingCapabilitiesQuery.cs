@@ -33,6 +33,7 @@ public sealed class DiscoverMoodleGradingCapabilitiesQueryHandler(
 {
     private static readonly MoodleFunctionRequirement[] Requirements =
     [
+        new("mod_assign_get_assignments", "read_assignments_and_grading_definitions"),
         new("mod_assign_get_submissions", "read_submissions"),
         new("mod_assign_get_submission_status", "read_submission_status"),
         new("mod_assign_get_grades", "read_grades"),

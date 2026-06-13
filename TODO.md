@@ -296,6 +296,18 @@ Implementação no repo:
   - próximos itens prontos para revisão;
   - métricas de processamento.
 
+#### Tool 3.1 — `cancelar_lote_correcao_assistida`
+
+**Tipo:** escrita interna, não Moodle
+**Objetivo:** cancelar um lote interno ainda não finalizado.
+
+- [x] Entrada:
+  - `batchJobId`
+- [x] Saída:
+  - `batchJobId`;
+  - status final;
+  - mensagem operacional.
+
 #### Tool 4 — `consultar_item_correcao_assistida`
 
 **Tipo:** leitura
@@ -382,6 +394,7 @@ No projeto C#, estes hints são expressos pelos campos `ReadOnly`, `Destructive`
 | `listar_entregas_corrigiveis` | true | false | true | false | Consulta paginada sem efeito colateral. |
 | `criar_lote_correcao_assistida` | false | false | false | false | Cria job interno; só pode ser idempotente com `idempotencyKey`. |
 | `consultar_status_lote_correcao` | true | false | true | false | Consulta status do job. |
+| `cancelar_lote_correcao_assistida` | false | false | true | false | Cancela job interno; retry por `batchJobId` deve ser seguro. |
 | `consultar_item_correcao_assistida` | true | false | true | false | Consulta rascunho/análise de um item. |
 | `atualizar_rascunho_correcao` | false | false | true | false | Atualiza estado interno; exigir versão/hash para evitar sobrescrita acidental. |
 | `criar_previa_lancamento_lote` | false | false | false | false | Cria `PendingMoodleAction`; só pode ser idempotente com chave de idempotência. |
@@ -1037,23 +1050,22 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 ### Fase 0 — Descoberta técnica
 
+- [x] Criar tool consolidada `executar_descoberta_tecnica_correcao` para relatar funcoes Moodle, anexos, `mod_assign_save_grade`, permissao de escrita, rubricas/escalas e modo de token sem executar escrita.
+- [ ] Executar a descoberta contra Moodle real/sandbox para transformar os itens abaixo de "relatado" em confirmacao operacional.
+
 - [ ] Confirmar versão do Moodle.
-- [ ] Exportar lista de funções web service habilitadas.
-- [ ] Confirmar se `mod_assign_save_grade` e `mod_assign_save_grades` estão disponíveis.
-- [ ] Confirmar se `mod_assign_get_submission_status` e `mod_assign_get_grades` estão disponíveis.
 - [ ] Confirmar como rubricas são expostas.
 - [ ] Confirmar como anexos de submissão são acessados.
 - [ ] Confirmar permissões de tutor/professor.
 - [ ] Confirmar escalas de nota usadas.
 - [ ] Confirmar política institucional de retenção de dados.
-- [ ] Confirmar se a conexão Moodle usada pelo professor deve ser `CanWrite = true`.
-- [ ] Confirmar se a escrita usará token do usuário ou `MoodleApi:WriteServiceToken`.
 
 ### Fase 1 — MVP sem escrita no Moodle
 
 - [x] Criar entidades/DTOs mínimos de correção em C#.
 - [x] Criar `criar_lote_correcao_assistida` para lotes pequenos inicialmente.
 - [x] Criar `consultar_status_lote_correcao`.
+- [x] Criar `cancelar_lote_correcao_assistida`.
 - [x] Criar `consultar_item_correcao_assistida`.
 - [ ] Baixar anexos.
 - [ ] Extrair texto.
@@ -1087,6 +1099,9 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 ### Fase 4 — Escala 300–400
 
 - [ ] Ativar fila e workers.
+- [x] Integrar `IGradingBatchOrchestrator.EnqueueAsync` no fluxo de criação de lote.
+- [x] Implementar orquestrador local MVP para enfileirar/cancelar/consultar status.
+- [x] Criar `GradingContext` e `GradingContextBuilder` MVP usando apenas `ExtractedTextRef` já persistido.
 - [ ] Processar 400 entregas com paginação.
 - [ ] Adicionar painel de filtros.
 - [ ] Adicionar revisão em lote com exceções.

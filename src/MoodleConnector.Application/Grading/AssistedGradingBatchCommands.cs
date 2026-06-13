@@ -39,6 +39,14 @@ public sealed record GetAssistedGradingBatchStatusQuery(
     int Page,
     int PageSize) : IRequest<AssistedGradingBatchStatusResult>;
 
+public sealed record CancelAssistedGradingBatchCommand(
+    Guid BatchJobId) : IRequest<CancelAssistedGradingBatchResult>;
+
+public sealed record CancelAssistedGradingBatchResult(
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string Message);
+
 public sealed record AssistedGradingBatchStatusResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
     [property: JsonPropertyName("status")] string Status,
@@ -110,7 +118,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     IMediator mediator,
     ICurrentUserContext currentUser,
     IMoodleUserResolver moodleUserResolver,
-    IMoodleAuditLogRepository auditLogs)
+    IMoodleAuditLogRepository auditLogs,
+    IGradingBatchOrchestrator orchestrator)
     : IRequestHandler<CreateAssistedGradingBatchCommand, CreateAssistedGradingBatchResult>
 {
     public async Task<CreateAssistedGradingBatchResult> Handle(
@@ -268,6 +277,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             Status = "batch_created"
         }, cancellationToken);
         await auditLogs.SaveChangesAsync(cancellationToken);
+
+        await orchestrator.EnqueueAsync(batch.Id, cancellationToken);
 
         return createResult;
     }
@@ -621,5 +632,31 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             failedPercent,
             pendingItems,
             canLaunch);
+    }
+}
+
+public sealed class CancelAssistedGradingBatchCommandHandler(
+    IGradingBatchOrchestrator orchestrator,
+    IGradingReviewRepository repository)
+    : IRequestHandler<CancelAssistedGradingBatchCommand, CancelAssistedGradingBatchResult>
+{
+    public async Task<CancelAssistedGradingBatchResult> Handle(
+        CancelAssistedGradingBatchCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (request.BatchJobId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
+        }
+
+        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
+            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+
+        await orchestrator.CancelAsync(batch.Id, cancellationToken);
+
+        return new CancelAssistedGradingBatchResult(
+            batch.Id,
+            batch.Status.ToString(),
+            "Lote cancelado com sucesso.");
     }
 }

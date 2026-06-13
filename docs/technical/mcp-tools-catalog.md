@@ -66,8 +66,10 @@ Este catálogo reflete o estado real do repositório.
 | `get_submission_status` | Get Submission Status | `SensitiveRead` | Sim | Não | Implementada |
 | `descobrir_funcoes_moodle_correcao` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Implementada |
+| `executar_descoberta_tecnica_correcao` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `criar_lote_correcao_assistida` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
 | `consultar_status_lote_correcao` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `cancelar_lote_correcao_assistida` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Implementada |
 | `consultar_item_correcao_assistida` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
 | `atualizar_rascunho_correcao` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Implementada |
 | `criar_previa_lancamento_lote` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
@@ -523,6 +525,39 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
+## `executar_descoberta_tecnica_correcao`
+
+Descricao:
+
+- Consolida a Fase 0 de descoberta tecnica para correcao assistida.
+- Consulta o catalogo de funcoes Moodle e classifica disponibilidade de leitura de entregas, leitura de notas, anexos, `mod_assign_save_grade`, `mod_assign_save_grades`, rubricas/escalas e modo de token de escrita.
+- Relata `CanWrite`, feature flags de escrita e se a configuracao usara token do usuario ou `MoodleApi:WriteServiceToken`, sem retornar o valor do token.
+- Nao baixa anexos, nao lista estudantes e nao executa escrita no Moodle.
+- Campos como permissao real de professor/tutor, acesso efetivo a pluginfile, rubricas e escalas ficam marcados como prova pendente quando dependem de curso/tarefa Moodle real.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+Resposta estruturada:
+
+- `overallStatus`: `blocked` ou `requires_real_moodle_probe`.
+- `functions[]`: funcoes Moodle avaliadas e disponibilidade.
+- `attachments`, `gradeWrite`, `permissions`, `rubricsAndScales`: area, status, evidencias e proximos passos.
+- `writeToken`: modo `user_token` ou `write_service_token`, flags de escrita e permissao da conexao.
+- `blockingIssues` e `warnings`: motivos que bloqueiam ou exigem prova em sandbox.
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
 ## `criar_lote_correcao_assistida`
 
 Descricao:
@@ -573,6 +608,29 @@ Metadados MCP:
 | Campo | Valor |
 | --- | --- |
 | `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `cancelar_lote_correcao_assistida`
+
+Descricao:
+
+- Cancela um lote interno de correcao assistida ainda nao finalizado.
+- Nao escreve no Moodle e nao altera nota/feedback de estudantes.
+- Usa o orquestrador de lote para aplicar cancelamento de forma retry-safe por `batchJobId`.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `batchJobId` | `Guid` | Identificador do lote retornado por `criar_lote_correcao_assistida`. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `false` |
 | `Destructive` | `false` |
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |

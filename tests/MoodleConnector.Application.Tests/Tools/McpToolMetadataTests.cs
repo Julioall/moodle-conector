@@ -43,6 +43,11 @@ public sealed class McpToolMetadataTests
                 Assert.False(attribute.ReadOnly, $"{toolName} atualiza estado interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente com expectedReviewStatus e payload identico.");
             }
+            else if (toolName == "cancelar_lote_correcao_assistida")
+            {
+                Assert.False(attribute.ReadOnly, $"{toolName} cancela job interno e deve declarar ReadOnly=false.");
+                Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe por batchJobId.");
+            }
             else
             {
                 Assert.True(attribute.Idempotent, $"{toolName} deve declarar Idempotent=true.");

@@ -39,6 +39,33 @@ public sealed class MoodleGradingToolsTests
     }
 
     [Fact]
+    public async Task Deve_executar_descoberta_tecnica_correcao_sem_expor_token()
+    {
+        var mediator = new FakeMediator();
+        var selection = new FakeMoodleConnectionSelection();
+        var sut = new MoodleGradingTools(mediator, selection, new FakeMoodleUserResolver(321));
+
+        var result = await sut.ExecutarDescobertaTecnicaCorrecaoAsync("goias");
+
+        Assert.False(result.IsError ?? false);
+        Assert.Equal("goias", selection.Alias);
+        Assert.NotNull(mediator.LastTechnicalDiscovery);
+        Assert.Equal("321", mediator.LastTechnicalDiscovery!.UserExternalId);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var data = structured.GetProperty("data");
+
+        Assert.Equal("requires_real_moodle_probe", data.GetProperty("overallStatus").GetString());
+        Assert.Equal("requires_submission_file_probe", data.GetProperty("attachments").GetProperty("status").GetString());
+        Assert.Equal("ready_for_sandbox_probe", data.GetProperty("gradeWrite").GetProperty("status").GetString());
+        Assert.Equal("unknown_requires_sandbox", data.GetProperty("permissions").GetProperty("status").GetString());
+        Assert.Equal("requires_assignment_probe", data.GetProperty("rubricsAndScales").GetProperty("status").GetString());
+        Assert.Equal("user_token", data.GetProperty("writeToken").GetProperty("mode").GetString());
+        Assert.DoesNotContain("secret", data.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("wstoken", data.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Deve_retornar_erro_controlado_quando_usuario_moodle_nao_for_identificado()
     {
         var sut = new MoodleGradingTools(
@@ -128,6 +155,27 @@ public sealed class MoodleGradingToolsTests
         var data = structured.GetProperty("data");
         Assert.Equal("Pending", data.GetProperty("status").GetString());
         Assert.Equal(1, data.GetProperty("items").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Deve_cancelar_lote_correcao_assistida()
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321));
+
+        var batchId = Guid.Parse("00000000-0000-0000-0000-000000000123");
+        var result = await sut.CancelarLoteCorrecaoAssistidaAsync(batchId);
+
+        Assert.False(result.IsError ?? false);
+        Assert.NotNull(mediator.LastCancelBatch);
+        Assert.Equal(batchId, mediator.LastCancelBatch!.BatchJobId);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var data = structured.GetProperty("data");
+        Assert.Equal("Cancelled", data.GetProperty("status").GetString());
     }
 
     [Fact]
@@ -290,9 +338,13 @@ public sealed class MoodleGradingToolsTests
     {
         public DiscoverMoodleGradingCapabilitiesQuery? LastQuery { get; private set; }
 
+        public GradingTechnicalDiscoveryQuery? LastTechnicalDiscovery { get; private set; }
+
         public CreateAssistedGradingBatchCommand? LastCreateBatch { get; private set; }
 
         public GetAssistedGradingBatchStatusQuery? LastStatusQuery { get; private set; }
+
+        public CancelAssistedGradingBatchCommand? LastCancelBatch { get; private set; }
 
         public GetAssistedGradingItemQuery? LastItemQuery { get; private set; }
 
@@ -323,6 +375,12 @@ public sealed class MoodleGradingToolsTests
             {
                 LastQuery = query;
                 return Task.FromResult((TResponse)(object)CreateReport());
+            }
+
+            if (request is GradingTechnicalDiscoveryQuery technicalDiscovery)
+            {
+                LastTechnicalDiscovery = technicalDiscovery;
+                return Task.FromResult((TResponse)(object)CreateTechnicalDiscoveryReport());
             }
 
             if (request is CreateAssistedGradingBatchCommand createBatch)
@@ -407,6 +465,15 @@ public sealed class MoodleGradingToolsTests
                         FailedPercent: 0,
                         PendingItems: 1,
                         CanLaunch: false)));
+            }
+
+            if (request is CancelAssistedGradingBatchCommand cancelBatch)
+            {
+                LastCancelBatch = cancelBatch;
+                return Task.FromResult((TResponse)(object)new CancelAssistedGradingBatchResult(
+                    cancelBatch.BatchJobId,
+                    "Cancelled",
+                    "Lote cancelado com sucesso."));
             }
 
             if (request is GetAssistedGradingItemQuery itemQuery)
@@ -517,6 +584,12 @@ public sealed class MoodleGradingToolsTests
                 return Task.FromResult<object?>(CreateReport());
             }
 
+            if (request is GradingTechnicalDiscoveryQuery technicalDiscovery)
+            {
+                LastTechnicalDiscovery = technicalDiscovery;
+                return Task.FromResult<object?>(CreateTechnicalDiscoveryReport());
+            }
+
             if (request is CreateAssistedGradingBatchCommand createBatch)
             {
                 LastCreateBatch = createBatch;
@@ -599,6 +672,15 @@ public sealed class MoodleGradingToolsTests
                         FailedPercent: 0,
                         PendingItems: 1,
                         CanLaunch: false)));
+            }
+
+            if (request is CancelAssistedGradingBatchCommand cancelBatch)
+            {
+                LastCancelBatch = cancelBatch;
+                return Task.FromResult<object?>(new CancelAssistedGradingBatchResult(
+                    cancelBatch.BatchJobId,
+                    "Cancelled",
+                    "Lote cancelado com sucesso."));
             }
 
             if (request is GetAssistedGradingItemQuery itemQuery)
@@ -726,6 +808,48 @@ public sealed class MoodleGradingToolsTests
                 CanWriteIndividualGrades: true,
                 CanWriteBatchGrades: false,
                 MissingFunctions: ["mod_assign_save_grades"]);
+        }
+
+        private static GradingTechnicalDiscoveryReport CreateTechnicalDiscoveryReport()
+        {
+            return new GradingTechnicalDiscoveryReport(
+                "moodle_mobile_app",
+                new DateTimeOffset(2026, 6, 13, 12, 0, 0, TimeSpan.Zero),
+                CreateReport().Functions,
+                new GradingTechnicalDiscoveryArea(
+                    "requires_submission_file_probe",
+                    Confirmed: false,
+                    "core_files_get_files esta disponivel; falta provar download de pluginfile com uma entrega real.",
+                    ["core_files_get_files"],
+                    ["Selecionar uma entrega com anexo e validar download/extracao."]),
+                new GradingTechnicalDiscoveryArea(
+                    "ready_for_sandbox_probe",
+                    Confirmed: false,
+                    "mod_assign_save_grade esta disponivel e a conexao permite escrita.",
+                    ["mod_assign_save_grade", "conexao_can_write=true"],
+                    ["Executar lancamento em uma tarefa sandbox."]),
+                new GradingTechnicalDiscoveryArea(
+                    "unknown_requires_sandbox",
+                    Confirmed: false,
+                    "A role real de professor/tutor deve ser confirmada em uma tarefa sandbox.",
+                    ["conexao_can_write=true"],
+                    ["Validar escrita com professor/tutor real."]),
+                new GradingTechnicalDiscoveryArea(
+                    "requires_assignment_probe",
+                    Confirmed: false,
+                    "Funcoes de tarefa/notas existem; rubricas e escalas dependem de tarefa real.",
+                    ["mod_assign_get_grades", "mod_assign_get_assignments"],
+                    ["Consultar tarefa com rubrica e escala configuradas."]),
+                new GradingWriteTokenDiscovery(
+                    "user_token",
+                    WriteServiceTokenConfigured: false,
+                    ConnectorCanWrite: true,
+                    AssignmentGradeWriteEnabled: true,
+                    AssignmentFeedbackWriteEnabled: true,
+                    AllowServiceTokenForReadOnlyQueries: true),
+                "requires_real_moodle_probe",
+                BlockingIssues: [],
+                Warnings: ["Permissoes, anexos, rubricas e escalas exigem prova em Moodle real."]);
         }
 
         private static GradingAuditResult CreateAuditResult()

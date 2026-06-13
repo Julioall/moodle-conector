@@ -55,6 +55,24 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
+        Name = "executar_descoberta_tecnica_correcao",
+        Title = "Executar Descoberta Tecnica Correcao",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<GradingTechnicalDiscoveryReport>))]
+    [Description("Consolida a descoberta tecnica da correcao assistida: funcoes Moodle, anexos, mod_assign_save_grade, permissao de escrita, rubricas/escalas e modo de token. Nao baixa arquivos nem escreve no Moodle.")]
+    public Task<CallToolResult> ExecutarDescobertaTecnicaCorrecaoAsync(
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return TechnicalDiscoveryCoreAsync(moodleAlias, cancellationToken);
+    }
+
+    [McpServerTool(
         Name = "listar_entregas_corrigiveis",
         Title = "Listar Entregas Corrigiveis",
         ReadOnly = true,
@@ -165,6 +183,24 @@ public sealed class MoodleGradingTools(
         CancellationToken cancellationToken = default)
     {
         return GetBatchStatusCoreAsync(batchJobId, pagina, tamanhoPagina, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "cancelar_lote_correcao_assistida",
+        Title = "Cancelar Lote Correcao Assistida",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CancelAssistedGradingBatchResult>))]
+    [Description("Cancela um lote interno de correcao assistida que ainda nao foi completamente processado. Nao escreve no Moodle.")]
+    public Task<CallToolResult> CancelarLoteCorrecaoAssistidaAsync(
+        [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
+        Guid batchJobId,
+        CancellationToken cancellationToken = default)
+    {
+        return CancelBatchCoreAsync(batchJobId, cancellationToken);
     }
 
     [McpServerTool(
@@ -350,6 +386,48 @@ public sealed class MoodleGradingTools(
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = BuildNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private async Task<CallToolResult> TechnicalDiscoveryCoreAsync(
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return Error<GradingTechnicalDiscoveryReport>("Usuario nao autenticado para executar descoberta tecnica de correcao.");
+        }
+
+        GradingTechnicalDiscoveryReport report;
+        try
+        {
+            report = await mediator.Send(
+                new GradingTechnicalDiscoveryQuery(moodleUserId.Value.ToString()),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return Error<GradingTechnicalDiscoveryReport>("Nao foi possivel executar a descoberta tecnica de correcao neste momento.");
+        }
+
+        var response = new ToolResponse<GradingTechnicalDiscoveryReport>(
+            "ok",
+            report,
+            report.Warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildTechnicalDiscoveryNarration(report) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
@@ -618,6 +696,50 @@ public sealed class MoodleGradingTools(
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = BuildBatchStatusNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private async Task<CallToolResult> CancelBatchCoreAsync(
+        Guid batchJobId,
+        CancellationToken cancellationToken)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return Error<CancelAssistedGradingBatchResult>("Informe um identificador de lote valido.");
+        }
+
+        CancelAssistedGradingBatchResult data;
+        try
+        {
+            data = await mediator.Send(
+                new CancelAssistedGradingBatchCommand(batchJobId),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<CancelAssistedGradingBatchResult>(ex.Message);
+        }
+        catch
+        {
+            return Error<CancelAssistedGradingBatchResult>("Nao foi possivel cancelar o lote de correcao assistida neste momento.");
+        }
+
+        var response = new ToolResponse<CancelAssistedGradingBatchResult>(
+            "ok",
+            data,
+            [],
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildCancelBatchNarration(data) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
@@ -949,6 +1071,14 @@ public sealed class MoodleGradingTools(
         return $"Verifiquei {total} funcao(oes) Moodle relevantes para correcao assistida: {availableCount} disponivel(is); {writeStatus}.";
     }
 
+    private static string BuildTechnicalDiscoveryNarration(GradingTechnicalDiscoveryReport response)
+    {
+        var blockerSuffix = response.BlockingIssues.Count > 0
+            ? $" Bloqueios: {string.Join("; ", response.BlockingIssues)}"
+            : " Sem bloqueios automaticos; falta prova em Moodle real.";
+        return $"Descoberta tecnica da correcao: status {response.OverallStatus}, token {response.WriteToken.Mode}.{blockerSuffix}";
+    }
+
     private static string BuildCreateBatchNarration(CreateAssistedGradingBatchResult response)
     {
         return $"Lote de correcao assistida criado com {response.AcceptedItems} item(ns) aceito(s). BatchJobId: {response.BatchJobId}.";
@@ -966,6 +1096,11 @@ public sealed class MoodleGradingTools(
         var metrics = response.ProcessingMetrics;
         var canLaunchNote = metrics.CanLaunch ? " Pronto para lancamento." : string.Empty;
         return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is). Prontos: {response.ReadyItems}, bloqueados: {response.BlockedItems}, falhos: {response.FailedItems}, progresso: {metrics.ProgressPercent}%.{canLaunchNote}{suffix}";
+    }
+
+    private static string BuildCancelBatchNarration(CancelAssistedGradingBatchResult response)
+    {
+        return $"Lote {response.BatchJobId}: {response.Message}";
     }
 
     private static string BuildGradingItemNarration(AssistedGradingItemDetailResult response)

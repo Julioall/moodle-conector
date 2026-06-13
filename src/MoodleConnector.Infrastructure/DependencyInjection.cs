@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Infrastructure.DocumentExtraction;
 using Polly;
 using Polly.Extensions.Http;
@@ -28,6 +29,10 @@ public static class DependencyInjection
         services
             .AddOptions<MoodleApiOptions>()
             .Bind(configuration.GetSection(MoodleApiOptions.SectionName));
+
+        services
+            .AddOptions<AssignmentWriteFeatureOptions>()
+            .Bind(configuration.GetSection(AssignmentWriteFeatureOptions.SectionName));
 
         services
             .AddOptions<MoodleProxyOptions>()
@@ -81,6 +86,7 @@ public static class DependencyInjection
         services.AddScoped<IMcpConnectorClientResolver, DatabaseConnectorClientResolver>();
         services.AddScoped<IConnectorClientRegistrationService, DatabaseConnectorClientRegistrationService>();
         services.AddScoped<IMoodleConnectorCredentialsProvider, HttpContextMoodleConnectorCredentialsProvider>();
+        services.AddScoped<IGradingTechnicalDiscoveryEnvironment, GradingTechnicalDiscoveryEnvironment>();
         services.AddScoped<IMoodleConnectionSelection, MoodleConnectionSelection>();
         services.AddSingleton<IConnectorSecretProtector, AesGcmConnectorSecretProtector>();
 

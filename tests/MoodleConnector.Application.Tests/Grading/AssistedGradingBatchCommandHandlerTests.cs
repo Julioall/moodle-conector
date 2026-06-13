@@ -14,12 +14,14 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     {
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator();
+        var orchestrator = new FakeGradingBatchOrchestrator();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
             mediator,
             new FakeCurrentUserContext("teacher-1"),
             new FakeMoodleUserResolver(321),
-            new FakeAuditLogRepository());
+            new FakeAuditLogRepository(),
+            orchestrator);
 
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -41,6 +43,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(2, repository.Items.Count);
         Assert.All(repository.Items, item => Assert.Equal(GradingItemStatus.Pending, item.Status));
         Assert.Equal(AssignmentSubmissionFilter.NeedsGrading, mediator.LastListQuery!.Filter);
+        Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
     }
 
     [Fact]
@@ -48,12 +51,14 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     {
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator();
+        var orchestrator = new FakeGradingBatchOrchestrator();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
             mediator,
             new FakeCurrentUserContext("teacher-1"),
             new FakeMoodleUserResolver(321),
-            new FakeAuditLogRepository());
+            new FakeAuditLogRepository(),
+            orchestrator);
 
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -69,6 +74,27 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var item = Assert.Single(repository.Items);
         Assert.Equal(9002, item.SubmissionId);
         Assert.Equal(102, item.MoodleUserId);
+        Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
+    }
+
+    [Fact]
+    public async Task CancelBatch_ChamaOrquestradorERetornaStatusCancelado()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        orchestrator.BatchLookup = id => repository.Batches.SingleOrDefault(candidate => candidate.Id == id);
+        var sut = new CancelAssistedGradingBatchCommandHandler(orchestrator, repository);
+
+        var result = await sut.Handle(
+            new CancelAssistedGradingBatchCommand(batch.Id),
+            CancellationToken.None);
+
+        Assert.Equal(batch.Id, orchestrator.LastCancelledBatchId);
+        Assert.Equal(batch.Id, result.BatchJobId);
+        Assert.Equal("Cancelled", result.Status);
+        Assert.Contains("cancelado", result.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -357,6 +383,45 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)
             => Task.CompletedTask;
+    }
+
+    private sealed class FakeGradingBatchOrchestrator : IGradingBatchOrchestrator
+    {
+        public Guid? LastEnqueuedBatchId { get; private set; }
+
+        public Guid? LastCancelledBatchId { get; private set; }
+
+        public Task EnqueueAsync(Guid batchId, CancellationToken cancellationToken)
+        {
+            LastEnqueuedBatchId = batchId;
+            return Task.CompletedTask;
+        }
+
+        public Task CancelAsync(Guid batchId, CancellationToken cancellationToken)
+        {
+            LastCancelledBatchId = batchId;
+            var batch = BatchLookup?.Invoke(batchId);
+            batch?.Cancel();
+            return Task.CompletedTask;
+        }
+
+        public Func<Guid, AssistedGradingBatch?>? BatchLookup { get; set; }
+
+        public Task<GradingBatchOrchestratorStatus> GetStatusAsync(Guid batchId, CancellationToken cancellationToken)
+        {
+            var batch = BatchLookup?.Invoke(batchId)
+                ?? AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 0);
+            return Task.FromResult(new GradingBatchOrchestratorStatus(
+                batchId,
+                batch.Status,
+                batch.TotalItems,
+                batch.ProcessedItems,
+                batch.ReadyItems,
+                batch.BlockedItems,
+                batch.FailedItems,
+                IsQueued: false,
+                LastError: null));
+        }
     }
 
     private sealed class FakeMediator : IMediator

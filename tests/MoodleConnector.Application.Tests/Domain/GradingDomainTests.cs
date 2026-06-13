@@ -57,4 +57,37 @@ public sealed class GradingDomainTests
         Assert.Equal("teacher-1", item.ReviewedBySubject);
         Assert.NotNull(item.ReviewedAt);
     }
+
+    [Fact]
+    public void GradingContext_HasMinimumContext_FicaFalseQuandoHaBloqueadoresMesmoComArquivo()
+    {
+        var context = GradingContext.Build(
+            gradingItemId: Guid.NewGuid(),
+            batchId: Guid.NewGuid(),
+            courseId: "10",
+            assignmentId: "501",
+            submissionId: "9001",
+            studentId: "101",
+            assignmentStatement: null,
+            criteria: null,
+            rubricDescription: null,
+            maxGrade: null,
+            gradeScale: null,
+            submissionText: null,
+            attachedFiles:
+            [
+                new GradingFileInfo(
+                    "entrega.pdf",
+                    "application/pdf",
+                    FileSizeBytes: 1200,
+                    Sha256: "hash-1",
+                    ExtractedText: "Texto extraido previamente.",
+                    IsSupported: true)
+            ],
+            courseMaterials: null,
+            teacherInstructions: null);
+
+        Assert.NotEmpty(context.Blockers);
+        Assert.False(context.HasMinimumContext);
+    }
 }
