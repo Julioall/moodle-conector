@@ -938,7 +938,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 ### 11.3 Confirmação humana
 
 - [x] Tool de escrita deve exigir `confirmationText` literal.
-- [ ] Confirmação deve conter:
+- [x] Confirmação deve conter:
   - lote;
   - quantidade de correções;
   - curso;

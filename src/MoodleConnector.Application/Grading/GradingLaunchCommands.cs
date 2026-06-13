@@ -106,8 +106,14 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             ready.Select(ToPayloadItem).ToArray());
         var previewItems = ready.Select(ToPreviewItem).ToArray();
         var itemLabel = ready.Length == 1 ? "CORRECAO" : "CORRECOES";
+        var activityScope = string.Join(
+            ",",
+            ready
+                .Select(item => item.AssignmentId.ToString(CultureInfo.InvariantCulture))
+                .Distinct(StringComparer.Ordinal)
+                .Take(10));
         var confirmationText =
-            $"CONFIRMO O LANCAMENTO DE {ready.Length} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId}";
+            $"CONFIRMO O LANCAMENTO DE {ready.Length} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO NOTA_E_FEEDBACK";
         var pending = await pendingActions.CreatePendingActionAsync(
             ToolName,
             ToolRiskLevel.CriticalHumanConfirmedWrite,
