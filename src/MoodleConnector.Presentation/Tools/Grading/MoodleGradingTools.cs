@@ -963,7 +963,9 @@ public sealed class MoodleGradingTools(
     private static string BuildBatchStatusNarration(AssistedGradingBatchStatusResult response)
     {
         var suffix = response.HasMore ? " Ha mais itens para consultar." : string.Empty;
-        return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is).{suffix}";
+        var metrics = response.ProcessingMetrics;
+        var canLaunchNote = metrics.CanLaunch ? " Pronto para lancamento." : string.Empty;
+        return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is). Prontos: {response.ReadyItems}, bloqueados: {response.BlockedItems}, falhos: {response.FailedItems}, progresso: {metrics.ProgressPercent}%.{canLaunchNote}{suffix}";
     }
 
     private static string BuildGradingItemNarration(AssistedGradingItemDetailResult response)

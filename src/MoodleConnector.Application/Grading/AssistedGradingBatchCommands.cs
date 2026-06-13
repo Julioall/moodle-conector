@@ -50,7 +50,18 @@ public sealed record AssistedGradingBatchStatusResult(
     [property: JsonPropertyName("page")] int Page,
     [property: JsonPropertyName("pageSize")] int PageSize,
     [property: JsonPropertyName("hasMore")] bool HasMore,
-    [property: JsonPropertyName("items")] IReadOnlyList<AssistedGradingBatchStatusItem> Items);
+    [property: JsonPropertyName("items")] IReadOnlyList<AssistedGradingBatchStatusItem> Items,
+    [property: JsonPropertyName("nextReadyItems")] IReadOnlyList<AssistedGradingBatchStatusItem> NextReadyItems,
+    [property: JsonPropertyName("errorsByCategory")] IReadOnlyDictionary<string, int> ErrorsByCategory,
+    [property: JsonPropertyName("processingMetrics")] GradingBatchProcessingMetrics ProcessingMetrics);
+
+public sealed record GradingBatchProcessingMetrics(
+    [property: JsonPropertyName("progressPercent")] int ProgressPercent,
+    [property: JsonPropertyName("readyPercent")] int ReadyPercent,
+    [property: JsonPropertyName("blockedPercent")] int BlockedPercent,
+    [property: JsonPropertyName("failedPercent")] int FailedPercent,
+    [property: JsonPropertyName("pendingItems")] int PendingItems,
+    [property: JsonPropertyName("canLaunch")] bool CanLaunch);
 
 public sealed record AssistedGradingBatchStatusItem(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -547,6 +558,22 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
         var items = await repository.ListItemsByBatchAsync(batch.Id, page, pageSize + 1, cancellationToken);
         var totalItems = await repository.CountItemsByBatchAsync(batch.Id, cancellationToken);
 
+        var nextReady = items
+            .Where(item => item.Status == GradingItemStatus.DraftReady && item.ReviewStatus == GradingReviewStatus.NotReviewed)
+            .Take(5)
+            .Select(ToStatusItem)
+            .ToArray();
+
+        var errorsByCategory = new Dictionary<string, int>();
+        foreach (var item in items.Where(item => item.Status == GradingItemStatus.Failed || item.Status == GradingItemStatus.Blocked))
+        {
+            var category = item.Status == GradingItemStatus.Blocked ? "blocked" : "failed";
+            errorsByCategory.TryGetValue(category, out var current);
+            errorsByCategory[category] = current + 1;
+        }
+
+        var metrics = BuildMetrics(batch);
+
         return new AssistedGradingBatchStatusResult(
             batch.Id,
             batch.Status.ToString(),
@@ -558,7 +585,10 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             page,
             pageSize,
             HasMore: items.Count > pageSize || page * pageSize < totalItems,
-            items.Take(pageSize).Select(ToStatusItem).ToArray());
+            items.Take(pageSize).Select(ToStatusItem).ToArray(),
+            NextReadyItems: nextReady,
+            ErrorsByCategory: errorsByCategory,
+            ProcessingMetrics: metrics);
     }
 
     private static AssistedGradingBatchStatusItem ToStatusItem(AssistedGradingItem item)
@@ -571,5 +601,25 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             item.Status.ToString(),
             item.ReviewStatus.ToString(),
             item.CommitStatus.ToString());
+    }
+
+    private static GradingBatchProcessingMetrics BuildMetrics(AssistedGradingBatch batch)
+    {
+        var total = batch.TotalItems > 0 ? batch.TotalItems : 1;
+        var progressPercent = (int)Math.Round((double)batch.ProcessedItems / total * 100);
+        var readyPercent = (int)Math.Round((double)batch.ReadyItems / total * 100);
+        var blockedPercent = (int)Math.Round((double)batch.BlockedItems / total * 100);
+        var failedPercent = (int)Math.Round((double)batch.FailedItems / total * 100);
+        var pendingItems = Math.Max(0, batch.TotalItems - batch.ProcessedItems - batch.BlockedItems - batch.FailedItems);
+        var canLaunch = batch.ReadyItems > 0 &&
+            batch.Status is GradingBatchStatus.ReadyForReview or GradingBatchStatus.Processing;
+
+        return new GradingBatchProcessingMetrics(
+            progressPercent,
+            readyPercent,
+            blockedPercent,
+            failedPercent,
+            pendingItems,
+            canLaunch);
     }
 }

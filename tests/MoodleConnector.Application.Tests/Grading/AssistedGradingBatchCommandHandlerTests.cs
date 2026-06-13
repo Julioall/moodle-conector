@@ -94,6 +94,10 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(item.Id, statusItem.GradingItemId);
         Assert.Equal("DraftReady", statusItem.Status);
         Assert.False(result.HasMore);
+        Assert.Equal(0, result.ProcessingMetrics.ProgressPercent);
+        Assert.False(result.ProcessingMetrics.CanLaunch);
+        Assert.Single(result.NextReadyItems);
+        Assert.Empty(result.ErrorsByCategory);
     }
 
     [Fact]

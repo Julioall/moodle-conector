@@ -57,6 +57,10 @@ builder.Services
     .Bind(builder.Configuration.GetSection(AssignmentWriteFeatureOptions.SectionName));
 
 builder.Services
+    .AddOptions<GradingLimitsOptions>()
+    .Bind(builder.Configuration.GetSection(GradingLimitsOptions.SectionName));
+
+builder.Services
     .AddOptions<PendingActionOptions>()
     .Bind(builder.Configuration.GetSection(PendingActionOptions.SectionName));
 

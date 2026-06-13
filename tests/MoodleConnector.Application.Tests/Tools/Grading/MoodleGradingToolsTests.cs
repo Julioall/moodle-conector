@@ -397,7 +397,16 @@ public sealed class MoodleGradingToolsTests
                             "Pending",
                             "NotReviewed",
                             "NotReady")
-                    ]));
+                    ],
+                    NextReadyItems: [],
+                    ErrorsByCategory: new Dictionary<string, int>(),
+                    ProcessingMetrics: new GradingBatchProcessingMetrics(
+                        ProgressPercent: 0,
+                        ReadyPercent: 0,
+                        BlockedPercent: 0,
+                        FailedPercent: 0,
+                        PendingItems: 1,
+                        CanLaunch: false)));
             }
 
             if (request is GetAssistedGradingItemQuery itemQuery)
@@ -580,7 +589,16 @@ public sealed class MoodleGradingToolsTests
                             "Pending",
                             "NotReviewed",
                             "NotReady")
-                    ]));
+                    ],
+                    NextReadyItems: [],
+                    ErrorsByCategory: new Dictionary<string, int>(),
+                    ProcessingMetrics: new GradingBatchProcessingMetrics(
+                        ProgressPercent: 0,
+                        ReadyPercent: 0,
+                        BlockedPercent: 0,
+                        FailedPercent: 0,
+                        PendingItems: 1,
+                        CanLaunch: false)));
             }
 
             if (request is GetAssistedGradingItemQuery itemQuery)

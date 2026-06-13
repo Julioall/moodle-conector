@@ -183,7 +183,7 @@ AVA Moodle
 - [x] `IMoodleSubmissionFileGateway`: gateway para anexos via Moodle/pluginfile.
 - [x] `IDocumentExtractionService`: extração de texto e metadados.
 - [x] `IGradingAnalysisService`: análise por critério e geração de rascunho.
-- [ ] `IGradingBatchOrchestrator`: criação e controle de lotes.
+- [x] `IGradingBatchOrchestrator`: criação e controle de lotes.
 - [x] `IGradingReviewRepository`: persistência de rascunhos e decisões do professor.
 - [x] Reusar `IPendingActionService` e `IActionConfirmationService` para prévia/confirmação.
 - [x] Reusar `IMoodleAuditLogRepository` e criar eventos específicos de correção para commit Moodle.
@@ -274,7 +274,7 @@ Implementação no repo:
   - `includeCourseMaterials`
   - `teacherInstructions`
   - `priority`
-- [ ] Saída:
+- [x] Saída:
   - `batchJobId`
   - quantidade total;
   - quantidade aceita;
@@ -287,9 +287,9 @@ Implementação no repo:
 **Tipo:** leitura
 **Objetivo:** consultar andamento do lote.
 
-- [ ] Entrada:
+- [x] Entrada:
   - `batchJobId`
-- [ ] Saída:
+- [x] Saída:
   - status geral;
   - contadores por estado;
   - erros por categoria;
@@ -477,13 +477,13 @@ Valores devem ser configuráveis por ambiente.
 
 ### 4.5 Limites iniciais
 
-- [ ] `MAX_BATCH_ITEMS=400`
-- [ ] `MAX_FILE_SIZE_MB=25`
-- [ ] `MAX_FILES_PER_SUBMISSION=10`
-- [ ] `MAX_TEXT_CHARS_PER_SUBMISSION=120000`
-- [ ] `MAX_REVIEW_ITEMS_PER_PAGE=25`
-- [ ] `RAW_FILE_RETENTION_DAYS=7`
-- [ ] `DRAFT_RETENTION_DAYS=180` ou conforme política institucional.
+- [x] `MAX_BATCH_ITEMS=400`
+- [x] `MAX_FILE_SIZE_MB=25`
+- [x] `MAX_FILES_PER_SUBMISSION=10`
+- [x] `MAX_TEXT_CHARS_PER_SUBMISSION=120000`
+- [x] `MAX_REVIEW_ITEMS_PER_PAGE=25`
+- [x] `RAW_FILE_RETENTION_DAYS=7`
+- [x] `DRAFT_RETENTION_DAYS=180` ou conforme política institucional.
 
 ---
 

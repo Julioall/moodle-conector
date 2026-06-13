@@ -3,6 +3,7 @@ using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.PendingActions;
+using Microsoft.Extensions.Options;
 
 namespace MoodleConnector.Application;
 
@@ -13,9 +14,11 @@ public static class DependencyInjection
         services.AddMediatR(cfg =>
             cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
         services.AddOptions<AssignmentWriteFeatureOptions>();
+        services.AddOptions<GradingLimitsOptions>();
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();
         services.AddSingleton<IGradingAnalysisService, StructuredGradingAnalysisService>();
+        services.AddScoped<IGradingBatchOrchestrator, LocalGradingBatchOrchestrator>();
 
         return services;
     }
