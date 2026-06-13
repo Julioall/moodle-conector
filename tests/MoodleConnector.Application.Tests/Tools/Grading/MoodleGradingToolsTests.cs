@@ -166,7 +166,8 @@ public sealed class MoodleGradingToolsTests
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         var data = structured.GetProperty("data");
         Assert.Equal("00000000-0000-0000-0000-000000000999", data.GetProperty("pendingActionId").GetString());
-        Assert.Equal("CONFIRMAR LANCAMENTO 1 ITEM", data.GetProperty("confirmationText").GetString());
+        var confirmationText = data.GetProperty("confirmationText").GetString();
+        Assert.StartsWith("CONFIRMO O LANCAMENTO DE 1 CORRECAO NO MOODLE PARA O LOTE", confirmationText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -180,7 +181,7 @@ public sealed class MoodleGradingToolsTests
 
         var result = await sut.ConfirmarLancamentoLoteMoodleAsync(
             Guid.Parse("00000000-0000-0000-0000-000000000999"),
-            "CONFIRMAR LANCAMENTO 1 ITEM");
+            "CONFIRMO O LANCAMENTO DE 1 CORRECAO NO MOODLE PARA O LOTE 00000000-0000-0000-0000-000000000123 DO CURSO 10");
 
         Assert.False(result.IsError ?? false);
         Assert.NotNull(mediator.LastConfirmLaunch);
@@ -391,7 +392,7 @@ public sealed class MoodleGradingToolsTests
                             8.5m,
                             "Feedback final revisado.")
                     ],
-                    ConfirmationText: "CONFIRMAR LANCAMENTO 1 ITEM",
+                    ConfirmationText: "CONFIRMO O LANCAMENTO DE 1 CORRECAO NO MOODLE PARA O LOTE 00000000-0000-0000-0000-000000000123 DO CURSO 10",
                     ExpiresAt: new DateTimeOffset(2026, 6, 13, 12, 15, 0, TimeSpan.Zero),
                     Warnings: []));
             }
@@ -536,7 +537,7 @@ public sealed class MoodleGradingToolsTests
                             8.5m,
                             "Feedback final revisado.")
                     ],
-                    ConfirmationText: "CONFIRMAR LANCAMENTO 1 ITEM",
+                    ConfirmationText: "CONFIRMO O LANCAMENTO DE 1 CORRECAO NO MOODLE PARA O LOTE 00000000-0000-0000-0000-000000000123 DO CURSO 10",
                     ExpiresAt: new DateTimeOffset(2026, 6, 13, 12, 15, 0, TimeSpan.Zero),
                     Warnings: []));
             }

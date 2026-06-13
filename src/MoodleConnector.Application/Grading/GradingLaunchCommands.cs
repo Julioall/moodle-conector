@@ -105,9 +105,9 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             batch.Id,
             ready.Select(ToPayloadItem).ToArray());
         var previewItems = ready.Select(ToPreviewItem).ToArray();
-        var confirmationText = ready.Length == 1
-            ? "CONFIRMAR LANCAMENTO 1 ITEM"
-            : $"CONFIRMAR LANCAMENTO {ready.Length} ITENS";
+        var itemLabel = ready.Length == 1 ? "CORRECAO" : "CORRECOES";
+        var confirmationText =
+            $"CONFIRMO O LANCAMENTO DE {ready.Length} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId}";
         var pending = await pendingActions.CreatePendingActionAsync(
             ToolName,
             ToolRiskLevel.CriticalHumanConfirmedWrite,

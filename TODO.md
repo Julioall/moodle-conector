@@ -83,7 +83,7 @@ Situação confirmada no repositório:
 - [x] Criar tool real de **lançamento de nota e feedback** no Moodle.
 - [x] Reusar a confirmação humana obrigatória já existente antes de qualquer escrita no Moodle.
 - [x] Expandir auditoria existente para registrar commit por item, nota final, feedback final e retorno/falha do Moodle.
-- [ ] Expandir auditoria existente para registrar criação de lote, versão do rascunho e revisão humana.
+- [x] Expandir auditoria existente para registrar criação de lote, versão do rascunho e revisão humana.
 
 ### 1.4 Viabilidade técnica
 
@@ -371,7 +371,7 @@ Implementação no repo:
 - [x] Entrada por `auditId`.
 - [x] Entrada por `batchJobId`.
 - [x] Saída com histórico, ator, data/hora e resultado do envio ao Moodle.
-- [ ] Saída com versão do rascunho, arquivos analisados e hash.
+- [x] Saída com versão do rascunho, arquivos analisados e hash.
 
 ### 3.3 Matriz de metadados Apps SDK
 
@@ -937,7 +937,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 ### 11.3 Confirmação humana
 
-- [ ] Tool de escrita deve exigir `confirmationText` literal.
+- [x] Tool de escrita deve exigir `confirmationText` literal.
 - [ ] Confirmação deve conter:
   - lote;
   - quantidade de correções;
@@ -1080,7 +1080,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [x] Implementar idempotência no retry por `pendingActionId` e status de item já lançado.
 - [x] Expandir auditoria existente para commit Moodle.
 - [x] Criar `consultar_auditoria_correcao` por `auditId`.
-- [ ] Expandir auditoria para criação de lote e revisão humana.
+- [x] Expandir auditoria para criação de lote e revisão humana.
 - [ ] Testar em sandbox.
 - [ ] Fazer piloto com turma pequena.
 

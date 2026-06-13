@@ -31,7 +31,9 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(batch.Id, result.BatchJobId);
         Assert.Equal(1, result.ReadyItems);
         Assert.Equal(0, result.BlockedItems);
-        Assert.Equal("CONFIRMAR LANCAMENTO 1 ITEM", result.ConfirmationText);
+        Assert.StartsWith("CONFIRMO O LANCAMENTO DE 1 CORRECAO NO MOODLE PARA O LOTE", result.ConfirmationText, StringComparison.Ordinal);
+        Assert.Contains(batch.Id.ToString(), result.ConfirmationText, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CURSO 10", result.ConfirmationText, StringComparison.Ordinal);
         Assert.NotNull(fixture.PendingActions.LastPayload);
         Assert.Single(fixture.PendingActions.LastPayload!.Items);
         Assert.Equal("501", fixture.PendingActions.LastPayload.Items[0].AssignmentId);
@@ -263,6 +265,13 @@ public sealed class GradingLaunchCommandHandlerTests
         public Task<int> CountItemsByBatchAsync(Guid batchId, CancellationToken cancellationToken)
         {
             return Task.FromResult(Items.Count(item => item.BatchId == batchId));
+        }
+
+        public Task<IReadOnlyList<GradingArtifact>> ListArtifactsByItemAsync(
+            Guid gradingItemId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<GradingArtifact>>([]);
         }
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)
