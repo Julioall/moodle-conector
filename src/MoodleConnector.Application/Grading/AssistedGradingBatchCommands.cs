@@ -82,7 +82,9 @@ public sealed record AssistedGradingItemDetailResult(
     [property: JsonPropertyName("reviewStatus")] string ReviewStatus,
     [property: JsonPropertyName("commitStatus")] string CommitStatus,
     [property: JsonPropertyName("teacherDecision")] string? TeacherDecision,
-    [property: JsonPropertyName("reviewNotes")] string? ReviewNotes);
+    [property: JsonPropertyName("reviewNotes")] string? ReviewNotes,
+    [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
+    [property: JsonPropertyName("pendingIssues")] IReadOnlyList<string> PendingIssues);
 
 public sealed record UpdateAssistedGradingDraftCommand(
     Guid GradingItemId,
@@ -320,7 +322,48 @@ public sealed class GetAssistedGradingItemQueryHandler(
             item.ReviewStatus.ToString(),
             item.CommitStatus.ToString(),
             item.TeacherDecision,
-            item.ReviewNotes);
+            item.ReviewNotes,
+            ComputeDraftVersionHash(item),
+            BuildPendingIssues(item));
+    }
+
+    private static string ComputeDraftVersionHash(AssistedGradingItem item)
+    {
+        var payload = string.Join(
+            "|",
+            item.Id.ToString("N"),
+            item.BatchId.ToString("N"),
+            item.FinalGrade?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            item.FinalFeedback ?? string.Empty,
+            item.TeacherDecision ?? string.Empty,
+            item.ReviewNotes ?? string.Empty,
+            item.ReviewStatus.ToString(),
+            item.CommitStatus.ToString(),
+            item.UpdatedAt.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
+        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    private static IReadOnlyList<string> BuildPendingIssues(AssistedGradingItem item)
+    {
+        var pendingIssues = new List<string>();
+
+        if (item.ReviewStatus == GradingReviewStatus.NotReviewed)
+        {
+            pendingIssues.Add("Revisao humana pendente.");
+        }
+
+        if (string.IsNullOrWhiteSpace(item.FinalFeedback))
+        {
+            pendingIssues.Add("Feedback final pendente.");
+        }
+
+        if (item.CommitStatus == GradingCommitStatus.Failed && !string.IsNullOrWhiteSpace(item.CommitError))
+        {
+            pendingIssues.Add($"Falha no lancamento Moodle: {item.CommitError}");
+        }
+
+        return pendingIssues;
     }
 }
 
@@ -441,6 +484,9 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
 
     private static AssistedGradingItemDetailResult ToDetailResult(AssistedGradingItem item)
     {
+        var draftVersionHash = ComputeDraftVersionHash(item);
+        var pendingIssues = BuildPendingIssues(item);
+
         return new AssistedGradingItemDetailResult(
             item.Id,
             item.BatchId,
@@ -458,7 +504,31 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             item.ReviewStatus.ToString(),
             item.CommitStatus.ToString(),
             item.TeacherDecision,
-            item.ReviewNotes);
+            item.ReviewNotes,
+            draftVersionHash,
+            pendingIssues);
+    }
+
+    private static IReadOnlyList<string> BuildPendingIssues(AssistedGradingItem item)
+    {
+        var pendingIssues = new List<string>();
+
+        if (item.ReviewStatus == GradingReviewStatus.NotReviewed)
+        {
+            pendingIssues.Add("Revisao humana pendente.");
+        }
+
+        if (string.IsNullOrWhiteSpace(item.FinalFeedback))
+        {
+            pendingIssues.Add("Feedback final pendente.");
+        }
+
+        if (item.CommitStatus == GradingCommitStatus.Failed && !string.IsNullOrWhiteSpace(item.CommitError))
+        {
+            pendingIssues.Add($"Falha no lancamento Moodle: {item.CommitError}");
+        }
+
+        return pendingIssues;
     }
 }
 

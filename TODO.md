@@ -321,13 +321,13 @@ Implementação no repo:
 **Tipo:** escrita interna, não Moodle
 **Objetivo:** salvar ajustes do professor no rascunho.
 
-- [ ] Entrada:
+- [x] Entrada:
   - `gradingItemId`
   - `finalGrade`
   - `finalFeedback`
   - `teacherDecision`
   - `reviewNotes`
-- [ ] Saída:
+- [x] Saída:
   - rascunho atualizado;
   - hash do rascunho;
   - pendências.

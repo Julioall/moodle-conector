@@ -151,6 +151,8 @@ public sealed class MoodleGradingToolsTests
         var data = structured.GetProperty("data");
         Assert.Equal("00000000-0000-0000-0000-000000000456", data.GetProperty("gradingItemId").GetString());
         Assert.Equal("101", data.GetProperty("studentId").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("draftVersionHash").GetString()));
+        Assert.Equal(2, data.GetProperty("pendingIssues").GetArrayLength());
         Assert.False(data.TryGetProperty("attachments", out _));
         Assert.False(data.TryGetProperty("studentEmail", out _));
     }
@@ -180,6 +182,8 @@ public sealed class MoodleGradingToolsTests
         var data = structured.GetProperty("data");
         Assert.Equal("Reviewed", data.GetProperty("reviewStatus").GetString());
         Assert.Equal("approved", data.GetProperty("teacherDecision").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("draftVersionHash").GetString()));
+        Assert.Equal(0, data.GetProperty("pendingIssues").GetArrayLength());
     }
 
     [Fact]
@@ -416,7 +420,9 @@ public sealed class MoodleGradingToolsTests
                     ReviewStatus: "NotReviewed",
                     CommitStatus: "NotReady",
                     TeacherDecision: null,
-                    ReviewNotes: null));
+                    ReviewNotes: null,
+                    DraftVersionHash: "hash-item-1",
+                    PendingIssues: ["Revisao humana pendente.", "Feedback final pendente."]));
             }
 
             if (request is UpdateAssistedGradingDraftCommand updateDraft)
@@ -439,7 +445,9 @@ public sealed class MoodleGradingToolsTests
                     ReviewStatus: "Reviewed",
                     CommitStatus: "Pending",
                     TeacherDecision: "approved",
-                    ReviewNotes: "Ajustei a nota pela conclusao."));
+                    ReviewNotes: "Ajustei a nota pela conclusao.",
+                    DraftVersionHash: "hash-item-2",
+                    PendingIssues: []));
             }
 
             if (request is CreateGradingLaunchPreviewCommand createPreview)
@@ -595,7 +603,9 @@ public sealed class MoodleGradingToolsTests
                     ReviewStatus: "NotReviewed",
                     CommitStatus: "NotReady",
                     TeacherDecision: null,
-                    ReviewNotes: null));
+                    ReviewNotes: null,
+                    DraftVersionHash: "hash-item-1",
+                    PendingIssues: ["Revisao humana pendente.", "Feedback final pendente."]));
             }
 
             if (request is UpdateAssistedGradingDraftCommand updateDraft)
@@ -618,7 +628,9 @@ public sealed class MoodleGradingToolsTests
                     ReviewStatus: "Reviewed",
                     CommitStatus: "Pending",
                     TeacherDecision: "approved",
-                    ReviewNotes: "Ajustei a nota pela conclusao."));
+                    ReviewNotes: "Ajustei a nota pela conclusao.",
+                    DraftVersionHash: "hash-item-2",
+                    PendingIssues: []));
             }
 
             if (request is CreateGradingLaunchPreviewCommand createPreview)

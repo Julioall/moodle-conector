@@ -122,6 +122,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(8.5m, result.FinalGrade);
         Assert.Equal("Feedback final revisado.", result.FinalFeedback);
         Assert.Equal("Reviewed", result.ReviewStatus);
+        Assert.False(string.IsNullOrWhiteSpace(result.DraftVersionHash));
+        Assert.Empty(result.PendingIssues);
     }
 
     [Fact]
@@ -175,6 +177,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal("Ajustei a nota pela conclusao.", result.ReviewNotes);
         Assert.Equal("Reviewed", result.ReviewStatus);
         Assert.Equal("Pending", result.CommitStatus);
+        Assert.False(string.IsNullOrWhiteSpace(result.DraftVersionHash));
+        Assert.Empty(result.PendingIssues);
         Assert.Equal(1, repository.SaveChangesCount);
     }
 
