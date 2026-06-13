@@ -116,6 +116,16 @@ public sealed class MoodleGradingTools(
         int maxItems = 25,
         [Description("Quando true, inclui apenas entregas aguardando correcao.")]
         bool onlyAwaitingGrading = true,
+        [Description("Quando true, inclui contexto de rubrica na montagem do lote.")]
+        bool includeRubric = true,
+        [Description("Quando true, considera anexos de submissao para analise.")]
+        bool includeSubmissionFiles = true,
+        [Description("Quando true, inclui materiais do curso como contexto auxiliar.")]
+        bool includeCourseMaterials = false,
+        [Description("Instrucoes adicionais do professor/tutor para orientar a correcao.")]
+        string? teacherInstructions = null,
+        [Description("Prioridade sugerida para processamento: low, normal ou high.")]
+        string priority = "normal",
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
@@ -126,6 +136,11 @@ public sealed class MoodleGradingTools(
             submissionIds ?? [],
             maxItems,
             onlyAwaitingGrading,
+                includeRubric,
+                includeSubmissionFiles,
+                includeCourseMaterials,
+                teacherInstructions,
+                priority,
             moodleAlias,
             cancellationToken);
     }
@@ -165,9 +180,11 @@ public sealed class MoodleGradingTools(
     public Task<CallToolResult> ConsultarItemCorrecaoAssistidaAsync(
         [Description("Identificador do item retornado pelo status do lote.")]
         Guid gradingItemId,
+        [Description("Identificador opcional do lote esperado para validar vinculo do item.")]
+        Guid? batchJobId = null,
         CancellationToken cancellationToken = default)
     {
-        return GetGradingItemCoreAsync(gradingItemId, cancellationToken);
+        return GetGradingItemCoreAsync(gradingItemId, batchJobId, cancellationToken);
     }
 
     [McpServerTool(
@@ -344,6 +361,11 @@ public sealed class MoodleGradingTools(
         IReadOnlyList<string> submissionIds,
         int maxItems,
         bool onlyAwaitingGrading,
+        bool includeRubric,
+        bool includeSubmissionFiles,
+        bool includeCourseMaterials,
+        string? teacherInstructions,
+        string priority,
         string? moodleAlias,
         CancellationToken cancellationToken)
     {
@@ -374,7 +396,12 @@ public sealed class MoodleGradingTools(
                     assignmentIds,
                     submissionIds,
                     maxItems,
-                    onlyAwaitingGrading),
+                    onlyAwaitingGrading,
+                    includeRubric,
+                    includeSubmissionFiles,
+                    includeCourseMaterials,
+                    teacherInstructions,
+                    priority),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -598,6 +625,7 @@ public sealed class MoodleGradingTools(
 
     private async Task<CallToolResult> GetGradingItemCoreAsync(
         Guid gradingItemId,
+        Guid? batchJobId,
         CancellationToken cancellationToken)
     {
         if (gradingItemId == Guid.Empty)
@@ -609,12 +637,16 @@ public sealed class MoodleGradingTools(
         try
         {
             data = await mediator.Send(
-                new GetAssistedGradingItemQuery(gradingItemId),
+                new GetAssistedGradingItemQuery(gradingItemId, batchJobId),
                 cancellationToken);
         }
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<AssistedGradingItemDetailResult>(ex.Message);
         }
         catch
         {

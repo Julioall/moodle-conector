@@ -17,7 +17,12 @@ public sealed record CreateAssistedGradingBatchCommand(
     IReadOnlyList<string> AssignmentIds,
     IReadOnlyList<string> SubmissionIds,
     int MaxItems,
-    bool OnlyAwaitingGrading) : IRequest<CreateAssistedGradingBatchResult>;
+    bool OnlyAwaitingGrading,
+    bool IncludeRubric = true,
+    bool IncludeSubmissionFiles = true,
+    bool IncludeCourseMaterials = false,
+    string? TeacherInstructions = null,
+    string Priority = "normal") : IRequest<CreateAssistedGradingBatchResult>;
 
 public sealed record CreateAssistedGradingBatchResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -57,7 +62,8 @@ public sealed record AssistedGradingBatchStatusItem(
     [property: JsonPropertyName("commitStatus")] string CommitStatus);
 
 public sealed record GetAssistedGradingItemQuery(
-    Guid GradingItemId) : IRequest<AssistedGradingItemDetailResult>;
+    Guid GradingItemId,
+    Guid? BatchJobId = null) : IRequest<AssistedGradingItemDetailResult>;
 
 public sealed record AssistedGradingItemDetailResult(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -291,6 +297,11 @@ public sealed class GetAssistedGradingItemQueryHandler(
 
         var item = await repository.GetItemAsync(request.GradingItemId, cancellationToken)
             ?? throw new InvalidOperationException("Item de correcao nao encontrado.");
+
+        if (request.BatchJobId is Guid batchJobId && batchJobId != Guid.Empty && item.BatchId != batchJobId)
+        {
+            throw new InvalidOperationException("O item informado nao pertence ao lote solicitado.");
+        }
 
         return new AssistedGradingItemDetailResult(
             item.Id,

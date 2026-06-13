@@ -264,7 +264,7 @@ Implementação no repo:
 **Tipo:** leitura + criação de job interno
 **Objetivo:** criar lote assíncrono de análise para 1 a 400 entregas.
 
-- [ ] Entrada:
+- [x] Entrada:
   - `courseId`
   - `assignmentIds`
   - `submissionIds` opcional
@@ -301,7 +301,7 @@ Implementação no repo:
 **Tipo:** leitura
 **Objetivo:** abrir análise de uma entrega específica.
 
-- [ ] Entrada:
+- [x] Entrada:
   - `batchJobId`
   - `gradingItemId`
 - [ ] Saída:

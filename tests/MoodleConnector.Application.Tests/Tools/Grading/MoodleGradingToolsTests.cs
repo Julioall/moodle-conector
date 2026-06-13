@@ -72,6 +72,10 @@ public sealed class MoodleGradingToolsTests
         Assert.Equal("321", mediator.LastCreateBatch!.UserExternalId);
         Assert.Equal("10", mediator.LastCreateBatch.CourseId);
         Assert.Equal(["501"], mediator.LastCreateBatch.AssignmentIds);
+        Assert.True(mediator.LastCreateBatch.IncludeRubric);
+        Assert.True(mediator.LastCreateBatch.IncludeSubmissionFiles);
+        Assert.False(mediator.LastCreateBatch.IncludeCourseMaterials);
+        Assert.Equal("normal", mediator.LastCreateBatch.Priority);
 
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         var data = structured.GetProperty("data");
@@ -136,10 +140,12 @@ public sealed class MoodleGradingToolsTests
             new FakeMoodleUserResolver(321));
 
         var result = await sut.ConsultarItemCorrecaoAssistidaAsync(
-            Guid.Parse("00000000-0000-0000-0000-000000000456"));
+            Guid.Parse("00000000-0000-0000-0000-000000000456"),
+            Guid.Parse("00000000-0000-0000-0000-000000000123"));
 
         Assert.False(result.IsError ?? false);
         Assert.NotNull(mediator.LastItemQuery);
+        Assert.Equal(Guid.Parse("00000000-0000-0000-0000-000000000123"), mediator.LastItemQuery!.BatchJobId);
 
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         var data = structured.GetProperty("data");

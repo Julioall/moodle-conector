@@ -110,7 +110,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var sut = new GetAssistedGradingItemQueryHandler(repository);
 
         var result = await sut.Handle(
-            new GetAssistedGradingItemQuery(item.Id),
+            new GetAssistedGradingItemQuery(item.Id, batch.Id),
             CancellationToken.None);
 
         Assert.Equal(item.Id, result.GradingItemId);
@@ -122,6 +122,25 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(8.5m, result.FinalGrade);
         Assert.Equal("Feedback final revisado.", result.FinalFeedback);
         Assert.Equal("Reviewed", result.ReviewStatus);
+    }
+
+    [Fact]
+    public async Task GetItem_QuandoBatchInformadoNaoCorresponde_DeveFalhar()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new GetAssistedGradingItemQueryHandler(repository);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sut.Handle(
+                new GetAssistedGradingItemQuery(item.Id, Guid.Parse("00000000-0000-0000-0000-000000000999")),
+                CancellationToken.None));
+
+        Assert.Equal("O item informado nao pertence ao lote solicitado.", ex.Message);
     }
 
     [Fact]
