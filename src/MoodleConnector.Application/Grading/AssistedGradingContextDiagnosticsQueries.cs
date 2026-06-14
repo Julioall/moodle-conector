@@ -51,7 +51,7 @@ public sealed record AssignmentContextArtifactDiagnosticResult(
     [property: JsonPropertyName("selected")] bool Selected,
     [property: JsonPropertyName("supporting")] bool Supporting);
 
-public sealed class GetAssistedGradingContextDiagnosticsQueryHandler(
+public sealed partial class GetAssistedGradingContextDiagnosticsQueryHandler(
     IGradingReviewRepository repository,
     ICurrentUserContext currentUser,
     IAssignmentContextSelectionService contextSelectionService,
