@@ -843,7 +843,7 @@ Checklist prático de descoberta:
 - [ ] Usar `mod_assign_save_grades` para envio em lote, se habilitado e testado.
 - [ ] Enviar em chunks.
 - [ ] Tratar escala 0–10, 0–100, conceito ou rubrica conforme configuração da atividade.
-- [ ] Validar nota máxima antes do commit.
+- [x] Validar nota máxima conhecida antes do commit, bloqueando prévia quando a nota final excede a soma dos critérios com `MaxPoints`.
 - [ ] Não sobrescrever feedback existente sem confirmação explícita adicional.
 - [x] No MVP, preferir envio individual com `mod_assign_save_grade` para simplificar auditoria e idempotência.
 - [ ] Só usar lote Moodle nativo (`mod_assign_save_grades`) depois de testar falhas parciais e comportamento transacional.
@@ -947,7 +947,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [ ] Validar se o professor/tutor pode corrigir a atividade.
 - [ ] Validar se o estudante pertence à turma.
 - [ ] Validar se a tentativa ainda é corrigível.
-- [ ] Validar se a nota está dentro da escala.
+- [x] Validar se a nota está dentro da escala quando há critérios com pontuação máxima persistida.
 - [ ] Validar se o feedback final foi revisado.
 - [ ] Validar no Moodle a capability `mod/assign:grade` ou comportamento equivalente retornado pela API.
 

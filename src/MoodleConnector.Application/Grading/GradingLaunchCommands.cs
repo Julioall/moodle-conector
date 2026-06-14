@@ -84,12 +84,27 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         var selected = selectedIds.Count == 0
             ? allItems
             : allItems.Where(item => selectedIds.Contains(item.Id)).ToArray();
-        var ready = selected
+        var launchable = selected
             .Where(item => IsReadyForLaunch(item, request.OnlyReviewed))
             .ToArray();
-        var blocked = selected.Count - ready.Length;
+        var scaleWarnings = new List<string>();
+        var ready = new List<AssistedGradingItem>();
+        foreach (var item in launchable)
+        {
+            var maxGrade = await GetKnownMaxGradeAsync(item.Id, cancellationToken);
+            if (maxGrade is not null && item.FinalGrade > maxGrade)
+            {
+                scaleWarnings.Add(
+                    $"Item {item.Id}: nota final {FormatGrade(item.FinalGrade!.Value)} excede nota maxima {FormatGrade(maxGrade.Value)} identificada pelos criterios.");
+                continue;
+            }
 
-        if (ready.Length == 0)
+            ready.Add(item);
+        }
+
+        var blocked = selected.Count - ready.Count;
+
+        if (ready.Count == 0)
         {
             return new CreateGradingLaunchPreviewResult(
                 Guid.Empty,
@@ -100,14 +115,16 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 Launches: [],
                 ConfirmationText: string.Empty,
                 ExpiresAt: null,
-                Warnings: ["Nenhum item revisado e pronto para lancamento foi encontrado."]);
+                Warnings: scaleWarnings.Count > 0
+                    ? scaleWarnings
+                    : ["Nenhum item revisado e pronto para lancamento foi encontrado."]);
         }
 
         var payload = new GradingLaunchPayload(
             batch.Id,
             ready.Select(ToPayloadItem).ToArray());
         var previewItems = ready.Select(ToPreviewItem).ToArray();
-        var itemLabel = ready.Length == 1 ? "CORRECAO" : "CORRECOES";
+        var itemLabel = ready.Count == 1 ? "CORRECAO" : "CORRECOES";
         var activityScope = string.Join(
             ",",
             ready
@@ -115,7 +132,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 .Distinct(StringComparer.Ordinal)
                 .Take(10));
         var confirmationText =
-            $"CONFIRMO O LANCAMENTO DE {ready.Length} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO NOTA_E_FEEDBACK";
+            $"CONFIRMO O LANCAMENTO DE {ready.Count} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO NOTA_E_FEEDBACK";
         var pending = await pendingActions.CreatePendingActionAsync(
             ToolName,
             ToolRiskLevel.CriticalHumanConfirmedWrite,
@@ -124,7 +141,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             {
                 batchJobId = batch.Id,
                 totalItems = selected.Count,
-                readyItems = ready.Length,
+                readyItems = ready.Count,
                 blockedItems = blocked,
                 launches = previewItems
             },
@@ -137,12 +154,12 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             pending.PendingActionId,
             batch.Id,
             selected.Count,
-            ready.Length,
+            ready.Count,
             blocked,
             previewItems,
             pending.ConfirmationText,
             pending.ExpiresAt,
-            Warnings: blocked > 0 ? [$"{blocked} item(ns) bloqueado(s) por falta de revisao, nota final ou feedback final."] : []);
+            Warnings: BuildWarnings(blocked, scaleWarnings));
     }
 
     private async Task<IReadOnlyList<AssistedGradingItem>> LoadBatchItemsAsync(
@@ -157,6 +174,18 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             cancellationToken);
     }
 
+    private async Task<decimal?> GetKnownMaxGradeAsync(Guid gradingItemId, CancellationToken cancellationToken)
+    {
+        var evidence = await repository.ListEvidenceByItemAsync(gradingItemId, cancellationToken);
+        var maxPoints = evidence
+            .Select(item => item.MaxPoints)
+            .Where(points => points is > 0)
+            .Select(points => points!.Value)
+            .ToArray();
+
+        return maxPoints.Length == 0 ? null : maxPoints.Sum();
+    }
+
     private static bool IsReadyForLaunch(AssistedGradingItem item, bool onlyReviewed)
     {
         return (!onlyReviewed || item.ReviewStatus == GradingReviewStatus.Reviewed) &&
@@ -165,6 +194,24 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.FinalGrade is not null &&
             !string.IsNullOrWhiteSpace(item.FinalFeedback);
     }
+
+    private static IReadOnlyList<string> BuildWarnings(int blocked, IReadOnlyList<string> scaleWarnings)
+    {
+        var warnings = new List<string>(scaleWarnings);
+        var otherBlocked = blocked - scaleWarnings.Count;
+        if (otherBlocked > 0)
+        {
+            warnings.Add($"{otherBlocked} item(ns) bloqueado(s) por falta de revisao, nota final ou feedback final.");
+        }
+
+        return warnings;
+    }
+
+    private static string FormatGrade(decimal grade)
+    {
+        return grade.ToString("0.####", CultureInfo.InvariantCulture);
+    }
+
 
     private static GradingLaunchPayloadItem ToPayloadItem(AssistedGradingItem item)
     {

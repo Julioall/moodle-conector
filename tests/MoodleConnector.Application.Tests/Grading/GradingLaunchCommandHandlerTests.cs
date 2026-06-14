@@ -72,6 +72,62 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreview_BloqueiaNotaFinalAcimaDaNotaMaximaDasEvidencias()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        item.ApplyTeacherReview(12m, "Feedback final revisado.", "teacher-1", 321, "approved", "ok");
+        await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
+        await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
+        await fixture.GradingRepository.AddEvidenceAsync(
+            new GradingEvidence(
+                Guid.NewGuid(),
+                item.Id,
+                "c1",
+                "Criterio 1",
+                MaxPoints: 5m,
+                SuggestedPoints: 4m,
+                EvidenceText: "Evidencia.",
+                GapsText: null,
+                TeacherReviewRequired: false,
+                CreatedAt: DateTimeOffset.UtcNow),
+            CancellationToken.None);
+        await fixture.GradingRepository.AddEvidenceAsync(
+            new GradingEvidence(
+                Guid.NewGuid(),
+                item.Id,
+                "c2",
+                "Criterio 2",
+                MaxPoints: 5m,
+                SuggestedPoints: 4m,
+                EvidenceText: "Evidencia.",
+                GapsText: null,
+                TeacherReviewRequired: false,
+                CreatedAt: DateTimeOffset.UtcNow),
+            CancellationToken.None);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(
+                batch.Id,
+                GradingItemIds: [],
+                OnlyReviewed: true),
+            CancellationToken.None);
+
+        Assert.Equal(Guid.Empty, result.PendingActionId);
+        Assert.Equal(0, result.ReadyItems);
+        Assert.Equal(1, result.BlockedItems);
+        Assert.Null(fixture.PendingActions.LastPayload);
+        Assert.Contains(result.Warnings, warning => warning.Contains("nota final 12", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Warnings, warning => warning.Contains("nota maxima 10", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task CreatePreview_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
     {
         var fixture = new Fixture(currentUserSubject: "teacher-2");
@@ -262,6 +318,7 @@ public sealed class GradingLaunchCommandHandlerTests
     {
         public List<AssistedGradingBatch> Batches { get; } = [];
         public List<AssistedGradingItem> Items { get; } = [];
+        public List<GradingEvidence> Evidence { get; } = [];
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
         {
@@ -287,6 +344,7 @@ public sealed class GradingLaunchCommandHandlerTests
 
         public Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
         {
+            Evidence.Add(evidence);
             return Task.CompletedTask;
         }
 
@@ -325,7 +383,9 @@ public sealed class GradingLaunchCommandHandlerTests
             Guid gradingItemId,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult<IReadOnlyList<GradingEvidence>>([]);
+            return Task.FromResult<IReadOnlyList<GradingEvidence>>(Evidence
+                .Where(evidence => evidence.GradingItemId == gradingItemId)
+                .ToArray());
         }
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)
