@@ -209,7 +209,7 @@ AVA Moodle
 - [ ] Usar `readOnlyHint: false` em tools que criam job, rascunho, ação pendente ou escrita no Moodle.
 - [ ] Usar `openWorldHint: false` para escrita no Moodle institucional, pois a ação fica em sistema privado/fechado e não publica na internet aberta.
 - [x] Usar `destructiveHint: true` em `confirmar_lancamento_lote_moodle`, salvo se o handler provar que nunca sobrescreve nota/feedback existente e que o efeito é reversível.
-- [ ] Usar `idempotentHint: true` somente quando houver chave de idempotência, versão de rascunho, `pendingActionId` ou semântica comprovadamente retry-safe.
+- [x] Usar `idempotentHint: true` somente quando houver chave de idempotência, versão de rascunho, `pendingActionId` ou semântica comprovadamente retry-safe.
 - [ ] No MVP, manter o OAuth atual com `moodle-mcp-audience` e autorização server-side por claims internas.
 - [ ] Para escrita, exigir:
   - conexão Moodle com `CanWrite = true`;
@@ -1042,7 +1042,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [ ] Tentativa de mandar o modelo ignorar rubrica.
 - [ ] Tentativa de sobrescrever nota sem confirmação.
 - [ ] Usuário sem permissão tentando lançar nota.
-- [ ] Reuso de `pendingActionId`.
+- [x] Reuso de `pendingActionId`.
 - [ ] Confirmação divergente.
 - [ ] Token expirado.
 - [ ] Token sem escopo de escrita.

@@ -61,7 +61,8 @@ public sealed record GradingLaunchPayloadItem(
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("grade")] decimal Grade,
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
-    [property: JsonPropertyName("attemptNumber")] int? AttemptNumber);
+    [property: JsonPropertyName("attemptNumber")] int? AttemptNumber,
+    [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash);
 
 public sealed class CreateGradingLaunchPreviewCommandHandler(
     IGradingReviewRepository repository,
@@ -222,7 +223,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             item.FinalGrade ?? 0,
             item.FinalFeedback ?? string.Empty,
-            item.AttemptNumber);
+            item.AttemptNumber,
+            GradingDraftVersionHash.Compute(item));
     }
 
     private static GradingLaunchPreviewItem ToPreviewItem(AssistedGradingItem item)
@@ -301,6 +303,29 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
 
             if (item.CommitStatus == GradingCommitStatus.Succeeded)
             {
+                continue;
+            }
+
+            var currentDraftVersionHash = GradingDraftVersionHash.Compute(item);
+            if (!string.Equals(payloadItem.DraftVersionHash, currentDraftVersionHash, StringComparison.Ordinal))
+            {
+                var message = "O rascunho foi alterado depois da criacao da previa. Gere uma nova previa antes de lancar no Moodle.";
+                item.MarkCommitFailed(message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new
+                    {
+                        item.CommitStatus,
+                        expectedDraftVersionHash = payloadItem.DraftVersionHash,
+                        currentDraftVersionHash
+                    },
+                    errorCode: "grading_draft_version_mismatch",
+                    errorMessage: message,
+                    cancellationToken);
                 continue;
             }
 

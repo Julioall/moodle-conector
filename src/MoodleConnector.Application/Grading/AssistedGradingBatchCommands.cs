@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -630,26 +629,9 @@ public sealed class GetAssistedGradingItemQueryHandler(
             item.CommitStatus.ToString(),
             item.TeacherDecision,
             item.ReviewNotes,
-            ComputeDraftVersionHash(item),
+            GradingDraftVersionHash.Compute(item),
             BuildPendingIssues(item),
             evidence.Select(ToEvidenceResult).ToArray());
-    }
-
-    private static string ComputeDraftVersionHash(AssistedGradingItem item)
-    {
-        var payload = string.Join(
-            "|",
-            item.Id.ToString("N"),
-            item.BatchId.ToString("N"),
-            item.FinalGrade?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-            item.FinalFeedback ?? string.Empty,
-            item.TeacherDecision ?? string.Empty,
-            item.ReviewNotes ?? string.Empty,
-            item.ReviewStatus.ToString(),
-            item.CommitStatus.ToString(),
-            item.UpdatedAt.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
-        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
-        return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
     private static IReadOnlyList<string> BuildPendingIssues(AssistedGradingItem item)
@@ -735,7 +717,7 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             .Distinct(StringComparer.Ordinal)
             .OrderBy(hash => hash, StringComparer.Ordinal)
             .ToArray();
-        var draftVersionHash = ComputeDraftVersionHash(item);
+        var draftVersionHash = GradingDraftVersionHash.Compute(item);
 
         await auditLogs.AddAsync(new MoodleAuditLog
         {
@@ -775,21 +757,6 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         return await ToDetailResultAsync(item, cancellationToken);
     }
 
-    private static string ComputeDraftVersionHash(AssistedGradingItem item)
-    {
-        var payload = string.Join(
-            "|",
-            item.Id.ToString("N"),
-            item.BatchId.ToString("N"),
-            item.FinalGrade?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
-            item.FinalFeedback ?? string.Empty,
-            item.TeacherDecision ?? string.Empty,
-            item.ReviewNotes ?? string.Empty,
-            item.ReviewedAt?.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture) ?? string.Empty);
-        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
-        return Convert.ToHexString(hashBytes).ToLowerInvariant();
-    }
-
     private static bool MatchesExistingReview(
         AssistedGradingItem item,
         UpdateAssistedGradingDraftCommand request)
@@ -810,7 +777,7 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         CancellationToken cancellationToken)
     {
         var evidence = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
-        var draftVersionHash = ComputeDraftVersionHash(item);
+        var draftVersionHash = GradingDraftVersionHash.Compute(item);
         var pendingIssues = BuildPendingIssues(item);
 
         return new AssistedGradingItemDetailResult(

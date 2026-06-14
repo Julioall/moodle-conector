@@ -41,6 +41,7 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("101", fixture.PendingActions.LastPayload.Items[0].StudentId);
         Assert.Equal(8.5m, fixture.PendingActions.LastPayload.Items[0].Grade);
         Assert.Equal("Feedback final revisado.", fixture.PendingActions.LastPayload.Items[0].FeedbackText);
+        Assert.False(string.IsNullOrWhiteSpace(fixture.PendingActions.LastPayload.Items[0].DraftVersionHash));
     }
 
     [Fact]
@@ -214,6 +215,40 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task ConfirmLaunch_ComPreviaObsoleta_NaoEnviaNota()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(
+            batch.Id,
+            item.Id,
+            draftVersionHash: "hash-antigo");
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("rascunho foi alterado", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("grading_draft_version_mismatch", auditLog.ErrorCode);
+    }
+
+    [Fact]
     public async Task ConfirmLaunch_BloqueiaQuandoFuncaoMoodleDeEscritaNaoEstaDisponivel()
     {
         var fixture = new Fixture();
@@ -270,7 +305,10 @@ public sealed class GradingLaunchCommandHandlerTests
             return batch;
         }
 
-        public PendingMoodleAction CreatePendingLaunchAction(Guid batchId, Guid gradingItemId)
+        public PendingMoodleAction CreatePendingLaunchAction(
+            Guid batchId,
+            Guid gradingItemId,
+            string? draftVersionHash = null)
         {
             var payload = new GradingLaunchPayload(
                 batchId,
@@ -282,7 +320,8 @@ public sealed class GradingLaunchCommandHandlerTests
                         "101",
                         8.5m,
                         "Feedback final revisado.",
-                        AttemptNumber: 0)
+                        AttemptNumber: 0,
+                        DraftVersionHash: draftVersionHash ?? GradingDraftVersionHash.Compute(GradingRepository.Items.Single(item => item.Id == gradingItemId)))
                 ]);
 
             return new PendingMoodleAction
