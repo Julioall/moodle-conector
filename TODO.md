@@ -828,7 +828,8 @@ Checklist prático de descoberta:
 - [ ] Confirmar quais funções estão habilitadas no serviço usado por `MoodleApi:LoginService`.
 - [ ] Confirmar se o mesmo token do usuário autenticado pode avaliar ou se será necessário `MoodleApi:WriteServiceToken`.
 - [ ] Se usar `WriteServiceToken`, validar governança: ele não pode permitir escrita ampla sem checagem do professor/tutor autenticado no conector.
-- [ ] Capturar respostas reais de erro do Moodle para falta de capability e mapear para mensagens claras no MCP.
+- [x] Capturar erros de capability/leitura de nota no caminho de commit e mapear para bloqueios claros no MCP/auditoria.
+- [ ] Ampliar mapeamento com respostas reais do Moodle capturadas em sandbox/homologacao.
 
 ### 8.2 Recomendação para anexos
 
@@ -950,7 +951,8 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [ ] Validar se a tentativa ainda é corrigível.
 - [x] Validar se a nota está dentro da escala quando há critérios com pontuação máxima persistida.
 - [ ] Validar se o feedback final foi revisado.
-- [ ] Validar no Moodle a capability `mod/assign:grade` ou comportamento equivalente retornado pela API.
+- [x] Validar no Moodle a disponibilidade de leitura/escrita necessaria antes do commit, bloqueando quando `mod_assign_get_grades` ou `mod_assign_save_grade` falham.
+- [ ] Validar no Moodle a capability `mod/assign:grade` por professor/tutor no curso/atividade, quando houver endpoint/sinal confiavel.
 
 ### 11.3 Confirmação humana
 

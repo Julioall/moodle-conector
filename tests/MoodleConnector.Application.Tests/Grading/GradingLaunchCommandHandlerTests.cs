@@ -289,6 +289,39 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoNaoConsegueValidarNotaExistente()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.ExistingGrades.Error = new InvalidOperationException("mod_assign_get_grades indisponivel");
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("validar se ja existe nota", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_existing_grade_validation_failed", auditLog.ErrorCode);
+    }
+
+    [Fact]
     public async Task ConfirmLaunch_BloqueiaQuandoFuncaoMoodleDeEscritaNaoEstaDisponivel()
     {
         var fixture = new Fixture();
@@ -561,6 +594,7 @@ public sealed class GradingLaunchCommandHandlerTests
     private sealed class FakeMoodleAssignmentGradeReadGateway : IMoodleAssignmentGradeReadGateway
     {
         public List<AssignmentExistingGrade> ExistingGrades { get; } = [];
+        public Exception? Error { get; set; }
 
         public Task<AssignmentExistingGrade?> GetExistingGradeAsync(
             string userExternalId,
@@ -568,6 +602,11 @@ public sealed class GradingLaunchCommandHandlerTests
             string studentId,
             CancellationToken cancellationToken)
         {
+            if (Error is not null)
+            {
+                throw Error;
+            }
+
             return Task.FromResult(ExistingGrades.SingleOrDefault(grade =>
                 grade.AssignmentId == assignmentId &&
                 grade.StudentId == studentId));

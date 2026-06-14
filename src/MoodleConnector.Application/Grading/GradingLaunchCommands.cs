@@ -336,12 +336,28 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 continue;
             }
 
-            var existingGrade = await gradeReadGateway.GetExistingGradeAsync(
+            var existingGradeResult = await GetExistingGradeValidationAsync(
                 userExternalId,
                 payloadItem.AssignmentId,
                 payloadItem.StudentId,
                 cancellationToken);
-            if (existingGrade?.HasGrade == true)
+            if (existingGradeResult.Failure is not null)
+            {
+                item.MarkCommitFailed(existingGradeResult.Failure.Message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, existingGradeResult.Failure.Message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new { item.CommitStatus },
+                    errorCode: existingGradeResult.Failure.ErrorCode,
+                    errorMessage: existingGradeResult.Failure.Message,
+                    cancellationToken);
+                continue;
+            }
+
+            if (existingGradeResult.ExistingGrade?.HasGrade == true)
             {
                 var message = $"O Moodle ja possui nota existente para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma confirmacao especifica de sobrescrita antes de lancar.";
                 item.MarkCommitFailed(message);
@@ -354,7 +370,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     responseSummary: new
                     {
                         item.CommitStatus,
-                        existingGrade = existingGrade.Grade
+                        existingGrade = existingGradeResult.ExistingGrade.Grade
                     },
                     errorCode: "moodle_existing_grade",
                     errorMessage: message,
@@ -437,6 +453,31 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         }
     }
 
+    private async Task<ExistingGradeValidationResult> GetExistingGradeValidationAsync(
+        string userExternalId,
+        string assignmentId,
+        string studentId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var existingGrade = await gradeReadGateway.GetExistingGradeAsync(
+                userExternalId,
+                assignmentId,
+                studentId,
+                cancellationToken);
+            return new ExistingGradeValidationResult(existingGrade, Failure: null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new ExistingGradeValidationResult(
+                ExistingGrade: null,
+                new CapabilityValidationFailure(
+                    $"Nao foi possivel validar se ja existe nota no Moodle antes do lancamento: {ex.Message}",
+                    "moodle_existing_grade_validation_failed"));
+        }
+    }
+
     private async Task MarkPendingItemsFailedAsync(
         PendingMoodleAction action,
         Guid batchJobId,
@@ -516,6 +557,10 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             ErrorMessage = errorMessage
         }, cancellationToken);
     }
+
+    private sealed record ExistingGradeValidationResult(
+        AssignmentExistingGrade? ExistingGrade,
+        CapabilityValidationFailure? Failure);
 
     private sealed record CapabilityValidationFailure(string Message, string ErrorCode);
 }
