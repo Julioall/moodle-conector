@@ -154,6 +154,47 @@ public sealed class GradingContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_ExtraiCriteriosEValorDeSapComCriteriosNaMesmaLinha()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            "SAP 01.pdf",
+            "application/pdf",
+            "sha-sap-01",
+            SizeBytes: 4317,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef:
+                """
+                Situação de Aprendizagem 01
+                Envio SAP 01 - Etapa 1
+                Valor da atividade: 49 pontos
+                Critérios de avaliação: organização do plano de gerenciamento; descrição do gerenciamento de eventos, incidentes e problemas; aderência às boas práticas de ITIL; clareza na proposta de ações corretivas.
+                Produto esperado: Plano de Gerenciamento de Eventos, Incidentes e Problemas de TI.
+                """,
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.Equal(49m, context.MaxGrade);
+        Assert.Contains("organização do plano de gerenciamento", context.Criteria, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("gerenciamento de eventos", context.Criteria, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ITIL", context.Criteria, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Produto esperado", context.Criteria, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task BuildAsync_QuandoArquivosNaoIncluidos_NaoConsultaArtefatos()
     {
         var repository = new FakeGradingReviewRepository();

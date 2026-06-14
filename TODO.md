@@ -324,8 +324,8 @@ Ainda pendente:
 
 ### P0 — antes de liberar escrita real
 
-- [ ] Retestar no conector `consultar_contexto_item_correcao_assistida`.
-- [ ] Retestar no conector curso `29972` e confirmar seleção do SAP correto.
+- [x] Retestar no conector `consultar_contexto_item_correcao_assistida`.
+- [x] Retestar no conector curso `29972` e confirmar seleção do SAP correto (`SAP 01.pdf`).
 - [ ] Retestar no conector curso `32787` e confirmar SAP 01/SAP 02 por atividade.
 - [ ] Confirmar rubricas/escalas reais no Moodle.
 - [ ] Confirmar permissões/capabilities reais de professor/tutor.
@@ -340,7 +340,8 @@ Ainda pendente:
 - [ ] Implementar XLSX.
 - [ ] Implementar ODT/ODS/ODP.
 - [ ] Implementar OCR ou bloqueio específico para PDF escaneado.
-- [ ] Melhorar extração de rubrica/critério/escala.
+- [x] Melhorar extração de critério/valor para SAP com `Valor da atividade` e critérios na mesma linha do cabeçalho.
+- [ ] Melhorar extração de rubrica/critério/escala para outros formatos reais do Moodle.
 - [ ] Melhorar análise de baixa confiança.
 - [ ] Adicionar observações internas ao professor.
 - [ ] Exportar relatório consolidado para coordenação.

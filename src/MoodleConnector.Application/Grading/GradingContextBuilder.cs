@@ -172,6 +172,7 @@ public sealed partial class GradingContextBuilder(
             if (CriteriaHeaderRegex().IsMatch(line))
             {
                 collecting = true;
+                AddInlineCriteriaFromHeader(line, criteria);
                 continue;
             }
 
@@ -195,13 +196,29 @@ public sealed partial class GradingContextBuilder(
         return criteria.Count == 0 ? null : string.Join('\n', criteria.Take(20));
     }
 
-    [GeneratedRegex(@"(?i)\b(?:valor|nota\s*maxima|pontuacao|vale)\s*:?\s*(?<grade>\d+(?:[\.,]\d+)?)\s*(?:pontos?|pts?|%)?")]
+    private static void AddInlineCriteriaFromHeader(string line, List<string> criteria)
+    {
+        var separatorIndex = line.IndexOf(':', StringComparison.Ordinal);
+        if (separatorIndex < 0 || separatorIndex == line.Length - 1)
+        {
+            return;
+        }
+
+        var inlineCriteria = line[(separatorIndex + 1)..]
+            .Split([';', '|'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => CriteriaPrefixRegex().Replace(item, string.Empty).Trim().TrimEnd('.'))
+            .Where(item => item.Length >= 8);
+
+        criteria.AddRange(inlineCriteria);
+    }
+
+    [GeneratedRegex(@"(?i)\b(?:valor(?:\s+da\s+atividade)?|nota\s*m[aá]xima|pontua[cç][aã]o|vale)\s*:?\s*(?<grade>\d+(?:[\.,]\d+)?)\s*(?:pontos?|pts?|%)?")]
     private static partial Regex MaxGradeRegex();
 
     [GeneratedRegex(@"(?i)\b(?:criterios?|crit[eé]rios?|rubrica|avaliacao|avalia[cç][aã]o)\b")]
     private static partial Regex CriteriaHeaderRegex();
 
-    [GeneratedRegex(@"(?i)\b(?:entrega|prazo|observa[cç][oõ]es?|formato|refer[eê]ncias?)\b")]
+    [GeneratedRegex(@"(?i)\b(?:entrega|prazo|observa[cç][oõ]es?|formato|refer[eê]ncias?|produto\s+esperado)\b")]
     private static partial Regex StopCriteriaRegex();
 
     [GeneratedRegex(@"^\s*(?:[-*•]|\d+[\.)]|[a-zA-Z][\.)])\s*")]
