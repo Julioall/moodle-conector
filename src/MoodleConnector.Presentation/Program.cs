@@ -246,7 +246,7 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleCourseContentsTools>()
     .WithTools<MoodleCourseActivitiesTools>()
     .WithTools<MoodleAssignmentSubmissionsTools>()
-    .WithTools<MoodleGradingTools>();
+    .WithTools<MoodleGradingTools>()
     .WithTools<MoodleGradingContextDiagnosticsTools>();
 
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();
