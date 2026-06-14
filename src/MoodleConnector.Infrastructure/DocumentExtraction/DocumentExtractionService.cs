@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using MoodleConnector.Application.Abstractions;
+using UglyToad.PdfPig;
+using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 
 namespace MoodleConnector.Infrastructure.DocumentExtraction;
 
@@ -21,7 +23,6 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
 
     private static readonly HashSet<string> BinaryMimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "application/pdf",
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -66,6 +67,11 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
                 ErrorMessage: $"Extracao de texto para o formato '{mimeType}' nao esta disponivel nesta versao. Requer biblioteca de conversao externa."));
         }
 
+        if (IsPdf(filename, mimeType, content))
+        {
+            return Task.FromResult(ExtractPdf(filename, mimeType, content));
+        }
+
         if (!SupportedMimeTypes.Contains(mimeType))
         {
             return Task.FromResult(new DocumentExtractionResult(
@@ -108,6 +114,76 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
                 Truncated: false,
                 ErrorMessage: $"Falha ao extrair texto: {ex.Message}"));
         }
+    }
+
+    private static DocumentExtractionResult ExtractPdf(
+        string filename,
+        string mimeType,
+        byte[] content)
+    {
+        try
+        {
+            using var document = PdfDocument.Open(content);
+            var builder = new StringBuilder();
+            foreach (var page in document.GetPages())
+            {
+                var pageText = ContentOrderTextExtractor.GetText(page);
+                if (!string.IsNullOrWhiteSpace(pageText))
+                {
+                    builder.AppendLine(pageText);
+                }
+            }
+
+            var text = MultiSpaceRegex().Replace(builder.ToString(), " ").Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return new DocumentExtractionResult(
+                    filename,
+                    mimeType,
+                    ExtractionStatus.UnsupportedFormat,
+                    ExtractedText: null,
+                    WordCount: 0,
+                    CharCount: 0,
+                    Truncated: false,
+                    ErrorMessage: "O PDF nao possui texto extraivel. Pode ser um PDF escaneado ou composto apenas por imagens.");
+            }
+
+            var truncated = text.Length > MaxExtractedChars;
+            var extracted = truncated ? text[..MaxExtractedChars] : text;
+
+            return new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.Succeeded,
+                extracted,
+                CountWords(extracted),
+                extracted.Length,
+                truncated,
+                ErrorMessage: null);
+        }
+        catch (Exception ex)
+        {
+            return new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.Failed,
+                ExtractedText: null,
+                WordCount: 0,
+                CharCount: 0,
+                Truncated: false,
+                ErrorMessage: $"Falha ao extrair texto do PDF: {ex.Message}");
+        }
+    }
+
+    private static bool IsPdf(string filename, string mimeType, byte[] content)
+    {
+        return mimeType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            filename.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+            (content.Length >= 4 &&
+             content[0] == 0x25 &&
+             content[1] == 0x50 &&
+             content[2] == 0x44 &&
+             content[3] == 0x46);
     }
 
     private static string DecodeText(byte[] content)

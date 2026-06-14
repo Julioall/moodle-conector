@@ -564,6 +564,7 @@ Descricao:
 
 - Cria um job interno em `grading_batch` e itens em `grading_item` a partir das entregas retornadas pelas queries de submissao existentes.
 - Quando `includeSubmissionFiles=true`, baixa os anexos retornados pela submissao com `fileUrl`, respeita os limites de arquivo configurados e persiste `GradingArtifact` com o resultado da extracao.
+- A extracao suporta textos simples/HTML/JSON/XML/CSV e PDF com texto embutido. PDF escaneado ou composto apenas por imagem ainda exige OCR.
 - O orquestrador inline do MVP processa itens pendentes logo apos a criacao do lote: se houver texto extraido, gera um parecer preliminar revisavel; se nao houver conteudo legivel, marca o item como bloqueado.
 - Nota sugerida confiavel continua dependente de rubrica/criterios e escala disponiveis.
 - Nao escreve nota ou feedback no Moodle.

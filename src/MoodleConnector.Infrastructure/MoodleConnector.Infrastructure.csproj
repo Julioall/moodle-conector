@@ -11,6 +11,7 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="10.0.8" />
     <PackageReference Include="OpenIddict.EntityFrameworkCore" Version="7.5.0" />
+    <PackageReference Include="PdfPig" Version="0.1.14" />
   </ItemGroup>
 
   <ItemGroup>
