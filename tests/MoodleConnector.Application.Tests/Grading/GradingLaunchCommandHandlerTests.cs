@@ -163,6 +163,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.GradingRepository,
             fixture.Confirmations,
             fixture.Capabilities,
+            fixture.ExistingGrades,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -201,6 +202,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.GradingRepository,
             fixture.Confirmations,
             fixture.Capabilities,
+            fixture.ExistingGrades,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -230,6 +232,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.GradingRepository,
             fixture.Confirmations,
             fixture.Capabilities,
+            fixture.ExistingGrades,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -249,6 +252,43 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoJaExisteNotaNoMoodle()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.ExistingGrades.ExistingGrades.Add(new AssignmentExistingGrade(
+            AssignmentId: "501",
+            StudentId: "101",
+            Grade: 7.5m,
+            HasGrade: true));
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("nota existente", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_existing_grade", auditLog.ErrorCode);
+    }
+
+    [Fact]
     public async Task ConfirmLaunch_BloqueiaQuandoFuncaoMoodleDeEscritaNaoEstaDisponivel()
     {
         var fixture = new Fixture();
@@ -263,6 +303,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.GradingRepository,
             fixture.Confirmations,
             fixture.Capabilities,
+            fixture.ExistingGrades,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -290,6 +331,7 @@ public sealed class GradingLaunchCommandHandlerTests
         public FakePendingActionRepository PendingRepository { get; } = new();
         public FakeActionConfirmationService Confirmations { get; } = new();
         public FakeMoodleGradingCapabilitiesGateway Capabilities { get; } = new();
+        public FakeMoodleAssignmentGradeReadGateway ExistingGrades { get; } = new();
         public FakeAuditLogRepository AuditLogs { get; } = new();
         public FakeMediator Mediator { get; } = new();
         public FakeCurrentUserContext CurrentUser { get; } = new(currentUserSubject, scopes);
@@ -513,6 +555,22 @@ public sealed class GradingLaunchCommandHandlerTests
             return Task.FromResult(new MoodleWebServiceFunctionCatalog(
                 "moodle_mobile_app",
                 Functions));
+        }
+    }
+
+    private sealed class FakeMoodleAssignmentGradeReadGateway : IMoodleAssignmentGradeReadGateway
+    {
+        public List<AssignmentExistingGrade> ExistingGrades { get; } = [];
+
+        public Task<AssignmentExistingGrade?> GetExistingGradeAsync(
+            string userExternalId,
+            string assignmentId,
+            string studentId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(ExistingGrades.SingleOrDefault(grade =>
+                grade.AssignmentId == assignmentId &&
+                grade.StudentId == studentId));
         }
     }
 

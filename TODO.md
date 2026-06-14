@@ -844,7 +844,8 @@ Checklist prático de descoberta:
 - [ ] Enviar em chunks.
 - [ ] Tratar escala 0–10, 0–100, conceito ou rubrica conforme configuração da atividade.
 - [x] Validar nota máxima conhecida antes do commit, bloqueando prévia quando a nota final excede a soma dos critérios com `MaxPoints`.
-- [ ] Não sobrescrever feedback existente sem confirmação explícita adicional.
+- [x] Não sobrescrever nota existente sem confirmação explícita adicional; `mod_assign_get_grades` bloqueia commit quando já há nota.
+- [ ] Não sobrescrever feedback existente sem confirmação explícita adicional quando houver leitura confiável de feedback atual.
 - [x] No MVP, preferir envio individual com `mod_assign_save_grade` para simplificar auditoria e idempotência.
 - [ ] Só usar lote Moodle nativo (`mod_assign_save_grades`) depois de testar falhas parciais e comportamento transacional.
 
@@ -960,7 +961,8 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
   - curso;
   - atividade;
   - escopo do envio.
-- [ ] Para sobrescrita de nota/feedback já existente, exigir confirmação adicional.
+- [x] Para sobrescrita de nota existente, exigir confirmação adicional.
+- [ ] Para sobrescrita de feedback existente, exigir confirmação adicional quando o feedback atual puder ser consultado.
 
 ### 11.4 Auditoria
 
@@ -1040,7 +1042,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 
 - [ ] Prompt injection em arquivo do estudante.
 - [ ] Tentativa de mandar o modelo ignorar rubrica.
-- [ ] Tentativa de sobrescrever nota sem confirmação.
+- [x] Tentativa de sobrescrever nota sem confirmação.
 - [ ] Usuário sem permissão tentando lançar nota.
 - [x] Reuso de `pendingActionId`.
 - [ ] Confirmação divergente.

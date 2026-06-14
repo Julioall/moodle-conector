@@ -64,6 +64,12 @@ public sealed record GradingLaunchPayloadItem(
     [property: JsonPropertyName("attemptNumber")] int? AttemptNumber,
     [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash);
 
+public sealed record AssignmentExistingGrade(
+    string AssignmentId,
+    string StudentId,
+    decimal? Grade,
+    bool HasGrade);
+
 public sealed class CreateGradingLaunchPreviewCommandHandler(
     IGradingReviewRepository repository,
     IPendingActionService pendingActions,
@@ -243,6 +249,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     IGradingReviewRepository repository,
     IActionConfirmationService confirmations,
     IMoodleGradingCapabilitiesGateway capabilities,
+    IMoodleAssignmentGradeReadGateway gradeReadGateway,
     IMoodleAuditLogRepository auditLogs,
     IMediator mediator)
     : IRequestHandler<ConfirmMoodleBatchLaunchCommand, ConfirmMoodleBatchLaunchResult>
@@ -324,6 +331,32 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                         currentDraftVersionHash
                     },
                     errorCode: "grading_draft_version_mismatch",
+                    errorMessage: message,
+                    cancellationToken);
+                continue;
+            }
+
+            var existingGrade = await gradeReadGateway.GetExistingGradeAsync(
+                userExternalId,
+                payloadItem.AssignmentId,
+                payloadItem.StudentId,
+                cancellationToken);
+            if (existingGrade?.HasGrade == true)
+            {
+                var message = $"O Moodle ja possui nota existente para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma confirmacao especifica de sobrescrita antes de lancar.";
+                item.MarkCommitFailed(message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new
+                    {
+                        item.CommitStatus,
+                        existingGrade = existingGrade.Grade
+                    },
+                    errorCode: "moodle_existing_grade",
                     errorMessage: message,
                     cancellationToken);
                 continue;

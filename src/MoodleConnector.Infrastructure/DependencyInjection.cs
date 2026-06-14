@@ -111,6 +111,10 @@ public static class DependencyInjection
             .AddMoodleResilience(moodleApiResilience);
 
         services
+            .AddHttpClient<IMoodleAssignmentGradeReadGateway, MoodleAssignmentGradeReadGateway>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+
+        services
             .AddHttpClient<IMoodleGradingCapabilitiesGateway, MoodleGradingCapabilitiesGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
 
