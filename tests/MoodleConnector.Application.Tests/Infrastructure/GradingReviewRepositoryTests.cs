@@ -51,6 +51,51 @@ public sealed class GradingReviewRepositoryTests
         Assert.NotNull(savedItem.IdempotencyKey);
     }
 
+    [Fact]
+    public async Task AddEvidenceAsync_PersisteEListaEvidenciasDoItem()
+    {
+        await using var dbContext = CreateDbContext();
+        IGradingReviewRepository repository = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(
+            courseId: 10,
+            assignmentIds: [501],
+            createdBySubject: "teacher-1",
+            createdByMoodleUserId: 321,
+            totalItems: 1);
+        var item = AssistedGradingItem.Create(
+            batch.Id,
+            courseId: 10,
+            assignmentId: 501,
+            submissionId: 9001,
+            moodleUserId: 101,
+            attemptNumber: 0);
+        var evidence = new GradingEvidence(
+            Guid.NewGuid(),
+            item.Id,
+            "c1",
+            "Descrever eventos de TI.",
+            4m,
+            3m,
+            "O texto menciona monitoramento e alerta.",
+            "Faltou exemplo operacional.",
+            TeacherReviewRequired: true,
+            CreatedAt: new DateTimeOffset(2026, 6, 13, 12, 0, 0, TimeSpan.Zero));
+
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddEvidenceAsync(evidence, CancellationToken.None);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
+        var saved = Assert.Single(await repository.ListEvidenceByItemAsync(item.Id, CancellationToken.None));
+        Assert.Equal("c1", saved.CriterionId);
+        Assert.Equal("Descrever eventos de TI.", saved.CriterionText);
+        Assert.Equal(4m, saved.MaxPoints);
+        Assert.Equal(3m, saved.SuggestedPoints);
+        Assert.Equal("O texto menciona monitoramento e alerta.", saved.EvidenceText);
+        Assert.Equal("Faltou exemplo operacional.", saved.GapsText);
+        Assert.True(saved.TeacherReviewRequired);
+    }
+
     private static ConnectorDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ConnectorDbContext>()

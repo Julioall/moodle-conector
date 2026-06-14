@@ -74,11 +74,13 @@ Situação confirmada no repositório:
 
 ### 1.3 Lacunas críticas
 
-- [ ] Verificar se existe endpoint real para **baixar anexos da submissão**.
-- [ ] Verificar se existe endpoint real para **ler arquivos vinculados a módulos e entregas**.
-- [ ] Verificar em ambiente Moodle real se `mod_assign_get_submission_status`, `mod_assign_get_grades`, `mod_assign_save_grade` e `mod_assign_save_grades` estão habilitadas no serviço externo.
-- [ ] Criar serviço de **extração de conteúdo** para PDF, DOCX, PPTX, XLSX, TXT, HTML, ODT e imagens.
-- [ ] Criar estrutura de **pacote de correção** com enunciado, critérios, rubrica, anexos, materiais e submissão.
+- [x] Verificar se existe endpoint real para **baixar anexos da submissão**.
+- [x] Verificar se existe endpoint real para **ler arquivos vinculados a módulos e entregas**.
+- [x] Verificar em ambiente Moodle real se `mod_assign_get_submission_status`, `mod_assign_get_grades`, `mod_assign_save_grade` e `mod_assign_save_grades` estão habilitadas no serviço externo.
+- [x] Criar serviço de **extração de conteúdo** para TXT, HTML, JSON, XML, CSV e PDF com texto embutido.
+- [ ] Expandir extração para DOCX, PPTX, XLSX, ODT e imagens/OCR.
+- [x] Criar estrutura inicial de **pacote de correção** com enunciado provável, anexos, materiais e submissão.
+- [ ] Completar pacote de correção com critérios/rubrica/escala confiáveis.
 - [x] Criar motor de **análise por critério** com evidências, lacunas e nota sugerida.
 - [x] Criar tool real de **lançamento de nota e feedback** no Moodle.
 - [x] Reusar a confirmação humana obrigatória já existente antes de qualquer escrita no Moodle.
@@ -91,9 +93,9 @@ Situação confirmada no repositório:
 
 A proposta é viável se forem atendidas estas condições:
 
-- [ ] O Moodle expõe funções de web service para consulta de submissões e notas.
-- [ ] O serviço externo consegue baixar arquivos via endpoint seguro.
-- [ ] A instância Moodle permite adicionar funções como `mod_assign_save_grade` ou `mod_assign_save_grades` ao serviço autorizado.
+- [x] O Moodle expõe funções de web service para consulta de submissões e notas.
+- [x] O serviço externo consegue baixar arquivos via endpoint seguro.
+- [x] A instância Moodle permite adicionar funções como `mod_assign_save_grade` ou `mod_assign_save_grades` ao serviço autorizado.
 - [ ] Os tokens possuem escopos separados para leitura e escrita.
 - [ ] Há fila de processamento para lotes grandes.
 - [ ] Há armazenamento temporário para pacotes, rascunhos, logs e auditoria.
@@ -129,12 +131,12 @@ Não recomendado:
 
 Recomendado:
 
-- [ ] Criar um `batchJobId`.
+- [x] Criar um `batchJobId`.
 - [ ] Processar em fila.
-- [ ] Consultar status por lote.
-- [ ] Retornar sumários paginados.
-- [ ] Abrir revisão individual sob demanda.
-- [ ] Permitir confirmação por subconjuntos revisados.
+- [x] Consultar status por lote.
+- [x] Retornar sumários paginados.
+- [x] Abrir revisão individual sob demanda.
+- [x] Permitir confirmação por subconjuntos revisados.
 - [x] Usar idempotência para evitar duplicidade de lançamento no fluxo MVP de confirmação.
 - [x] Registrar auditoria por estudante, atividade e tentativa no commit Moodle.
 
@@ -316,7 +318,7 @@ Implementação no repo:
 - [x] Entrada:
   - `batchJobId`
   - `gradingItemId`
-- [ ] Saída:
+- [x] Saída:
   - dados mínimos do estudante;
   - enunciado;
   - critérios;
@@ -863,10 +865,10 @@ Checklist prático de descoberta:
 - [ ] Parecer preliminar.
 - [ ] Pontos fortes.
 - [ ] Pontos a melhorar.
-- [ ] Evidências por critério.
-- [ ] Lacunas por critério.
-- [ ] Nota ou conceito sugerido, quando houver base.
-- [ ] Feedback ao estudante.
+- [x] Evidências por critério.
+- [x] Lacunas por critério.
+- [x] Nota ou conceito sugerido, quando houver base.
+- [x] Feedback ao estudante.
 - [ ] Observações internas ao professor.
 - [ ] Nível de confiança.
 - [ ] Bloqueios ou limitações.
@@ -1072,7 +1074,9 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [x] Escanear materiais da tarefa/secao e selecionar heuristicamente o candidato mais provavel de enunciado/contexto.
 - [ ] Extrair texto de PDF escaneado/imagem via OCR.
 - [x] Gerar parecer preliminar revisavel quando houver texto extraido.
-- [ ] Gerar nota sugerida confiavel quando rubrica/criterios e escala estiverem disponiveis.
+- [x] Gerar nota sugerida quando criterios e valor maximo forem extraidos do contexto selecionado.
+- [x] Persistir e expor evidencias/lacunas por criterio em `consultar_item_correcao_assistida`.
+- [ ] Validar nota sugerida com rubrica real do Moodle quando disponivel.
 - [ ] Permitir professor copiar o feedback manualmente.
 - [ ] Validar qualidade pedagógica com tutores.
 - [ ] Não criar UI complexa nesta fase.

@@ -105,7 +105,17 @@ public sealed record AssistedGradingItemDetailResult(
     [property: JsonPropertyName("teacherDecision")] string? TeacherDecision,
     [property: JsonPropertyName("reviewNotes")] string? ReviewNotes,
     [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
-    [property: JsonPropertyName("pendingIssues")] IReadOnlyList<string> PendingIssues);
+    [property: JsonPropertyName("pendingIssues")] IReadOnlyList<string> PendingIssues,
+    [property: JsonPropertyName("evidence")] IReadOnlyList<AssistedGradingEvidenceResult> Evidence);
+
+public sealed record AssistedGradingEvidenceResult(
+    [property: JsonPropertyName("criterionId")] string? CriterionId,
+    [property: JsonPropertyName("criterionText")] string CriterionText,
+    [property: JsonPropertyName("maxPoints")] decimal? MaxPoints,
+    [property: JsonPropertyName("suggestedPoints")] decimal? SuggestedPoints,
+    [property: JsonPropertyName("evidenceText")] string? EvidenceText,
+    [property: JsonPropertyName("gapsText")] string? GapsText,
+    [property: JsonPropertyName("teacherReviewRequired")] bool TeacherReviewRequired);
 
 public sealed record UpdateAssistedGradingDraftCommand(
     Guid GradingItemId,
@@ -596,6 +606,8 @@ public sealed class GetAssistedGradingItemQueryHandler(
             throw new InvalidOperationException("O item informado nao pertence ao lote solicitado.");
         }
 
+        var evidence = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
+
         return new AssistedGradingItemDetailResult(
             item.Id,
             item.BatchId,
@@ -615,7 +627,8 @@ public sealed class GetAssistedGradingItemQueryHandler(
             item.TeacherDecision,
             item.ReviewNotes,
             ComputeDraftVersionHash(item),
-            BuildPendingIssues(item));
+            BuildPendingIssues(item),
+            evidence.Select(ToEvidenceResult).ToArray());
     }
 
     private static string ComputeDraftVersionHash(AssistedGradingItem item)
@@ -656,6 +669,18 @@ public sealed class GetAssistedGradingItemQueryHandler(
 
         return pendingIssues;
     }
+
+    private static AssistedGradingEvidenceResult ToEvidenceResult(GradingEvidence evidence)
+    {
+        return new AssistedGradingEvidenceResult(
+            evidence.CriterionId,
+            evidence.CriterionText,
+            evidence.MaxPoints,
+            evidence.SuggestedPoints,
+            evidence.EvidenceText,
+            evidence.GapsText,
+            evidence.TeacherReviewRequired);
+    }
 }
 
 public sealed class UpdateAssistedGradingDraftCommandHandler(
@@ -681,7 +706,7 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         {
             if (MatchesExistingReview(item, request))
             {
-                return ToDetailResult(item);
+                return await ToDetailResultAsync(item, cancellationToken);
             }
 
             throw new InvalidOperationException("O rascunho foi alterado desde a ultima leitura. Consulte o item novamente antes de sobrescrever.");
@@ -740,7 +765,7 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         await repository.SaveChangesAsync(cancellationToken);
         await auditLogs.SaveChangesAsync(cancellationToken);
 
-        return ToDetailResult(item);
+        return await ToDetailResultAsync(item, cancellationToken);
     }
 
     private static string ComputeDraftVersionHash(AssistedGradingItem item)
@@ -773,8 +798,11 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
-    private static AssistedGradingItemDetailResult ToDetailResult(AssistedGradingItem item)
+    private async Task<AssistedGradingItemDetailResult> ToDetailResultAsync(
+        AssistedGradingItem item,
+        CancellationToken cancellationToken)
     {
+        var evidence = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
         var draftVersionHash = ComputeDraftVersionHash(item);
         var pendingIssues = BuildPendingIssues(item);
 
@@ -797,7 +825,8 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             item.TeacherDecision,
             item.ReviewNotes,
             draftVersionHash,
-            pendingIssues);
+            pendingIssues,
+            evidence.Select(ToEvidenceResult).ToArray());
     }
 
     private static IReadOnlyList<string> BuildPendingIssues(AssistedGradingItem item)
@@ -820,6 +849,18 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         }
 
         return pendingIssues;
+    }
+
+    private static AssistedGradingEvidenceResult ToEvidenceResult(GradingEvidence evidence)
+    {
+        return new AssistedGradingEvidenceResult(
+            evidence.CriterionId,
+            evidence.CriterionText,
+            evidence.MaxPoints,
+            evidence.SuggestedPoints,
+            evidence.EvidenceText,
+            evidence.GapsText,
+            evidence.TeacherReviewRequired);
     }
 }
 

@@ -498,7 +498,8 @@ public sealed class MoodleGradingToolsTests
                     TeacherDecision: null,
                     ReviewNotes: null,
                     DraftVersionHash: "hash-item-1",
-                    PendingIssues: ["Revisao humana pendente.", "Feedback final pendente."]));
+                    PendingIssues: ["Revisao humana pendente.", "Feedback final pendente."],
+                    Evidence: []));
             }
 
             if (request is UpdateAssistedGradingDraftCommand updateDraft)
@@ -523,7 +524,8 @@ public sealed class MoodleGradingToolsTests
                     TeacherDecision: "approved",
                     ReviewNotes: "Ajustei a nota pela conclusao.",
                     DraftVersionHash: "hash-item-2",
-                    PendingIssues: []));
+                    PendingIssues: [],
+                    Evidence: []));
             }
 
             if (request is CreateGradingLaunchPreviewCommand createPreview)
@@ -705,7 +707,8 @@ public sealed class MoodleGradingToolsTests
                     TeacherDecision: null,
                     ReviewNotes: null,
                     DraftVersionHash: "hash-item-1",
-                    PendingIssues: ["Revisao humana pendente.", "Feedback final pendente."]));
+                    PendingIssues: ["Revisao humana pendente.", "Feedback final pendente."],
+                    Evidence: []));
             }
 
             if (request is UpdateAssistedGradingDraftCommand updateDraft)
@@ -730,7 +733,8 @@ public sealed class MoodleGradingToolsTests
                     TeacherDecision: "approved",
                     ReviewNotes: "Ajustei a nota pela conclusao.",
                     DraftVersionHash: "hash-item-2",
-                    PendingIssues: []));
+                    PendingIssues: [],
+                    Evidence: []));
             }
 
             if (request is CreateGradingLaunchPreviewCommand createPreview)

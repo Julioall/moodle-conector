@@ -247,6 +247,44 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task GetItem_RetornaEvidenciasPorCriterio()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddEvidenceAsync(
+            new GradingEvidence(
+                Guid.NewGuid(),
+                item.Id,
+                "c1",
+                "Descrever eventos de TI.",
+                4m,
+                3m,
+                "O texto descreve monitoramento e alerta.",
+                "Faltou exemplo operacional.",
+                TeacherReviewRequired: true,
+                CreatedAt: new DateTimeOffset(2026, 6, 13, 12, 0, 0, TimeSpan.Zero)),
+            CancellationToken.None);
+        var sut = new GetAssistedGradingItemQueryHandler(repository);
+
+        var result = await sut.Handle(
+            new GetAssistedGradingItemQuery(item.Id, batch.Id),
+            CancellationToken.None);
+
+        var evidence = Assert.Single(result.Evidence);
+        Assert.Equal("c1", evidence.CriterionId);
+        Assert.Equal("Descrever eventos de TI.", evidence.CriterionText);
+        Assert.Equal(4m, evidence.MaxPoints);
+        Assert.Equal(3m, evidence.SuggestedPoints);
+        Assert.Equal("O texto descreve monitoramento e alerta.", evidence.EvidenceText);
+        Assert.Equal("Faltou exemplo operacional.", evidence.GapsText);
+        Assert.True(evidence.TeacherReviewRequired);
+    }
+
+    [Fact]
     public async Task GetItem_QuandoBatchInformadoNaoCorresponde_DeveFalhar()
     {
         var repository = new FakeGradingReviewRepository();
@@ -371,6 +409,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         public List<GradingArtifact> Artifacts { get; } = [];
 
+        public List<GradingEvidence> Evidence { get; } = [];
+
         public int SaveChangesCount { get; private set; }
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
@@ -393,6 +433,12 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
         {
             Artifacts.Add(artifact);
+            return Task.CompletedTask;
+        }
+
+        public Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
+        {
+            Evidence.Add(evidence);
             return Task.CompletedTask;
         }
 
@@ -426,6 +472,15 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         {
             return Task.FromResult<IReadOnlyList<GradingArtifact>>(Artifacts
                 .Where(artifact => artifact.GradingItemId == gradingItemId)
+                .ToArray());
+        }
+
+        public Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(
+            Guid gradingItemId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<GradingEvidence>>(Evidence
+                .Where(evidence => evidence.GradingItemId == gradingItemId)
                 .ToArray());
         }
 

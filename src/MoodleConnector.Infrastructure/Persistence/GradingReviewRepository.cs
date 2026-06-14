@@ -26,6 +26,11 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         await dbContext.GradingArtifacts.AddAsync(artifact, cancellationToken);
     }
 
+    public async Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
+    {
+        await dbContext.GradingEvidence.AddAsync(evidence, cancellationToken);
+    }
+
     public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
     {
         return dbContext.GradingItems.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
@@ -60,6 +65,17 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         return await dbContext.GradingArtifacts
             .Where(artifact => artifact.GradingItemId == gradingItemId)
             .OrderBy(artifact => artifact.CreatedAt)
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(
+        Guid gradingItemId,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.GradingEvidence
+            .Where(evidence => evidence.GradingItemId == gradingItemId)
+            .OrderBy(evidence => evidence.CreatedAt)
+            .ThenBy(evidence => evidence.Id)
             .ToArrayAsync(cancellationToken);
     }
 

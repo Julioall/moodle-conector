@@ -113,6 +113,47 @@ public sealed class GradingContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_ExtraiCriteriosENotaMaximaDoContextoSelecionado()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            "Enunciado SAP 01 - Etapa 1.pdf",
+            "application/pdf",
+            "sha-enunciado",
+            SizeBytes: 300,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef:
+                """
+                Enunciado da atividade SAP 01 - Etapa 1.
+                Valor: 16 pontos.
+                Critérios de avaliação:
+                - Descrever o gerenciamento de eventos de TI.
+                - Apresentar exemplos de incidentes e problemas.
+                - Propor ações corretivas coerentes.
+                """,
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.Equal(16m, context.MaxGrade);
+        Assert.Contains("gerenciamento de eventos", context.Criteria, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ações corretivas", context.Criteria, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Escala de nota", context.Blockers[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task BuildAsync_QuandoArquivosNaoIncluidos_NaoConsultaArtefatos()
     {
         var repository = new FakeGradingReviewRepository();
@@ -154,6 +195,9 @@ public sealed class GradingContextBuilderTests
             return Task.CompletedTask;
         }
 
+        public Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
         public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
             => Task.FromResult<AssistedGradingItem?>(null);
 
@@ -175,6 +219,11 @@ public sealed class GradingContextBuilderTests
             return Task.FromResult<IReadOnlyList<GradingArtifact>>(
                 Artifacts.Where(artifact => artifact.GradingItemId == gradingItemId).ToArray());
         }
+
+        public Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(
+            Guid gradingItemId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<GradingEvidence>>([]);
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)
             => Task.CompletedTask;

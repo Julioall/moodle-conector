@@ -3,6 +3,7 @@ using MoodleConnector.Application.Configuration;
 using MoodleConnector.Domain.Grading;
 using Microsoft.Extensions.Options;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace MoodleConnector.Application.Grading;
 
@@ -11,7 +12,7 @@ namespace MoodleConnector.Application.Grading;
 /// Reutiliza artefatos já extraídos salvos no repositório.
 /// Download e extração de novos arquivos ficam para fase futura (sem Moodle real).
 /// </summary>
-public sealed class GradingContextBuilder(
+public sealed partial class GradingContextBuilder(
     IGradingReviewRepository repository,
     IOptions<GradingLimitsOptions> limits,
     IAssignmentContextSelectionService contextSelectionService)
@@ -27,6 +28,8 @@ public sealed class GradingContextBuilder(
 
         string? submissionText = null;
         string? assignmentStatement = null;
+        string? criteria = null;
+        decimal? maxGrade = null;
         string? courseMaterials = null;
         var attachedFiles = new List<GradingFileInfo>();
         IReadOnlyList<GradingArtifact> artifacts = [];
@@ -100,6 +103,8 @@ public sealed class GradingContextBuilder(
                 if (selected is not null)
                 {
                     assignmentStatement = selected.ExtractedText;
+                    criteria = ExtractCriteria(selected.ExtractedText);
+                    maxGrade = ExtractMaxGrade(selected.ExtractedText);
                     courseMaterials = $"{selected.Title}\n{selected.ExtractedText}";
                 }
             }
@@ -113,9 +118,9 @@ public sealed class GradingContextBuilder(
             submissionId: item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
             studentId: item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             assignmentStatement: assignmentStatement,
-            criteria: null,
+            criteria: criteria,
             rubricDescription: null,
-            maxGrade: null,
+            maxGrade: maxGrade,
             gradeScale: null,
             submissionText: submissionText,
             attachedFiles: attachedFiles,
@@ -127,5 +132,78 @@ public sealed class GradingContextBuilder(
     {
         return text.Length <= maxChars ? text : text[..maxChars];
     }
-}
 
+    private static decimal? ExtractMaxGrade(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var match = MaxGradeRegex().Match(text);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var raw = match.Groups["grade"].Value.Replace(',', '.');
+        return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var grade) && grade > 0
+            ? grade
+            : null;
+    }
+
+    private static string? ExtractCriteria(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var lines = text
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Trim())
+            .Where(line => line.Length > 0)
+            .ToArray();
+        var criteria = new List<string>();
+        var collecting = false;
+
+        foreach (var line in lines)
+        {
+            if (CriteriaHeaderRegex().IsMatch(line))
+            {
+                collecting = true;
+                continue;
+            }
+
+            if (!collecting)
+            {
+                continue;
+            }
+
+            if (criteria.Count > 0 && StopCriteriaRegex().IsMatch(line))
+            {
+                break;
+            }
+
+            var cleaned = CriteriaPrefixRegex().Replace(line, string.Empty).Trim();
+            if (cleaned.Length >= 8)
+            {
+                criteria.Add(cleaned);
+            }
+        }
+
+        return criteria.Count == 0 ? null : string.Join('\n', criteria.Take(20));
+    }
+
+    [GeneratedRegex(@"(?i)\b(?:valor|nota\s*maxima|pontuacao|vale)\s*:?\s*(?<grade>\d+(?:[\.,]\d+)?)\s*(?:pontos?|pts?|%)?")]
+    private static partial Regex MaxGradeRegex();
+
+    [GeneratedRegex(@"(?i)\b(?:criterios?|crit[eé]rios?|rubrica|avaliacao|avalia[cç][aã]o)\b")]
+    private static partial Regex CriteriaHeaderRegex();
+
+    [GeneratedRegex(@"(?i)\b(?:entrega|prazo|observa[cç][oõ]es?|formato|refer[eê]ncias?)\b")]
+    private static partial Regex StopCriteriaRegex();
+
+    [GeneratedRegex(@"^\s*(?:[-*•]|\d+[\.)]|[a-zA-Z][\.)])\s*")]
+    private static partial Regex CriteriaPrefixRegex();
+}

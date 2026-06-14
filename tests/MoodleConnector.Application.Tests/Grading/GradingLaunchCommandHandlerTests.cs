@@ -248,6 +248,11 @@ public sealed class GradingLaunchCommandHandlerTests
             return Task.CompletedTask;
         }
 
+        public Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
+        {
+            return Task.CompletedTask;
+        }
+
         public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
         {
             return Task.FromResult(Items.SingleOrDefault(item => item.Id == id));
@@ -277,6 +282,13 @@ public sealed class GradingLaunchCommandHandlerTests
             CancellationToken cancellationToken)
         {
             return Task.FromResult<IReadOnlyList<GradingArtifact>>([]);
+        }
+
+        public Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(
+            Guid gradingItemId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<GradingEvidence>>([]);
         }
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)

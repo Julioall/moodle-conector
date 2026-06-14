@@ -12,6 +12,8 @@ public interface IGradingReviewRepository
 
     Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken);
 
+    Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken);
+
     Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<AssistedGradingItem>> ListItemsByBatchAsync(
@@ -23,6 +25,10 @@ public interface IGradingReviewRepository
     Task<int> CountItemsByBatchAsync(Guid batchId, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<GradingArtifact>> ListArtifactsByItemAsync(
+        Guid gradingItemId,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(
         Guid gradingItemId,
         CancellationToken cancellationToken);
 

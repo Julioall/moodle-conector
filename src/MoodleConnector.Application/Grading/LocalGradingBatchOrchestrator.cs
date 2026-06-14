@@ -120,7 +120,10 @@ public sealed class LocalGradingBatchOrchestrator(
     {
         var context = await contextBuilder.BuildAsync(
             item,
-            new GradingContextOptions(IncludeSubmissionFiles: true),
+            new GradingContextOptions(
+                IncludeRubric: true,
+                IncludeSubmissionFiles: true,
+                IncludeCourseMaterials: true),
             cancellationToken);
 
         var readableText = FirstReadableText(context);
@@ -156,6 +159,23 @@ public sealed class LocalGradingBatchOrchestrator(
 
         if (!string.IsNullOrWhiteSpace(result.FeedbackToStudent))
         {
+            foreach (var criterion in result.CriterionAnalysis)
+            {
+                await repository.AddEvidenceAsync(
+                    new GradingEvidence(
+                        Guid.NewGuid(),
+                        item.Id,
+                        criterion.CriterionId,
+                        criterion.CriterionText,
+                        criterion.MaxPoints,
+                        criterion.SuggestedPoints,
+                        criterion.EvidenceFound,
+                        criterion.Gaps,
+                        criterion.TeacherReviewRequired,
+                        DateTimeOffset.UtcNow),
+                    cancellationToken);
+            }
+
             item.SetDraft(result.SuggestedGrade, result.Confidence, result.FeedbackToStudent);
             return;
         }

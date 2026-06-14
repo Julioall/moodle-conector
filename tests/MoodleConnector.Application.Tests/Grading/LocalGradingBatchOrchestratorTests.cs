@@ -45,7 +45,12 @@ public sealed class LocalGradingBatchOrchestratorTests
             "Texto extraido da entrega com evidencias suficientes para parecer preliminar.",
             SummaryRef: null,
             new DateTimeOffset(2026, 6, 13, 12, 0, 0, TimeSpan.Zero)));
-        var sut = CreateSut(repository);
+        var sut = new LocalGradingBatchOrchestrator(
+            repository,
+            DefaultLimits(),
+            new FakeCompleteGradingContextBuilder(),
+            new FakeGradingAnalysisService(),
+            NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
 
@@ -81,6 +86,108 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Equal(0, batch.ReadyItems);
         Assert.Equal(1, batch.BlockedItems);
         Assert.Equal(1, repository.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ComSubmissaoCriteriosEValor_GeraNotaSugerida()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(29972, [101112], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 29972, 101112, 1178546, 356968, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Artifacts.AddRange(
+        [
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "submission_file",
+                "entrega.pdf",
+                "application/pdf",
+                "sha-submission",
+                1200,
+                "succeeded",
+                "O plano apresenta gerenciamento de eventos de TI, exemplos de incidentes e problemas, alem de acoes corretivas coerentes para reduzir impactos.",
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow),
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                "Enunciado SAP 01 - Etapa 1.pdf",
+                "application/pdf",
+                "sha-context",
+                900,
+                "succeeded",
+                """
+                Enunciado SAP 01 - Etapa 1.
+                Valor: 16 pontos.
+                Critérios de avaliação:
+                - Descrever gerenciamento de eventos de TI.
+                - Apresentar exemplos de incidentes e problemas.
+                - Propor ações corretivas coerentes.
+                """,
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow)
+        ]);
+        var sut = new LocalGradingBatchOrchestrator(
+            repository,
+            DefaultLimits(),
+            new GradingContextBuilder(
+                repository,
+                Options.Create(new GradingLimitsOptions()),
+                new HeuristicAssignmentContextSelectionService()),
+            new StructuredGradingAnalysisService(),
+            NullLogger<LocalGradingBatchOrchestrator>.Instance);
+
+        await sut.EnqueueAsync(batch.Id, CancellationToken.None);
+
+        Assert.Equal(GradingItemStatus.DraftReady, item.Status);
+        Assert.NotNull(item.SuggestedGrade);
+        Assert.True(item.SuggestedGrade > 0);
+        Assert.True(item.Confidence > 0m);
+        Assert.Contains("Pontos fortes", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, batch.ReadyItems);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ComAnalisePorCriterio_PersisteEvidencias()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "submission_file",
+            "entrega.txt",
+            "text/plain",
+            "sha-1",
+            120,
+            "succeeded",
+            "Texto da entrega com evidencia do criterio.",
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = new LocalGradingBatchOrchestrator(
+            repository,
+            DefaultLimits(),
+            new FakeCompleteGradingContextBuilder(),
+            new FakeGradingAnalysisService(),
+            NullLogger<LocalGradingBatchOrchestrator>.Instance);
+
+        await sut.EnqueueAsync(batch.Id, CancellationToken.None);
+
+        var evidence = Assert.Single(repository.Evidence);
+        Assert.Equal(item.Id, evidence.GradingItemId);
+        Assert.Equal("c1", evidence.CriterionId);
+        Assert.Equal("Criterio avaliado.", evidence.CriterionText);
+        Assert.Equal(4m, evidence.MaxPoints);
+        Assert.Equal(2m, evidence.SuggestedPoints);
+        Assert.Equal("Evidencia encontrada.", evidence.EvidenceText);
+        Assert.Equal("Lacuna encontrada.", evidence.GapsText);
+        Assert.True(evidence.TeacherReviewRequired);
     }
 
     [Fact]
@@ -171,6 +278,7 @@ public sealed class LocalGradingBatchOrchestratorTests
         public List<AssistedGradingBatch> Batches { get; } = [];
         public List<AssistedGradingItem> Items { get; } = [];
         public List<GradingArtifact> Artifacts { get; } = [];
+        public List<GradingEvidence> Evidence { get; } = [];
         public int SaveChangesCount { get; private set; }
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
@@ -194,6 +302,12 @@ public sealed class LocalGradingBatchOrchestratorTests
             return Task.CompletedTask;
         }
 
+        public Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
+        {
+            Evidence.Add(evidence);
+            return Task.CompletedTask;
+        }
+
         public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
             => Task.FromResult(Items.SingleOrDefault(i => i.Id == id));
 
@@ -211,6 +325,12 @@ public sealed class LocalGradingBatchOrchestratorTests
             Guid gradingItemId, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<GradingArtifact>>(Artifacts
                 .Where(artifact => artifact.GradingItemId == gradingItemId)
+                .ToArray());
+
+        public Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(
+            Guid gradingItemId, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<GradingEvidence>>(Evidence
+                .Where(evidence => evidence.GradingItemId == gradingItemId)
                 .ToArray());
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)
@@ -266,6 +386,32 @@ public sealed class LocalGradingBatchOrchestratorTests
         }
     }
 
+    private sealed class FakeCompleteGradingContextBuilder : IGradingContextBuilder
+    {
+        public Task<GradingContext> BuildAsync(
+            AssistedGradingItem item,
+            GradingContextOptions options,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(GradingContext.Build(
+                item.Id,
+                item.BatchId,
+                item.CourseId.ToString(),
+                item.AssignmentId.ToString(),
+                item.SubmissionId?.ToString(),
+                item.MoodleUserId.ToString(),
+                assignmentStatement: "Enunciado.",
+                criteria: "Criterio avaliado.",
+                rubricDescription: null,
+                maxGrade: 4m,
+                gradeScale: null,
+                submissionText: "Texto da entrega com evidencia do criterio.",
+                attachedFiles: [new GradingFileInfo("entrega.txt", "text/plain", 120, "sha-1", "Texto da entrega com evidencia do criterio.", true)],
+                courseMaterials: null,
+                teacherInstructions: options.TeacherInstructions));
+        }
+    }
+
     private sealed class FakeGradingAnalysisService : IGradingAnalysisService
     {
         public Task<GradingAnalysisResult> AnalyzeAsync(
@@ -278,7 +424,17 @@ public sealed class LocalGradingBatchOrchestratorTests
                 AnalysisStatus.BlockedMissingCriteria,
                 "Parecer preliminar gerado para revisao do professor.",
                 PrivateNotesToTeacher: "Sem criterios.",
-                CriterionAnalysis: [],
+                CriterionAnalysis:
+                [
+                    new GradingCriterionAnalysis(
+                        "c1",
+                        "Criterio avaliado.",
+                        4m,
+                        2m,
+                        "Evidencia encontrada.",
+                        "Lacuna encontrada.",
+                        TeacherReviewRequired: true)
+                ],
                 Blocks: ["Criterios ausentes."]));
         }
     }
