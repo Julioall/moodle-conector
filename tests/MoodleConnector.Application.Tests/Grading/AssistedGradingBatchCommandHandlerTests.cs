@@ -197,7 +197,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
         await repository.SaveChangesAsync(CancellationToken.None);
-        var sut = new GetAssistedGradingBatchStatusQueryHandler(repository);
+        var sut = new GetAssistedGradingBatchStatusQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
 
         var result = await sut.Handle(
             new GetAssistedGradingBatchStatusQuery(batch.Id, Page: 1, PageSize: 10),
@@ -227,7 +229,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
         await repository.SaveChangesAsync(CancellationToken.None);
-        var sut = new GetAssistedGradingItemQueryHandler(repository);
+        var sut = new GetAssistedGradingItemQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
 
         var result = await sut.Handle(
             new GetAssistedGradingItemQuery(item.Id, batch.Id),
@@ -268,7 +272,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 TeacherReviewRequired: true,
                 CreatedAt: new DateTimeOffset(2026, 6, 13, 12, 0, 0, TimeSpan.Zero)),
             CancellationToken.None);
-        var sut = new GetAssistedGradingItemQueryHandler(repository);
+        var sut = new GetAssistedGradingItemQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
 
         var result = await sut.Handle(
             new GetAssistedGradingItemQuery(item.Id, batch.Id),
@@ -293,7 +299,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         item.SetDraft(8m, 0.8m, "Rascunho.");
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
-        var sut = new GetAssistedGradingItemQueryHandler(repository);
+        var sut = new GetAssistedGradingItemQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             sut.Handle(
@@ -401,6 +409,70 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(0, repository.SaveChangesCount);
     }
 
+    [Fact]
+    public async Task GetBatchStatus_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        var sut = new GetAssistedGradingBatchStatusQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-2"));
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            sut.Handle(new GetAssistedGradingBatchStatusQuery(batch.Id, Page: 1, PageSize: 10), CancellationToken.None));
+
+        Assert.Equal("Usuario atual nao esta autorizado a acessar este lote de correcao.", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetItem_DeOutroCriadorComEscopoAdmin_DevePermitir()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new GetAssistedGradingItemQueryHandler(
+            repository,
+            new FakeCurrentUserContext("coordinator-1", ["grading.admin"]));
+
+        var result = await sut.Handle(new GetAssistedGradingItemQuery(item.Id, batch.Id), CancellationToken.None);
+
+        Assert.Equal(item.Id, result.GradingItemId);
+    }
+
+    [Fact]
+    public async Task UpdateDraft_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new UpdateAssistedGradingDraftCommandHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-2"),
+            new FakeMoodleUserResolver(654),
+            new FakeAuditLogRepository());
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            sut.Handle(
+                new UpdateAssistedGradingDraftCommand(
+                    item.Id,
+                    FinalGrade: 8.5m,
+                    FinalFeedback: "Feedback final revisado.",
+                    TeacherDecision: "approved",
+                    ReviewNotes: null,
+                    ExpectedReviewStatus: "NotReviewed"),
+                CancellationToken.None));
+
+        Assert.Equal("Usuario atual nao esta autorizado a acessar este lote de correcao.", ex.Message);
+        Assert.Equal(0, repository.SaveChangesCount);
+    }
+
     private sealed class FakeGradingReviewRepository : IGradingReviewRepository
     {
         public List<AssistedGradingBatch> Batches { get; } = [];
@@ -491,15 +563,15 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         }
     }
 
-    private sealed class FakeCurrentUserContext(string subject) : ICurrentUserContext
+    private sealed class FakeCurrentUserContext(string subject, IReadOnlyCollection<string>? scopes = null) : ICurrentUserContext
     {
         public string Subject { get; } = subject;
         public string? Email => "teacher@example.com";
-        public IReadOnlyCollection<string> Scopes => [];
+        public IReadOnlyCollection<string> Scopes { get; } = scopes ?? [];
 
         public bool HasScope(string scope)
         {
-            return false;
+            return Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
         }
     }
 

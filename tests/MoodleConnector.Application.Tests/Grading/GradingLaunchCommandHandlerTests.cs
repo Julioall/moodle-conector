@@ -18,7 +18,8 @@ public sealed class GradingLaunchCommandHandlerTests
         var batch = fixture.CreateBatchWithReviewedItem();
         var sut = new CreateGradingLaunchPreviewCommandHandler(
             fixture.GradingRepository,
-            fixture.PendingActions);
+            fixture.PendingActions,
+            fixture.CurrentUser);
 
         var result = await sut.Handle(
             new CreateGradingLaunchPreviewCommand(
@@ -53,7 +54,8 @@ public sealed class GradingLaunchCommandHandlerTests
         await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
         var sut = new CreateGradingLaunchPreviewCommandHandler(
             fixture.GradingRepository,
-            fixture.PendingActions);
+            fixture.PendingActions,
+            fixture.CurrentUser);
 
         var result = await sut.Handle(
             new CreateGradingLaunchPreviewCommand(
@@ -67,6 +69,28 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(1, result.BlockedItems);
         Assert.Null(fixture.PendingActions.LastPayload);
         Assert.Contains(result.Warnings, warning => warning.Contains("Nenhum item revisado", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CreatePreview_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
+    {
+        var fixture = new Fixture(currentUserSubject: "teacher-2");
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser);
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            sut.Handle(
+                new CreateGradingLaunchPreviewCommand(
+                    batch.Id,
+                    GradingItemIds: [],
+                    OnlyReviewed: true),
+                CancellationToken.None));
+
+        Assert.Equal("Usuario atual nao esta autorizado a acessar este lote de correcao.", ex.Message);
+        Assert.Null(fixture.PendingActions.LastPayload);
     }
 
     [Fact]
@@ -168,7 +192,7 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("mod_assign_save_grade", auditLog.MoodleFunction);
     }
 
-    private sealed class Fixture
+    private sealed class Fixture(string currentUserSubject = "teacher-1", IReadOnlyCollection<string>? scopes = null)
     {
         public FakeGradingReviewRepository GradingRepository { get; } = new();
         public FakePendingActionService PendingActions { get; } = new();
@@ -177,6 +201,7 @@ public sealed class GradingLaunchCommandHandlerTests
         public FakeMoodleGradingCapabilitiesGateway Capabilities { get; } = new();
         public FakeAuditLogRepository AuditLogs { get; } = new();
         public FakeMediator Mediator { get; } = new();
+        public FakeCurrentUserContext CurrentUser { get; } = new(currentUserSubject, scopes);
 
         public AssistedGradingBatch CreateBatchWithReviewedItem()
         {
@@ -218,6 +243,18 @@ public sealed class GradingLaunchCommandHandlerTests
                 IdempotencyKey = "idem-1",
                 CorrelationId = "audit-1"
             };
+        }
+    }
+
+    private sealed class FakeCurrentUserContext(string subject, IReadOnlyCollection<string>? scopes = null) : ICurrentUserContext
+    {
+        public string Subject { get; } = subject;
+        public string? Email => "teacher@example.com";
+        public IReadOnlyCollection<string> Scopes { get; } = scopes ?? [];
+
+        public bool HasScope(string scope)
+        {
+            return Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
         }
     }
 

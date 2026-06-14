@@ -586,7 +586,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
 }
 
 public sealed class GetAssistedGradingItemQueryHandler(
-    IGradingReviewRepository repository)
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser)
     : IRequestHandler<GetAssistedGradingItemQuery, AssistedGradingItemDetailResult>
 {
     public async Task<AssistedGradingItemDetailResult> Handle(
@@ -600,6 +601,9 @@ public sealed class GetAssistedGradingItemQueryHandler(
 
         var item = await repository.GetItemAsync(request.GradingItemId, cancellationToken)
             ?? throw new InvalidOperationException("Item de correcao nao encontrado.");
+        var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken)
+            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
         if (request.BatchJobId is Guid batchJobId && batchJobId != Guid.Empty && item.BatchId != batchJobId)
         {
@@ -701,6 +705,9 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
 
         var item = await repository.GetItemAsync(request.GradingItemId, cancellationToken)
             ?? throw new InvalidOperationException("Item de correcao nao encontrado.");
+        var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken)
+            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
         if (!string.Equals(item.ReviewStatus.ToString(), request.ExpectedReviewStatus, StringComparison.OrdinalIgnoreCase))
         {
@@ -865,7 +872,8 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
 }
 
 public sealed class GetAssistedGradingBatchStatusQueryHandler(
-    IGradingReviewRepository repository)
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser)
     : IRequestHandler<GetAssistedGradingBatchStatusQuery, AssistedGradingBatchStatusResult>
 {
     public async Task<AssistedGradingBatchStatusResult> Handle(
@@ -874,6 +882,7 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
     {
         var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
         var page = Math.Max(1, request.Page);
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
         var items = await repository.ListItemsByBatchAsync(batch.Id, page, pageSize + 1, cancellationToken);

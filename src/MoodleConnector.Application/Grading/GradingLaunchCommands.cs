@@ -65,7 +65,8 @@ public sealed record GradingLaunchPayloadItem(
 
 public sealed class CreateGradingLaunchPreviewCommandHandler(
     IGradingReviewRepository repository,
-    IPendingActionService pendingActions)
+    IPendingActionService pendingActions,
+    ICurrentUserContext currentUser)
     : IRequestHandler<CreateGradingLaunchPreviewCommand, CreateGradingLaunchPreviewResult>
 {
     private const string ToolName = "criar_previa_lancamento_lote";
@@ -77,6 +78,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
     {
         var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
         var allItems = await LoadBatchItemsAsync(batch.Id, cancellationToken);
         var selectedIds = request.GradingItemIds.ToHashSet();
         var selected = selectedIds.Count == 0

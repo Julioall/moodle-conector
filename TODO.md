@@ -764,9 +764,10 @@ public async Task<CallToolResult> ConsultarStatusLoteCorrecaoAsync(
 
 Notas para o projeto:
 
-- [ ] A autorização não deve depender apenas dos metadados da tool; validar no handler usando `ICurrentUserContext`.
-- [ ] Para leitura do lote, validar se o usuário criou o lote, é revisor autorizado ou possui escopo administrativo.
-- [ ] Retornar dados paginados e minimizados, seguindo o padrão das tools atuais.
+- [x] A autorização não deve depender apenas dos metadados da tool; validar no handler usando `ICurrentUserContext`.
+- [x] Para leitura do lote, validar se o usuário criou o lote ou possui escopo administrativo.
+- [ ] Evoluir leitura do lote para revisor autorizado quando houver modelo de revisores por lote/curso.
+- [x] Retornar dados paginados e minimizados, seguindo o padrão das tools atuais.
 
 ### 7.3 Registro de tool de escrita no Moodle — exemplo C#
 
