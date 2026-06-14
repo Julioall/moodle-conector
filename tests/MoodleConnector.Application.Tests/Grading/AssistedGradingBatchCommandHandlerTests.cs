@@ -22,6 +22,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeMoodleUserResolver(321),
             new FakeAuditLogRepository(),
             orchestrator,
+            new FakeCourseContentsGateway(),
             new FakeSubmissionFileGateway(),
             new FakeDocumentExtractionService());
 
@@ -63,6 +64,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeMoodleUserResolver(321),
             new FakeAuditLogRepository(),
             orchestrator,
+            new FakeCourseContentsGateway(),
             fileGateway,
             extraction);
 
@@ -77,15 +79,58 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 IncludeSubmissionFiles: true),
             CancellationToken.None);
 
-        var artifact = Assert.Single(repository.Artifacts);
+        var artifact = Assert.Single(repository.Artifacts, artifact => artifact.ArtifactType == "submission_file");
         Assert.Equal(repository.Items.Single().Id, artifact.GradingItemId);
         Assert.Equal("submission_file", artifact.ArtifactType);
         Assert.Equal("entrega.txt", artifact.Filename);
         Assert.Equal("Texto extraido real da submissao.", artifact.ExtractedTextRef);
         Assert.Equal("succeeded", artifact.ExtractionStatus);
-        Assert.Equal("https://moodle.example/pluginfile.php/entrega.txt", fileGateway.LastFileUrl);
-        Assert.Equal("entrega.txt", extraction.LastFilename);
+        Assert.Contains("https://moodle.example/pluginfile.php/entrega.txt", fileGateway.DownloadedFileUrls);
+        Assert.Contains("entrega.txt", extraction.Filenames);
         Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
+    }
+
+    [Fact]
+    public async Task CreateBatch_ComMateriaisDoCurso_SalvaArtefatoDeContextoDaTarefa()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var fileGateway = new FakeSubmissionFileGateway();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            orchestrator,
+            new FakeCourseContentsGateway(),
+            fileGateway,
+            new FakeDocumentExtractionService());
+
+        await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: ["9001"],
+                MaxItems: 25,
+                OnlyAwaitingGrading: true,
+                IncludeRubric: true,
+                IncludeSubmissionFiles: false,
+                IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        var contextArtifacts = repository.Artifacts
+            .Where(artifact => artifact.ArtifactType == "assignment_context")
+            .ToArray();
+        Assert.Contains(contextArtifacts, artifact =>
+            artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf" &&
+            artifact.ExtractedTextRef == "Texto extraido real da submissao.");
+        Assert.Contains(contextArtifacts, artifact =>
+            artifact.Filename == "Tarefa 1" &&
+            artifact.ExtractedTextRef!.Contains("Descricao da tarefa SAP 01", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(fileGateway.DownloadedFileUrls, url => url == "https://moodle.example/pluginfile.php/orientacoes.pdf");
     }
 
     [Fact]
@@ -101,6 +146,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeMoodleUserResolver(321),
             new FakeAuditLogRepository(),
             orchestrator,
+            new FakeCourseContentsGateway(),
             new FakeSubmissionFileGateway(),
             new FakeDocumentExtractionService());
 
@@ -582,6 +628,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     {
         public string? LastFileUrl { get; private set; }
 
+        public List<string> DownloadedFileUrls { get; } = [];
+
         public Task<SubmissionFileDownloadResult> DownloadFileAsync(
             string userExternalId,
             string fileUrl,
@@ -590,6 +638,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             CancellationToken cancellationToken)
         {
             LastFileUrl = fileUrl;
+            DownloadedFileUrls.Add(fileUrl);
             return Task.FromResult(new SubmissionFileDownloadResult(
                 filename,
                 "text/plain",
@@ -600,9 +649,89 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         }
     }
 
+    private sealed class FakeCourseContentsGateway : IMoodleCourseContentsGateway
+    {
+        public Task<CourseContentsSummary> GetCourseContentsAsync(
+            string userExternalId,
+            string courseId,
+            IReadOnlyCollection<string> moduleTypes,
+            bool includeHidden,
+            bool onlyWithFiles,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new CourseContentsSummary(
+                courseId,
+                moduleTypes.ToArray(),
+                includeHidden,
+                onlyWithFiles,
+                Sections:
+                [
+                    new CourseSectionSummary(
+                        "1",
+                        SectionNumber: 1,
+                        "SAP 01",
+                        Summary: null,
+                        Visible: true,
+                        ModuleCount: 3,
+                        IsEmpty: false,
+                        Modules:
+                        [
+                            new CourseModuleSummary(
+                                "499",
+                                InstanceId: "900",
+                                "resource",
+                                "Calendario do curso",
+                                Url: null,
+                                Visible: true,
+                                UserVisible: true,
+                                Description: "Datas gerais.",
+                                AvailabilityInfo: null,
+                                Dates: [],
+                                Files: []),
+                            new CourseModuleSummary(
+                                "500",
+                                InstanceId: "901",
+                                "resource",
+                                "Orientacoes SAP 01 - Etapa 1",
+                                Url: null,
+                                Visible: true,
+                                UserVisible: true,
+                                Description: null,
+                                AvailabilityInfo: null,
+                                Dates: [],
+                                Files:
+                                [
+                                    new CourseModuleFile(
+                                        Type: "file",
+                                        FileName: "Orientacoes SAP 01 - Etapa 1.pdf",
+                                        FilePath: "/",
+                                        FileSize: 100,
+                                        MimeType: "application/pdf",
+                                        FileUrl: "https://moodle.example/pluginfile.php/orientacoes.pdf",
+                                        IsExternalFile: false)
+                                ]),
+                            new CourseModuleSummary(
+                                "42",
+                                InstanceId: "501",
+                                "assign",
+                                "Tarefa 1",
+                                Url: null,
+                                Visible: true,
+                                UserVisible: true,
+                                Description: "Descricao da tarefa SAP 01 etapa 1.",
+                                AvailabilityInfo: null,
+                                Dates: [],
+                                Files: [])
+                        ])
+                ]));
+        }
+    }
+
     private sealed class FakeDocumentExtractionService : IDocumentExtractionService
     {
         public string? LastFilename { get; private set; }
+
+        public List<string> Filenames { get; } = [];
 
         public Task<DocumentExtractionResult> ExtractAsync(
             string filename,
@@ -611,6 +740,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             CancellationToken cancellationToken)
         {
             LastFilename = filename;
+            Filenames.Add(filename);
             return Task.FromResult(new DocumentExtractionResult(
                 filename,
                 mimeType,

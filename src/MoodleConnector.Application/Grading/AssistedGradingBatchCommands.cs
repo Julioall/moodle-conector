@@ -122,6 +122,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     IMoodleUserResolver moodleUserResolver,
     IMoodleAuditLogRepository auditLogs,
     IGradingBatchOrchestrator orchestrator,
+    IMoodleCourseContentsGateway contentsGateway,
     IMoodleSubmissionFileGateway fileGateway,
     IDocumentExtractionService extractionService,
     IOptions<GradingLimitsOptions>? limits = null)
@@ -252,6 +253,15 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     warnings,
                     cancellationToken);
             }
+
+            if (request.IncludeRubric || request.IncludeCourseMaterials)
+            {
+                await AddAssignmentContextArtifactsAsync(
+                    request.UserExternalId,
+                    item,
+                    warnings,
+                    cancellationToken);
+            }
         }
 
         await repository.SaveChangesAsync(cancellationToken);
@@ -379,6 +389,181 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     cancellationToken);
             }
         }
+    }
+
+    private async Task AddAssignmentContextArtifactsAsync(
+        string userExternalId,
+        AssistedGradingItem item,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        CourseContentsSummary contents;
+        try
+        {
+            contents = await contentsGateway.GetCourseContentsAsync(
+                userExternalId,
+                item.CourseId.ToString(CultureInfo.InvariantCulture),
+                moduleTypes: [],
+                includeHidden: true,
+                onlyWithFiles: false,
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"Nao foi possivel escanear materiais do curso para contexto da tarefa {item.AssignmentId}: {ex.Message}");
+            return;
+        }
+
+        var assignmentId = item.AssignmentId.ToString(CultureInfo.InvariantCulture);
+        var section = contents.Sections.FirstOrDefault(candidate =>
+            candidate.Modules.Any(module => IsAssignmentModule(module, assignmentId)));
+        var assignmentModule = section?.Modules.FirstOrDefault(module => IsAssignmentModule(module, assignmentId));
+        if (section is null || assignmentModule is null)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(assignmentModule.Description))
+        {
+            await repository.AddArtifactAsync(
+                new GradingArtifact(
+                    Guid.NewGuid(),
+                    item.Id,
+                    "assignment_context",
+                    assignmentModule.Name,
+                    "text/html",
+                    Sha256: null,
+                    SizeBytes: assignmentModule.Description.Length,
+                    ExtractionStatus.Succeeded,
+                    assignmentModule.Description,
+                    SummaryRef: "assignment_description",
+                    CreatedAt: DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+
+        var modules = section.Modules.ToArray();
+        var assignmentIndex = Array.IndexOf(modules, assignmentModule);
+        var nearbyModules = modules
+            .Select((module, index) => new
+            {
+                Module = module,
+                Distance = assignmentIndex >= 0 ? Math.Abs(index - assignmentIndex) : int.MaxValue
+            })
+            .Where(entry => entry.Distance <= 3 && IsContextCandidateModule(entry.Module, assignmentModule))
+            .OrderBy(entry => entry.Distance)
+            .Take(Math.Max(1, _limits.MaxFilesPerSubmission))
+            .ToArray();
+
+        foreach (var entry in nearbyModules)
+        {
+            if (!string.IsNullOrWhiteSpace(entry.Module.Description))
+            {
+                await repository.AddArtifactAsync(
+                    new GradingArtifact(
+                        Guid.NewGuid(),
+                        item.Id,
+                        "assignment_context",
+                        entry.Module.Name,
+                        "text/html",
+                        Sha256: null,
+                        SizeBytes: entry.Module.Description.Length,
+                        ExtractionStatus.Succeeded,
+                        entry.Module.Description,
+                        SummaryRef: $"section:{section.SectionNumber};distance:{entry.Distance}",
+                        CreatedAt: DateTimeOffset.UtcNow),
+                    cancellationToken);
+            }
+
+            foreach (var file in entry.Module.Files.Where(file => !string.IsNullOrWhiteSpace(file.FileUrl)))
+            {
+                await AddContextFileArtifactAsync(
+                    userExternalId,
+                    item.Id,
+                    file,
+                    warnings,
+                    cancellationToken);
+            }
+        }
+    }
+
+    private async Task AddContextFileArtifactAsync(
+        string userExternalId,
+        Guid gradingItemId,
+        CourseModuleFile file,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var filename = string.IsNullOrWhiteSpace(file.FileName)
+            ? "context-file"
+            : file.FileName;
+        var maxBytes = Math.Max(1, _limits.MaxFileSizeMb) * 1024L * 1024L;
+
+        try
+        {
+            var download = await fileGateway.DownloadFileAsync(
+                userExternalId,
+                file.FileUrl!,
+                filename,
+                maxBytes,
+                cancellationToken);
+            var extraction = await extractionService.ExtractAsync(
+                download.Filename,
+                download.MimeType,
+                download.Content,
+                cancellationToken);
+
+            await repository.AddArtifactAsync(
+                new GradingArtifact(
+                    Guid.NewGuid(),
+                    gradingItemId,
+                    "assignment_context",
+                    download.Filename,
+                    download.MimeType,
+                    download.Sha256Hex,
+                    download.SizeBytes,
+                    extraction.ExtractionStatus,
+                    extraction.ExtractedText,
+                    extraction.ErrorMessage,
+                    DateTimeOffset.UtcNow),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"Material de contexto {filename} nao foi extraido: {ex.Message}");
+        }
+    }
+
+    private static bool IsAssignmentModule(CourseModuleSummary module, string assignmentId)
+    {
+        return string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(module.InstanceId, assignmentId, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(module.ModuleId, assignmentId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsContextCandidateModule(CourseModuleSummary module, CourseModuleSummary assignmentModule)
+    {
+        if (ReferenceEquals(module, assignmentModule))
+        {
+            return false;
+        }
+
+        if (module.Files.Count > 0)
+        {
+            return true;
+        }
+
+        return module.ModuleType.Equals("resource", StringComparison.OrdinalIgnoreCase) ||
+            module.ModuleType.Equals("page", StringComparison.OrdinalIgnoreCase) ||
+            module.ModuleType.Equals("label", StringComparison.OrdinalIgnoreCase) ||
+            module.ModuleType.Equals("folder", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record AssistedGradingItemSeed(

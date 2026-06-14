@@ -47,7 +47,8 @@ public sealed class GradingContextBuilderTests
             {
                 MaxFilesPerSubmission = 1,
                 MaxTextCharsPerSubmission = 12
-            }));
+            }),
+            new HeuristicAssignmentContextSelectionService());
 
         var context = await sut.BuildAsync(
             item,
@@ -65,6 +66,53 @@ public sealed class GradingContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_SelecionaMelhorArtefatoDeContextoComoEnunciado()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.AddRange(
+        [
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                "Calendario do curso.pdf",
+                "application/pdf",
+                "sha-calendar",
+                SizeBytes: 100,
+                ExtractionStatus: "succeeded",
+                ExtractedTextRef: "Datas gerais e recados administrativos.",
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow),
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                "Orientacoes SAP 01 - Etapa 1.pdf",
+                "application/pdf",
+                "sha-enunciado",
+                SizeBytes: 200,
+                ExtractionStatus: "succeeded",
+                ExtractedTextRef: "Enunciado da atividade SAP 01 etapa 1 com criterios de entrega.",
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow)
+        ]);
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.Contains("Enunciado da atividade SAP 01", context.AssignmentStatement);
+        Assert.Contains("Orientacoes SAP 01", context.CourseMaterials);
+        Assert.DoesNotContain("Datas gerais", context.AssignmentStatement);
+    }
+
+    [Fact]
     public async Task BuildAsync_QuandoArquivosNaoIncluidos_NaoConsultaArtefatos()
     {
         var repository = new FakeGradingReviewRepository();
@@ -72,7 +120,8 @@ public sealed class GradingContextBuilderTests
         var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
         var sut = new GradingContextBuilder(
             repository,
-            Options.Create(new GradingLimitsOptions()));
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService());
 
         var context = await sut.BuildAsync(
             item,

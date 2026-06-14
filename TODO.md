@@ -1069,6 +1069,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [x] Criar `consultar_item_correcao_assistida`.
 - [x] Baixar anexos retornados por `mod_assign_get_submissions` quando houver `fileUrl`.
 - [x] Extrair texto de TXT/HTML/JSON/XML/CSV e PDF com texto embutido, persistindo `GradingArtifact.ExtractedTextRef`.
+- [x] Escanear materiais da tarefa/secao e selecionar heuristicamente o candidato mais provavel de enunciado/contexto.
 - [ ] Extrair texto de PDF escaneado/imagem via OCR.
 - [x] Gerar parecer preliminar revisavel quando houver texto extraido.
 - [ ] Gerar nota sugerida confiavel quando rubrica/criterios e escala estiverem disponiveis.
