@@ -164,6 +164,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Confirmations,
             fixture.Capabilities,
             fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -203,6 +204,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Confirmations,
             fixture.Capabilities,
             fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -233,6 +235,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Confirmations,
             fixture.Capabilities,
             fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -270,6 +273,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Confirmations,
             fixture.Capabilities,
             fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -303,6 +307,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Confirmations,
             fixture.Capabilities,
             fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -322,6 +327,82 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoTentativaDoMoodleMudou()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.SubmissionStatuses.Statuses.Add(new AssignmentSubmissionAttemptStatus(
+            AssignmentId: "501",
+            StudentId: "101",
+            AttemptNumber: 1,
+            SubmissionStatus: "submitted"));
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("tentativa", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_submission_attempt_mismatch", auditLog.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoSubmissaoAtualNaoEstaEntregue()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.SubmissionStatuses.Statuses.Add(new AssignmentSubmissionAttemptStatus(
+            AssignmentId: "501",
+            StudentId: "101",
+            AttemptNumber: 0,
+            SubmissionStatus: "new"));
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("submissao atual nao esta entregue", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_submission_not_submitted", auditLog.ErrorCode);
+    }
+
+    [Fact]
     public async Task ConfirmLaunch_BloqueiaQuandoFuncaoMoodleDeEscritaNaoEstaDisponivel()
     {
         var fixture = new Fixture();
@@ -337,6 +418,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Confirmations,
             fixture.Capabilities,
             fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -365,6 +447,7 @@ public sealed class GradingLaunchCommandHandlerTests
         public FakeActionConfirmationService Confirmations { get; } = new();
         public FakeMoodleGradingCapabilitiesGateway Capabilities { get; } = new();
         public FakeMoodleAssignmentGradeReadGateway ExistingGrades { get; } = new();
+        public FakeMoodleAssignmentSubmissionStatusGateway SubmissionStatuses { get; } = new();
         public FakeAuditLogRepository AuditLogs { get; } = new();
         public FakeMediator Mediator { get; } = new();
         public FakeCurrentUserContext CurrentUser { get; } = new(currentUserSubject, scopes);
@@ -385,6 +468,17 @@ public sealed class GradingLaunchCommandHandlerTests
             Guid gradingItemId,
             string? draftVersionHash = null)
         {
+            if (!SubmissionStatuses.Statuses.Any(status =>
+                status.AssignmentId == "501" &&
+                status.StudentId == "101"))
+            {
+                SubmissionStatuses.Statuses.Add(new AssignmentSubmissionAttemptStatus(
+                    AssignmentId: "501",
+                    StudentId: "101",
+                    AttemptNumber: 0,
+                    SubmissionStatus: "submitted"));
+            }
+
             var payload = new GradingLaunchPayload(
                 batchId,
                 [
@@ -610,6 +704,22 @@ public sealed class GradingLaunchCommandHandlerTests
             return Task.FromResult(ExistingGrades.SingleOrDefault(grade =>
                 grade.AssignmentId == assignmentId &&
                 grade.StudentId == studentId));
+        }
+    }
+
+    private sealed class FakeMoodleAssignmentSubmissionStatusGateway : IMoodleAssignmentSubmissionStatusGateway
+    {
+        public List<AssignmentSubmissionAttemptStatus> Statuses { get; } = [];
+
+        public Task<AssignmentSubmissionAttemptStatus?> GetSubmissionStatusAsync(
+            string userExternalId,
+            string assignmentId,
+            string studentId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Statuses.LastOrDefault(status =>
+                status.AssignmentId == assignmentId &&
+                status.StudentId == studentId));
         }
     }
 

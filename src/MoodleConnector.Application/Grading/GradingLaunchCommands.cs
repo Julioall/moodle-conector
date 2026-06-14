@@ -70,6 +70,12 @@ public sealed record AssignmentExistingGrade(
     decimal? Grade,
     bool HasGrade);
 
+public sealed record AssignmentSubmissionAttemptStatus(
+    string AssignmentId,
+    string StudentId,
+    int? AttemptNumber,
+    string? SubmissionStatus);
+
 public sealed class CreateGradingLaunchPreviewCommandHandler(
     IGradingReviewRepository repository,
     IPendingActionService pendingActions,
@@ -250,6 +256,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     IActionConfirmationService confirmations,
     IMoodleGradingCapabilitiesGateway capabilities,
     IMoodleAssignmentGradeReadGateway gradeReadGateway,
+    IMoodleAssignmentSubmissionStatusGateway submissionStatusGateway,
     IMoodleAuditLogRepository auditLogs,
     IMediator mediator)
     : IRequestHandler<ConfirmMoodleBatchLaunchCommand, ConfirmMoodleBatchLaunchResult>
@@ -378,6 +385,32 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 continue;
             }
 
+            var submissionAttemptResult = await GetSubmissionAttemptValidationAsync(
+                userExternalId,
+                payloadItem,
+                cancellationToken);
+            if (submissionAttemptResult.Failure is not null)
+            {
+                item.MarkCommitFailed(submissionAttemptResult.Failure.Message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, submissionAttemptResult.Failure.Message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new
+                    {
+                        item.CommitStatus,
+                        payloadAttemptNumber = payloadItem.AttemptNumber,
+                        currentAttemptNumber = submissionAttemptResult.CurrentStatus?.AttemptNumber,
+                        currentSubmissionStatus = submissionAttemptResult.CurrentStatus?.SubmissionStatus
+                    },
+                    errorCode: submissionAttemptResult.Failure.ErrorCode,
+                    errorMessage: submissionAttemptResult.Failure.Message,
+                    cancellationToken);
+                continue;
+            }
+
             try
             {
                 var writeResult = await mediator.Send(
@@ -478,6 +511,55 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         }
     }
 
+    private async Task<SubmissionAttemptValidationResult> GetSubmissionAttemptValidationAsync(
+        string userExternalId,
+        GradingLaunchPayloadItem payloadItem,
+        CancellationToken cancellationToken)
+    {
+        if (payloadItem.AttemptNumber is null)
+        {
+            return new SubmissionAttemptValidationResult(CurrentStatus: null, Failure: null);
+        }
+
+        try
+        {
+            var currentStatus = await submissionStatusGateway.GetSubmissionStatusAsync(
+                userExternalId,
+                payloadItem.AssignmentId,
+                payloadItem.StudentId,
+                cancellationToken);
+            if (currentStatus?.AttemptNumber is not null &&
+                currentStatus.AttemptNumber != payloadItem.AttemptNumber)
+            {
+                return new SubmissionAttemptValidationResult(
+                    currentStatus,
+                    new CapabilityValidationFailure(
+                        $"A tentativa da submissao mudou no Moodle para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma nova previa antes de lancar.",
+                        "moodle_submission_attempt_mismatch"));
+            }
+
+            if (!string.IsNullOrWhiteSpace(currentStatus?.SubmissionStatus) &&
+                !string.Equals(currentStatus.SubmissionStatus, "submitted", StringComparison.OrdinalIgnoreCase))
+            {
+                return new SubmissionAttemptValidationResult(
+                    currentStatus,
+                    new CapabilityValidationFailure(
+                        $"A submissao atual nao esta entregue no Moodle para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma nova previa antes de lancar.",
+                        "moodle_submission_not_submitted"));
+            }
+
+            return new SubmissionAttemptValidationResult(currentStatus, Failure: null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new SubmissionAttemptValidationResult(
+                CurrentStatus: null,
+                new CapabilityValidationFailure(
+                    $"Nao foi possivel validar a tentativa atual da submissao no Moodle antes do lancamento: {ex.Message}",
+                    "moodle_submission_status_validation_failed"));
+        }
+    }
+
     private async Task MarkPendingItemsFailedAsync(
         PendingMoodleAction action,
         Guid batchJobId,
@@ -560,6 +642,10 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
 
     private sealed record ExistingGradeValidationResult(
         AssignmentExistingGrade? ExistingGrade,
+        CapabilityValidationFailure? Failure);
+
+    private sealed record SubmissionAttemptValidationResult(
+        AssignmentSubmissionAttemptStatus? CurrentStatus,
         CapabilityValidationFailure? Failure);
 
     private sealed record CapabilityValidationFailure(string Message, string ErrorCode);

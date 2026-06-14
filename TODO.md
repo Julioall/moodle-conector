@@ -948,7 +948,7 @@ O painel é opcional e deve entrar depois do MVP `tool-only`. Se for implementad
 - [ ] Validar se o professor/tutor tem permissão no curso.
 - [ ] Validar se o professor/tutor pode corrigir a atividade.
 - [ ] Validar se o estudante pertence à turma.
-- [ ] Validar se a tentativa ainda é corrigível.
+- [x] Validar se a tentativa ainda é corrigível antes do commit, bloqueando quando a tentativa mudou ou a submissão atual não está entregue.
 - [x] Validar se a nota está dentro da escala quando há critérios com pontuação máxima persistida.
 - [ ] Validar se o feedback final foi revisado.
 - [x] Validar no Moodle a disponibilidade de leitura/escrita necessaria antes do commit, bloqueando quando `mod_assign_get_grades` ou `mod_assign_save_grade` falham.
