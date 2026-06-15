@@ -30,6 +30,8 @@ public sealed class AssistedGradingItem
 
     public string? DraftFeedback { get; private set; }
 
+    public string? PrivateNotesToTeacher { get; private set; }
+
     public string? FinalFeedback { get; private set; }
 
     public string? TeacherDecision { get; private set; }
@@ -83,7 +85,11 @@ public sealed class AssistedGradingItem
         };
     }
 
-    public void SetDraft(decimal? suggestedGrade, decimal? confidence, string draftFeedback)
+    public void SetDraft(
+        decimal? suggestedGrade,
+        decimal? confidence,
+        string draftFeedback,
+        string? privateNotesToTeacher = null)
     {
         if (suggestedGrade < 0)
         {
@@ -98,6 +104,7 @@ public sealed class AssistedGradingItem
         SuggestedGrade = suggestedGrade;
         Confidence = confidence;
         DraftFeedback = draftFeedback.Trim();
+        PrivateNotesToTeacher = string.IsNullOrWhiteSpace(privateNotesToTeacher) ? null : privateNotesToTeacher.Trim();
         Status = GradingItemStatus.DraftReady;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
@@ -111,7 +118,23 @@ public sealed class AssistedGradingItem
         SuggestedGrade = null;
         Confidence = 0m;
         DraftFeedback = message;
+        PrivateNotesToTeacher = message;
         Status = GradingItemStatus.Blocked;
+        CommitStatus = GradingCommitStatus.NotReady;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void MarkAnalysisFailed(string error)
+    {
+        var message = string.IsNullOrWhiteSpace(error)
+            ? "Falha desconhecida ao processar a correcao assistida."
+            : error.Trim();
+
+        SuggestedGrade = null;
+        Confidence = 0m;
+        DraftFeedback = message;
+        PrivateNotesToTeacher = message;
+        Status = GradingItemStatus.Failed;
         CommitStatus = GradingCommitStatus.NotReady;
         UpdatedAt = DateTimeOffset.UtcNow;
     }

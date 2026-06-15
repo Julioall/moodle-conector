@@ -41,6 +41,7 @@ public sealed class SchemaScriptTests
         Assert.Contains("grading_evidence", sql, StringComparison.Ordinal);
         Assert.Contains("\"TeacherDecision\"", sql, StringComparison.Ordinal);
         Assert.Contains("\"ReviewNotes\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"PrivateNotesToTeacher\"", sql, StringComparison.Ordinal);
         Assert.Contains("IX_grading_item_BatchId_Status", sql, StringComparison.Ordinal);
         Assert.Contains("VALUES (3, 'assisted grading schema'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);

@@ -4,7 +4,7 @@ public interface IDocumentExtractionService
 {
     /// <summary>
     /// Extrai texto e metadados de um arquivo de submissao.
-    /// Suporta TXT, HTML, JSON nativamente; retorna stub estruturado para formatos binarios.
+    /// Suporta texto, PDF com texto embutido, documentos ZIP/XML como DOCX, PPTX, XLSX e OpenDocument, e ZIP com arquivos internos suportados.
     /// </summary>
     Task<DocumentExtractionResult> ExtractAsync(
         string filename,
@@ -21,12 +21,21 @@ public sealed record DocumentExtractionResult(
     int WordCount,
     int CharCount,
     bool Truncated,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    IReadOnlyList<DocumentTextChunk>? TextChunks = null);
+
+public sealed record DocumentTextChunk(
+    int Index,
+    int TotalChunks,
+    int StartChar,
+    int EndChar,
+    string Text);
 
 public static class ExtractionStatus
 {
     public const string Succeeded = "succeeded";
     public const string UnsupportedFormat = "unsupported_format";
+    public const string ScannedPdf = "scanned_pdf";
     public const string FileTooLarge = "file_too_large";
     public const string Empty = "empty";
     public const string Failed = "failed";

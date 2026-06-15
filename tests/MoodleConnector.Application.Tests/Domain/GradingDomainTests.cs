@@ -40,7 +40,8 @@ public sealed class GradingDomainTests
         item.SetDraft(
             suggestedGrade: 7.5m,
             confidence: 0.82m,
-            draftFeedback: "Feedback sugerido.");
+            draftFeedback: "Feedback sugerido.",
+            privateNotesToTeacher: "Observacao privada do rascunho.");
 
         item.ApplyTeacherReview(
             finalGrade: 8.0m,
@@ -49,6 +50,7 @@ public sealed class GradingDomainTests
             reviewedByMoodleUserId: 321);
 
         Assert.Equal(7.5m, item.SuggestedGrade);
+        Assert.Equal("Observacao privada do rascunho.", item.PrivateNotesToTeacher);
         Assert.Equal(8.0m, item.FinalGrade);
         Assert.Equal("Feedback revisado pelo professor.", item.FinalFeedback);
         Assert.Equal(GradingReviewStatus.Reviewed, item.ReviewStatus);
@@ -56,6 +58,26 @@ public sealed class GradingDomainTests
         Assert.Equal(GradingCommitStatus.Pending, item.CommitStatus);
         Assert.Equal("teacher-1", item.ReviewedBySubject);
         Assert.NotNull(item.ReviewedAt);
+    }
+
+    [Fact]
+    public void AssistedGradingItem_MarkAnalysisFailed_MarcaFalhaSemCommitMoodle()
+    {
+        var item = AssistedGradingItem.Create(
+            batchId: Guid.NewGuid(),
+            courseId: 10,
+            assignmentId: 501,
+            submissionId: 9001,
+            moodleUserId: 101,
+            attemptNumber: 0);
+
+        item.MarkAnalysisFailed("Erro ao montar contexto.");
+
+        Assert.Equal(GradingItemStatus.Failed, item.Status);
+        Assert.Equal(GradingCommitStatus.NotReady, item.CommitStatus);
+        Assert.Equal(0m, item.Confidence);
+        Assert.Contains("Erro ao montar contexto", item.DraftFeedback);
+        Assert.Equal(item.DraftFeedback, item.PrivateNotesToTeacher);
     }
 
     [Fact]

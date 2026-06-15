@@ -140,6 +140,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         item.Property(x => x.ReviewStatus).HasConversion<string>().HasMaxLength(80).IsRequired();
         item.Property(x => x.CommitStatus).HasConversion<string>().HasMaxLength(80).IsRequired();
         item.Property(x => x.TeacherDecision).HasMaxLength(80);
+        item.Property(x => x.PrivateNotesToTeacher);
         item.Property(x => x.ReviewedBySubject).HasMaxLength(200);
         item.Property(x => x.IdempotencyKey).HasMaxLength(64);
         item.HasOne<AssistedGradingBatch>()

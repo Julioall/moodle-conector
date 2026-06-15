@@ -1,7 +1,7 @@
 # TODO.md — Correção Assistida SENAI para AVA/Moodle via GPT Apps
 
 **Status atual:** MVP funcional avançado em validação técnica controlada.
-**Data-base atualizada:** 2026-06-14
+**Data-base atualizada:** 2026-06-15
 **Repositório:** `moodle-conector`
 **Objetivo:** transformar o GPT App/Conector do AVA em uma ferramenta de consulta, análise, rascunho, revisão e escrita assistida para apoiar professores/tutores na correção de atividades no Moodle, mantendo decisão humana, rastreabilidade, segurança institucional e confirmação explícita antes de qualquer escrita oficial.
 
@@ -17,7 +17,7 @@ Fluxo implementado:
 2. listagem de entregas corrigíveis;
 3. criação de lote interno de correção assistida;
 4. download de anexos da submissão quando há `fileUrl`;
-5. extração de TXT, HTML, JSON, XML, CSV e PDF com texto embutido;
+5. extração de TXT, HTML, JSON, XML, CSV, PDF com texto embutido, DOCX, PPTX, XLSX, OpenDocument e chunking representativo para textos muito grandes;
 6. varredura de materiais da seção da tarefa;
 7. persistência de artefatos `submission_file` e `assignment_context`;
 8. seleção heurística do provável enunciado/material de contexto;
@@ -33,7 +33,8 @@ Fluxo implementado:
 18. confirmação literal;
 19. escrita individual controlada no Moodle via `mod_assign_save_grade`;
 20. auditoria de criação de lote, revisão, bloqueios e commit Moodle;
-21. proteções contra reenvio, prévia obsoleta, nota existente e tentativa/submissão alterada antes do commit.
+21. proteções contra reenvio, prévia obsoleta, nota existente e tentativa/submissão alterada antes do commit;
+22. exportação de relatório consolidado do lote para coordenação, com contadores, atenção e critérios com lacunas.
 
 Estado operacional correto:
 
@@ -63,6 +64,7 @@ Tools de correção expostas:
 | `listar_entregas_corrigiveis` | Implementada | leitura |
 | `criar_lote_correcao_assistida` | Implementada | criação interna |
 | `consultar_status_lote_correcao` | Implementada | leitura |
+| `exportar_relatorio_correcao_coordenacao` | Implementada | leitura |
 | `cancelar_lote_correcao_assistida` | Implementada | escrita interna |
 | `consultar_item_correcao_assistida` | Implementada | leitura |
 | `consultar_contexto_item_correcao_assistida` | Implementada e registrada | leitura |
@@ -191,20 +193,21 @@ Implementado:
 - [x] XML.
 - [x] CSV.
 - [x] PDF com texto embutido via PdfPig.
+- [x] DOCX.
+- [x] PPTX.
+- [x] XLSX.
+- [x] ODT/ODS/ODP.
+- [x] ZIP com múltiplos arquivos internos suportados.
+- [x] Bloqueio específico para PDF escaneado ou sem texto extraível (`scanned_pdf`).
+- [x] Falha estruturada para arquivo corrompido em formatos suportados.
 - [x] Bloqueio claro quando não há conteúdo legível suficiente.
+- [x] Chunking representativo para submissões muito grandes, preservando trechos distribuídos pelo documento dentro do limite de contexto.
 
 Ainda pendente:
 
-- [ ] DOCX.
-- [ ] PPTX.
-- [ ] XLSX.
-- [ ] ODT/ODS/ODP.
 - [ ] Imagens.
-- [ ] PDF escaneado/OCR.
-- [ ] ZIP e múltiplos arquivos internos.
+- [ ] OCR para PDF escaneado/imagem.
 - [ ] Arquivo protegido por senha.
-- [ ] Arquivo corrompido.
-- [ ] Chunking para submissões muito grandes além do limite atual.
 
 ---
 
@@ -219,16 +222,17 @@ Implementado:
 - [x] Lacunas por critério.
 - [x] Feedback ao estudante.
 - [x] Confiança inicial.
+- [x] Observações internas ao professor/tutor no rascunho.
+- [x] Sinalização de baixa confiança para revisão humana.
 - [x] Pendências para revisão humana.
 - [x] Bloqueio quando falta conteúdo legível.
+- [x] Relatório consolidado para coordenação com itens que exigem atenção e critérios com lacunas.
 
 Ainda pendente:
 
 - [ ] Rubrica real do Moodle.
 - [ ] Escalas/conceitos reais do Moodle.
 - [ ] Conversão robusta de escala.
-- [ ] Observações internas ao professor/tutor.
-- [ ] Melhor classificação de baixa confiança.
 - [ ] Suspeita de plágio/autoria duvidosa apenas como sinalização humana.
 - [ ] Validação pedagógica com tutores antes de uso amplo.
 
@@ -245,15 +249,16 @@ Implementado no MVP:
 - [x] Confirmação por subconjuntos revisados.
 - [x] Limites configuráveis para lote, arquivo, quantidade de arquivos e texto.
 - [x] `LocalGradingBatchOrchestrator` com enqueue/cancel/status local.
+- [x] Timeout, retry/backoff e circuit breaker HTTP configuráveis nos gateways Moodle.
+- [x] Cache de materiais comuns por curso+tarefa durante a criação do lote.
+- [x] Falhas recuperáveis por item no orquestrador local.
+- [x] Retomada local de lote parcialmente processado, reprocessando apenas itens ainda pendentes.
 
 Ainda pendente para escala real:
 
 - [ ] Fila real com workers/background service.
 - [ ] Concorrência configurável por Moodle/download/extração/análise.
-- [ ] Retry/backoff/circuit breaker operacional.
-- [ ] Cache de materiais comuns por atividade/seção.
-- [ ] Retomada segura de lote parcialmente processado.
-- [ ] Falhas recuperáveis por item.
+- [ ] Retomada durável de lote parcialmente processado após queda de processo/worker.
 - [ ] Métricas de tempo, custo, falha e carga Moodle.
 - [ ] Teste de carga com 25 entregas.
 - [ ] Teste de carga com 100 entregas.
@@ -304,16 +309,26 @@ Estado atual:
 - [x] Testes de bloqueio por tentativa/submissão alterada.
 - [x] Testes de auditoria.
 - [x] Testes de metadata MCP.
+- [x] Testes de resiliência HTTP Moodle.
+- [x] Testes de extração DOCX/PPTX/XLSX/ODT/ODS/ODP.
+- [x] Testes de extração ZIP e arquivo corrompido.
+- [x] Testes de cache de contexto por atividade no lote.
+- [x] Testes de falha parcial recuperável por item.
+- [x] Testes de retomada local de lote parcialmente processado.
+- [x] Testes de observações internas e baixa confiança no rascunho.
+- [x] Testes de relatório consolidado para coordenação.
+- [x] Testes de chunking representativo para texto muito grande.
 
 Última verificação conhecida:
 
-- [x] `dotnet test MoodleConnector.slnx` passando com 185 testes em 2026-06-14.
+- [x] `dotnet.exe test MoodleConnector.slnx` passando com 211 testes em 2026-06-15.
+- [x] `dotnet.exe test tests/MoodleConnector.Application.Tests/MoodleConnector.Application.Tests.csproj --filter DocumentExtractionServiceTests` passando com 19 testes em 2026-06-15.
 
 Ainda pendente:
 
 - [ ] Testes de integração em sandbox para escrita real.
 - [ ] Testes de carga 25/100/400.
-- [ ] Testes com DOCX/PPTX/XLSX/ODT/imagem quando suporte for implementado.
+- [ ] Testes com imagens e PDF escaneado/OCR quando suporte for implementado.
 - [ ] Testes de token expirado e token sem escopo de escrita.
 - [ ] Testes de usuário sem permissão Moodle real para corrigir.
 - [ ] Reescanear `/mcp` no ChatGPT Developer Mode após mudanças de metadata/tools.
@@ -335,22 +350,23 @@ Ainda pendente:
 
 ### P1 — robustez pedagógica e formatos
 
-- [ ] Implementar DOCX.
-- [ ] Implementar PPTX.
-- [ ] Implementar XLSX.
-- [ ] Implementar ODT/ODS/ODP.
-- [ ] Implementar OCR ou bloqueio específico para PDF escaneado.
+- [x] Implementar DOCX.
+- [x] Implementar PPTX.
+- [x] Implementar XLSX.
+- [x] Implementar ODT/ODS/ODP.
+- [x] Implementar ZIP e múltiplos arquivos internos.
+- [x] Implementar OCR ou bloqueio específico para PDF escaneado.
 - [x] Melhorar extração de critério/valor para SAP com `Valor da atividade` e critérios na mesma linha do cabeçalho.
 - [ ] Melhorar extração de rubrica/critério/escala para outros formatos reais do Moodle.
-- [ ] Melhorar análise de baixa confiança.
-- [ ] Adicionar observações internas ao professor.
-- [ ] Exportar relatório consolidado para coordenação.
+- [x] Melhorar análise de baixa confiança.
+- [x] Adicionar observações internas ao professor.
+- [x] Exportar relatório consolidado para coordenação.
 
 ### P2 — escala e operação
 
 - [ ] Implementar fila real com workers.
-- [ ] Cachear materiais comuns por atividade/seção.
-- [ ] Adicionar retry/backoff/circuit breaker.
+- [x] Cachear materiais comuns por atividade/seção.
+- [x] Adicionar retry/backoff/circuit breaker.
 - [ ] Adicionar métricas e dashboard operacional.
 - [ ] Criar painel UI opcional.
 - [ ] Executar testes de carga.
@@ -392,9 +408,9 @@ Ainda pendente:
 
 - [ ] Lote com 400 entregas não trava o chat.
 - [ ] Processamento ocorre por fila/workers reais.
-- [ ] Materiais comuns são cacheados.
+- [x] Materiais comuns são cacheados dentro do lote.
 - [ ] Professor/tutor consegue revisar por páginas/filtros.
-- [ ] Falhas parciais não bloqueiam todo o lote.
+- [x] Falhas parciais não bloqueiam todo o lote.
 - [x] Lançamento parcial é auditável no commit Moodle.
 - [ ] Sistema respeita limites de Moodle, arquivos e IA em teste de carga.
 

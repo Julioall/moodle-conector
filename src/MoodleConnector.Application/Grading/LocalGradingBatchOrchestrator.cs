@@ -29,10 +29,10 @@ public sealed class LocalGradingBatchOrchestrator(
         var batch = await repository.GetBatchAsync(batchId, cancellationToken)
             ?? throw new InvalidOperationException("Lote nao encontrado para enfileirar.");
 
-        if (batch.Status is GradingBatchStatus.Processing or GradingBatchStatus.ReadyForReview or GradingBatchStatus.Completed)
+        if (batch.Status is not (GradingBatchStatus.Pending or GradingBatchStatus.Processing))
         {
             logger.LogDebug(
-                "Lote {BatchId} em status {Status} ja processado ou em processamento; enfileiramento ignorado.",
+                "Lote {BatchId} em status {Status} nao aceita enfileiramento local; enfileiramento ignorado.",
                 batchId,
                 batch.Status);
             return;
@@ -60,7 +60,23 @@ public sealed class LocalGradingBatchOrchestrator(
 
         foreach (var item in items.Where(item => item.Status == GradingItemStatus.Pending))
         {
-            await ProcessItemAsync(item, cancellationToken);
+            try
+            {
+                await ProcessItemAsync(item, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(
+                    ex,
+                    "Falha recuperavel ao processar item {GradingItemId} do lote {BatchId}.",
+                    item.Id,
+                    batchId);
+                item.MarkAnalysisFailed($"Falha ao processar este item de correcao assistida: {ex.Message}");
+            }
         }
 
         UpdateBatchCounters(batch, items);
@@ -138,7 +154,8 @@ public sealed class LocalGradingBatchOrchestrator(
             item.SetDraft(
                 suggestedGrade: null,
                 confidence: 0m,
-                BuildPreliminaryFeedback(context, readableText));
+                BuildPreliminaryFeedback(context, readableText),
+                BuildPreliminaryTeacherNotes(context));
             return;
         }
 
@@ -176,7 +193,11 @@ public sealed class LocalGradingBatchOrchestrator(
                     cancellationToken);
             }
 
-            item.SetDraft(result.SuggestedGrade, result.Confidence, result.FeedbackToStudent);
+            item.SetDraft(
+                result.SuggestedGrade,
+                result.Confidence,
+                result.FeedbackToStudent,
+                result.PrivateNotesToTeacher);
             return;
         }
 
@@ -207,6 +228,13 @@ public sealed class LocalGradingBatchOrchestrator(
         return "Parecer preliminar para revisao do professor/tutor. " +
             "A submissao possui conteudo legivel, mas ainda faltam criterios, rubrica ou escala de nota para sugerir nota com seguranca. " +
             $"Trecho inicial analisado: {snippet}";
+    }
+
+    private static string BuildPreliminaryTeacherNotes(GradingContext context)
+    {
+        return context.Blockers.Count == 0
+            ? "Rascunho preliminar sem bloqueadores adicionais."
+            : "Rascunho preliminar gerado com pendencias de contexto: " + string.Join(" ", context.Blockers);
     }
 
     private static void UpdateBatchCounters(

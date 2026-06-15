@@ -60,6 +60,7 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Null(item.SuggestedGrade);
         Assert.Equal(0m, item.Confidence);
         Assert.Contains("parecer preliminar", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Sem criterios.", item.PrivateNotesToTeacher);
         Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
         Assert.Equal(1, batch.ProcessedItems);
         Assert.Equal(1, batch.ReadyItems);
@@ -147,6 +148,7 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.True(item.SuggestedGrade > 0);
         Assert.True(item.Confidence > 0m);
         Assert.Contains("Pontos fortes", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Analise estruturada", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, batch.ReadyItems);
     }
 
@@ -188,6 +190,103 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Equal("Evidencia encontrada.", evidence.EvidenceText);
         Assert.Equal("Lacuna encontrada.", evidence.GapsText);
         Assert.True(evidence.TeacherReviewRequired);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_QuandoUmItemFalha_ContinuaProcessandoDemaisItens()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 2);
+        var failedItem = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var readyItem = AssistedGradingItem.Create(batch.Id, 10, 501, 9002, 102, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(failedItem, CancellationToken.None);
+        await repository.AddItemAsync(readyItem, CancellationToken.None);
+        var sut = new LocalGradingBatchOrchestrator(
+            repository,
+            DefaultLimits(),
+            new FailingOneItemContextBuilder(failedItem.Id),
+            new FakeGradingAnalysisService(),
+            NullLogger<LocalGradingBatchOrchestrator>.Instance);
+
+        await sut.EnqueueAsync(batch.Id, CancellationToken.None);
+
+        Assert.Equal(GradingItemStatus.Failed, failedItem.Status);
+        Assert.Equal(GradingCommitStatus.NotReady, failedItem.CommitStatus);
+        Assert.Contains("Falha ao processar", failedItem.DraftFeedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(GradingItemStatus.DraftReady, readyItem.Status);
+        Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
+        Assert.Equal(2, batch.ProcessedItems);
+        Assert.Equal(1, batch.ReadyItems);
+        Assert.Equal(1, batch.FailedItems);
+        Assert.Equal(1, repository.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ComLoteEmProcessamento_RetomaSomenteItensPendentes()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 2);
+        var alreadyProcessedItem = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var pendingItem = AssistedGradingItem.Create(batch.Id, 10, 501, 9002, 102, 0);
+        alreadyProcessedItem.SetDraft(null, 0m, "Rascunho anterior.");
+        batch.UpdateCounters(processedItems: 1, readyItems: 1, blockedItems: 0, failedItems: 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(alreadyProcessedItem, CancellationToken.None);
+        await repository.AddItemAsync(pendingItem, CancellationToken.None);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            pendingItem.Id,
+            "submission_file",
+            "entrega.txt",
+            "text/plain",
+            "sha-2",
+            120,
+            "succeeded",
+            "Texto pendente extraido para retomada do lote.",
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = CreateSut(repository);
+
+        await sut.EnqueueAsync(batch.Id, CancellationToken.None);
+
+        Assert.Equal("Rascunho anterior.", alreadyProcessedItem.DraftFeedback);
+        Assert.Equal(GradingItemStatus.DraftReady, pendingItem.Status);
+        Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
+        Assert.Equal(2, batch.ProcessedItems);
+        Assert.Equal(2, batch.ReadyItems);
+        Assert.Equal(0, batch.FailedItems);
+        Assert.Equal(1, repository.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task EnqueueAsync_ComLoteCancelado_NaoProcessaItensPendentes()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        batch.Cancel();
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "submission_file",
+            "entrega.txt",
+            "text/plain",
+            "sha-1",
+            120,
+            "succeeded",
+            "Texto que nao deve ser processado porque o lote foi cancelado.",
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = CreateSut(repository);
+
+        await sut.EnqueueAsync(batch.Id, CancellationToken.None);
+
+        Assert.Equal(GradingItemStatus.Pending, item.Status);
+        Assert.Equal(GradingBatchStatus.Cancelled, batch.Status);
+        Assert.Equal(0, repository.SaveChangesCount);
     }
 
     [Fact]
@@ -393,6 +492,37 @@ public sealed class LocalGradingBatchOrchestratorTests
             GradingContextOptions options,
             CancellationToken cancellationToken)
         {
+            return Task.FromResult(GradingContext.Build(
+                item.Id,
+                item.BatchId,
+                item.CourseId.ToString(),
+                item.AssignmentId.ToString(),
+                item.SubmissionId?.ToString(),
+                item.MoodleUserId.ToString(),
+                assignmentStatement: "Enunciado.",
+                criteria: "Criterio avaliado.",
+                rubricDescription: null,
+                maxGrade: 4m,
+                gradeScale: null,
+                submissionText: "Texto da entrega com evidencia do criterio.",
+                attachedFiles: [new GradingFileInfo("entrega.txt", "text/plain", 120, "sha-1", "Texto da entrega com evidencia do criterio.", true)],
+                courseMaterials: null,
+                teacherInstructions: options.TeacherInstructions));
+        }
+    }
+
+    private sealed class FailingOneItemContextBuilder(Guid failedItemId) : IGradingContextBuilder
+    {
+        public Task<GradingContext> BuildAsync(
+            AssistedGradingItem item,
+            GradingContextOptions options,
+            CancellationToken cancellationToken)
+        {
+            if (item.Id == failedItemId)
+            {
+                throw new InvalidOperationException("Falha simulada no contexto.");
+            }
+
             return Task.FromResult(GradingContext.Build(
                 item.Id,
                 item.BatchId,

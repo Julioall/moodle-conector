@@ -69,6 +69,7 @@ Este catálogo reflete o estado real do repositório.
 | `executar_descoberta_tecnica_correcao` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `criar_lote_correcao_assistida` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
 | `consultar_status_lote_correcao` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `exportar_relatorio_correcao_coordenacao` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Implementada |
 | `cancelar_lote_correcao_assistida` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Implementada |
 | `consultar_item_correcao_assistida` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
 | `atualizar_rascunho_correcao` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Implementada |
@@ -564,7 +565,7 @@ Descricao:
 
 - Cria um job interno em `grading_batch` e itens em `grading_item` a partir das entregas retornadas pelas queries de submissao existentes.
 - Quando `includeSubmissionFiles=true`, baixa os anexos retornados pela submissao com `fileUrl`, respeita os limites de arquivo configurados e persiste `GradingArtifact` com o resultado da extracao.
-- A extracao suporta textos simples/HTML/JSON/XML/CSV e PDF com texto embutido. PDF escaneado ou composto apenas por imagem ainda exige OCR.
+- A extracao suporta textos simples/HTML/JSON/XML/CSV, PDF com texto embutido, DOCX, PPTX, XLSX, OpenDocument e ZIP com arquivos internos suportados. Textos muito grandes usam chunking representativo com trechos distribuídos pelo documento dentro do limite de contexto. PDF escaneado ou composto apenas por imagem retorna status `scanned_pdf` e ainda exige OCR.
 - Quando `includeRubric=true` ou `includeCourseMaterials=true`, escaneia a secao da tarefa, persiste candidatos de contexto como `assignment_context` e usa selecao heuristica para escolher o provavel enunciado/material principal.
 - O orquestrador inline do MVP processa itens pendentes logo apos a criacao do lote: se houver texto extraido, gera um parecer preliminar revisavel; se nao houver conteudo legivel, marca o item como bloqueado.
 - Nota sugerida confiavel continua dependente de rubrica/criterios e escala disponiveis.
@@ -616,6 +617,42 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
+## `exportar_relatorio_correcao_coordenacao`
+
+Descricao:
+
+- Gera um relatorio consolidado de um lote interno de correcao assistida para coordenacao.
+- Retorna contadores de processamento, revisao, commit, baixa confianca, medias de confianca/nota, itens que exigem atencao e criterios com lacunas.
+- Inclui `reportMarkdown` para exportacao/copiar em atas, acompanhamentos ou documentos internos.
+- Nao retorna anexos completos, e-mail de estudante ou feedback completo de submissao.
+- Nao consulta nem escreve no Moodle.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `batchJobId` | `Guid` | Identificador do lote retornado por `criar_lote_correcao_assistida`. |
+
+Campos principais de resposta:
+
+| Campo | Tipo | Descricao |
+| --- | --- | --- |
+| `statusCounts` | `object` | Contagem por status interno do item. |
+| `reviewStatusCounts` | `object` | Contagem por status de revisao humana. |
+| `commitStatusCounts` | `object` | Contagem por status de lancamento Moodle. |
+| `attentionItems` | `array` | Ate 25 itens que exigem atencao, com estudante, tarefa, status e motivo resumido. |
+| `criteriaNeedingReview` | `array` | Ate 10 criterios com lacunas ou revisao obrigatoria. |
+| `reportMarkdown` | `string` | Relatorio em Markdown, sem textos completos de feedback/anexo. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
 ## `cancelar_lote_correcao_assistida`
 
 Descricao:
@@ -644,7 +681,7 @@ Metadados MCP:
 Descricao:
 
 - Consulta os dados minimos de um item de correcao assistida salvo em `grading_item`.
-- Retorna status, revisao, nota sugerida/final e feedback de rascunho/final quando existirem.
+- Retorna status, revisao, nota sugerida/final, feedback de rascunho/final e observacoes privadas do rascunho quando existirem.
 - Nao retorna anexos completos, e-mail do estudante ou dados sensiveis desnecessarios.
 - Nao executa escrita no Moodle.
 

@@ -158,6 +158,34 @@ public sealed class MoodleGradingToolsTests
     }
 
     [Fact]
+    public async Task Deve_exportar_relatorio_correcao_coordenacao()
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321));
+        var batchId = Guid.Parse("00000000-0000-0000-0000-000000000123");
+
+        var result = await sut.ExportarRelatorioCorrecaoCoordenacaoAsync(batchId);
+
+        Assert.False(result.IsError ?? false);
+        Assert.NotNull(mediator.LastCoordinationReportQuery);
+        Assert.Equal(batchId, mediator.LastCoordinationReportQuery!.BatchJobId);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var data = structured.GetProperty("data");
+        Assert.Equal("00000000-0000-0000-0000-000000000123", data.GetProperty("batchJobId").GetString());
+        Assert.Equal(2, data.GetProperty("totalItems").GetInt32());
+        Assert.Equal(1, data.GetProperty("reviewedItems").GetInt32());
+        Assert.Equal(1, data.GetProperty("pendingReviewItems").GetInt32());
+        Assert.Equal(1, data.GetProperty("attentionItems").GetArrayLength());
+        Assert.Contains("Relatorio consolidado", data.GetProperty("reportMarkdown").GetString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(data.TryGetProperty("studentEmail", out _));
+        Assert.False(data.TryGetProperty("attachments", out _));
+    }
+
+    [Fact]
     public async Task Deve_cancelar_lote_correcao_assistida()
     {
         var mediator = new FakeMediator();
@@ -344,6 +372,8 @@ public sealed class MoodleGradingToolsTests
 
         public GetAssistedGradingBatchStatusQuery? LastStatusQuery { get; private set; }
 
+        public GetAssistedGradingCoordinationReportQuery? LastCoordinationReportQuery { get; private set; }
+
         public CancelAssistedGradingBatchCommand? LastCancelBatch { get; private set; }
 
         public GetAssistedGradingItemQuery? LastItemQuery { get; private set; }
@@ -465,6 +495,12 @@ public sealed class MoodleGradingToolsTests
                         FailedPercent: 0,
                         PendingItems: 1,
                         CanLaunch: false)));
+            }
+
+            if (request is GetAssistedGradingCoordinationReportQuery coordinationReportQuery)
+            {
+                LastCoordinationReportQuery = coordinationReportQuery;
+                return Task.FromResult((TResponse)(object)CreateCoordinationReport(coordinationReportQuery.BatchJobId));
             }
 
             if (request is CancelAssistedGradingBatchCommand cancelBatch)
@@ -676,6 +712,12 @@ public sealed class MoodleGradingToolsTests
                         CanLaunch: false)));
             }
 
+            if (request is GetAssistedGradingCoordinationReportQuery coordinationReportQuery)
+            {
+                LastCoordinationReportQuery = coordinationReportQuery;
+                return Task.FromResult<object?>(CreateCoordinationReport(coordinationReportQuery.BatchJobId));
+            }
+
             if (request is CancelAssistedGradingBatchCommand cancelBatch)
             {
                 LastCancelBatch = cancelBatch;
@@ -854,6 +896,71 @@ public sealed class MoodleGradingToolsTests
                 "requires_real_moodle_probe",
                 BlockingIssues: [],
                 Warnings: ["Permissoes, anexos, rubricas e escalas exigem prova em Moodle real."]);
+        }
+
+        private static AssistedGradingCoordinationReportResult CreateCoordinationReport(Guid batchJobId)
+        {
+            return new AssistedGradingCoordinationReportResult(
+                batchJobId,
+                new DateTimeOffset(2026, 6, 13, 12, 0, 0, TimeSpan.Zero),
+                "10",
+                ["501"],
+                "ReadyForReview",
+                TotalItems: 2,
+                ProcessedItems: 2,
+                ReadyItems: 2,
+                BlockedItems: 0,
+                FailedItems: 0,
+                ReviewedItems: 1,
+                PendingReviewItems: 1,
+                CommittedItems: 0,
+                LaunchPendingItems: 1,
+                LowConfidenceItems: 1,
+                AverageConfidence: 0.58m,
+                AverageSuggestedGrade: 6m,
+                AverageFinalGrade: 8.5m,
+                StatusCounts: new Dictionary<string, int>
+                {
+                    ["DraftReady"] = 1,
+                    ["ReadyToCommit"] = 1
+                },
+                ReviewStatusCounts: new Dictionary<string, int>
+                {
+                    ["NotReviewed"] = 1,
+                    ["Reviewed"] = 1
+                },
+                CommitStatusCounts: new Dictionary<string, int>
+                {
+                    ["NotReady"] = 1,
+                    ["Pending"] = 1
+                },
+                AttentionItems:
+                [
+                    new AssistedGradingCoordinationAttentionItem(
+                        Guid.Parse("00000000-0000-0000-0000-000000000456"),
+                        "501",
+                        "9001",
+                        "101",
+                        "DraftReady",
+                        "NotReviewed",
+                        "NotReady",
+                        0.35m,
+                        4m,
+                        FinalGrade: null,
+                        "Baixa confianca do rascunho assistido. Revisao humana pendente.")
+                ],
+                CriteriaNeedingReview:
+                [
+                    new AssistedGradingCoordinationCriterionSummary(
+                        "c1",
+                        "Descrever eventos de TI.",
+                        ItemCount: 2,
+                        TeacherReviewRequiredItems: 1,
+                        ItemsWithGaps: 1,
+                        AverageSuggestedPoints: 3m,
+                        AverageMaxPoints: 4m)
+                ],
+                ReportMarkdown: "# Relatorio consolidado de correcao assistida");
         }
 
         private static GradingAuditResult CreateAuditResult()

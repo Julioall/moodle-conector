@@ -138,4 +138,23 @@ public sealed class GradingAnalysisServiceTests
         var criterion = Assert.Single(result.CriterionAnalysis);
         Assert.True(criterion.TeacherReviewRequired);
     }
+
+    [Fact]
+    public async Task AnalyzeAsync_BaixaConfianca_IncluiObservacaoPrivada()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 04",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Descrever riscos fisicos; Apresentar medidas preventivas; Relacionar normas tecnicas",
+            TeacherInstructions: null,
+            SubmissionText: "Resposta curta.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        Assert.True(result.Confidence < 0.5m);
+        Assert.Contains("Baixa confianca", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+    }
 }

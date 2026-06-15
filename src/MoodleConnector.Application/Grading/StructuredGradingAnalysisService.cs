@@ -59,7 +59,7 @@ public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
         var criteria = ParseCriteria(request.RubricOrCriteria!);
         var criterionResults = BuildCriterionAnalysis(criteria, request.SubmissionText, request.MaxGrade);
         var totalSuggested = criterionResults.Sum(c => c.SuggestedPoints ?? 0);
-        var confidence = hasCriteria && wordCount >= 50 ? 0.6m : 0.3m;
+        var confidence = CalculateConfidence(wordCount, criterionResults);
 
         return Task.FromResult(new GradingAnalysisResult(
             SuggestedGrade: totalSuggested,
@@ -170,9 +170,40 @@ public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
         var snippetLength = Math.Min(submissionText.Length, 500);
         var snippet = submissionText[..snippetLength];
 
-        return $"Analise estruturada gerada automaticamente. Confianca estimada: {confidence * 100:0}%. " +
-               $"Criterios para revisao manual: {reviews.Count}/{criteria.Count}. " +
-               $"Trecho inicial da submissao: {snippet}";
+        var notes = new System.Text.StringBuilder();
+        notes.Append($"Analise estruturada gerada automaticamente. Confianca estimada: {confidence * 100:0}%. ");
+        notes.Append($"Criterios para revisao manual: {reviews.Count}/{criteria.Count}. ");
+
+        if (confidence < 0.5m)
+        {
+            notes.Append("Baixa confianca: revise manualmente a nota sugerida, pois a submissao tem pouca extensao textual ou baixa cobertura dos criterios. ");
+        }
+
+        notes.Append($"Trecho inicial da submissao: {snippet}");
+        return notes.ToString();
+    }
+
+    private static decimal CalculateConfidence(
+        int wordCount,
+        IReadOnlyList<GradingCriterionAnalysis> criteria)
+    {
+        if (criteria.Count == 0)
+        {
+            return 0.3m;
+        }
+
+        var reviewRatio = (decimal)criteria.Count(c => c.TeacherReviewRequired) / criteria.Count;
+        if (wordCount < 50 || reviewRatio >= 0.75m)
+        {
+            return 0.35m;
+        }
+
+        if (reviewRatio >= 0.5m)
+        {
+            return 0.5m;
+        }
+
+        return 0.7m;
     }
 
     private static IReadOnlyList<string> ParseCriteria(string rubricOrCriteria)

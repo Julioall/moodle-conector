@@ -134,6 +134,59 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreateBatch_ComDoisItensDaMesmaTarefa_ReusaCacheDeContexto()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var fileGateway = new FakeSubmissionFileGateway();
+        var contentsGateway = new FakeCourseContentsGateway();
+        var extraction = new FakeDocumentExtractionService();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            orchestrator,
+            contentsGateway,
+            fileGateway,
+            extraction);
+
+        await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: [],
+                MaxItems: 25,
+                OnlyAwaitingGrading: true,
+                IncludeRubric: true,
+                IncludeSubmissionFiles: false,
+                IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.Equal(2, repository.Items.Count);
+        Assert.Equal(1, contentsGateway.CallCount);
+        Assert.Single(fileGateway.DownloadedFileUrls, url => url == "https://moodle.example/pluginfile.php/orientacoes.pdf");
+        Assert.Single(extraction.Filenames, filename => filename == "Orientacoes SAP 01 - Etapa 1.pdf");
+
+        var contextArtifacts = repository.Artifacts
+            .Where(artifact => artifact.ArtifactType == "assignment_context")
+            .ToArray();
+        Assert.Equal(6, contextArtifacts.Length);
+        foreach (var item in repository.Items)
+        {
+            Assert.Contains(contextArtifacts, artifact =>
+                artifact.GradingItemId == item.Id &&
+                artifact.Filename == "Tarefa 1");
+            Assert.Contains(contextArtifacts, artifact =>
+                artifact.GradingItemId == item.Id &&
+                artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf");
+        }
+    }
+
+    [Fact]
     public async Task CreateBatch_RespeitaMaxItemsESubmissionIds()
     {
         var repository = new FakeGradingReviewRepository();
@@ -219,12 +272,94 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task GetCoordinationReport_ConsolidaLoteInteiroParaCoordenacao()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501, 502], "teacher-1", 321, totalItems: 3);
+        var lowConfidenceItem = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var reviewedItem = AssistedGradingItem.Create(batch.Id, 10, 501, 9002, 102, 0);
+        var failedItem = AssistedGradingItem.Create(batch.Id, 10, 502, 9003, 103, 0);
+        lowConfidenceItem.SetDraft(4m, 0.35m, "Rascunho de baixa confianca.", "Revisar criterios.");
+        reviewedItem.SetDraft(9m, 0.8m, "Rascunho consistente.");
+        reviewedItem.ApplyTeacherReview(9.5m, "Feedback final revisado.", "teacher-1", 321, "approved");
+        failedItem.MarkAnalysisFailed("Falha simulada ao processar contexto.");
+        batch.UpdateCounters(processedItems: 3, readyItems: 2, blockedItems: 0, failedItems: 1);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(lowConfidenceItem, CancellationToken.None);
+        await repository.AddItemAsync(reviewedItem, CancellationToken.None);
+        await repository.AddItemAsync(failedItem, CancellationToken.None);
+        await repository.AddEvidenceAsync(
+            new GradingEvidence(
+                Guid.NewGuid(),
+                lowConfidenceItem.Id,
+                "c1",
+                "Descrever eventos de TI.",
+                4m,
+                2m,
+                "Evidencia parcial.",
+                "Faltou exemplo operacional.",
+                TeacherReviewRequired: true,
+                CreatedAt: DateTimeOffset.UtcNow),
+            CancellationToken.None);
+        await repository.AddEvidenceAsync(
+            new GradingEvidence(
+                Guid.NewGuid(),
+                reviewedItem.Id,
+                "c1",
+                "Descrever eventos de TI.",
+                4m,
+                4m,
+                "Evidencia suficiente.",
+                GapsText: null,
+                TeacherReviewRequired: false,
+                CreatedAt: DateTimeOffset.UtcNow),
+            CancellationToken.None);
+        var sut = new GetAssistedGradingCoordinationReportQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new GetAssistedGradingCoordinationReportQuery(batch.Id),
+            CancellationToken.None);
+
+        Assert.Equal(batch.Id, result.BatchJobId);
+        Assert.Equal("10", result.CourseId);
+        Assert.Equal(["501", "502"], result.AssignmentIds);
+        Assert.Equal("ReadyForReview", result.Status);
+        Assert.Equal(3, result.TotalItems);
+        Assert.Equal(1, result.ReviewedItems);
+        Assert.Equal(1, result.PendingReviewItems);
+        Assert.Equal(1, result.LaunchPendingItems);
+        Assert.Equal(1, result.LowConfidenceItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Equal(0.38m, result.AverageConfidence);
+        Assert.Equal(6.5m, result.AverageSuggestedGrade);
+        Assert.Equal(9.5m, result.AverageFinalGrade);
+        Assert.Equal(1, result.StatusCounts["Failed"]);
+        Assert.Equal(1, result.ReviewStatusCounts["Reviewed"]);
+        Assert.Equal(1, result.CommitStatusCounts["Pending"]);
+        Assert.Contains(result.AttentionItems, item =>
+            item.GradingItemId == lowConfidenceItem.Id &&
+            item.Reason.Contains("Baixa confianca", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.AttentionItems, item =>
+            item.GradingItemId == failedItem.Id &&
+            item.Reason.Contains("Falha no processamento", StringComparison.OrdinalIgnoreCase));
+        var criterion = Assert.Single(result.CriteriaNeedingReview);
+        Assert.Equal("c1", criterion.CriterionId);
+        Assert.Equal(2, criterion.ItemCount);
+        Assert.Equal(1, criterion.TeacherReviewRequiredItems);
+        Assert.Equal(1, criterion.ItemsWithGaps);
+        Assert.Contains("Relatorio consolidado", result.ReportMarkdown, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Itens que exigem atencao", result.ReportMarkdown, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GetItem_RetornaDetalheMinimoDaCorrecao()
     {
         var repository = new FakeGradingReviewRepository();
         var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
         var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
-        item.SetDraft(8m, 0.8m, "Rascunho.");
+        item.SetDraft(8m, 0.8m, "Rascunho.", "Nota privada para o professor.");
         item.ApplyTeacherReview(8.5m, "Feedback final revisado.", "teacher-1", 321);
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
@@ -244,10 +379,54 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal("101", result.StudentId);
         Assert.Equal(8m, result.SuggestedGrade);
         Assert.Equal(8.5m, result.FinalGrade);
+        Assert.Equal("Nota privada para o professor.", result.PrivateNotesToTeacher);
         Assert.Equal("Feedback final revisado.", result.FinalFeedback);
         Assert.Equal("Reviewed", result.ReviewStatus);
         Assert.False(string.IsNullOrWhiteSpace(result.DraftVersionHash));
         Assert.Empty(result.PendingIssues);
+    }
+
+    [Fact]
+    public async Task GetItem_ComBaixaConfianca_RetornaPendenciaEObservacaoPrivada()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(4m, 0.35m, "Rascunho de baixa confianca.", "Baixa confianca: texto curto.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new GetAssistedGradingItemQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new GetAssistedGradingItemQuery(item.Id, batch.Id),
+            CancellationToken.None);
+
+        Assert.Equal("Baixa confianca: texto curto.", result.PrivateNotesToTeacher);
+        Assert.Contains(result.PendingIssues, issue => issue.Contains("Baixa confianca", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GetItem_ComFalhaDeAnalise_RetornaPendenciaDeProcessamento()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAnalysisFailed("Falha simulada ao processar contexto.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new GetAssistedGradingItemQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new GetAssistedGradingItemQuery(item.Id, batch.Id),
+            CancellationToken.None);
+
+        Assert.Equal("Failed", result.Status);
+        Assert.Equal("Falha simulada ao processar contexto.", result.PrivateNotesToTeacher);
+        Assert.Contains(result.PendingIssues, issue => issue.Contains("Falha no processamento", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -421,6 +600,22 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             sut.Handle(new GetAssistedGradingBatchStatusQuery(batch.Id, Page: 1, PageSize: 10), CancellationToken.None));
+
+        Assert.Equal("Usuario atual nao esta autorizado a acessar este lote de correcao.", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetCoordinationReport_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        var sut = new GetAssistedGradingCoordinationReportQueryHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-2"));
+
+        var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            sut.Handle(new GetAssistedGradingCoordinationReportQuery(batch.Id), CancellationToken.None));
 
         Assert.Equal("Usuario atual nao esta autorizado a acessar este lote de correcao.", ex.Message);
     }
@@ -778,6 +973,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
     private sealed class FakeCourseContentsGateway : IMoodleCourseContentsGateway
     {
+        public int CallCount { get; private set; }
+
         public Task<CourseContentsSummary> GetCourseContentsAsync(
             string userExternalId,
             string courseId,
@@ -786,6 +983,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             bool onlyWithFiles,
             CancellationToken cancellationToken)
         {
+            CallCount++;
             return Task.FromResult(new CourseContentsSummary(
                 courseId,
                 moduleTypes.ToArray(),

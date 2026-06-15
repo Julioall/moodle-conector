@@ -186,6 +186,24 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
+        Name = "exportar_relatorio_correcao_coordenacao",
+        Title = "Exportar Relatorio Correcao Coordenacao",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<AssistedGradingCoordinationReportResult>))]
+    [Description("Gera um relatorio consolidado do lote de correcao assistida para coordenacao, com contadores, itens que exigem atencao e criterios com lacunas. Nao escreve no Moodle.")]
+    public Task<CallToolResult> ExportarRelatorioCorrecaoCoordenacaoAsync(
+        [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
+        Guid batchJobId,
+        CancellationToken cancellationToken = default)
+    {
+        return GetCoordinationReportCoreAsync(batchJobId, cancellationToken);
+    }
+
+    [McpServerTool(
         Name = "cancelar_lote_correcao_assistida",
         Title = "Cancelar Lote Correcao Assistida",
         ReadOnly = false,
@@ -701,6 +719,54 @@ public sealed class MoodleGradingTools(
         };
     }
 
+    private async Task<CallToolResult> GetCoordinationReportCoreAsync(
+        Guid batchJobId,
+        CancellationToken cancellationToken)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return Error<AssistedGradingCoordinationReportResult>("Informe um identificador de lote valido.");
+        }
+
+        AssistedGradingCoordinationReportResult data;
+        try
+        {
+            data = await mediator.Send(
+                new GetAssistedGradingCoordinationReportQuery(batchJobId),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<AssistedGradingCoordinationReportResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Error<AssistedGradingCoordinationReportResult>(ex.Message);
+        }
+        catch
+        {
+            return Error<AssistedGradingCoordinationReportResult>("Nao foi possivel exportar o relatorio consolidado de correcao neste momento.");
+        }
+
+        var response = new ToolResponse<AssistedGradingCoordinationReportResult>(
+            "ok",
+            data,
+            [],
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildCoordinationReportNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
     private async Task<CallToolResult> CancelBatchCoreAsync(
         Guid batchJobId,
         CancellationToken cancellationToken)
@@ -1096,6 +1162,11 @@ public sealed class MoodleGradingTools(
         var metrics = response.ProcessingMetrics;
         var canLaunchNote = metrics.CanLaunch ? " Pronto para lancamento." : string.Empty;
         return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is). Prontos: {response.ReadyItems}, bloqueados: {response.BlockedItems}, falhos: {response.FailedItems}, progresso: {metrics.ProgressPercent}%.{canLaunchNote}{suffix}";
+    }
+
+    private static string BuildCoordinationReportNarration(AssistedGradingCoordinationReportResult response)
+    {
+        return $"Relatorio consolidado do lote {response.BatchJobId}: {response.TotalItems} item(ns), {response.ReviewedItems} revisado(s), {response.PendingReviewItems} com revisao pendente, {response.AttentionItems.Count} item(ns) exigem atencao.";
     }
 
     private static string BuildCancelBatchNarration(CancelAssistedGradingBatchResult response)

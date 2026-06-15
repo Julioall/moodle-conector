@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS grading_item (
     "FinalGrade" numeric(10, 4),
     "Confidence" numeric(5, 4),
     "DraftFeedback" text,
+    "PrivateNotesToTeacher" text,
     "FinalFeedback" text,
     "TeacherDecision" character varying(80),
     "ReviewNotes" text,
@@ -88,6 +89,7 @@ CREATE INDEX IF NOT EXISTS "IX_grading_evidence_GradingItemId" ON grading_eviden
 
 ALTER TABLE grading_item ADD COLUMN IF NOT EXISTS "TeacherDecision" character varying(80);
 ALTER TABLE grading_item ADD COLUMN IF NOT EXISTS "ReviewNotes" text;
+ALTER TABLE grading_item ADD COLUMN IF NOT EXISTS "PrivateNotesToTeacher" text;
 
 INSERT INTO "moodle_connector_schema_versions" ("Version", "Description", "AppliedAt")
 VALUES (3, 'assisted grading schema', now())

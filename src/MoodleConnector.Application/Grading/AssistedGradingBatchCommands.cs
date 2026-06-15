@@ -81,6 +81,57 @@ public sealed record AssistedGradingBatchStatusItem(
     [property: JsonPropertyName("reviewStatus")] string ReviewStatus,
     [property: JsonPropertyName("commitStatus")] string CommitStatus);
 
+public sealed record GetAssistedGradingCoordinationReportQuery(
+    Guid BatchJobId) : IRequest<AssistedGradingCoordinationReportResult>;
+
+public sealed record AssistedGradingCoordinationReportResult(
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("generatedAt")] DateTimeOffset GeneratedAt,
+    [property: JsonPropertyName("courseId")] string CourseId,
+    [property: JsonPropertyName("assignmentIds")] IReadOnlyList<string> AssignmentIds,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("totalItems")] int TotalItems,
+    [property: JsonPropertyName("processedItems")] int ProcessedItems,
+    [property: JsonPropertyName("readyItems")] int ReadyItems,
+    [property: JsonPropertyName("blockedItems")] int BlockedItems,
+    [property: JsonPropertyName("failedItems")] int FailedItems,
+    [property: JsonPropertyName("reviewedItems")] int ReviewedItems,
+    [property: JsonPropertyName("pendingReviewItems")] int PendingReviewItems,
+    [property: JsonPropertyName("committedItems")] int CommittedItems,
+    [property: JsonPropertyName("launchPendingItems")] int LaunchPendingItems,
+    [property: JsonPropertyName("lowConfidenceItems")] int LowConfidenceItems,
+    [property: JsonPropertyName("averageConfidence")] decimal? AverageConfidence,
+    [property: JsonPropertyName("averageSuggestedGrade")] decimal? AverageSuggestedGrade,
+    [property: JsonPropertyName("averageFinalGrade")] decimal? AverageFinalGrade,
+    [property: JsonPropertyName("statusCounts")] IReadOnlyDictionary<string, int> StatusCounts,
+    [property: JsonPropertyName("reviewStatusCounts")] IReadOnlyDictionary<string, int> ReviewStatusCounts,
+    [property: JsonPropertyName("commitStatusCounts")] IReadOnlyDictionary<string, int> CommitStatusCounts,
+    [property: JsonPropertyName("attentionItems")] IReadOnlyList<AssistedGradingCoordinationAttentionItem> AttentionItems,
+    [property: JsonPropertyName("criteriaNeedingReview")] IReadOnlyList<AssistedGradingCoordinationCriterionSummary> CriteriaNeedingReview,
+    [property: JsonPropertyName("reportMarkdown")] string ReportMarkdown);
+
+public sealed record AssistedGradingCoordinationAttentionItem(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("assignmentId")] string AssignmentId,
+    [property: JsonPropertyName("submissionId")] string? SubmissionId,
+    [property: JsonPropertyName("studentId")] string StudentId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("reviewStatus")] string ReviewStatus,
+    [property: JsonPropertyName("commitStatus")] string CommitStatus,
+    [property: JsonPropertyName("confidence")] decimal? Confidence,
+    [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
+    [property: JsonPropertyName("finalGrade")] decimal? FinalGrade,
+    [property: JsonPropertyName("reason")] string Reason);
+
+public sealed record AssistedGradingCoordinationCriterionSummary(
+    [property: JsonPropertyName("criterionId")] string? CriterionId,
+    [property: JsonPropertyName("criterionText")] string CriterionText,
+    [property: JsonPropertyName("itemCount")] int ItemCount,
+    [property: JsonPropertyName("teacherReviewRequiredItems")] int TeacherReviewRequiredItems,
+    [property: JsonPropertyName("itemsWithGaps")] int ItemsWithGaps,
+    [property: JsonPropertyName("averageSuggestedPoints")] decimal? AverageSuggestedPoints,
+    [property: JsonPropertyName("averageMaxPoints")] decimal? AverageMaxPoints);
+
 public sealed record GetAssistedGradingItemQuery(
     Guid GradingItemId,
     Guid? BatchJobId = null) : IRequest<AssistedGradingItemDetailResult>;
@@ -105,7 +156,8 @@ public sealed record AssistedGradingItemDetailResult(
     [property: JsonPropertyName("reviewNotes")] string? ReviewNotes,
     [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
     [property: JsonPropertyName("pendingIssues")] IReadOnlyList<string> PendingIssues,
-    [property: JsonPropertyName("evidence")] IReadOnlyList<AssistedGradingEvidenceResult> Evidence);
+    [property: JsonPropertyName("evidence")] IReadOnlyList<AssistedGradingEvidenceResult> Evidence,
+    [property: JsonPropertyName("privateNotesToTeacher")] string? PrivateNotesToTeacher = null);
 
 public sealed record AssistedGradingEvidenceResult(
     [property: JsonPropertyName("criterionId")] string? CriterionId,
@@ -242,6 +294,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             selectedItems.Count);
 
         await repository.AddBatchAsync(batch, cancellationToken);
+        var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
         foreach (var seed in selectedItems)
         {
             var item = AssistedGradingItem.Create(
@@ -268,6 +321,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 await AddAssignmentContextArtifactsAsync(
                     request.UserExternalId,
                     item,
+                    assignmentContextCache,
                     warnings,
                     cancellationToken);
             }
@@ -403,6 +457,30 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     private async Task AddAssignmentContextArtifactsAsync(
         string userExternalId,
         AssistedGradingItem item,
+        Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>> assignmentContextCache,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = new AssignmentContextCacheKey(item.CourseId, item.AssignmentId);
+        if (!assignmentContextCache.TryGetValue(cacheKey, out var templates))
+        {
+            templates = await BuildAssignmentContextTemplatesAsync(
+                userExternalId,
+                item,
+                warnings,
+                cancellationToken);
+            assignmentContextCache[cacheKey] = templates;
+        }
+
+        foreach (var template in templates)
+        {
+            await repository.AddArtifactAsync(template.ToArtifact(item.Id), cancellationToken);
+        }
+    }
+
+    private async Task<IReadOnlyList<ContextArtifactTemplate>> BuildAssignmentContextTemplatesAsync(
+        string userExternalId,
+        AssistedGradingItem item,
         List<string> warnings,
         CancellationToken cancellationToken)
     {
@@ -424,7 +502,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         catch (Exception ex)
         {
             warnings.Add($"Nao foi possivel escanear materiais do curso para contexto da tarefa {item.AssignmentId}: {ex.Message}");
-            return;
+            return [];
         }
 
         var assignmentId = item.AssignmentId.ToString(CultureInfo.InvariantCulture);
@@ -433,25 +511,21 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         var assignmentModule = section?.Modules.FirstOrDefault(module => IsAssignmentModule(module, assignmentId));
         if (section is null || assignmentModule is null)
         {
-            return;
+            return [];
         }
 
+        var templates = new List<ContextArtifactTemplate>();
         if (!string.IsNullOrWhiteSpace(assignmentModule.Description))
         {
-            await repository.AddArtifactAsync(
-                new GradingArtifact(
-                    Guid.NewGuid(),
-                    item.Id,
-                    "assignment_context",
-                    assignmentModule.Name,
-                    "text/html",
-                    Sha256: null,
-                    SizeBytes: assignmentModule.Description.Length,
-                    ExtractionStatus.Succeeded,
-                    assignmentModule.Description,
-                    SummaryRef: "assignment_description",
-                    CreatedAt: DateTimeOffset.UtcNow),
-                cancellationToken);
+            templates.Add(new ContextArtifactTemplate(
+                "assignment_context",
+                assignmentModule.Name,
+                "text/html",
+                Sha256: null,
+                SizeBytes: assignmentModule.Description.Length,
+                ExtractionStatus.Succeeded,
+                assignmentModule.Description,
+                SummaryRef: "assignment_description"));
         }
 
         var modules = section.Modules.ToArray();
@@ -471,37 +545,36 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         {
             if (!string.IsNullOrWhiteSpace(entry.Module.Description))
             {
-                await repository.AddArtifactAsync(
-                    new GradingArtifact(
-                        Guid.NewGuid(),
-                        item.Id,
-                        "assignment_context",
-                        entry.Module.Name,
-                        "text/html",
-                        Sha256: null,
-                        SizeBytes: entry.Module.Description.Length,
-                        ExtractionStatus.Succeeded,
-                        entry.Module.Description,
-                        SummaryRef: $"section:{section.SectionNumber};distance:{entry.Distance}",
-                        CreatedAt: DateTimeOffset.UtcNow),
-                    cancellationToken);
+                templates.Add(new ContextArtifactTemplate(
+                    "assignment_context",
+                    entry.Module.Name,
+                    "text/html",
+                    Sha256: null,
+                    SizeBytes: entry.Module.Description.Length,
+                    ExtractionStatus.Succeeded,
+                    entry.Module.Description,
+                    SummaryRef: $"section:{section.SectionNumber};distance:{entry.Distance}"));
             }
 
             foreach (var file in entry.Module.Files.Where(file => !string.IsNullOrWhiteSpace(file.FileUrl)))
             {
-                await AddContextFileArtifactAsync(
+                var template = await BuildContextFileArtifactTemplateAsync(
                     userExternalId,
-                    item.Id,
                     file,
                     warnings,
                     cancellationToken);
+                if (template is not null)
+                {
+                    templates.Add(template);
+                }
             }
         }
+
+        return templates;
     }
 
-    private async Task AddContextFileArtifactAsync(
+    private async Task<ContextArtifactTemplate?> BuildContextFileArtifactTemplateAsync(
         string userExternalId,
-        Guid gradingItemId,
         CourseModuleFile file,
         List<string> warnings,
         CancellationToken cancellationToken)
@@ -525,20 +598,15 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 download.Content,
                 cancellationToken);
 
-            await repository.AddArtifactAsync(
-                new GradingArtifact(
-                    Guid.NewGuid(),
-                    gradingItemId,
-                    "assignment_context",
-                    download.Filename,
-                    download.MimeType,
-                    download.Sha256Hex,
-                    download.SizeBytes,
-                    extraction.ExtractionStatus,
-                    extraction.ExtractedText,
-                    extraction.ErrorMessage,
-                    DateTimeOffset.UtcNow),
-                cancellationToken);
+            return new ContextArtifactTemplate(
+                "assignment_context",
+                download.Filename,
+                download.MimeType,
+                download.Sha256Hex,
+                download.SizeBytes,
+                extraction.ExtractionStatus,
+                extraction.ExtractedText,
+                extraction.ErrorMessage);
         }
         catch (OperationCanceledException)
         {
@@ -547,6 +615,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         catch (Exception ex)
         {
             warnings.Add($"Material de contexto {filename} nao foi extraido: {ex.Message}");
+            return null;
         }
     }
 
@@ -582,6 +651,35 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         string StudentId,
         int? AttemptNumber,
         IReadOnlyList<AssignmentSubmissionFile> Files);
+
+    private sealed record AssignmentContextCacheKey(long CourseId, long AssignmentId);
+
+    private sealed record ContextArtifactTemplate(
+        string ArtifactType,
+        string? Filename,
+        string? MimeType,
+        string? Sha256,
+        long? SizeBytes,
+        string ExtractionStatus,
+        string? ExtractedTextRef,
+        string? SummaryRef)
+    {
+        public GradingArtifact ToArtifact(Guid gradingItemId)
+        {
+            return new GradingArtifact(
+                Guid.NewGuid(),
+                gradingItemId,
+                ArtifactType,
+                Filename,
+                MimeType,
+                Sha256,
+                SizeBytes,
+                ExtractionStatus,
+                ExtractedTextRef,
+                SummaryRef,
+                DateTimeOffset.UtcNow);
+        }
+    }
 }
 
 public sealed class GetAssistedGradingItemQueryHandler(
@@ -631,7 +729,8 @@ public sealed class GetAssistedGradingItemQueryHandler(
             item.ReviewNotes,
             GradingDraftVersionHash.Compute(item),
             BuildPendingIssues(item),
-            evidence.Select(ToEvidenceResult).ToArray());
+            evidence.Select(ToEvidenceResult).ToArray(),
+            item.PrivateNotesToTeacher);
     }
 
     private static IReadOnlyList<string> BuildPendingIssues(AssistedGradingItem item)
@@ -643,6 +742,11 @@ public sealed class GetAssistedGradingItemQueryHandler(
             pendingIssues.Add("Revisao humana pendente.");
         }
 
+        if (item.Status == GradingItemStatus.DraftReady && item.Confidence is < 0.5m)
+        {
+            pendingIssues.Add("Baixa confianca do rascunho assistido; revise criterios, evidencias e nota sugerida antes de aprovar.");
+        }
+
         if (string.IsNullOrWhiteSpace(item.FinalFeedback))
         {
             pendingIssues.Add("Feedback final pendente.");
@@ -651,6 +755,13 @@ public sealed class GetAssistedGradingItemQueryHandler(
         if (item.CommitStatus == GradingCommitStatus.Failed && !string.IsNullOrWhiteSpace(item.CommitError))
         {
             pendingIssues.Add($"Falha no lancamento Moodle: {item.CommitError}");
+        }
+
+        if (item.Status == GradingItemStatus.Failed &&
+            item.CommitStatus != GradingCommitStatus.Failed &&
+            !string.IsNullOrWhiteSpace(item.DraftFeedback))
+        {
+            pendingIssues.Add($"Falha no processamento da correcao assistida: {item.DraftFeedback}");
         }
 
         return pendingIssues;
@@ -800,7 +911,8 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             item.ReviewNotes,
             draftVersionHash,
             pendingIssues,
-            evidence.Select(ToEvidenceResult).ToArray());
+            evidence.Select(ToEvidenceResult).ToArray(),
+            item.PrivateNotesToTeacher);
     }
 
     private static IReadOnlyList<string> BuildPendingIssues(AssistedGradingItem item)
@@ -812,6 +924,11 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             pendingIssues.Add("Revisao humana pendente.");
         }
 
+        if (item.Status == GradingItemStatus.DraftReady && item.Confidence is < 0.5m)
+        {
+            pendingIssues.Add("Baixa confianca do rascunho assistido; revise criterios, evidencias e nota sugerida antes de aprovar.");
+        }
+
         if (string.IsNullOrWhiteSpace(item.FinalFeedback))
         {
             pendingIssues.Add("Feedback final pendente.");
@@ -820,6 +937,13 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         if (item.CommitStatus == GradingCommitStatus.Failed && !string.IsNullOrWhiteSpace(item.CommitError))
         {
             pendingIssues.Add($"Falha no lancamento Moodle: {item.CommitError}");
+        }
+
+        if (item.Status == GradingItemStatus.Failed &&
+            item.CommitStatus != GradingCommitStatus.Failed &&
+            !string.IsNullOrWhiteSpace(item.DraftFeedback))
+        {
+            pendingIssues.Add($"Falha no processamento da correcao assistida: {item.DraftFeedback}");
         }
 
         return pendingIssues;
@@ -919,6 +1043,365 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             pendingItems,
             canLaunch);
     }
+}
+
+public sealed class GetAssistedGradingCoordinationReportQueryHandler(
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser)
+    : IRequestHandler<GetAssistedGradingCoordinationReportQuery, AssistedGradingCoordinationReportResult>
+{
+    private const int PageSize = 100;
+    private const int MaxAttentionItems = 25;
+    private const int MaxCriteriaSummaries = 10;
+
+    public async Task<AssistedGradingCoordinationReportResult> Handle(
+        GetAssistedGradingCoordinationReportQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (request.BatchJobId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
+        }
+
+        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
+            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
+
+        var items = await LoadAllItemsAsync(batch.Id, cancellationToken);
+        var evidenceByItem = new Dictionary<Guid, IReadOnlyList<GradingEvidence>>();
+        foreach (var item in items)
+        {
+            evidenceByItem[item.Id] = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
+        }
+
+        var statusCounts = CountBy(items, item => item.Status.ToString());
+        var reviewStatusCounts = CountBy(items, item => item.ReviewStatus.ToString());
+        var commitStatusCounts = CountBy(items, item => item.CommitStatus.ToString());
+        var attentionItems = BuildAttentionItems(items, evidenceByItem);
+        var criteriaNeedingReview = BuildCriterionSummaries(evidenceByItem.Values.SelectMany(evidence => evidence));
+        var reviewedItems = items.Count(item => item.ReviewStatus == GradingReviewStatus.Reviewed);
+        var pendingReviewItems = items.Count(item =>
+            item.ReviewStatus != GradingReviewStatus.Reviewed &&
+            item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit);
+        var committedItems = items.Count(item =>
+            item.Status == GradingItemStatus.Committed ||
+            item.CommitStatus == GradingCommitStatus.Succeeded);
+        var launchPendingItems = items.Count(item => item.CommitStatus == GradingCommitStatus.Pending);
+        var lowConfidenceItems = items.Count(HasLowConfidence);
+        var generatedAt = DateTimeOffset.UtcNow;
+
+        var report = new AssistedGradingCoordinationReportResult(
+            batch.Id,
+            generatedAt,
+            batch.CourseId.ToString(CultureInfo.InvariantCulture),
+            batch.AssignmentIds
+                .Select(id => id.ToString(CultureInfo.InvariantCulture))
+                .ToArray(),
+            batch.Status.ToString(),
+            batch.TotalItems,
+            batch.ProcessedItems,
+            batch.ReadyItems,
+            batch.BlockedItems,
+            batch.FailedItems,
+            reviewedItems,
+            pendingReviewItems,
+            committedItems,
+            launchPendingItems,
+            lowConfidenceItems,
+            AverageOrNull(items.Select(item => item.Confidence)),
+            AverageOrNull(items.Select(item => item.SuggestedGrade)),
+            AverageOrNull(items.Select(item => item.FinalGrade)),
+            statusCounts,
+            reviewStatusCounts,
+            commitStatusCounts,
+            attentionItems,
+            criteriaNeedingReview,
+            ReportMarkdown: string.Empty);
+
+        return report with { ReportMarkdown = BuildReportMarkdown(report) };
+    }
+
+    private async Task<IReadOnlyList<AssistedGradingItem>> LoadAllItemsAsync(
+        Guid batchId,
+        CancellationToken cancellationToken)
+    {
+        var totalItems = await repository.CountItemsByBatchAsync(batchId, cancellationToken);
+        var items = new List<AssistedGradingItem>(totalItems);
+        for (var page = 1; items.Count < totalItems; page++)
+        {
+            var pageItems = await repository.ListItemsByBatchAsync(batchId, page, PageSize, cancellationToken);
+            if (pageItems.Count == 0)
+            {
+                break;
+            }
+
+            items.AddRange(pageItems);
+        }
+
+        return items;
+    }
+
+    private static IReadOnlyDictionary<string, int> CountBy(
+        IReadOnlyList<AssistedGradingItem> items,
+        Func<AssistedGradingItem, string> selector)
+    {
+        return items
+            .GroupBy(selector, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyList<AssistedGradingCoordinationAttentionItem> BuildAttentionItems(
+        IReadOnlyList<AssistedGradingItem> items,
+        IReadOnlyDictionary<Guid, IReadOnlyList<GradingEvidence>> evidenceByItem)
+    {
+        return items
+            .Select(item => BuildAttentionItem(item, evidenceByItem))
+            .Where(entry => entry is not null)
+            .Select(entry => entry!)
+            .OrderBy(entry => entry.Priority)
+            .ThenBy(entry => entry.Item.AssignmentId, StringComparer.Ordinal)
+            .ThenBy(entry => entry.Item.StudentId, StringComparer.Ordinal)
+            .Take(MaxAttentionItems)
+            .Select(entry => entry.Item)
+            .ToArray();
+    }
+
+    private static AttentionEntry? BuildAttentionItem(
+        AssistedGradingItem item,
+        IReadOnlyDictionary<Guid, IReadOnlyList<GradingEvidence>> evidenceByItem)
+    {
+        var reasons = new List<string>();
+        var priority = 99;
+        var evidence = evidenceByItem.TryGetValue(item.Id, out var itemEvidence)
+            ? itemEvidence
+            : [];
+
+        if (item.CommitStatus == GradingCommitStatus.Failed)
+        {
+            reasons.Add("Falha no lancamento Moodle: " + Shorten(item.CommitError ?? item.DraftFeedback));
+            priority = Math.Min(priority, 0);
+        }
+        else if (item.Status == GradingItemStatus.Failed)
+        {
+            reasons.Add("Falha no processamento: " + Shorten(item.DraftFeedback));
+            priority = Math.Min(priority, 1);
+        }
+
+        if (item.Status == GradingItemStatus.Blocked)
+        {
+            reasons.Add("Bloqueado: " + Shorten(item.DraftFeedback));
+            priority = Math.Min(priority, 2);
+        }
+
+        if (HasLowConfidence(item))
+        {
+            reasons.Add("Baixa confianca do rascunho assistido.");
+            priority = Math.Min(priority, 3);
+        }
+
+        if (item.Status == GradingItemStatus.DraftReady && item.ReviewStatus != GradingReviewStatus.Reviewed)
+        {
+            reasons.Add("Revisao humana pendente.");
+            priority = Math.Min(priority, 4);
+        }
+
+        if (item.CommitStatus == GradingCommitStatus.Pending)
+        {
+            reasons.Add("Lancamento Moodle pendente de previa/confirmacao.");
+            priority = Math.Min(priority, 5);
+        }
+
+        if (evidence.Any(entry => entry.TeacherReviewRequired))
+        {
+            reasons.Add("Ha criterio marcado para revisao humana.");
+            priority = Math.Min(priority, 6);
+        }
+
+        if (evidence.Any(entry => !string.IsNullOrWhiteSpace(entry.GapsText)))
+        {
+            reasons.Add("Ha lacunas registradas em criterio.");
+            priority = Math.Min(priority, 7);
+        }
+
+        if (reasons.Count == 0)
+        {
+            return null;
+        }
+
+        var attentionItem = new AssistedGradingCoordinationAttentionItem(
+            item.Id,
+            item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+            item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
+            item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
+            item.Status.ToString(),
+            item.ReviewStatus.ToString(),
+            item.CommitStatus.ToString(),
+            item.Confidence,
+            item.SuggestedGrade,
+            item.FinalGrade,
+            string.Join(" ", reasons.Distinct(StringComparer.Ordinal)));
+
+        return new AttentionEntry(priority, attentionItem);
+    }
+
+    private static IReadOnlyList<AssistedGradingCoordinationCriterionSummary> BuildCriterionSummaries(
+        IEnumerable<GradingEvidence> evidence)
+    {
+        return evidence
+            .GroupBy(evidenceItem =>
+                string.IsNullOrWhiteSpace(evidenceItem.CriterionId)
+                    ? NormalizeCriterionKey(evidenceItem.CriterionText)
+                    : evidenceItem.CriterionId!,
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var entries = group.ToArray();
+                var criterionId = entries
+                    .Select(entry => entry.CriterionId)
+                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+                var criterionText = entries
+                    .Select(entry => entry.CriterionText)
+                    .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? "Criterio sem texto.";
+                var teacherReviewRequiredItems = entries
+                    .Where(entry => entry.TeacherReviewRequired)
+                    .Select(entry => entry.GradingItemId)
+                    .Distinct()
+                    .Count();
+                var itemsWithGaps = entries
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry.GapsText))
+                    .Select(entry => entry.GradingItemId)
+                    .Distinct()
+                    .Count();
+
+                return new AssistedGradingCoordinationCriterionSummary(
+                    criterionId,
+                    criterionText,
+                    entries.Select(entry => entry.GradingItemId).Distinct().Count(),
+                    teacherReviewRequiredItems,
+                    itemsWithGaps,
+                    AverageOrNull(entries.Select(entry => entry.SuggestedPoints)),
+                    AverageOrNull(entries.Select(entry => entry.MaxPoints)));
+            })
+            .Where(summary => summary.TeacherReviewRequiredItems > 0 || summary.ItemsWithGaps > 0)
+            .OrderByDescending(summary => summary.TeacherReviewRequiredItems)
+            .ThenByDescending(summary => summary.ItemsWithGaps)
+            .ThenByDescending(summary => summary.ItemCount)
+            .ThenBy(summary => summary.CriterionText, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxCriteriaSummaries)
+            .ToArray();
+    }
+
+    private static bool HasLowConfidence(AssistedGradingItem item)
+    {
+        return item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit &&
+            item.Confidence is < 0.5m;
+    }
+
+    private static decimal? AverageOrNull(IEnumerable<decimal?> values)
+    {
+        var concreteValues = values
+            .Where(value => value.HasValue)
+            .Select(value => value!.Value)
+            .ToArray();
+        return concreteValues.Length == 0
+            ? null
+            : Math.Round(concreteValues.Average(), 2, MidpointRounding.AwayFromZero);
+    }
+
+    private static string BuildReportMarkdown(AssistedGradingCoordinationReportResult report)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("# Relatorio consolidado de correcao assistida");
+        builder.AppendLine();
+        builder.AppendLine($"- Lote: `{report.BatchJobId}`");
+        builder.AppendLine($"- Curso: `{report.CourseId}`");
+        builder.AppendLine($"- Tarefas: {string.Join(", ", report.AssignmentIds.Select(id => $"`{id}`"))}");
+        builder.AppendLine($"- Status: `{report.Status}`");
+        builder.AppendLine($"- Gerado em UTC: {report.GeneratedAt:yyyy-MM-dd HH:mm:ss}");
+        builder.AppendLine();
+        builder.AppendLine("## Resumo");
+        builder.AppendLine();
+        builder.AppendLine($"- Total: {report.TotalItems}");
+        builder.AppendLine($"- Processados: {report.ProcessedItems}");
+        builder.AppendLine($"- Prontos para revisao: {report.ReadyItems}");
+        builder.AppendLine($"- Revisados: {report.ReviewedItems}");
+        builder.AppendLine($"- Revisao pendente: {report.PendingReviewItems}");
+        builder.AppendLine($"- Bloqueados: {report.BlockedItems}");
+        builder.AppendLine($"- Falhos: {report.FailedItems}");
+        builder.AppendLine($"- Lancamento pendente: {report.LaunchPendingItems}");
+        builder.AppendLine($"- Lancados no Moodle: {report.CommittedItems}");
+        builder.AppendLine($"- Baixa confianca: {report.LowConfidenceItems}");
+        builder.AppendLine($"- Confianca media: {FormatDecimal(report.AverageConfidence)}");
+        builder.AppendLine($"- Nota sugerida media: {FormatDecimal(report.AverageSuggestedGrade)}");
+        builder.AppendLine($"- Nota final media: {FormatDecimal(report.AverageFinalGrade)}");
+
+        builder.AppendLine();
+        builder.AppendLine("## Itens que exigem atencao");
+        builder.AppendLine();
+        if (report.AttentionItems.Count == 0)
+        {
+            builder.AppendLine("- Nenhum item critico identificado no lote.");
+        }
+        else
+        {
+            foreach (var item in report.AttentionItems)
+            {
+                builder.AppendLine(
+                    $"- Estudante `{item.StudentId}`, tarefa `{item.AssignmentId}`, item `{item.GradingItemId}`: {item.Reason}");
+            }
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("## Criterios com maior necessidade de revisao");
+        builder.AppendLine();
+        if (report.CriteriaNeedingReview.Count == 0)
+        {
+            builder.AppendLine("- Nenhum criterio com lacuna ou revisao obrigatoria foi registrado.");
+        }
+        else
+        {
+            foreach (var criterion in report.CriteriaNeedingReview)
+            {
+                builder.AppendLine(
+                    $"- {criterion.CriterionText}: {criterion.TeacherReviewRequiredItems} item(ns) exigem revisao, {criterion.ItemsWithGaps} item(ns) com lacunas.");
+            }
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string Shorten(string? value, int maxLength = 180)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "motivo nao informado.";
+        }
+
+        var normalized = value
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Trim();
+        return normalized.Length <= maxLength
+            ? normalized
+            : normalized[..maxLength] + "...";
+    }
+
+    private static string NormalizeCriterionKey(string value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? "criterio-sem-texto"
+            : value.Trim().ToUpperInvariant();
+    }
+
+    private static string FormatDecimal(decimal? value)
+    {
+        return value?.ToString("0.##", CultureInfo.InvariantCulture) ?? "n/d";
+    }
+
+    private sealed record AttentionEntry(
+        int Priority,
+        AssistedGradingCoordinationAttentionItem Item);
 }
 
 public sealed class CancelAssistedGradingBatchCommandHandler(

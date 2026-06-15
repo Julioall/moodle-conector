@@ -84,7 +84,7 @@ public sealed class AssistedGradingBatch
         ReadyItems = readyItems;
         BlockedItems = blockedItems;
         FailedItems = failedItems;
-        Status = processedItems >= TotalItems && failedItems == 0
+        Status = processedItems >= TotalItems
             ? GradingBatchStatus.ReadyForReview
             : GradingBatchStatus.Processing;
         UpdatedAt = DateTimeOffset.UtcNow;
