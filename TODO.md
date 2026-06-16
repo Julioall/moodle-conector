@@ -175,9 +175,9 @@ Implementado:
 
 Ainda pendente:
 
-- [ ] Retestar no conector a tool `consultar_contexto_item_correcao_assistida` no curso `29972`.
-- [ ] Confirmar se `selectedContextFileName` aponta para o SAP correto no curso `29972`.
-- [ ] Confirmar no curso `32787` se SAP 01/SAP 02 são escolhidos conforme a atividade.
+- [ ] Retestar no conector a tool `consultar_contexto_item_correcao_assistida` no curso de teste (`curso_12345`).
+- [ ] Confirmar se `selectedContextFileName` aponta para o SAP correto no curso de teste (`curso_12345`).
+- [ ] Confirmar no curso de homologação (`curso_67890`) se SAP 01/SAP 02 são escolhidos conforme a atividade.
 - [ ] Evoluir seleção heurística se houver falso positivo em materiais administrativos.
 - [ ] Futuro: plugar seleção por IA opcional apenas quando houver infraestrutura barata/viável.
 
@@ -340,8 +340,8 @@ Ainda pendente:
 ### P0 — antes de liberar escrita real
 
 - [x] Retestar no conector `consultar_contexto_item_correcao_assistida`.
-- [x] Retestar no conector curso `29972` e confirmar seleção do SAP correto (`SAP 01.pdf`).
-- [ ] Retestar no conector curso `32787` e confirmar SAP 01/SAP 02 por atividade.
+- [x] Retestar no conector no curso de teste (`curso_12345`) e confirmar seleção do SAP correto (`SAP_01.pdf`).
+- [ ] Retestar no conector no curso de homologação (`curso_67890`) e confirmar SAP 01/SAP 02 por atividade.
 - [ ] Confirmar rubricas/escalas reais no Moodle.
 - [ ] Confirmar permissões/capabilities reais de professor/tutor.
 - [ ] Definir definitivamente token de escrita: usuário autenticado ou `WriteServiceToken`.

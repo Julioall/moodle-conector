@@ -140,6 +140,11 @@ var oauthEncryptionCertificate = LoadOrCreateOAuthCertificate(
 
 ValidateMcpAuthConfiguration(builder.Environment, mcpSecurityOptions, oauthIssuer, oauthAudience, oauthOptions);
 
+var postgresOptionsForValidation = builder.Configuration.GetSection(PostgresOptions.SectionName).Get<PostgresOptions>();
+var secretsOptionsForValidation = builder.Configuration.GetSection(ConnectorSecretsOptions.SectionName).Get<ConnectorSecretsOptions>();
+var adminApiOptionsForValidation = builder.Configuration.GetSection(AdminApiOptions.SectionName).Get<AdminApiOptions>();
+ValidateProductionSecuritySettings(builder.Environment, postgresOptionsForValidation, secretsOptionsForValidation, adminApiOptionsForValidation);
+
 builder.Services
     .AddAuthentication(options =>
     {
@@ -1301,6 +1306,48 @@ static void ValidateMcpAuthConfiguration(
         if (redirectUri.Scheme != Uri.UriSchemeHttps)
         {
             throw new InvalidOperationException("OAuth:ChatGptRedirectUri deve usar HTTPS em producao.");
+        }
+    }
+}
+
+static void ValidateProductionSecuritySettings(
+    IWebHostEnvironment environment,
+    PostgresOptions? postgres,
+    ConnectorSecretsOptions? secrets,
+    AdminApiOptions? adminApi)
+{
+    var isDevLike = environment.IsDevelopment() || environment.IsEnvironment("Testing");
+    if (isDevLike)
+    {
+        return;
+    }
+
+    if (postgres is not null && !string.IsNullOrWhiteSpace(postgres.ConnectionString))
+    {
+        var connStrLower = postgres.ConnectionString.ToLowerInvariant();
+        if (connStrLower.Contains("password=postgres") || connStrLower.Contains("username=postgres"))
+        {
+            throw new InvalidOperationException("Segurança de Produção: Postgres ConnectionString não pode utilizar o usuário ou senha padrão 'postgres' em ambiente de produção.");
+        }
+    }
+
+    if (secrets is not null && !string.IsNullOrWhiteSpace(secrets.EncryptionKeyBase64))
+    {
+        const string defaultKey = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=";
+        if (secrets.EncryptionKeyBase64 == defaultKey)
+        {
+            throw new InvalidOperationException("Segurança de Produção: ConnectorSecrets:EncryptionKeyBase64 não pode utilizar a chave AES de exemplo em ambiente de produção.");
+        }
+    }
+
+    if (adminApi is not null && !string.IsNullOrWhiteSpace(adminApi.ApiKey))
+    {
+        var apiKeyLower = adminApi.ApiKey.ToLowerInvariant();
+        if (apiKeyLower == "troque-este-valor-em-producao" ||
+            apiKeyLower.Contains("change-me") ||
+            apiKeyLower.Contains("troque-este-valor"))
+        {
+            throw new InvalidOperationException("Segurança de Produção: AdminApi:ApiKey não pode utilizar o valor padrão ou conter expressões como 'change-me' ou 'troque-este-valor' em ambiente de produção.");
         }
     }
 }

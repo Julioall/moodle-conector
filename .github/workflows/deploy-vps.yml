@@ -27,7 +27,7 @@ env:
   VPS_APP_DIR: ${{ vars.VPS_APP_DIR || '/opt/moodle-connector' }}
   VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
   APP_PORT: ${{ vars.APP_PORT || '8787' }}
-  APP_DOMAIN: ${{ vars.APP_DOMAIN || secrets.APP_DOMAIN || 'novascript.com.br' }}
+  APP_DOMAIN: ${{ vars.APP_DOMAIN || secrets.APP_DOMAIN || '' }}
   COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES || 'https' }}
   CADDYFILE: ${{ vars.CADDYFILE || './Caddyfile' }}
   MCP_REQUIRE_JWT: ${{ vars.MCP_REQUIRE_JWT || 'true' }}
@@ -113,6 +113,7 @@ jobs:
           test -n "${{ secrets.POSTGRES_PASSWORD }}" || (echo "::error::Configure POSTGRES_PASSWORD" && exit 1)
           test -n "${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}" || (echo "::error::Configure CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64" && exit 1)
           test -n "${{ secrets.ADMIN_API_KEY }}" || (echo "::error::Configure ADMIN_API_KEY" && exit 1)
+          test -n "$APP_DOMAIN" || (echo "::error::Configure APP_DOMAIN via variables or secrets" && exit 1)
 
           require_bool MCP_REQUIRE_JWT "$MCP_REQUIRE_JWT"
           require_bool MCP_REQUIRE_API_KEY "$MCP_REQUIRE_API_KEY"
