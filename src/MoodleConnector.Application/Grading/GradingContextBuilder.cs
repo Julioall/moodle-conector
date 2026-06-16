@@ -15,7 +15,8 @@ namespace MoodleConnector.Application.Grading;
 public sealed partial class GradingContextBuilder(
     IGradingReviewRepository repository,
     IOptions<GradingLimitsOptions> limits,
-    IAssignmentContextSelectionService contextSelectionService)
+    IAssignmentContextSelectionService contextSelectionService,
+    IMoodleAssignmentSettingsGateway? settingsGateway = null)
     : IGradingContextBuilder
 {
     public async Task<GradingContext> BuildAsync(
@@ -130,6 +131,31 @@ public sealed partial class GradingContextBuilder(
                     {
                         criteria = Truncate(selected.ExtractedText, maxChars);
                     }
+                }
+            }
+        }
+
+        if (maxGrade == null && settingsGateway != null)
+        {
+            var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken);
+            if (batch != null)
+            {
+                try
+                {
+                    var settings = await settingsGateway.GetAssignmentSettingsAsync(
+                        batch.CreatedBySubject,
+                        item.CourseId.ToString(CultureInfo.InvariantCulture),
+                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                        cancellationToken);
+                    
+                    if (settings != null && settings.MaxGrade > 0)
+                    {
+                        maxGrade = settings.MaxGrade;
+                    }
+                }
+                catch
+                {
+                    // Ignora falhas ao buscar nota máxima do Moodle, tenta continuar com o que foi extraído.
                 }
             }
         }

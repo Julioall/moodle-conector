@@ -145,7 +145,11 @@ public sealed class LocalGradingBatchOrchestrator(
         var readableText = FirstReadableText(context);
         if (string.IsNullOrWhiteSpace(readableText))
         {
-            item.BlockAnalysis("Submissao sem conteudo legivel para correcao assistida.");
+            var blockerReason = context.Blockers.FirstOrDefault(b => 
+                b.Contains("Submissão sem conteúdo legível", StringComparison.OrdinalIgnoreCase) || 
+                b.Contains("Submissão não disponível", StringComparison.OrdinalIgnoreCase))
+                ?? "Submissao sem conteudo legivel para correcao assistida.";
+            item.BlockAnalysis(blockerReason);
             return;
         }
 

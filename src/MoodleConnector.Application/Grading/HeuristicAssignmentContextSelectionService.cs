@@ -44,7 +44,7 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var ranked = request.Candidates
-            .Select(candidate => new CandidateScore(candidate, Score(candidate, assignmentTokens)))
+            .Select(candidate => new CandidateScore(candidate, Score(candidate, assignmentTokens, request.AssignmentName)))
             .OrderByDescending(candidate => candidate.Score)
             .ThenBy(candidate => candidate.Candidate.DistanceFromAssignment ?? int.MaxValue)
             .ThenBy(candidate => candidate.Candidate.Title, StringComparer.OrdinalIgnoreCase)
@@ -71,7 +71,8 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
 
     private static decimal Score(
         AssignmentContextCandidate candidate,
-        HashSet<string> assignmentTokens)
+        HashSet<string> assignmentTokens,
+        string assignmentName)
     {
         var title = Normalize(candidate.Title);
         var text = Normalize(candidate.ExtractedText ?? string.Empty);
@@ -120,6 +121,25 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
         if (!string.IsNullOrWhiteSpace(candidate.ExtractedText))
         {
             score += 1m;
+        }
+
+        var normalizedAssignmentName = Normalize(assignmentName);
+        var isSubPart = normalizedAssignmentName.Contains("etapa") || 
+                        normalizedAssignmentName.Contains("parte") || 
+                        normalizedAssignmentName.Contains("fase");
+
+        var matchGroup = Regex.Match(normalizedAssignmentName, @"(?:sap|sa|projeto|atividade)\s*\d+");
+        if (isSubPart && matchGroup.Success)
+        {
+            var groupValue = matchGroup.Value;
+            if (title.Contains(groupValue) && !title.Contains("etapa") && !title.Contains("parte") && !title.Contains("fase"))
+            {
+                score += 5m; // Boost overarching document
+                if (title.EndsWith(".pdf") || candidate.SourceType == "resource")
+                {
+                    score += 5m;
+                }
+            }
         }
 
         return score;

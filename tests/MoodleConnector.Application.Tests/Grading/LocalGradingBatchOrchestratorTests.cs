@@ -81,7 +81,7 @@ public sealed class LocalGradingBatchOrchestratorTests
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
 
         Assert.Equal(GradingItemStatus.Blocked, item.Status);
-        Assert.Contains("conteudo legivel", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("conteúdo legível", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
         Assert.Equal(1, batch.ProcessedItems);
         Assert.Equal(0, batch.ReadyItems);

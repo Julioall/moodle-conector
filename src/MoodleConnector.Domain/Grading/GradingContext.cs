@@ -72,9 +72,28 @@ public sealed class GradingContext
             blockers.Add("Critérios, rubrica ou enunciado não informados. Análise baseada apenas no conteúdo da submissão.");
         }
 
-        if (string.IsNullOrWhiteSpace(submissionText) && (attachedFiles is null || attachedFiles.Count == 0))
+        if (string.IsNullOrWhiteSpace(submissionText))
         {
-            blockers.Add("Submissão não disponível. Não há conteúdo legível para análise.");
+            if (attachedFiles is null || attachedFiles.Count == 0)
+            {
+                blockers.Add("Submissão não disponível. Não há conteúdo legível para análise.");
+            }
+            else
+            {
+                var fileNames = string.Join(", ", attachedFiles.Select(f => f.FileName));
+                if (attachedFiles.Any(f => string.IsNullOrWhiteSpace(f.ExtractedText) && f.IsSupported))
+                {
+                    blockers.Add($"Submissão sem conteúdo legível. Não foi possível extrair texto dos arquivos suportados ({fileNames}). Motivos comuns: PDF escaneado, arquivo sem texto extraível, corrompido ou protegido por senha.");
+                }
+                else if (attachedFiles.Any(f => !f.IsSupported))
+                {
+                    blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) estão em formatos não suportados para extração de texto.");
+                }
+                else
+                {
+                    blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) apresentam ausência real de dados mínimos de texto para análise.");
+                }
+            }
         }
 
         return new GradingContext
