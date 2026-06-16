@@ -29,6 +29,7 @@ public sealed partial class GradingContextBuilder(
         string? submissionText = null;
         string? assignmentStatement = null;
         string? criteria = null;
+        string? rubricDescription = null;
         decimal? maxGrade = null;
         string? courseMaterials = null;
         var attachedFiles = new List<GradingFileInfo>();
@@ -71,6 +72,21 @@ public sealed partial class GradingContextBuilder(
 
         if (options.IncludeCourseMaterials)
         {
+            // 1. Tentar rubrica formal (artefatos do tipo 'rubric').
+            var rubricArtifacts = artifacts
+                .Where(artifact =>
+                    artifact.ArtifactType == "rubric" &&
+                    artifact.ExtractionStatus == "succeeded" &&
+                    !string.IsNullOrWhiteSpace(artifact.ExtractedTextRef))
+                .ToArray();
+
+            if (rubricArtifacts.Length > 0)
+            {
+                rubricDescription = Truncate(rubricArtifacts[0].ExtractedTextRef!, maxChars);
+                maxGrade ??= ExtractMaxGrade(rubricDescription);
+            }
+
+            // 2. Selecionar o melhor artefato de contexto como enunciado da atividade.
             var contextArtifacts = artifacts
                 .Where(artifact =>
                     artifact.ArtifactType == "assignment_context" &&
@@ -104,8 +120,16 @@ public sealed partial class GradingContextBuilder(
                 {
                     assignmentStatement = selected.ExtractedText;
                     criteria = ExtractCriteria(selected.ExtractedText);
-                    maxGrade = ExtractMaxGrade(selected.ExtractedText);
+                    maxGrade ??= ExtractMaxGrade(selected.ExtractedText);
                     courseMaterials = $"{selected.Title}\n{selected.ExtractedText}";
+
+                    // 3. Fallback: se nenhum critério estruturado foi extraído, usar o enunciado
+                    // completo como critério aproximado — dá contexto suficiente para o serviço
+                    // gerar feedback relevante mesmo sem rubrica formal.
+                    if (string.IsNullOrWhiteSpace(criteria) && string.IsNullOrWhiteSpace(rubricDescription))
+                    {
+                        criteria = Truncate(selected.ExtractedText, maxChars);
+                    }
                 }
             }
         }
@@ -119,7 +143,7 @@ public sealed partial class GradingContextBuilder(
             studentId: item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             assignmentStatement: assignmentStatement,
             criteria: criteria,
-            rubricDescription: null,
+            rubricDescription: rubricDescription,
             maxGrade: maxGrade,
             gradeScale: null,
             submissionText: submissionText,

@@ -65,19 +65,16 @@ public sealed class GradingContext
     {
         var blockers = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(criteria) && string.IsNullOrWhiteSpace(rubricDescription))
+        if (string.IsNullOrWhiteSpace(criteria) &&
+            string.IsNullOrWhiteSpace(rubricDescription) &&
+            string.IsNullOrWhiteSpace(assignmentStatement))
         {
-            blockers.Add("Critérios ou rubrica não informados. Não é possível sugerir nota fundamentada.");
+            blockers.Add("Critérios, rubrica ou enunciado não informados. Análise baseada apenas no conteúdo da submissão.");
         }
 
         if (string.IsNullOrWhiteSpace(submissionText) && (attachedFiles is null || attachedFiles.Count == 0))
         {
             blockers.Add("Submissão não disponível. Não há conteúdo legível para análise.");
-        }
-
-        if (maxGrade is null && string.IsNullOrWhiteSpace(gradeScale))
-        {
-            blockers.Add("Escala de nota não identificada. Não é possível calcular nota sugerida.");
         }
 
         return new GradingContext

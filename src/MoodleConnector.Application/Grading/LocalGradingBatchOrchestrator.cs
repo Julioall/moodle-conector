@@ -149,16 +149,8 @@ public sealed class LocalGradingBatchOrchestrator(
             return;
         }
 
-        if (context.Blockers.Count > 0)
-        {
-            item.SetDraft(
-                suggestedGrade: null,
-                confidence: 0m,
-                BuildPreliminaryFeedback(context, readableText),
-                BuildPreliminaryTeacherNotes(context));
-            return;
-        }
-
+        // Tenta análise mesmo com contexto incompleto (best-effort):
+        // o serviço gera feedback genérico quando critérios ou escala estão ausentes.
         var result = await analysisService.AnalyzeAsync(
             new GradingAnalysisRequest(
                 AssignmentName: $"Tarefa {context.AssignmentId}",
@@ -193,14 +185,20 @@ public sealed class LocalGradingBatchOrchestrator(
                     cancellationToken);
             }
 
-            item.SetDraft(
-                result.SuggestedGrade,
-                result.Confidence,
-                result.FeedbackToStudent,
-                result.PrivateNotesToTeacher);
+            // Quando há blockers de contexto, o rascunho tem confiança zero e nota nula
+            // mesmo que o serviço retorne uma sugestão — pois os critérios usados são parciais.
+            // Os blockers de contexto são adicionados às notas privadas do professor.
+            var confidence = context.Blockers.Count > 0 ? 0m : result.Confidence;
+            var suggestedGrade = context.Blockers.Count > 0 ? null : result.SuggestedGrade;
+            var teacherNotes = context.Blockers.Count > 0
+                ? BuildPreliminaryTeacherNotes(context) + " " + result.PrivateNotesToTeacher
+                : result.PrivateNotesToTeacher;
+
+            item.SetDraft(suggestedGrade, confidence, result.FeedbackToStudent, teacherNotes);
             return;
         }
 
+        // Serviço não gerou feedback revisável — bloqueia o item.
         item.BlockAnalysis(
             result.Blocks.Count > 0
                 ? string.Join(" ", result.Blocks)
@@ -217,17 +215,6 @@ public sealed class LocalGradingBatchOrchestrator(
         return context.AttachedFiles
             .Select(file => file.ExtractedText)
             .FirstOrDefault(text => !string.IsNullOrWhiteSpace(text));
-    }
-
-    private static string BuildPreliminaryFeedback(GradingContext context, string readableText)
-    {
-        var snippet = readableText.Length > 500
-            ? readableText[..500]
-            : readableText;
-
-        return "Parecer preliminar para revisao do professor/tutor. " +
-            "A submissao possui conteudo legivel, mas ainda faltam criterios, rubrica ou escala de nota para sugerir nota com seguranca. " +
-            $"Trecho inicial analisado: {snippet}";
     }
 
     private static string BuildPreliminaryTeacherNotes(GradingContext context)

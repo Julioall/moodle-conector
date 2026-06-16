@@ -28,7 +28,7 @@ public sealed class GradingAnalysisServiceTests
     }
 
     [Fact]
-    public async Task AnalyzeAsync_SemCriterios_RetornaBlockedMissingCriteria()
+    public async Task AnalyzeAsync_SemCriteriosNemDescricao_GeraRascunhoComBaixaConfianca()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 01",
@@ -41,14 +41,17 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.BlockedMissingCriteria, result.AnalysisStatus);
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
         Assert.Null(result.SuggestedGrade);
-        Assert.NotEmpty(result.FeedbackToStudent ?? string.Empty);
-        Assert.NotEmpty(result.Blocks);
+        Assert.True(result.Confidence > 0m);
+        Assert.True(result.Confidence < 0.3m);
+        Assert.NotEmpty(result.FeedbackToStudent!);
+        Assert.Contains("Revisao manual obrigatoria", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.Blocks);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_EscalaInvalida_RetornaBlockedUnknownScale()
+    public async Task AnalyzeAsync_SemMaxGrade_GeraRascunhoSemNotaSugerida()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 01",
@@ -61,8 +64,11 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.BlockedUnknownScale, result.AnalysisStatus);
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
         Assert.Null(result.SuggestedGrade);
+        Assert.NotEmpty(result.FeedbackToStudent!);
+        Assert.Contains("Escala de nota nao identificada", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.Blocks);
     }
 
     [Fact]
@@ -157,4 +163,52 @@ public sealed class GradingAnalysisServiceTests
         Assert.True(result.Confidence < 0.5m);
         Assert.Contains("Baixa confianca", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task AnalyzeAsync_ComDescricaoComoFallback_GeraRascunhoComBaixaConfianca()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 05",
+            MaxGrade: 10m,
+            ActivityDescription: "O aluno deve elaborar um plano de continuidade; considerar riscos operacionais; propor estratégias de mitigação",
+            RubricOrCriteria: null,
+            TeacherInstructions: null,
+            SubmissionText: "O estudante elaborou um plano de continuidade abordando os riscos operacionais " +
+                            "e propondo estrategias de mitigacao para garantir a resiliencia do negocio.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        Assert.NotNull(result.SuggestedGrade);
+        Assert.True(result.SuggestedGrade > 0m);
+        Assert.True(result.Confidence > 0m);
+        Assert.True(result.Confidence <= 0.5m);
+        Assert.Contains("descricao/enunciado", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEmpty(result.CriterionAnalysis);
+        Assert.Empty(result.Blocks);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_ComDescricaoContendoValor_ExtraiMaxGradeEGeraNotaSugerida()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 06",
+            MaxGrade: 0m,
+            ActivityDescription: "Atividade sobre riscos fisicos. Valor da atividade: 16 pontos. Criterios: identificar riscos; propor medidas",
+            RubricOrCriteria: null,
+            TeacherInstructions: null,
+            SubmissionText: "O estudante identificou riscos fisicos e propôs medidas preventivas adequadas ao contexto.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        Assert.NotNull(result.SuggestedGrade);
+        Assert.True(result.SuggestedGrade > 0m);
+        Assert.True(result.SuggestedGrade <= 16m);
+        Assert.Contains("Valor da atividade extraido", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.Blocks);
+    }
 }
+

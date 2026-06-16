@@ -1,13 +1,16 @@
 using MoodleConnector.Application.Abstractions;
+using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace MoodleConnector.Application.Grading;
 
 /// <summary>
 /// Implementacao de analise assistida baseada em texto.
 /// Esta versao gera um rascunho estruturado com base no texto da submissao e nos criterios informados.
+/// Nunca bloqueia quando ha conteudo legivel — gera rascunho com confianca proporcional a qualidade dos criterios.
 /// Para producao, substitua por implementacao que integre com servico de IA/LLM.
 /// </summary>
-public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
+public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisService
 {
     public Task<GradingAnalysisResult> AnalyzeAsync(
         GradingAnalysisRequest request,
@@ -25,50 +28,105 @@ public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
                 Blocks: ["Submissao sem conteudo textual para analise."]));
         }
 
-        if (request.MaxGrade <= 0)
-        {
-            return Task.FromResult(new GradingAnalysisResult(
-                SuggestedGrade: null,
-                Confidence: 0m,
-                AnalysisStatus.BlockedUnknownScale,
-                FeedbackToStudent: null,
-                PrivateNotesToTeacher: "Escala de nota invalida ou nao configurada para esta atividade.",
-                CriterionAnalysis: [],
-                Blocks: ["Escala de nota nao identificada. Nao e possivel sugerir nota sem referencia de valor maximo."]));
-        }
+        // --- Resolucao de criterios efetivos (cascata) ---
+        var criteriaSource = ResolveCriteria(request.RubricOrCriteria, request.ActivityDescription);
+        var effectiveCriteria = criteriaSource.Text;
+        var hasFormalCriteria = criteriaSource.Source == CriteriaSourceKind.Formal;
+        var hasApproximateCriteria = criteriaSource.Source == CriteriaSourceKind.Approximate;
 
-        var hasCriteria = !string.IsNullOrWhiteSpace(request.RubricOrCriteria);
+        // --- Resolucao de MaxGrade efetivo (cascata) ---
+        var effectiveMaxGrade = request.MaxGrade > 0
+            ? request.MaxGrade
+            : TryExtractMaxGrade(request.RubricOrCriteria) ?? TryExtractMaxGrade(request.ActivityDescription) ?? 0m;
+        var hasMaxGrade = effectiveMaxGrade > 0;
+
         var wordCount = CountWords(request.SubmissionText);
         var submissionSnippet = request.SubmissionText.Length > 300
             ? request.SubmissionText[..300] + "..."
             : request.SubmissionText;
 
-        if (!hasCriteria)
+        // --- Sem criterios e sem descricao: rascunho generico com baixa confianca ---
+        if (string.IsNullOrWhiteSpace(effectiveCriteria))
         {
+            var lowConfNotes = new System.Text.StringBuilder();
+            lowConfNotes.Append("Rascunho preliminar sem criterios ou descricao disponiveis. ");
+            if (!hasMaxGrade)
+            {
+                lowConfNotes.Append("Escala de nota nao identificada. Nota sugerida indisponivel. ");
+            }
+            lowConfNotes.Append("Revisao manual obrigatoria. ");
+            lowConfNotes.Append($"Trecho da submissao: {submissionSnippet}");
+
             return Task.FromResult(new GradingAnalysisResult(
                 SuggestedGrade: null,
-                Confidence: 0m,
-                AnalysisStatus.BlockedMissingCriteria,
+                Confidence: 0.15m,
+                AnalysisStatus.Draft,
                 FeedbackToStudent: BuildGenericFeedback(request.AssignmentName, wordCount),
-                PrivateNotesToTeacher: $"Atividade sem rubrica ou criterios definidos. Revisao manual obrigatoria. Trecho da submissao: {submissionSnippet}",
+                PrivateNotesToTeacher: lowConfNotes.ToString(),
                 CriterionAnalysis: [],
-                Blocks: ["Nao foram informados criterios ou rubrica para esta atividade. Nota sugerida indisponivel."]));
+                Blocks: []));
         }
 
-        // Analise estruturada por criterio
-        var criteria = ParseCriteria(request.RubricOrCriteria!);
-        var criterionResults = BuildCriterionAnalysis(criteria, request.SubmissionText, request.MaxGrade);
-        var totalSuggested = criterionResults.Sum(c => c.SuggestedPoints ?? 0);
-        var confidence = CalculateConfidence(wordCount, criterionResults);
+        // --- Analise estruturada por criterio ---
+        var criteria = ParseCriteria(effectiveCriteria);
+        if (criteria.Count == 0)
+        {
+            // Criterios parseados resultaram vazios — gera rascunho generico
+            return Task.FromResult(new GradingAnalysisResult(
+                SuggestedGrade: null,
+                Confidence: 0.2m,
+                AnalysisStatus.Draft,
+                FeedbackToStudent: BuildGenericFeedback(request.AssignmentName, wordCount),
+                PrivateNotesToTeacher: $"Criterios extraidos do contexto nao geraram itens avaliáveis. Revisao manual obrigatoria. Trecho da submissao: {submissionSnippet}",
+                CriterionAnalysis: [],
+                Blocks: []));
+        }
+
+        var criterionResults = hasMaxGrade
+            ? BuildCriterionAnalysis(criteria, request.SubmissionText, effectiveMaxGrade)
+            : BuildCriterionAnalysisWithoutGrade(criteria, request.SubmissionText);
+
+        var totalSuggested = hasMaxGrade ? criterionResults.Sum(c => c.SuggestedPoints ?? 0) : (decimal?)null;
+
+        // Confianca base depende da fonte dos criterios
+        var baseConfidence = hasFormalCriteria
+            ? CalculateConfidence(wordCount, criterionResults)
+            : hasApproximateCriteria
+                ? Math.Min(CalculateConfidence(wordCount, criterionResults), 0.5m)
+                : 0.3m;
+
+        // Reduzir confianca ainda mais se nao houver MaxGrade
+        if (!hasMaxGrade)
+        {
+            baseConfidence = Math.Min(baseConfidence, 0.35m);
+        }
+
+        var teacherNotes = BuildTeacherNotes(criterionResults, request.SubmissionText, baseConfidence,
+            criteriaSource.Source, hasMaxGrade, effectiveMaxGrade);
 
         return Task.FromResult(new GradingAnalysisResult(
             SuggestedGrade: totalSuggested,
-            Confidence: confidence,
+            Confidence: baseConfidence,
             AnalysisStatus.Draft,
             FeedbackToStudent: BuildStructuredFeedback(request.AssignmentName, criterionResults, wordCount),
-            PrivateNotesToTeacher: BuildTeacherNotes(criterionResults, request.SubmissionText, confidence),
+            PrivateNotesToTeacher: teacherNotes,
             criterionResults,
             Blocks: []));
+    }
+
+    private static CriteriaResolution ResolveCriteria(string? rubricOrCriteria, string? activityDescription)
+    {
+        if (!string.IsNullOrWhiteSpace(rubricOrCriteria))
+        {
+            return new CriteriaResolution(rubricOrCriteria, CriteriaSourceKind.Formal);
+        }
+
+        if (!string.IsNullOrWhiteSpace(activityDescription))
+        {
+            return new CriteriaResolution(activityDescription, CriteriaSourceKind.Approximate);
+        }
+
+        return new CriteriaResolution(null, CriteriaSourceKind.None);
     }
 
     private static IReadOnlyList<GradingCriterionAnalysis> BuildCriterionAnalysis(
@@ -107,6 +165,51 @@ public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
                 CriterionText: criterion,
                 MaxPoints: pointsPerCriterion,
                 SuggestedPoints: suggestedPoints,
+                EvidenceFound: matchedWords > 0
+                    ? $"O estudante abordou {matchedWords} de {criterionWords.Length} aspecto(s) identificado(s) no criterio."
+                    : "Nao foram encontradas evidencias diretamente relacionadas ao criterio no texto analisado.",
+                Gaps: needsReview
+                    ? $"O texto apresenta cobertura parcial ({Math.Round(coverage * 100)}%) dos aspectos esperados. Revisao recomendada."
+                    : null,
+                TeacherReviewRequired: needsReview));
+        }
+
+        return results;
+    }
+
+    private static IReadOnlyList<GradingCriterionAnalysis> BuildCriterionAnalysisWithoutGrade(
+        IReadOnlyList<string> criteria,
+        string submissionText)
+    {
+        if (criteria.Count == 0)
+        {
+            return [];
+        }
+
+        var results = new List<GradingCriterionAnalysis>();
+        var submissionLower = submissionText.ToLowerInvariant();
+
+        for (var i = 0; i < criteria.Count; i++)
+        {
+            var criterion = criteria[i].Trim();
+            var criterionWords = criterion.ToLowerInvariant()
+                .Split([' ', ',', ';', '.', ':'], StringSplitOptions.RemoveEmptyEntries)
+                .Where(word => word.Length > 3)
+                .Take(5)
+                .ToArray();
+
+            var matchedWords = criterionWords.Count(word => submissionLower.Contains(word));
+            var coverage = criterionWords.Length > 0
+                ? (decimal)matchedWords / criterionWords.Length
+                : 0m;
+
+            var needsReview = coverage < 0.5m;
+
+            results.Add(new GradingCriterionAnalysis(
+                CriterionId: $"C{i + 1}",
+                CriterionText: criterion,
+                MaxPoints: null,
+                SuggestedPoints: null,
                 EvidenceFound: matchedWords > 0
                     ? $"O estudante abordou {matchedWords} de {criterionWords.Length} aspecto(s) identificado(s) no criterio."
                     : "Nao foram encontradas evidencias diretamente relacionadas ao criterio no texto analisado.",
@@ -164,7 +267,10 @@ public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
     private static string BuildTeacherNotes(
         IReadOnlyList<GradingCriterionAnalysis> criteria,
         string submissionText,
-        decimal confidence)
+        decimal confidence,
+        CriteriaSourceKind criteriaSource,
+        bool hasMaxGrade,
+        decimal effectiveMaxGrade)
     {
         var reviews = criteria.Where(c => c.TeacherReviewRequired).ToList();
         var snippetLength = Math.Min(submissionText.Length, 500);
@@ -172,7 +278,34 @@ public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
 
         var notes = new System.Text.StringBuilder();
         notes.Append($"Analise estruturada gerada automaticamente. Confianca estimada: {confidence * 100:0}%. ");
-        notes.Append($"Criterios para revisao manual: {reviews.Count}/{criteria.Count}. ");
+
+        if (criteria.Count > 0)
+        {
+            notes.Append($"Criterios para revisao manual: {reviews.Count}/{criteria.Count}. ");
+        }
+
+        // Informar a origem dos criterios
+        switch (criteriaSource)
+        {
+            case CriteriaSourceKind.Formal:
+                notes.Append("Criterios extraidos de rubrica/criterios formais. ");
+                break;
+            case CriteriaSourceKind.Approximate:
+                notes.Append("Criterios extraidos da descricao/enunciado da atividade (aproximados). Revise se os criterios estao corretos. ");
+                break;
+            case CriteriaSourceKind.None:
+                notes.Append("Nenhum criterio formal ou descricao encontrados. Analise baseada apenas no conteudo da submissao. ");
+                break;
+        }
+
+        if (!hasMaxGrade)
+        {
+            notes.Append("Escala de nota nao identificada. Nota sugerida indisponivel. ");
+        }
+        else if (effectiveMaxGrade > 0 && criteriaSource != CriteriaSourceKind.Formal)
+        {
+            notes.Append($"Valor da atividade extraido do contexto: {effectiveMaxGrade} pontos. Confirme se esta correto. ");
+        }
 
         if (confidence < 0.5m)
         {
@@ -222,4 +355,31 @@ public sealed class StructuredGradingAnalysisService : IGradingAnalysisService
             ? 0
             : text.Split([' ', '\t', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries).Length;
     }
+
+    private static decimal? TryExtractMaxGrade(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var match = MaxGradeRegex().Match(text);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        var raw = match.Groups["grade"].Value.Replace(',', '.');
+        return decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var grade) && grade > 0
+            ? grade
+            : null;
+    }
+
+    [GeneratedRegex(@"(?i)\b(?:valor(?:\s+da\s+atividade)?|nota\s*m[aá]xima|pontua[cç][aã]o|vale)\s*:?\s*(?<grade>\d+(?:[\.,]\d+)?)\s*(?:pontos?|pts?|%)?")]
+    private static partial Regex MaxGradeRegex();
+
+    private sealed record CriteriaResolution(string? Text, CriteriaSourceKind Source);
+
+    private enum CriteriaSourceKind { None, Formal, Approximate }
 }
+

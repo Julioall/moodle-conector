@@ -150,7 +150,9 @@ public sealed class GradingContextBuilderTests
         Assert.Equal(16m, context.MaxGrade);
         Assert.Contains("gerenciamento de eventos", context.Criteria, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ações corretivas", context.Criteria, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Escala de nota", context.Blockers[0], StringComparison.OrdinalIgnoreCase);
+        // Sem submissao incluida, o blocker de submissao e esperado
+        Assert.DoesNotContain(context.Blockers, b => b.Contains("Escala", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(context.Blockers, b => b.Contains("Critérios", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -192,6 +194,87 @@ public sealed class GradingContextBuilderTests
         Assert.Contains("gerenciamento de eventos", context.Criteria, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ITIL", context.Criteria, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Produto esperado", context.Criteria, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ComArtefatoDeRubrica_PopulaRubricDescriptionENotaMaxima()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "rubric",
+            "Rubrica SAP 01.pdf",
+            "application/pdf",
+            "sha-rubric",
+            SizeBytes: 500,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef:
+                """
+                Rubrica de avaliação SAP 01.
+                Valor da atividade: 20 pontos.
+                Critério 1: Clareza na descrição dos processos ITIL.
+                Critério 2: Coerência das ações corretivas propostas.
+                """,
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.NotNull(context.RubricDescription);
+        Assert.Contains("Rubrica de avaliação", context.RubricDescription, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(20m, context.MaxGrade);
+        // Com rubricDescription preenchida, o blocker de critérios não deve disparar
+        Assert.DoesNotContain(context.Blockers, b => b.Contains("Critérios", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task BuildAsync_QuandoCriteriosNaoEstruturados_UsaEnunciadoComoFallbackDeCriterios()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            "Orientacoes SAP 02.pdf",
+            "application/pdf",
+            "sha-sap-02",
+            SizeBytes: 200,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef:
+                """
+                Situação de Aprendizagem 02 - Etapa 2.
+                O aluno deve elaborar um plano de continuidade de negócios para uma empresa de médio porte.
+                Deve considerar os principais riscos operacionais e as estratégias de mitigação adequadas.
+                Valor: 12 pontos.
+                """,
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        // Sem header de critérios no texto, o enunciado completo deve ser usado como fallback
+        Assert.NotNull(context.Criteria);
+        Assert.Contains("plano de continuidade", context.Criteria, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(12m, context.MaxGrade);
+        // Com criteria preenchida pelo fallback, o blocker de critérios não deve disparar
+        Assert.DoesNotContain(context.Blockers, b => b.Contains("Critérios", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
