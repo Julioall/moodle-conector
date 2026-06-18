@@ -137,7 +137,9 @@ public sealed class LocalGradingBatchOrchestratorTests
             new GradingContextBuilder(
                 repository,
                 Options.Create(new GradingLimitsOptions()),
-                new HeuristicAssignmentContextSelectionService()),
+                new HeuristicAssignmentContextSelectionService(),
+                new FakeMoodleAssignmentSettingsGateway(),
+                new FakeCriteriaGenerationService()),
             new StructuredGradingAnalysisService(),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
@@ -147,7 +149,7 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.NotNull(item.SuggestedGrade);
         Assert.True(item.SuggestedGrade > 0);
         Assert.True(item.Confidence > 0m);
-        Assert.Contains("Pontos fortes", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Pontos positivos", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Analise estruturada", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, batch.ReadyItems);
     }
@@ -574,4 +576,18 @@ public sealed class LocalGradingBatchOrchestratorTests
                 Blocks: ["Criterios ausentes."]));
         }
     }
+    internal sealed class FakeMoodleAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway
+    {
+        public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
+            string userExternalId, string courseId, string assignmentId, CancellationToken cancellationToken)
+            => Task.FromResult<AssignmentSettingsSummary?>(null);
+    }
+
+    internal sealed class FakeCriteriaGenerationService : ICriteriaGenerationService
+    {
+        public Task<CriteriaGenerationResult> GenerateAsync(
+            CriteriaGenerationRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(new CriteriaGenerationResult("fake", request.MaxGrade, 0m, [], [], null));
+    }
 }
+

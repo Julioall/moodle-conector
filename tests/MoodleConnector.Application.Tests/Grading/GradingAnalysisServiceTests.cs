@@ -94,7 +94,7 @@ public sealed class GradingAnalysisServiceTests
         Assert.True(result.Confidence > 0m);
         Assert.NotEmpty(result.FeedbackToStudent!);
         Assert.NotEmpty(result.PrivateNotesToTeacher!);
-        Assert.Equal(3, result.CriterionAnalysis.Count);
+        Assert.Equal(4, result.CriterionAnalysis.Count);
         Assert.Empty(result.Blocks);
 
         // Feedback nao deve expor dados PII ou tokens

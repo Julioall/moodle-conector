@@ -48,7 +48,9 @@ public sealed class GradingContextBuilderTests
                 MaxFilesPerSubmission = 1,
                 MaxTextCharsPerSubmission = 12
             }),
-            new HeuristicAssignmentContextSelectionService());
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
             item,
@@ -100,7 +102,9 @@ public sealed class GradingContextBuilderTests
         var sut = new GradingContextBuilder(
             repository,
             Options.Create(new GradingLimitsOptions()),
-            new HeuristicAssignmentContextSelectionService());
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
             item,
@@ -140,7 +144,9 @@ public sealed class GradingContextBuilderTests
         var sut = new GradingContextBuilder(
             repository,
             Options.Create(new GradingLimitsOptions()),
-            new HeuristicAssignmentContextSelectionService());
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
             item,
@@ -182,7 +188,9 @@ public sealed class GradingContextBuilderTests
         var sut = new GradingContextBuilder(
             repository,
             Options.Create(new GradingLimitsOptions()),
-            new HeuristicAssignmentContextSelectionService());
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
             item,
@@ -222,7 +230,9 @@ public sealed class GradingContextBuilderTests
         var sut = new GradingContextBuilder(
             repository,
             Options.Create(new GradingLimitsOptions()),
-            new HeuristicAssignmentContextSelectionService());
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
             item,
@@ -262,7 +272,9 @@ public sealed class GradingContextBuilderTests
         var sut = new GradingContextBuilder(
             repository,
             Options.Create(new GradingLimitsOptions()),
-            new HeuristicAssignmentContextSelectionService());
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
             item,
@@ -286,7 +298,9 @@ public sealed class GradingContextBuilderTests
         var sut = new GradingContextBuilder(
             repository,
             Options.Create(new GradingLimitsOptions()),
-            new HeuristicAssignmentContextSelectionService());
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
             item,
@@ -325,7 +339,7 @@ public sealed class GradingContextBuilderTests
             repository,
             Options.Create(new GradingLimitsOptions()),
             new HeuristicAssignmentContextSelectionService(),
-            settingsGateway: null,
+            settingsGateway: new FakeMoodleAssignmentSettingsGateway(),
             criteriaGenerationService: new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
@@ -372,7 +386,7 @@ public sealed class GradingContextBuilderTests
             repository,
             Options.Create(new GradingLimitsOptions()),
             new HeuristicAssignmentContextSelectionService(),
-            settingsGateway: null,
+            settingsGateway: new FakeMoodleAssignmentSettingsGateway(),
             criteriaGenerationService: fakeGenerator);
 
         var context = await sut.BuildAsync(
@@ -411,7 +425,7 @@ public sealed class GradingContextBuilderTests
             repository,
             Options.Create(new GradingLimitsOptions()),
             new HeuristicAssignmentContextSelectionService(),
-            settingsGateway: null,
+            settingsGateway: new FakeMoodleAssignmentSettingsGateway(),
             criteriaGenerationService: new HeuristicCriteriaGenerationService());
 
         var context = await sut.BuildAsync(
@@ -514,5 +528,12 @@ public sealed class GradingContextBuilderTests
             GradingBatchStatus status, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());        public Task SaveChangesAsync(CancellationToken cancellationToken)
             => Task.CompletedTask;
+    }
+
+    private sealed class FakeMoodleAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway
+    {
+        public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
+            string userExternalId, string courseId, string assignmentId, CancellationToken cancellationToken)
+            => Task.FromResult<AssignmentSettingsSummary?>(null);
     }
 }
