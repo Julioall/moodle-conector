@@ -315,6 +315,22 @@ public sealed partial class GradingContextBuilder(
             return true;
         }
 
+        // Se o texto contém marcadores de estrutura de documento (SAP/enunciado bruto),
+        // significa que o texto completo do documento foi usado como fallback de critérios
+        // em vez de critérios estruturados extraídos. Nesse caso, o serviço de geração
+        // pode produzir critérios muito melhores a partir do mesmo texto.
+        var lower = criteria.ToLowerInvariant();
+        var documentMarkers = new[]
+        {
+            "resultados esperados", "produto esperado",
+            "situação de aprendizagem", "situacao de aprendizagem",
+            "envio sap"
+        };
+        if (documentMarkers.Any(marker => lower.Contains(marker)))
+        {
+            return true;
+        }
+
         var lines = criteria
             .Split(['\n', ';'], StringSplitOptions.RemoveEmptyEntries)
             .Select(l => l.Trim())

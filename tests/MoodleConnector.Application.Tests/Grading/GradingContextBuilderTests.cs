@@ -429,6 +429,9 @@ public sealed class GradingContextBuilderTests
     [InlineData("   ", true)]
     [InlineData("à distância - individual momento atividade", true)]
     [InlineData("modalidade a distancia individual", true)]
+    [InlineData("Resultados esperados: elaboração de um plano de gerenciamento", true)]
+    [InlineData("Produto esperado: Plano de Gerenciamento de TI", true)]
+    [InlineData("Situação de Aprendizagem 01\nElaborar plano de TI", true)]
     [InlineData("elaborar um plano de gerenciamento de eventos de TI", false)]
     [InlineData("organização do plano de gerenciamento\ndescrição do gerenciamento de eventos\naderência às boas práticas", false)]
     public void AreCriteriaLowQuality_DetectaCorretamente(string? criteria, bool expectedLowQuality)
