@@ -165,12 +165,12 @@ public sealed class GradingAnalysisServiceTests
     }
 
     [Fact]
-    public async Task AnalyzeAsync_ComDescricaoComoFallback_GeraRascunhoComBaixaConfianca()
+    public async Task AnalyzeAsync_ComDescricaoComoFallback_DelegaParaIA()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 05",
             MaxGrade: 10m,
-            ActivityDescription: "O aluno deve elaborar um plano de continuidade; considerar riscos operacionais; propor estratégias de mitigação",
+            ActivityDescription: "O aluno deve elaborar um plano de continuidade; considerar riscos operacionais; propor estratégias de mitigação. O aluno devera escrever uma redacao.",
             RubricOrCriteria: null,
             TeacherInstructions: null,
             SubmissionText: "O estudante elaborou um plano de continuidade abordando os riscos operacionais " +
@@ -180,22 +180,21 @@ public sealed class GradingAnalysisServiceTests
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
         Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        Assert.NotNull(result.SuggestedGrade);
-        Assert.True(result.SuggestedGrade > 0m);
+        Assert.Null(result.SuggestedGrade);
         Assert.True(result.Confidence > 0m);
         Assert.True(result.Confidence <= 0.5m);
-        Assert.Contains("descricao/enunciado", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
-        Assert.NotEmpty(result.CriterionAnalysis);
+        Assert.Contains("INSTRUCAO PARA A IA", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(result.CriterionAnalysis);
         Assert.Empty(result.Blocks);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_ComDescricaoContendoValor_ExtraiMaxGradeEGeraNotaSugerida()
+    public async Task AnalyzeAsync_ComDescricaoMuitoPequena_BloqueiaAnalise()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 06",
             MaxGrade: 0m,
-            ActivityDescription: "Atividade sobre riscos fisicos. Valor da atividade: 16 pontos. Criterios: identificar riscos; propor medidas",
+            ActivityDescription: "Atividade sobre riscos fisicos. Valor da atividade: 16 pontos.",
             RubricOrCriteria: null,
             TeacherInstructions: null,
             SubmissionText: "O estudante identificou riscos fisicos e propôs medidas preventivas adequadas ao contexto.",
@@ -203,12 +202,10 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        Assert.NotNull(result.SuggestedGrade);
-        Assert.True(result.SuggestedGrade > 0m);
-        Assert.True(result.SuggestedGrade <= 16m);
-        Assert.Contains("Valor da atividade extraido", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(result.Blocks);
+        Assert.Equal(AnalysisStatus.BlockedMissingCriteria, result.AnalysisStatus);
+        Assert.Null(result.SuggestedGrade);
+        Assert.NotEmpty(result.Blocks);
+        Assert.Contains("insuficiente", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 }
 

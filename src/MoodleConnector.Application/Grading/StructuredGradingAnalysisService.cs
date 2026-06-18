@@ -67,9 +67,25 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 Blocks: []));
         }
 
+        // --- Enunciado insuficiente: bloquear analise ---
+        if (hasApproximateCriteria && CountWords(effectiveCriteria) < 15)
+        {
+            return Task.FromResult(new GradingAnalysisResult(
+                SuggestedGrade: null,
+                Confidence: 0m,
+                AnalysisStatus.BlockedMissingCriteria,
+                FeedbackToStudent: null,
+                PrivateNotesToTeacher: "O texto extraido do enunciado da atividade e insuficiente para analise automatica (provavel imagem sem OCR ou apenas titulo de secao).",
+                CriterionAnalysis: [],
+                Blocks: ["Enunciado insuficiente ou sem criterios legiveis."]));
+        }
+
         // --- Analise estruturada por criterio ---
-        var criteria = ParseCriteria(effectiveCriteria);
-        if (criteria.Count == 0)
+        var criteria = hasApproximateCriteria 
+            ? Array.Empty<string>() 
+            : ParseCriteria(effectiveCriteria);
+
+        if (criteria.Count == 0 && hasFormalCriteria)
         {
             // Criterios parseados resultaram vazios — gera rascunho generico
             return Task.FromResult(new GradingAnalysisResult(
@@ -82,11 +98,15 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 Blocks: []));
         }
 
-        var criterionResults = hasMaxGrade
-            ? BuildCriterionAnalysis(criteria, request.SubmissionText, effectiveMaxGrade)
-            : BuildCriterionAnalysisWithoutGrade(criteria, request.SubmissionText);
+        var criterionResults = criteria.Count > 0
+            ? (hasMaxGrade
+                ? BuildCriterionAnalysis(criteria, request.SubmissionText, effectiveMaxGrade)
+                : BuildCriterionAnalysisWithoutGrade(criteria, request.SubmissionText))
+            : [];
 
-        var totalSuggested = hasMaxGrade ? criterionResults.Sum(c => c.SuggestedPoints ?? 0) : (decimal?)null;
+        var totalSuggested = criterionResults.Count > 0 && hasMaxGrade 
+            ? criterionResults.Sum(c => c.SuggestedPoints ?? 0) 
+            : (decimal?)null;
 
         // Confianca base depende da fonte dos criterios
         var baseConfidence = hasFormalCriteria
@@ -329,7 +349,7 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 notes.Append("Criterios extraidos de rubrica/criterios formais. ");
                 break;
             case CriteriaSourceKind.Approximate:
-                notes.Append("Criterios extraidos da descricao/enunciado da atividade (aproximados). Revise se os criterios estao corretos. ");
+                notes.Append("Enunciado da atividade selecionado como contexto. INSTRUCAO PARA A IA: O contexto selecionado nao possui rubrica formal. Use o texto extraido do enunciado como contexto pedagogico principal, e nao como lista direta de criterios. Primeiro interprete o enunciado, identifique comandos avaliativos e expectativas de resposta, ignorando cabecalhos, rodapes, logos, nomes, turma, enderecos e textos administrativos. Em seguida, compare a submissao do aluno com essas expectativas e gere feedback especifico, com pontos fortes e lacunas reais. So transforme em criterios avaliativos os comandos pedagogicos detectados ou derivados, nunca use as linhas brutas do documento como criterio. ");
                 break;
             case CriteriaSourceKind.None:
                 notes.Append("Nenhum criterio formal, instrucao ou descricao encontrados. Analise baseada apenas no conteudo da submissao. ");
