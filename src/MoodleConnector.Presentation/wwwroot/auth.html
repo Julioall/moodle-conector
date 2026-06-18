@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moodle Connector — Entrar</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .tab-active   { border-bottom: 2px solid #f86000; color: #f86000; font-weight: 600; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #a8a29e; }
+    .tab-inactive:hover { color: #fff7ed; }
+    input { background: #2a2521; color: #fff7ed; }
+    input::placeholder { color: #8c837a; }
+    input:focus { outline: none; box-shadow: 0 0 0 3px rgba(248,96,0,0.22); }
+  </style>
+</head>
+<body class="min-h-screen bg-[#14110e] flex items-center justify-center p-4">
+
+  <div class="w-full max-w-md">
+
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <div class="inline-flex items-center justify-center w-32 h-24 cursor-pointer" onclick="window.location.href='/'">
+        <img src="/logo.png" alt="Moodle Connector" class="max-w-full max-h-full object-contain" />
+      </div>
+      <div class="flex items-center justify-center gap-2 mt-4 cursor-pointer" onclick="window.location.href='/'">
+        <h1 class="text-2xl font-bold text-[#f86000] tracking-tight">Moodle</h1>
+        <h1 class="text-2xl font-bold text-white tracking-tight">Connector</h1>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div class="bg-[#1f1b18] text-orange-50 rounded-2xl shadow-2xl overflow-hidden border border-[#3a332d]">
+
+      <!-- Tabs -->
+      <div class="flex border-b border-[#3a332d] bg-[#171412]">
+        <button id="tab-login-btn" onclick="switchTab('login')"
+          class="flex-1 py-4 text-sm transition-all tab-active">
+          Entrar
+        </button>
+        <button id="tab-register-btn" onclick="switchTab('register')"
+          class="flex-1 py-4 text-sm transition-all tab-inactive">
+          Criar conta
+        </button>
+      </div>
+
+      <div class="p-8">
+
+        <!-- Login form -->
+        <form id="form-login" onsubmit="handleLogin(event)">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                E-mail
+              </label>
+              <input id="login-email" type="email" placeholder="seu@email.com" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                Senha
+              </label>
+              <input id="login-password" type="password" placeholder="Sua senha" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div id="login-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
+            <button type="submit" id="login-submit"
+              class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-semibold py-2.5 px-4 rounded-lg text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+              Entrar
+            </button>
+          </div>
+        </form>
+
+        <!-- Register form (hidden initially) -->
+        <form id="form-register" class="hidden" onsubmit="handleRegister(event)">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                Nome completo
+              </label>
+              <input id="reg-name" type="text" placeholder="Seu nome" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                E-mail
+              </label>
+              <input id="reg-email" type="email" placeholder="seu@email.com" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
+                Senha
+              </label>
+              <input id="reg-password" type="password" placeholder="Mínimo 12 caracteres" required
+                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
+            </div>
+            <div id="reg-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
+            <button type="submit" id="reg-submit"
+              class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-semibold py-2.5 px-4 rounded-lg text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+              Criar conta
+            </button>
+          </div>
+        </form>
+
+      </div>
+    </div><!-- /card -->
+
+  </div><!-- /max-w -->
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const returnUrl = urlParams.get('returnUrl') || '/app.html';
+    const emailParam = urlParams.get('email');
+    const errorParam = urlParams.get('error');
+
+    function boot() {
+      if (emailParam) {
+        document.getElementById('login-email').value = emailParam;
+        document.getElementById('reg-email').value = emailParam;
+      }
+      
+      if (errorParam) {
+        showError(document.getElementById('login-error'), errorParam);
+      }
+    }
+
+    function switchTab(tab) {
+      const isLogin = tab === 'login';
+      document.getElementById('form-login').classList.toggle('hidden', !isLogin);
+      document.getElementById('form-register').classList.toggle('hidden', isLogin);
+      document.getElementById('tab-login-btn').className = `flex-1 py-4 text-sm transition-all ${isLogin ? 'tab-active' : 'tab-inactive'}`;
+      document.getElementById('tab-register-btn').className = `flex-1 py-4 text-sm transition-all ${isLogin ? 'tab-inactive' : 'tab-active'}`;
+      
+      hideError(document.getElementById('login-error'));
+      hideError(document.getElementById('reg-error'));
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('login-submit');
+      const errEl = document.getElementById('login-error');
+      setLoading(btn, true);
+      hideError(errEl);
+
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+
+      try {
+        const res = await api('/api/account/login', {
+          method: 'POST',
+          body: { email, password }
+        });
+        window.location.href = returnUrl;
+      } catch (err) {
+        showError(errEl, err.message || 'Erro ao entrar. Verifique seus dados.');
+      } finally {
+        setLoading(btn, false, 'Entrar');
+      }
+    }
+
+    async function handleRegister(e) {
+      e.preventDefault();
+      const btn = document.getElementById('reg-submit');
+      const errEl = document.getElementById('reg-error');
+      setLoading(btn, true);
+      hideError(errEl);
+
+      const name = document.getElementById('reg-name').value.trim();
+      const email = document.getElementById('reg-email').value.trim();
+      const password = document.getElementById('reg-password').value;
+
+      try {
+        const res = await api('/api/account/register', {
+          method: 'POST',
+          body: { name, email, password }
+        });
+        window.location.href = res.redirectUrl || `/auth.html?email=${encodeURIComponent(email)}&returnUrl=${encodeURIComponent(returnUrl)}`;
+      } catch (err) {
+        showError(errEl, err.message || 'Erro ao criar conta. Tente novamente.');
+      } finally {
+        setLoading(btn, false, 'Criar conta');
+      }
+    }
+
+    async function api(url, opts = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+      const fetchOpts = {
+        method: opts.method || 'GET',
+        headers,
+        credentials: 'include',
+      };
+      if (opts.body) {
+        fetchOpts.body = JSON.stringify(opts.body);
+      }
+
+      const res = await fetch(url, fetchOpts);
+      let data;
+      try { data = await res.json(); } catch { data = {}; }
+
+      if (!res.ok) {
+        throw new Error(data.error || data.title || (res.status === 401 ? 'Sessão expirada. Faça login novamente.' : `Erro ${res.status}`));
+      }
+      return data;
+    }
+
+    function setLoading(btn, loading, defaultText) {
+      btn.disabled = loading;
+      if (loading) {
+        btn.dataset.original = btn.textContent;
+        btn.innerHTML = `<span class="inline-flex items-center justify-center gap-2">
+          <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+          </svg>
+          Aguarde…</span>`;
+      } else {
+        btn.textContent = defaultText || btn.dataset.original || 'Enviar';
+      }
+    }
+
+    function showError(el, msg) {
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    function hideError(el) {
+      el.textContent = '';
+      el.classList.add('hidden');
+    }
+
+    boot();
+  </script>
+</body>
+</html>

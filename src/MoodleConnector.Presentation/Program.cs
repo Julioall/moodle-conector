@@ -730,9 +730,70 @@ app.MapPost("/api/account/connect-moodle", async (
     }
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapPut("/api/account/moodle/{id}", async (
+    string id,
+    UpdateMoodleInput input,
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(input.MoodleAlias) || string.IsNullOrWhiteSpace(input.MoodleBaseUrl))
+        return Results.BadRequest(new { ok = false, error = "Preencha alias e URL do Moodle." });
+
+    try
+    {
+        await accountService.UpdateMoodleAsync(
+            new UpdateMoodleAccountRequest(
+                identity.Id,
+                id,
+                input.MoodleAlias,
+                input.MoodleBaseUrl,
+                input.MoodleUsername,
+                input.MoodlePassword,
+                input.IsDefault,
+                input.CanWrite),
+            cancellationToken);
+
+        return Results.Ok(new { ok = true });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapDelete("/api/account/moodle/{id}", async (
+    string id,
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    try
+    {
+        await accountService.DeleteMoodleAsync(identity.Id, id, cancellationToken);
+        return Results.Ok(new { ok = true });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapGet("/auth/login", (string? email, string? returnUrl) =>
 {
-    return Results.Content(BuildLoginPage(email, returnUrl), "text/html; charset=utf-8");
+    var qs = new List<string>();
+    if (!string.IsNullOrEmpty(email)) qs.Add($"email={Uri.EscapeDataString(email)}");
+    if (!string.IsNullOrEmpty(returnUrl)) qs.Add($"returnUrl={Uri.EscapeDataString(returnUrl)}");
+    var q = qs.Count > 0 ? "?" + string.Join("&", qs) : "";
+    return Results.Redirect($"/auth.html{q}");
 });
 
 app.MapPost("/auth/login", async (
@@ -751,7 +812,12 @@ app.MapPost("/auth/login", async (
 
     if (account is null)
     {
-        return Results.Content(BuildLoginPage(email, returnUrl, "E-mail ou senha invalidos."), "text/html; charset=utf-8");
+        var qs = new List<string>();
+        if (!string.IsNullOrEmpty(email)) qs.Add($"email={Uri.EscapeDataString(email)}");
+        if (!string.IsNullOrEmpty(returnUrl)) qs.Add($"returnUrl={Uri.EscapeDataString(returnUrl)}");
+        qs.Add("error=" + Uri.EscapeDataString("E-mail ou senha invalidos."));
+        var q = qs.Count > 0 ? "?" + string.Join("&", qs) : "";
+        return Results.Redirect($"/auth.html{q}");
     }
 
     await SignInPortalAccountAsync(context, account.Id, account.Name, account.Email);
@@ -1600,3 +1666,4 @@ public sealed record RegisterConnectorClientInput(
 public sealed record RegisterAccountInput(string Name, string Email, string Password);
 public sealed record LoginInput(string Email, string Password);
 public sealed record ConnectMoodleInput(string MoodleAlias, string MoodleBaseUrl, string MoodleUsername, string MoodlePassword, bool IsDefault = false, bool CanWrite = false);
+public sealed record UpdateMoodleInput(string MoodleAlias, string MoodleBaseUrl, string? MoodleUsername, string? MoodlePassword, bool IsDefault = false, bool CanWrite = false);

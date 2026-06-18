@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moodle Connector — Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .api-key-box { font-family: 'Courier New', monospace; word-break: break-all; }
+    input { background: #2a2521; color: #fff7ed; }
+    input::placeholder { color: #8c837a; }
+    input:focus { outline: none; box-shadow: 0 0 0 3px rgba(248,96,0,0.22); }
+  </style>
+</head>
+<body class="min-h-screen bg-[#14110e] flex flex-col items-center p-4">
+
+  <!-- Header -->
+  <header class="w-full max-w-3xl flex items-center justify-between py-6">
+    <div class="flex items-center gap-3 cursor-pointer" onclick="window.location.href='/'">
+      <img src="/logo.png" alt="Moodle Connector" class="w-12 h-12 object-contain" />
+      <div>
+        <h1 class="text-xl font-bold text-[#f86000] tracking-tight leading-none">Moodle</h1>
+        <h1 class="text-xl font-bold text-white tracking-tight leading-none">Connector</h1>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <span id="user-greeting" class="text-sm font-medium text-stone-300">Olá!</span>
+      <button onclick="handleLogout()" class="text-xs bg-red-950 hover:bg-red-900 text-red-300 border border-red-800 font-semibold px-3 py-1.5 rounded-md transition-all">Sair</button>
+    </div>
+  </header>
+
+  <main class="w-full max-w-3xl space-y-6">
+
+    <!-- API Key Section -->
+    <div class="bg-[#1f1b18] text-orange-50 rounded-2xl shadow-xl border border-[#3a332d] p-6">
+      <h2 class="text-lg font-bold text-white mb-2">Sua API Key do Conector</h2>
+      <div class="relative">
+        <div id="api-key-display" class="api-key-box w-full px-4 py-3 bg-[#2a2521] border border-[#4a4038] rounded-lg text-sm text-orange-50 pr-20 select-all">
+          Aguarde...
+        </div>
+        <button onclick="copyApiKey()" id="copy-btn" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-neutral-800 hover:bg-neutral-700 text-orange-300 border border-neutral-700 font-semibold px-3 py-1.5 rounded-md transition-all">
+          Copiar
+        </button>
+      </div>
+      <p class="text-xs text-amber-200 bg-amber-950/50 border border-amber-800 rounded-lg px-3 py-2 mt-3 inline-block">
+        ⚠️ Adicione o header <code class="bg-black px-1 rounded">X-Mcp-Api-Key: &lt;sua-chave&gt;</code> em requisições para o endpoint <code class="bg-black px-1 rounded">/mcp</code>.
+      </p>
+    </div>
+
+    <!-- Connections Section -->
+    <div class="bg-[#1f1b18] text-orange-50 rounded-2xl shadow-xl border border-[#3a332d] p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold text-white">Seus Moodles</h2>
+        <button onclick="openMoodleForm()" class="text-xs bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          Adicionar Moodle
+        </button>
+      </div>
+      
+      <div id="connections-list" class="space-y-3">
+        <!-- Connections will be injected here -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Moodle Form Modal -->
+  <div id="moodle-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 hidden z-50 transition-opacity">
+    <div class="bg-[#1f1b18] border border-[#3a332d] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+      <button onclick="closeMoodleForm()" class="absolute top-4 right-4 text-stone-400 hover:text-white">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+      
+      <div class="p-6">
+        <h3 id="modal-title" class="text-xl font-bold text-white mb-4">Adicionar Moodle</h3>
+        
+        <form id="form-moodle" onsubmit="handleSaveMoodle(event)">
+          <input type="hidden" id="moodle-id" />
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">Alias do Moodle</label>
+              <input id="moodle-alias" type="text" placeholder="Goias, Nacional, CTM..." required class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">URL base do Moodle</label>
+              <input id="moodle-base-url" type="url" placeholder="https://ead.exemplo.com" required class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">Usuário do Moodle</label>
+              <input id="moodle-username" type="text" placeholder="seu.usuario" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
+              <p id="moodle-username-hint" class="text-xs text-stone-400 mt-1 hidden">Deixe em branco para não alterar.</p>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">Senha do Moodle</label>
+              <input id="moodle-password" type="password" placeholder="Sua senha do Moodle" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
+              <p id="moodle-password-hint" class="text-xs text-stone-400 mt-1 hidden">Deixe em branco para não alterar.</p>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <input id="moodle-isdefault" type="checkbox" class="w-4 h-4 rounded accent-orange-500" />
+              <label for="moodle-isdefault" class="text-sm font-medium text-orange-50 cursor-pointer">Definir como Moodle padrão</label>
+            </div>
+            <div class="flex items-center gap-3 py-1">
+              <input id="moodle-canwrite" type="checkbox" class="w-4 h-4 rounded accent-orange-500" />
+              <label for="moodle-canwrite" class="text-sm font-medium text-orange-50 cursor-pointer">Habilitar permissão de escrita</label>
+            </div>
+            <div id="moodle-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
+            
+            <button type="submit" id="moodle-submit" class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-bold py-2.5 px-4 rounded-lg text-sm transition-all">
+              Salvar Moodle
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      user: null,
+      connections: [],
+      apiKey: null,
+      editingId: null
+    };
+
+    async function boot() {
+      try {
+        const me = await api('/api/account/me');
+        state.user = me;
+        state.apiKey = me.apiKey;
+        state.connections = me.moodleConnections || [];
+        
+        document.getElementById('user-greeting').textContent = `Olá, ${me.name}!`;
+        if (state.apiKey) {
+          document.getElementById('api-key-display').textContent = state.apiKey;
+        } else {
+          document.getElementById('api-key-display').textContent = 'Você não possui API Key. Adicione um Moodle.';
+        }
+        
+        renderConnections();
+      } catch (e) {
+        window.location.href = '/auth.html';
+      }
+    }
+
+    function renderConnections() {
+      const list = document.getElementById('connections-list');
+      if (state.connections.length === 0) {
+        list.innerHTML = `<div class="text-center py-8 text-stone-400 text-sm">Nenhum Moodle cadastrado ainda.</div>`;
+        return;
+      }
+
+      list.innerHTML = state.connections.map(c => `
+        <div class="bg-[#2a2521] border border-[#4a4038] rounded-xl p-4 flex items-center justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <h3 class="font-bold text-orange-50 truncate">${escapeHtml(c.alias)}</h3>
+              ${c.isDefault ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30 uppercase tracking-wider">Padrão</span>' : ''}
+              ${c.canWrite ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wider">Escrita</span>' : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-stone-500/20 text-stone-400 border border-stone-500/30 uppercase tracking-wider">Leitura</span>'}
+            </div>
+            <p class="text-xs text-stone-400 truncate">${escapeHtml(c.baseUrl)}</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="editMoodle('${c.id}')" class="p-2 text-stone-400 hover:text-orange-400 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-all" title="Editar">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+            </button>
+            <button onclick="deleteMoodle('${c.id}')" class="p-2 text-stone-400 hover:text-red-400 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-all" title="Excluir">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openMoodleForm() {
+      state.editingId = null;
+      document.getElementById('modal-title').textContent = 'Adicionar Moodle';
+      document.getElementById('moodle-id').value = '';
+      document.getElementById('moodle-alias').value = '';
+      document.getElementById('moodle-base-url').value = '';
+      document.getElementById('moodle-username').value = '';
+      document.getElementById('moodle-password').value = '';
+      document.getElementById('moodle-isdefault').checked = state.connections.length === 0;
+      document.getElementById('moodle-canwrite').checked = false;
+      
+      document.getElementById('moodle-username').required = true;
+      document.getElementById('moodle-password').required = true;
+      document.getElementById('moodle-username-hint').classList.add('hidden');
+      document.getElementById('moodle-password-hint').classList.add('hidden');
+      
+      hideError(document.getElementById('moodle-error'));
+      document.getElementById('moodle-modal').classList.remove('hidden');
+    }
+
+    function editMoodle(id) {
+      const c = state.connections.find(x => x.id === id);
+      if (!c) return;
+      
+      state.editingId = id;
+      document.getElementById('modal-title').textContent = 'Editar Moodle';
+      document.getElementById('moodle-id').value = c.id;
+      document.getElementById('moodle-alias').value = c.alias;
+      document.getElementById('moodle-base-url').value = c.baseUrl;
+      document.getElementById('moodle-username').value = '';
+      document.getElementById('moodle-password').value = '';
+      document.getElementById('moodle-isdefault').checked = c.isDefault;
+      document.getElementById('moodle-canwrite').checked = c.canWrite;
+
+      document.getElementById('moodle-username').required = false;
+      document.getElementById('moodle-password').required = false;
+      document.getElementById('moodle-username-hint').classList.remove('hidden');
+      document.getElementById('moodle-password-hint').classList.remove('hidden');
+
+      hideError(document.getElementById('moodle-error'));
+      document.getElementById('moodle-modal').classList.remove('hidden');
+    }
+
+    function closeMoodleForm() {
+      document.getElementById('moodle-modal').classList.add('hidden');
+    }
+
+    async function handleSaveMoodle(e) {
+      e.preventDefault();
+      const btn = document.getElementById('moodle-submit');
+      const errEl = document.getElementById('moodle-error');
+      setLoading(btn, true, 'Salvando...');
+      hideError(errEl);
+
+      const payload = {
+        moodleAlias: document.getElementById('moodle-alias').value.trim(),
+        moodleBaseUrl: document.getElementById('moodle-base-url').value.trim(),
+        moodleUsername: document.getElementById('moodle-username').value.trim(),
+        moodlePassword: document.getElementById('moodle-password').value,
+        isDefault: document.getElementById('moodle-isdefault').checked,
+        canWrite: document.getElementById('moodle-canwrite').checked
+      };
+
+      try {
+        if (state.editingId) {
+          await api(`/api/account/moodle/${state.editingId}`, { method: 'PUT', body: payload });
+        } else {
+          await api('/api/account/connect-moodle', { method: 'POST', body: payload });
+        }
+        closeMoodleForm();
+        await boot(); // Refresh data
+      } catch (err) {
+        showError(errEl, err.message || 'Erro ao salvar. Verifique os dados.');
+      } finally {
+        setLoading(btn, false, 'Salvar Moodle');
+      }
+    }
+
+    async function deleteMoodle(id) {
+      if (!confirm('Tem certeza que deseja excluir esta conexão Moodle?')) return;
+      try {
+        await api(`/api/account/moodle/${id}`, { method: 'DELETE' });
+        await boot();
+      } catch (err) {
+        alert(err.message || 'Erro ao excluir.');
+      }
+    }
+
+    function handleLogout() {
+      window.location.href = '/auth/logout';
+    }
+
+    async function copyApiKey() {
+      const key = state.apiKey;
+      if (!key) return;
+      try {
+        await navigator.clipboard.writeText(key);
+        const btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copiado!';
+        btn.classList.replace('bg-neutral-800', 'bg-orange-500');
+        btn.classList.replace('text-orange-300', 'text-white');
+        btn.classList.replace('border-neutral-700', 'border-orange-500');
+        setTimeout(() => {
+          btn.textContent = 'Copiar';
+          btn.classList.replace('bg-orange-500', 'bg-neutral-800');
+          btn.classList.replace('text-white', 'text-orange-300');
+          btn.classList.replace('border-orange-500', 'border-neutral-700');
+        }, 2000);
+      } catch {
+        const display = document.getElementById('api-key-display');
+        const range = document.createRange();
+        range.selectNodeContents(display);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+
+    async function api(url, opts = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+      const fetchOpts = { method: opts.method || 'GET', headers, credentials: 'include' };
+      if (opts.body) fetchOpts.body = JSON.stringify(opts.body);
+      const res = await fetch(url, fetchOpts);
+      let data;
+      try { data = await res.json(); } catch { data = {}; }
+      if (!res.ok) throw new Error(data.error || data.title || (res.status === 401 ? 'Sessão expirada.' : `Erro ${res.status}`));
+      return data;
+    }
+
+    function setLoading(btn, loading, defaultText) {
+      btn.disabled = loading;
+      if (loading) {
+        btn.dataset.original = btn.textContent;
+        btn.innerHTML = `<span class="inline-flex items-center gap-2"><svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg> Aguarde...</span>`;
+      } else {
+        btn.textContent = defaultText || btn.dataset.original || 'Salvar Moodle';
+      }
+    }
+
+    function showError(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
+    function hideError(el) { el.textContent = ''; el.classList.add('hidden'); }
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[m]);
+    }
+
+    boot();
+  </script>
+</body>
+</html>

@@ -141,6 +141,98 @@ internal sealed class AccountService(
                 : secretProtector.Unprotect(entity.ApiKeyEncrypted);
     }
 
+    public async Task UpdateMoodleAsync(UpdateMoodleAccountRequest request, CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.UserAccounts
+            .FindAsync([request.UserId], cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+
+        var clientId = entity.ConnectorClientId ?? entity.Id.ToString();
+
+        var clientEntity = await dbContext.ConnectorClients
+            .FirstOrDefaultAsync(c => c.Id == request.MoodleId && c.ClientId == clientId, cancellationToken)
+            ?? throw new InvalidOperationException("Moodle não encontrado ou acesso negado.");
+
+        var moodleBaseUrl = NormalizeMoodleBaseUrl(request.MoodleBaseUrl);
+
+        if (!string.IsNullOrWhiteSpace(request.MoodleUsername) && !string.IsNullOrWhiteSpace(request.MoodlePassword))
+        {
+            var isValid = await moodleValidator.ValidateAsync(
+                moodleBaseUrl,
+                request.MoodleUsername.Trim(),
+                request.MoodlePassword,
+                cancellationToken);
+
+            if (!isValid)
+                throw new InvalidOperationException("Credenciais do Moodle inválidas. Verifique seu usuário e senha.");
+            
+            clientEntity.MoodleUsernameEncrypted = secretProtector.Protect(request.MoodleUsername.Trim());
+            clientEntity.MoodlePasswordEncrypted = secretProtector.Protect(request.MoodlePassword);
+        }
+
+        clientEntity.MoodleAlias = string.IsNullOrWhiteSpace(request.MoodleAlias) ? "Moodle" : request.MoodleAlias;
+        clientEntity.MoodleBaseUrl = moodleBaseUrl;
+        clientEntity.CanWrite = request.CanWrite;
+        clientEntity.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+        if (request.IsDefault)
+        {
+            var existingDefaults = await dbContext.ConnectorClients
+                .Where(c => c.ClientId == clientId && c.IsDefault && c.Id != clientEntity.Id)
+                .ToListAsync(cancellationToken);
+            
+            foreach (var existingDefault in existingDefaults)
+            {
+                existingDefault.IsDefault = false;
+                existingDefault.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+            clientEntity.IsDefault = true;
+        }
+        else
+        {
+            clientEntity.IsDefault = false;
+            var anyDefault = await dbContext.ConnectorClients
+                .AnyAsync(c => c.ClientId == clientId && c.IsDefault && c.Id != clientEntity.Id && c.IsActive, cancellationToken);
+            if (!anyDefault)
+            {
+                clientEntity.IsDefault = true; // Force at least one default if it's the only one
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteMoodleAsync(Guid userId, string moodleId, CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.UserAccounts
+            .FindAsync([userId], cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+
+        var clientId = entity.ConnectorClientId ?? entity.Id.ToString();
+
+        var clientEntity = await dbContext.ConnectorClients
+            .FirstOrDefaultAsync(c => c.Id == moodleId && c.ClientId == clientId, cancellationToken)
+            ?? throw new InvalidOperationException("Moodle não encontrado ou acesso negado.");
+
+        dbContext.ConnectorClients.Remove(clientEntity);
+
+        // Verify if it was the last default, and pick another one to be default if exists
+        if (clientEntity.IsDefault)
+        {
+            var nextDefault = await dbContext.ConnectorClients
+                .Where(c => c.ClientId == clientId && c.Id != moodleId && c.IsActive)
+                .FirstOrDefaultAsync(cancellationToken);
+            
+            if (nextDefault != null)
+            {
+                nextDefault.IsDefault = true;
+                nextDefault.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static string NormalizeName(string name)
     {
         var normalized = string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim();
