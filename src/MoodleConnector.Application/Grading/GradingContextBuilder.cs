@@ -131,7 +131,7 @@ public sealed partial class GradingContextBuilder(
                     // gerar feedback relevante mesmo sem rubrica formal.
                     if (string.IsNullOrWhiteSpace(criteria) && string.IsNullOrWhiteSpace(rubricDescription))
                     {
-                        criteria = Truncate(selected.ExtractedText, maxChars);
+                        criteria = Truncate(selected.ExtractedText ?? string.Empty, maxChars);
                     }
                 }
             }

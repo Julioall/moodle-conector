@@ -1541,48 +1541,7 @@ static async Task SignInPortalAccountAsync(HttpContext context, Guid id, string 
     await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
 }
 
-static string BuildLoginPage(string? email, string? returnUrl, string? error = null)
-{
-    var safeEmail = System.Net.WebUtility.HtmlEncode(email ?? string.Empty);
-    var safeReturnUrl = System.Net.WebUtility.HtmlEncode(returnUrl ?? "/");
-    var errorHtml = string.IsNullOrWhiteSpace(error)
-        ? string.Empty
-        : $"""<div class="error">{System.Net.WebUtility.HtmlEncode(error)}</div>""";
 
-    return $$"""
-<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Moodle Connector - Login</title>
-  <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f86000;margin:0;min-height:100vh;display:grid;place-items:center;color:#fff7ed}
-    main{width:min(420px,calc(100vw - 32px));background:#1f1b18;border:1px solid #3a332d;border-radius:14px;padding:28px;box-shadow:0 24px 70px rgba(0,0,0,.28)}
-    h1{font-size:22px;margin:0 0 20px}
-    label{display:block;font-size:12px;text-transform:uppercase;color:#d6d3d1;font-weight:700;margin:14px 0 6px}
-    input{width:100%;box-sizing:border-box;border:1px solid #4a4038;border-radius:8px;background:#2a2521;color:#fff7ed;padding:11px 12px;font-size:14px}
-    button{width:100%;border:0;border-radius:8px;background:#f98012;color:#1f1b18;font-weight:700;padding:11px 12px;margin-top:18px;cursor:pointer}
-    .error{background:#450a0a;border:1px solid #991b1b;color:#fecaca;border-radius:8px;padding:10px 12px;font-size:14px;margin-bottom:12px}
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Moodle Connector</h1>
-    {{errorHtml}}
-    <form method="post" action="/auth/login">
-      <input type="hidden" name="returnUrl" value="{{safeReturnUrl}}">
-      <label for="email">E-mail</label>
-      <input id="email" name="email" type="email" value="{{safeEmail}}" required autofocus>
-      <label for="password">Senha</label>
-      <input id="password" name="password" type="password" required>
-      <button type="submit">Entrar</button>
-    </form>
-  </main>
-</body>
-</html>
-""";
-}
 
 static bool IsLocalReturnUrl(string? returnUrl)
 {
