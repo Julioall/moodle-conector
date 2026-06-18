@@ -528,7 +528,8 @@ public sealed class GradingContextBuilderTests
 
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
             GradingBatchStatus status, CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());        public Task SaveChangesAsync(CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());
+        public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(string createdBySubject, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());        public Task SaveChangesAsync(CancellationToken cancellationToken)
             => Task.CompletedTask;
     }
 

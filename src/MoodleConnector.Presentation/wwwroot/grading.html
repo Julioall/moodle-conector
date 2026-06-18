@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Moodle Connector — Correção Assistida</title>
+  <meta name="description" content="Painel de revisão e lançamento de correções assistidas no Moodle." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .api-key-box { font-family: 'Courier New', monospace; word-break: break-all; }
+    input, textarea, select { background: #2a2521; color: #fff7ed; }
+    input::placeholder, textarea::placeholder { color: #8c837a; }
+    input:focus, textarea:focus, select:focus { outline: none; box-shadow: 0 0 0 3px rgba(248,96,0,0.22); }
+    .fade-in { animation: fadeIn 0.25s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .progress-bar { transition: width 0.5s ease-out; }
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+    .badge-pending { background: rgba(234,179,8,0.15); color: #eab308; border: 1px solid rgba(234,179,8,0.3); }
+    .badge-processing { background: rgba(59,130,246,0.15); color: #3b82f6; border: 1px solid rgba(59,130,246,0.3); }
+    .badge-ready { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    .badge-completed { background: rgba(156,163,175,0.15); color: #9ca3af; border: 1px solid rgba(156,163,175,0.3); }
+    .badge-cancelled { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+    .badge-draft { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+    .badge-blocked { background: rgba(234,179,8,0.15); color: #eab308; border: 1px solid rgba(234,179,8,0.3); }
+    .badge-failed { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+    .confidence-high { color: #22c55e; }
+    .confidence-medium { color: #eab308; }
+    .confidence-low { color: #ef4444; }
+    .card { background: #1f1b18; border: 1px solid #3a332d; border-radius: 16px; }
+    .card-inner { background: #2a2521; border: 1px solid #4a4038; border-radius: 12px; }
+    .btn-primary { background: #f86000; color: #1f1b18; font-weight: 700; border-radius: 8px; transition: all 0.2s; }
+    .btn-primary:hover { background: #e55600; transform: translateY(-1px); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-secondary { background: #2a2521; color: #fed7aa; border: 1px solid #4a4038; font-weight: 600; border-radius: 8px; transition: all 0.2s; }
+    .btn-secondary:hover { background: #3a332d; }
+    .btn-danger { background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); font-weight: 600; border-radius: 8px; transition: all 0.2s; }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+  </style>
+</head>
+<body class="min-h-screen bg-[#14110e] flex flex-col items-center p-4">
+
+  <!-- Header -->
+  <header class="w-full max-w-4xl flex items-center justify-between py-6">
+    <div class="flex items-center gap-3 cursor-pointer" onclick="window.location.href='/'">
+      <img src="/logo.png" alt="Moodle Connector" class="w-12 h-12 object-contain" />
+      <div>
+        <h1 class="text-xl font-bold text-[#f86000] tracking-tight leading-none">Moodle</h1>
+        <h1 class="text-xl font-bold text-white tracking-tight leading-none">Connector</h1>
+      </div>
+    </div>
+    <nav class="flex items-center gap-4">
+      <a href="/app.html" class="text-sm font-medium text-stone-400 hover:text-orange-300 transition-colors">Dashboard</a>
+      <a href="/grading.html" class="text-sm font-bold text-orange-400 border-b-2 border-orange-400 pb-0.5">Correções</a>
+      <span id="user-greeting" class="text-sm font-medium text-stone-300">Olá!</span>
+      <button onclick="window.location.href='/auth/logout'" class="text-xs bg-red-950 hover:bg-red-900 text-red-300 border border-red-800 font-semibold px-3 py-1.5 rounded-md transition-all">Sair</button>
+    </nav>
+  </header>
+
+  <main id="main-content" class="w-full max-w-4xl space-y-6 fade-in">
+    <!-- Content injected by JS -->
+    <div class="text-center py-16">
+      <div class="inline-flex items-center gap-2 text-stone-400">
+        <svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+        Carregando...
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const state = { view: 'batches', batches: [], currentBatch: null, currentItem: null, preview: null };
+
+    // ─── API Helper ─────────────────────────────────────────────────────
+    async function api(url, opts = {}) {
+      const headers = { 'Content-Type': 'application/json' };
+      const fetchOpts = { method: opts.method || 'GET', headers, credentials: 'include' };
+      if (opts.body) fetchOpts.body = JSON.stringify(opts.body);
+      const res = await fetch(url, fetchOpts);
+      let data;
+      try { data = await res.json(); } catch { data = {}; }
+      if (!res.ok) throw new Error(data.error || data.title || `Erro ${res.status}`);
+      return data;
+    }
+
+    function esc(v) { return String(v ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[m]); }
+
+    // ─── Status helpers ─────────────────────────────────────────────────
+    function statusBadge(status) {
+      const map = {
+        'Pending': 'badge-pending', 'Processing': 'badge-processing',
+        'ReadyForReview': 'badge-ready', 'Completed': 'badge-completed',
+        'Cancelled': 'badge-cancelled', 'DraftReady': 'badge-draft',
+        'Blocked': 'badge-blocked', 'Failed': 'badge-failed',
+        'NotReviewed': 'badge-pending', 'Reviewed': 'badge-ready',
+        'NotReady': 'badge-pending', 'Committed': 'badge-completed',
+        'CommitFailed': 'badge-failed'
+      };
+      const label = {
+        'Pending': 'Pendente', 'Processing': 'Processando',
+        'ReadyForReview': 'Pronto p/ Revisão', 'Completed': 'Concluído',
+        'Cancelled': 'Cancelado', 'DraftReady': 'Rascunho',
+        'Blocked': 'Bloqueado', 'Failed': 'Falha',
+        'NotReviewed': 'Não Revisado', 'Reviewed': 'Revisado',
+        'NotReady': 'Não Pronto', 'Committed': 'Enviado',
+        'CommitFailed': 'Falha Envio'
+      };
+      return `<span class="badge ${map[status] || 'badge-pending'}">${label[status] || status}</span>`;
+    }
+
+    function confidenceClass(c) {
+      if (c == null) return 'text-stone-500';
+      if (c >= 0.6) return 'confidence-high';
+      if (c >= 0.3) return 'confidence-medium';
+      return 'confidence-low';
+    }
+
+    // ─── Boot ───────────────────────────────────────────────────────────
+    async function boot() {
+      try {
+        const me = await api('/api/account/me');
+        document.getElementById('user-greeting').textContent = `Olá, ${me.name}!`;
+        await loadBatches();
+      } catch {
+        window.location.href = '/auth.html';
+      }
+    }
+
+    // ─── View: Batches List ─────────────────────────────────────────────
+    async function loadBatches() {
+      state.view = 'batches';
+      try {
+        const batches = await api('/api/grading/batches');
+        state.batches = batches;
+        renderBatches();
+      } catch (e) {
+        render(`<div class="card p-8 text-center text-stone-400">${esc(e.message)}</div>`);
+      }
+    }
+
+    function renderBatches() {
+      if (state.batches.length === 0) {
+        render(`
+          <div class="card p-8 text-center">
+            <div class="text-stone-400 mb-2">Nenhum lote de correção assistida encontrado.</div>
+            <p class="text-xs text-stone-500">Crie um lote via ChatGPT ou ferramentas MCP para começar.</p>
+          </div>
+        `);
+        return;
+      }
+
+      const cards = state.batches.map(b => `
+        <div class="card p-5 hover:border-orange-500/30 transition-all cursor-pointer" onclick="loadBatch('${b.batchJobId}')">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              ${statusBadge(b.status)}
+              <span class="text-xs text-stone-500 font-mono">${b.batchJobId.substring(0, 8)}…</span>
+            </div>
+            <span class="text-xs text-stone-500">${new Date(b.createdAt).toLocaleDateString('pt-BR')} ${new Date(b.createdAt).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'})}</span>
+          </div>
+          <div class="flex items-center gap-4 text-sm">
+            <div class="text-stone-300"><span class="font-bold text-white">${b.totalItems}</span> itens</div>
+            <div class="text-green-400"><span class="font-bold">${b.readyItems}</span> prontos</div>
+            ${b.blockedItems > 0 ? `<div class="text-yellow-400"><span class="font-bold">${b.blockedItems}</span> bloqueados</div>` : ''}
+            ${b.failedItems > 0 ? `<div class="text-red-400"><span class="font-bold">${b.failedItems}</span> falhos</div>` : ''}
+          </div>
+          ${b.totalItems > 0 ? `
+          <div class="mt-3 w-full bg-[#2a2521] rounded-full h-1.5 overflow-hidden">
+            <div class="progress-bar h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full" style="width: ${Math.round((b.processedItems / b.totalItems) * 100)}%"></div>
+          </div>` : ''}
+        </div>
+      `).join('');
+
+      render(`
+        <div class="flex items-center justify-between mb-2">
+          <h2 class="text-lg font-bold text-white">Lotes de Correção</h2>
+        </div>
+        <div class="space-y-3">${cards}</div>
+      `);
+    }
+
+    // ─── View: Batch Detail ─────────────────────────────────────────────
+    async function loadBatch(batchId) {
+      state.view = 'batch';
+      renderLoading();
+      try {
+        const data = await api(`/api/grading/batches/${batchId}`);
+        state.currentBatch = data;
+        renderBatch();
+      } catch (e) {
+        render(`<div class="card p-8 text-center text-red-400">${esc(e.message)}</div>`);
+      }
+    }
+
+    function renderBatch() {
+      const b = state.currentBatch;
+      const m = b.processingMetrics;
+      const items = b.items || [];
+
+      const itemRows = items.map(item => `
+        <tr class="border-b border-[#3a332d] hover:bg-[#2a2521] cursor-pointer transition-colors" onclick="loadItem('${item.gradingItemId}')">
+          <td class="py-3 px-4 text-sm font-mono text-stone-300">${esc(item.studentId)}</td>
+          <td class="py-3 px-4 text-sm text-stone-400">${esc(item.assignmentId)}</td>
+          <td class="py-3 px-4">${statusBadge(item.status)}</td>
+          <td class="py-3 px-4">${statusBadge(item.reviewStatus)}</td>
+          <td class="py-3 px-4">${statusBadge(item.commitStatus)}</td>
+        </tr>
+      `).join('');
+
+      render(`
+        <button onclick="loadBatches()" class="btn-secondary px-3 py-1.5 text-xs mb-2 inline-flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          Voltar
+        </button>
+
+        <div class="card p-6">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-lg font-bold text-white">Lote de Correção</h2>
+              <span class="text-xs font-mono text-stone-500">${b.batchJobId}</span>
+            </div>
+            ${statusBadge(b.status)}
+          </div>
+
+          <!-- Metrics -->
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-5">
+            <div class="card-inner p-3 text-center">
+              <div class="text-2xl font-extrabold text-white">${b.totalItems}</div>
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Total</div>
+            </div>
+            <div class="card-inner p-3 text-center">
+              <div class="text-2xl font-extrabold text-green-400">${b.readyItems}</div>
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Prontos</div>
+            </div>
+            <div class="card-inner p-3 text-center">
+              <div class="text-2xl font-extrabold text-yellow-400">${b.blockedItems}</div>
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Bloqueados</div>
+            </div>
+            <div class="card-inner p-3 text-center">
+              <div class="text-2xl font-extrabold text-red-400">${b.failedItems}</div>
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Falhos</div>
+            </div>
+            <div class="card-inner p-3 text-center">
+              <div class="text-2xl font-extrabold text-blue-400">${m.progressPercent}%</div>
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold">Progresso</div>
+            </div>
+          </div>
+
+          <div class="w-full bg-[#2a2521] rounded-full h-2 overflow-hidden mb-5">
+            <div class="progress-bar h-full bg-gradient-to-r from-green-500 to-emerald-400 rounded-full" style="width: ${m.progressPercent}%"></div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 mb-5">
+            ${m.canLaunch ? `<button onclick="createPreview('${b.batchJobId}')" class="btn-primary px-4 py-2 text-sm">Gerar Prévia de Lançamento</button>` : ''}
+            <button onclick="loadBatch('${b.batchJobId}')" class="btn-secondary px-4 py-2 text-sm">Atualizar</button>
+          </div>
+
+          <!-- Items table -->
+          ${items.length > 0 ? `
+          <div class="overflow-x-auto">
+            <table class="w-full text-left">
+              <thead>
+                <tr class="border-b border-[#4a4038]">
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase tracking-wider">Aluno</th>
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase tracking-wider">Atividade</th>
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase tracking-wider">Status</th>
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase tracking-wider">Revisão</th>
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase tracking-wider">Envio</th>
+                </tr>
+              </thead>
+              <tbody>${itemRows}</tbody>
+            </table>
+          </div>` : '<div class="text-center text-stone-500 py-4">Nenhum item neste lote.</div>'}
+
+          ${b.hasMore ? `<button onclick="loadBatch('${b.batchJobId}')" class="btn-secondary px-4 py-2 text-sm mt-3 w-full">Carregar mais…</button>` : ''}
+        </div>
+      `);
+    }
+
+    // ─── View: Item Detail ──────────────────────────────────────────────
+    async function loadItem(itemId) {
+      state.view = 'item';
+      renderLoading();
+      try {
+        const data = await api(`/api/grading/items/${itemId}`);
+        state.currentItem = data;
+        renderItem();
+      } catch (e) {
+        render(`<div class="card p-8 text-center text-red-400">${esc(e.message)}</div>`);
+      }
+    }
+
+    function renderItem() {
+      const item = state.currentItem;
+      const evidenceRows = (item.evidence || []).map(ev => `
+        <div class="card-inner p-4 ${ev.teacherReviewRequired ? 'border-yellow-500/40' : ''}">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm font-semibold text-orange-50">${esc(ev.criterionText)}</span>
+            <div class="flex items-center gap-2">
+              ${ev.maxPoints != null ? `<span class="text-xs text-stone-400">${ev.suggestedPoints ?? '?'}/${ev.maxPoints} pts</span>` : ''}
+              ${ev.teacherReviewRequired ? '<span class="badge badge-pending">Revisão</span>' : ''}
+            </div>
+          </div>
+          ${ev.evidenceText ? `<div class="text-xs text-green-300 mb-1"><span class="font-semibold text-green-400">✓ Evidência:</span> ${esc(ev.evidenceText)}</div>` : ''}
+          ${ev.gapsText ? `<div class="text-xs text-red-300"><span class="font-semibold text-red-400">✗ Lacuna:</span> ${esc(ev.gapsText)}</div>` : ''}
+        </div>
+      `).join('');
+
+      render(`
+        <button onclick="loadBatch('${item.batchJobId}')" class="btn-secondary px-3 py-1.5 text-xs mb-2 inline-flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          Voltar ao Lote
+        </button>
+
+        <div class="card p-6">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-white">Item de Correção</h2>
+            <div class="flex items-center gap-2">
+              ${statusBadge(item.status)}
+              ${statusBadge(item.reviewStatus)}
+            </div>
+          </div>
+
+          <!-- Info Grid -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+            <div class="card-inner p-3">
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mb-1">Aluno</div>
+              <div class="text-sm font-mono text-stone-300">${esc(item.studentId)}</div>
+            </div>
+            <div class="card-inner p-3">
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mb-1">Atividade</div>
+              <div class="text-sm font-mono text-stone-300">${esc(item.assignmentId)}</div>
+            </div>
+            <div class="card-inner p-3">
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mb-1">Nota Sugerida</div>
+              <div class="text-sm font-bold ${confidenceClass(item.confidence)}">${item.suggestedGrade != null ? item.suggestedGrade : '—'}</div>
+            </div>
+            <div class="card-inner p-3">
+              <div class="text-[10px] uppercase tracking-wider text-stone-500 font-semibold mb-1">Confiança</div>
+              <div class="text-sm font-bold ${confidenceClass(item.confidence)}">${item.confidence != null ? Math.round(item.confidence * 100) + '%' : '—'}</div>
+            </div>
+          </div>
+
+          <!-- Draft Feedback (read-only) -->
+          <div class="mb-5">
+            <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1">Feedback Gerado (Rascunho)</label>
+            <div class="card-inner p-4 text-sm text-stone-300 whitespace-pre-wrap max-h-48 overflow-y-auto">${esc(item.draftFeedback || 'Sem rascunho.')}</div>
+          </div>
+
+          <!-- Private Notes (read-only) -->
+          ${item.privateNotesToTeacher ? `
+          <div class="mb-5">
+            <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1">Observações ao Professor</label>
+            <div class="card-inner p-4 text-sm text-yellow-200/80 whitespace-pre-wrap max-h-32 overflow-y-auto">${esc(item.privateNotesToTeacher)}</div>
+          </div>` : ''}
+
+          <!-- Evidence by Criterion -->
+          ${evidenceRows ? `
+          <div class="mb-5">
+            <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-2">Evidências por Critério</label>
+            <div class="space-y-2">${evidenceRows}</div>
+          </div>` : ''}
+
+          <!-- Pending Issues -->
+          ${item.pendingIssues && item.pendingIssues.length > 0 ? `
+          <div class="mb-5 bg-yellow-950/30 border border-yellow-800/40 rounded-lg p-4">
+            <label class="block text-xs font-semibold text-yellow-400 uppercase tracking-wide mb-2">Pendências</label>
+            <ul class="list-disc list-inside text-sm text-yellow-200 space-y-1">
+              ${item.pendingIssues.map(i => `<li>${esc(i)}</li>`).join('')}
+            </ul>
+          </div>` : ''}
+
+          <!-- Editable Review Form -->
+          ${item.status === 'DraftReady' ? `
+          <form onsubmit="saveReview(event, '${item.gradingItemId}')" class="border-t border-[#3a332d] pt-5 mt-5">
+            <h3 class="text-md font-bold text-white mb-4">Revisão do Professor</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1">Nota Final</label>
+                <input id="review-grade" type="number" step="0.01" min="0" placeholder="${item.suggestedGrade ?? ''}" value="${item.finalGrade ?? item.suggestedGrade ?? ''}" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm" />
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1">Decisão</label>
+                <select id="review-decision" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm">
+                  <option value="approved" ${item.teacherDecision === 'approved' ? 'selected' : ''}>Aprovado</option>
+                  <option value="needs_changes" ${item.teacherDecision === 'needs_changes' ? 'selected' : ''}>Necessita alterações</option>
+                </select>
+              </div>
+            </div>
+            <div class="mb-4">
+              <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1">Feedback Final</label>
+              <textarea id="review-feedback" rows="5" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm" placeholder="Feedback que será enviado ao estudante...">${esc(item.finalFeedback || item.draftFeedback || '')}</textarea>
+            </div>
+            <div class="mb-4">
+              <label class="block text-xs font-semibold text-stone-400 uppercase tracking-wide mb-1">Notas do Professor (opcional)</label>
+              <textarea id="review-notes" rows="2" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm" placeholder="Observações internas...">${esc(item.reviewNotes || '')}</textarea>
+            </div>
+            <div id="review-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5 mb-4"></div>
+            <button type="submit" id="review-submit" class="btn-primary px-6 py-2.5 text-sm">Salvar Revisão</button>
+          </form>` : ''}
+        </div>
+      `);
+    }
+
+    async function saveReview(e, itemId) {
+      e.preventDefault();
+      const btn = document.getElementById('review-submit');
+      const errEl = document.getElementById('review-error');
+      setLoading(btn, true);
+      hideError(errEl);
+
+      const gradeStr = document.getElementById('review-grade').value;
+      try {
+        await api(`/api/grading/items/${itemId}/review`, {
+          method: 'PUT',
+          body: {
+            finalGrade: gradeStr ? parseFloat(gradeStr) : null,
+            finalFeedback: document.getElementById('review-feedback').value,
+            teacherDecision: document.getElementById('review-decision').value,
+            reviewNotes: document.getElementById('review-notes').value || null,
+            expectedReviewStatus: state.currentItem.reviewStatus
+          }
+        });
+        await loadItem(itemId);
+      } catch (err) {
+        showError(errEl, err.message);
+      } finally {
+        setLoading(btn, false, 'Salvar Revisão');
+      }
+    }
+
+    // ─── View: Launch Preview & Confirm ─────────────────────────────────
+    async function createPreview(batchId) {
+      renderLoading();
+      try {
+        const data = await api(`/api/grading/batches/${batchId}/preview`, { method: 'POST', body: { onlyReviewed: true } });
+        state.preview = data;
+        renderPreview(batchId);
+      } catch (e) {
+        render(`
+          <button onclick="loadBatch('${batchId}')" class="btn-secondary px-3 py-1.5 text-xs mb-2 inline-flex items-center gap-1">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+            Voltar ao Lote
+          </button>
+          <div class="card p-6 text-center">
+            <div class="text-red-400 font-bold mb-2">Erro ao gerar prévia</div>
+            <div class="text-sm text-stone-400">${esc(e.message)}</div>
+          </div>
+        `);
+      }
+    }
+
+    function renderPreview(batchId) {
+      const p = state.preview;
+      const launchRows = (p.launches || []).map(l => `
+        <tr class="border-b border-[#3a332d]">
+          <td class="py-2 px-4 text-sm font-mono text-stone-300">${esc(l.studentId)}</td>
+          <td class="py-2 px-4 text-sm text-stone-400">${esc(l.assignmentId)}</td>
+          <td class="py-2 px-4 text-sm font-bold text-orange-300">${l.grade}</td>
+          <td class="py-2 px-4 text-xs text-stone-400 max-w-xs truncate">${esc(l.feedbackText?.substring(0, 80))}${l.feedbackText?.length > 80 ? '…' : ''}</td>
+        </tr>
+      `).join('');
+
+      render(`
+        <button onclick="loadBatch('${batchId}')" class="btn-secondary px-3 py-1.5 text-xs mb-2 inline-flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          Voltar ao Lote
+        </button>
+
+        <div class="card p-6">
+          <h2 class="text-lg font-bold text-white mb-1">Prévia de Lançamento</h2>
+          <p class="text-xs text-stone-400 mb-4">${p.readyItems} itens prontos para envio ao Moodle</p>
+
+          ${p.warnings && p.warnings.length > 0 ? `
+          <div class="bg-yellow-950/30 border border-yellow-800/40 rounded-lg p-3 mb-4">
+            ${p.warnings.map(w => `<div class="text-xs text-yellow-200">⚠️ ${esc(w)}</div>`).join('')}
+          </div>` : ''}
+
+          <!-- Launches Table -->
+          <div class="overflow-x-auto mb-6">
+            <table class="w-full text-left">
+              <thead>
+                <tr class="border-b border-[#4a4038]">
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase">Aluno</th>
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase">Atividade</th>
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase">Nota</th>
+                  <th class="py-2 px-4 text-xs font-semibold text-stone-400 uppercase">Feedback</th>
+                </tr>
+              </thead>
+              <tbody>${launchRows}</tbody>
+            </table>
+          </div>
+
+          <!-- Confirmation -->
+          <div class="bg-red-950/20 border-2 border-red-800/50 rounded-xl p-5">
+            <h3 class="text-md font-bold text-red-300 mb-2">⚠️ Confirmação de Envio ao Moodle</h3>
+            <p class="text-xs text-stone-400 mb-3">Para confirmar o lançamento de nota e feedback no Moodle, digite exatamente o texto abaixo:</p>
+            <div class="card-inner p-3 mb-3 font-mono text-sm text-orange-300 select-all">${esc(p.confirmationText)}</div>
+            <input id="confirm-text" type="text" placeholder="Digite o texto de confirmação…" class="w-full px-4 py-2.5 rounded-lg border border-red-800/50 text-sm mb-3" oninput="checkConfirmation()" />
+            <div id="confirm-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5 mb-3"></div>
+            <div id="confirm-result" class="hidden mb-3"></div>
+            <button id="confirm-btn" onclick="confirmLaunch('${batchId}')" disabled class="btn-danger px-6 py-2.5 text-sm font-bold w-full opacity-50 cursor-not-allowed transition-all">
+              Confirmar e Enviar ao Moodle
+            </button>
+          </div>
+
+          ${p.expiresAt ? `<p class="text-xs text-stone-500 mt-3">Esta prévia expira em ${new Date(p.expiresAt).toLocaleString('pt-BR')}.</p>` : ''}
+        </div>
+      `);
+    }
+
+    function checkConfirmation() {
+      const input = document.getElementById('confirm-text').value;
+      const btn = document.getElementById('confirm-btn');
+      const matches = input === state.preview?.confirmationText;
+      btn.disabled = !matches;
+      btn.classList.toggle('opacity-50', !matches);
+      btn.classList.toggle('cursor-not-allowed', !matches);
+    }
+
+    async function confirmLaunch(batchId) {
+      const btn = document.getElementById('confirm-btn');
+      const errEl = document.getElementById('confirm-error');
+      const resultEl = document.getElementById('confirm-result');
+      setLoading(btn, true);
+      hideError(errEl);
+
+      try {
+        const result = await api(`/api/grading/batches/${batchId}/confirm`, {
+          method: 'POST',
+          body: {
+            pendingActionId: state.preview.pendingActionId,
+            confirmationText: document.getElementById('confirm-text').value
+          }
+        });
+
+        resultEl.classList.remove('hidden');
+        resultEl.innerHTML = `
+          <div class="bg-green-950/30 border border-green-800/40 rounded-lg p-4">
+            <div class="text-green-400 font-bold mb-1">✓ Lançamento concluído</div>
+            <div class="text-sm text-stone-300">${result.sentItems} itens enviados${result.failedItems > 0 ? `, ${result.failedItems} falhos` : ''}</div>
+            ${result.auditId ? `<div class="text-xs text-stone-500 mt-1">Audit ID: ${esc(result.auditId)}</div>` : ''}
+            ${result.failures && result.failures.length > 0 ? `
+            <div class="mt-2 space-y-1">
+              ${result.failures.map(f => `<div class="text-xs text-red-300">✗ ${esc(f.gradingItemId.substring(0,8))}… — ${esc(f.message)}</div>`).join('')}
+            </div>` : ''}
+          </div>
+        `;
+        btn.disabled = true;
+        btn.textContent = 'Enviado';
+      } catch (err) {
+        showError(errEl, err.message);
+      } finally {
+        setLoading(btn, false, 'Confirmar e Enviar ao Moodle');
+      }
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────
+    function render(html) {
+      const main = document.getElementById('main-content');
+      main.innerHTML = html;
+      main.classList.remove('fade-in');
+      void main.offsetWidth;
+      main.classList.add('fade-in');
+    }
+
+    function renderLoading() {
+      render(`
+        <div class="text-center py-16">
+          <div class="inline-flex items-center gap-2 text-stone-400">
+            <svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
+            Carregando...
+          </div>
+        </div>
+      `);
+    }
+
+    function setLoading(btn, loading, defaultText) {
+      btn.disabled = loading;
+      if (loading) {
+        btn.dataset.original = btn.textContent;
+        btn.innerHTML = `<span class="inline-flex items-center gap-2"><svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg> Aguarde...</span>`;
+      } else {
+        btn.textContent = defaultText || btn.dataset.original || 'Salvar';
+      }
+    }
+
+    function showError(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
+    function hideError(el) { el.textContent = ''; el.classList.add('hidden'); }
+
+    boot();
+  </script>
+</body>
+</html>

@@ -36,5 +36,9 @@ public interface IGradingReviewRepository
         GradingBatchStatus status,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(
+        string createdBySubject,
+        CancellationToken cancellationToken);
+
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

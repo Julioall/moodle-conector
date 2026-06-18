@@ -452,6 +452,7 @@ public sealed class LocalGradingBatchOrchestratorTests
             => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Batches
                 .Where(b => b.Status == status)
                 .ToArray());
+        public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(string createdBySubject, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)
         {

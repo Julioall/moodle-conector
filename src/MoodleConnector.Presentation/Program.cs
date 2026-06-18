@@ -28,6 +28,8 @@ using MoodleConnector.Presentation.Tools.Risk;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.Threading.RateLimiting;
+using MediatR;
+using MoodleConnector.Application.Grading;
 
 var builder = WebApplication.CreateBuilder(args);
 const string PortalAuthRateLimitPolicy = "portal-auth";
@@ -835,6 +837,166 @@ app.MapGet("/auth/logout", () =>
     return Results.SignOut(authenticationSchemes: new[] { CookieAuthenticationDefaults.AuthenticationScheme });
 });
 
+// ─── Grading Portal API ────────────────────────────────────────────────────────
+
+app.MapGet("/api/grading/batches", async (
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IGradingReviewRepository gradingRepository,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    var batches = await gradingRepository.ListBatchesByCreatorAsync(
+        identity.Id.ToString(), cancellationToken);
+
+    return Results.Ok(batches.Select(b => new
+    {
+        batchJobId = b.Id,
+        status = b.Status.ToString(),
+        courseId = b.CourseId,
+        totalItems = b.TotalItems,
+        processedItems = b.ProcessedItems,
+        readyItems = b.ReadyItems,
+        blockedItems = b.BlockedItems,
+        failedItems = b.FailedItems,
+        createdAt = b.CreatedAt
+    }).ToArray());
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/grading/batches/{id:guid}", async (
+    Guid id,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    try
+    {
+        var result = await mediator.Send(
+            new GetAssistedGradingBatchStatusQuery(id, 1, 100), cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/grading/items/{id:guid}", async (
+    Guid id,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    try
+    {
+        var result = await mediator.Send(
+            new GetAssistedGradingItemQuery(id), cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPut("/api/grading/items/{id:guid}/review", async (
+    Guid id,
+    ReviewGradingItemInput input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    try
+    {
+        var result = await mediator.Send(
+            new UpdateAssistedGradingDraftCommand(
+                id,
+                input.FinalGrade,
+                input.FinalFeedback ?? "",
+                input.TeacherDecision ?? "approved",
+                input.ReviewNotes,
+                input.ExpectedReviewStatus ?? "NotReviewed"),
+            cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/grading/batches/{id:guid}/preview", async (
+    Guid id,
+    PreviewGradingBatchInput input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    try
+    {
+        var result = await mediator.Send(
+            new CreateGradingLaunchPreviewCommand(
+                id,
+                input.GradingItemIds ?? [],
+                input.OnlyReviewed),
+            cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/grading/batches/{id:guid}/confirm", async (
+    Guid id,
+    ConfirmGradingBatchInput input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText))
+    {
+        return Results.BadRequest(new { ok = false, error = "Informe pendingActionId e confirmationText." });
+    }
+
+    try
+    {
+        var result = await mediator.Send(
+            new ConfirmMoodleBatchLaunchCommand(
+                input.PendingActionId,
+                input.ConfirmationText),
+            cancellationToken);
+        return Results.Ok(result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 // ─── Admin ─────────────────────────────────────────────────────────────────────
 
 app.MapPost("/admin/connector-clients/register", async (
@@ -1632,3 +1794,7 @@ public sealed record RegisterAccountInput(string Name, string Email, string Pass
 public sealed record LoginInput(string Email, string Password);
 public sealed record ConnectMoodleInput(string MoodleAlias, string MoodleBaseUrl, string MoodleUsername, string MoodlePassword, bool IsDefault = false, bool CanWrite = false);
 public sealed record UpdateMoodleInput(string MoodleAlias, string MoodleBaseUrl, string? MoodleUsername, string? MoodlePassword, bool IsDefault = false, bool CanWrite = false);
+
+public sealed record ReviewGradingItemInput(decimal? FinalGrade, string? FinalFeedback, string? TeacherDecision, string? ReviewNotes, string? ExpectedReviewStatus);
+public sealed record PreviewGradingBatchInput(Guid[]? GradingItemIds, bool OnlyReviewed = true);
+public sealed record ConfirmGradingBatchInput(Guid PendingActionId, string ConfirmationText);

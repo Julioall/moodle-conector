@@ -88,6 +88,16 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .OrderBy(batch => batch.CreatedAt)
             .ToArrayAsync(cancellationToken);
     }
+    public async Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(
+        string createdBySubject,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.GradingBatches
+            .Where(batch => batch.CreatedBySubject == createdBySubject)
+            .OrderByDescending(batch => batch.CreatedAt)
+            .Take(50)
+            .ToArrayAsync(cancellationToken);
+    }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
