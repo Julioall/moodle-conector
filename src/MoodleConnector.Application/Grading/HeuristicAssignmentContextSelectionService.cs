@@ -20,7 +20,12 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
         "etapa",
         "envio",
         "situacao",
-        "aprendizagem"
+        "aprendizagem",
+        "desafio",
+        "instrucao",
+        "instrucoes",
+        "guia",
+        "manual"
     ];
 
     public Task<AssignmentContextSelectionResult> SelectAsync(
@@ -112,6 +117,15 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
             "label" => 0.75m,
             _ => 0m
         };
+
+        if (candidate.SourceType.Equals("resource", StringComparison.OrdinalIgnoreCase))
+        {
+            var ext = System.IO.Path.GetExtension(title).ToLowerInvariant();
+            if (ext is ".pdf" or ".docx" or ".doc" or ".pptx")
+            {
+                score += 2.5m; // Boost para arquivos típicos de enunciado
+            }
+        }
 
         if (candidate.DistanceFromAssignment is int distance)
         {

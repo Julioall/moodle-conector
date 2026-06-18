@@ -537,11 +537,27 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
         foreach (var entry in entries)
         {
             var document = LoadXml(entry);
-            foreach (var textElement in document.Descendants().Where(element => element.Name.LocalName == "t"))
+            foreach (var paragraph in document.Descendants().Where(element => element.Name.LocalName == "p"))
             {
-                if (!string.IsNullOrWhiteSpace(textElement.Value))
+                var paragraphText = string.Concat(paragraph.Descendants()
+                    .Where(element => element.Name.LocalName == "t")
+                    .Select(element => element.Value));
+
+                if (!string.IsNullOrWhiteSpace(paragraphText))
                 {
-                    builder.Append(textElement.Value).Append(' ');
+                    builder.AppendLine(paragraphText.Trim());
+                }
+            }
+            
+            // Fallback para textos fora de parágrafos (ex: alguns shapes)
+            if (builder.Length == 0)
+            {
+                foreach (var textElement in document.Descendants().Where(element => element.Name.LocalName == "t"))
+                {
+                    if (!string.IsNullOrWhiteSpace(textElement.Value))
+                    {
+                        builder.Append(textElement.Value).Append(' ');
+                    }
                 }
             }
         }

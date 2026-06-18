@@ -402,8 +402,8 @@ Tarefa: `Enviar - SAP 1` (CMID 295001, assignmentId 23796).
 - [x] Seleção de contexto parcialmente OK (confidence 0.3, classification: possible_context).
 - [x] Auditoria sanitizada: sem PII evidente em logs técnicos.
 - [x] Escrita bloqueada corretamente (AssignmentGradeWriteEnabled=false, AssignmentFeedbackWriteEnabled=false).
-- [ ] Melhorar confiança/heurística da seleção de enunciado.
-- [ ] Melhorar extração de critérios/escala/valor máximo.
+- [x] Melhorar confiança/heurística da seleção de enunciado.
+- [x] Melhorar extração de critérios/escala/valor máximo (correção da extração DOCX preservando parágrafos evita aglutinar todo o texto em um único critério).
 - [x] Filtrar XML interno de OOXML (customXml/item1.xml) em extração DOCX tratada como ZIP.
 - [ ] Expor/validar tool de prévia de lançamento.
 - [ ] Rodar teste de escrita somente em sandbox com feature flags habilitadas.
@@ -446,7 +446,7 @@ Tarefa: `Enviar - SAP 1` (CMID 295001, assignmentId 23796).
 - [x] Implementar ZIP e múltiplos arquivos internos.
 - [x] Implementar OCR ou bloqueio específico para PDF escaneado.
 - [x] Melhorar extração de critério/valor para SAP com `Valor da atividade` e critérios na mesma linha do cabeçalho.
-- [ ] Melhorar extração de rubrica/critério/escala para outros formatos reais do Moodle.
+- [x] Melhorar extração de rubrica/critério/escala para outros formatos reais do Moodle.
 - [x] Melhorar análise de baixa confiança.
 - [x] Adicionar observações internas ao professor.
 - [x] Exportar relatório consolidado para coordenação.
