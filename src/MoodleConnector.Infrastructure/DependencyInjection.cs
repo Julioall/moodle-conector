@@ -134,6 +134,10 @@ public static class DependencyInjection
             .AddHttpClient<IMoodleGradebookGateway, MoodleGradebookGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
 
+        services
+            .AddHttpClient<IMoodleCompletionGateway, MoodleCompletionGateway>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+
         services.AddSingleton<IDocumentExtractionService, DocumentExtractionService>();
 
         services
