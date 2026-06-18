@@ -165,6 +165,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -205,6 +206,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -236,6 +238,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -274,6 +277,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -308,6 +312,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -346,6 +351,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -384,6 +390,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -419,6 +426,7 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.Capabilities,
             fixture.ExistingGrades,
             fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
             fixture.AuditLogs,
             fixture.Mediator);
 
@@ -439,6 +447,154 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("mod_assign_save_grade", auditLog.MoodleFunction);
     }
 
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoEstudanteNaoEstaInscritoNoCurso()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.EnrollmentGateway.EnrolledUserIds.Clear(); // nenhum estudante inscrito
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("nao esta inscrito", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_student_not_enrolled", auditLog.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoValidacaoDeEnrollmentFalha()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.EnrollmentGateway.Error = new InvalidOperationException("Token expirado");
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("validar se o estudante", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_enrollment_validation_failed", auditLog.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoCapabilitiesGatewayLancaExcecao()
+    {
+        var fixture = new Fixture();
+        fixture.Capabilities.Error = new InvalidOperationException("Token expirado ou sem escopo");
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal("confirmed", result.Status);
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("validar a funcao Moodle", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_function_validation_failed", auditLog.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoJaExisteFeedbackNoMoodle()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        // Substituir o status padrão por um com HasFeedback = true
+        fixture.SubmissionStatuses.Statuses.Clear();
+        fixture.SubmissionStatuses.Statuses.Add(new AssignmentSubmissionAttemptStatus(
+            AssignmentId: "501",
+            StudentId: "101",
+            AttemptNumber: 0,
+            SubmissionStatus: "submitted",
+            HasFeedback: true));
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains("feedback existente", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("moodle_existing_feedback", auditLog.ErrorCode);
+    }
+
     private sealed class Fixture(string currentUserSubject = "teacher-1", IReadOnlyCollection<string>? scopes = null)
     {
         public FakeGradingReviewRepository GradingRepository { get; } = new();
@@ -448,6 +604,7 @@ public sealed class GradingLaunchCommandHandlerTests
         public FakeMoodleGradingCapabilitiesGateway Capabilities { get; } = new();
         public FakeMoodleAssignmentGradeReadGateway ExistingGrades { get; } = new();
         public FakeMoodleAssignmentSubmissionStatusGateway SubmissionStatuses { get; } = new();
+        public FakeMoodleParticipantsGateway EnrollmentGateway { get; } = new();
         public FakeAuditLogRepository AuditLogs { get; } = new();
         public FakeMediator Mediator { get; } = new();
         public FakeCurrentUserContext CurrentUser { get; } = new(currentUserSubject, scopes);
@@ -674,11 +831,17 @@ public sealed class GradingLaunchCommandHandlerTests
     private sealed class FakeMoodleGradingCapabilitiesGateway : IMoodleGradingCapabilitiesGateway
     {
         public List<string> Functions { get; } = ["mod_assign_save_grade"];
+        public Exception? Error { get; set; }
 
         public Task<MoodleWebServiceFunctionCatalog> GetFunctionCatalogAsync(
             string userExternalId,
             CancellationToken cancellationToken)
         {
+            if (Error is not null)
+            {
+                throw Error;
+            }
+
             return Task.FromResult(new MoodleWebServiceFunctionCatalog(
                 "moodle_mobile_app",
                 Functions));
@@ -829,5 +992,59 @@ public sealed class GradingLaunchCommandHandlerTests
 
         public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
             => AsyncEnumerable.Empty<object?>();
+    }
+
+    private sealed class FakeMoodleParticipantsGateway : IMoodleParticipantsGateway
+    {
+        public List<string> EnrolledUserIds { get; } = ["101"];
+        public Exception? Error { get; set; }
+
+        public Task<CourseParticipantsPage> GetCourseParticipantsAsync(
+            string userExternalId,
+            string courseId,
+            ParticipantStatusFilter statusFilter,
+            int page,
+            int pageSize,
+            bool studentsOnly,
+            bool includeEmail,
+            string? groupId,
+            CancellationToken cancellationToken)
+        {
+            if (Error is not null)
+            {
+                throw Error;
+            }
+
+            var participants = EnrolledUserIds
+                .Select(id => new CourseParticipantSummary(
+                    id,
+                    $"Student {id}",
+                    Email: null,
+                    Suspended: false,
+                    FirstAccessAt: null,
+                    LastAccessAt: null,
+                    LastCourseAccessAt: null,
+                    Roles: [new CourseParticipantRole("5", "student", "Estudante")],
+                    Groups: []))
+                .ToArray();
+
+            return Task.FromResult(new CourseParticipantsPage(
+                courseId,
+                page,
+                pageSize,
+                statusFilter,
+                studentsOnly,
+                includeEmail,
+                HasMore: false,
+                participants));
+        }
+
+        public Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(
+            string userExternalId,
+            string courseId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<CourseGroupSummary>>([]);
+        }
     }
 }

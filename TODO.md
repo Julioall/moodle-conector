@@ -153,8 +153,8 @@ Implementado:
 Ainda pendente:
 
 - [ ] Validar capability real `mod/assign:grade` por professor/tutor no curso/atividade.
-- [ ] Validar se o estudante pertence à turma no momento do commit.
-- [ ] Bloquear sobrescrita de feedback existente quando houver leitura confiável do feedback atual.
+- [x] Validar se o estudante pertence à turma no momento do commit.
+- [x] Bloquear sobrescrita de feedback existente quando houver leitura confiável do feedback atual.
 - [ ] Separar escopos OAuth por domínio em fase posterior.
 - [ ] Definir política de retenção de arquivos brutos e textos extraídos.
 - [ ] Redigir PII em logs técnicos.
@@ -322,6 +322,7 @@ Estado atual:
 Última verificação conhecida:
 
 - [x] `dotnet.exe test MoodleConnector.slnx` passando com 211 testes em 2026-06-15.
+- [x] `dotnet.exe test tests/MoodleConnector.Application.Tests` passando com 242 testes em 2026-06-17.
 - [x] `dotnet.exe test tests/MoodleConnector.Application.Tests/MoodleConnector.Application.Tests.csproj --filter DocumentExtractionServiceTests` passando com 19 testes em 2026-06-15.
 
 Ainda pendente:
@@ -329,7 +330,7 @@ Ainda pendente:
 - [ ] Testes de integração em sandbox para escrita real.
 - [ ] Testes de carga 25/100/400.
 - [ ] Testes com imagens e PDF escaneado/OCR quando suporte for implementado.
-- [ ] Testes de token expirado e token sem escopo de escrita.
+- [x] Testes de token expirado e token sem escopo de escrita.
 - [ ] Testes de usuário sem permissão Moodle real para corrigir.
 - [ ] Reescanear `/mcp` no ChatGPT Developer Mode após mudanças de metadata/tools.
 

@@ -74,7 +74,8 @@ public sealed record AssignmentSubmissionAttemptStatus(
     string AssignmentId,
     string StudentId,
     int? AttemptNumber,
-    string? SubmissionStatus);
+    string? SubmissionStatus,
+    bool HasFeedback = false);
 
 public sealed class CreateGradingLaunchPreviewCommandHandler(
     IGradingReviewRepository repository,
@@ -257,6 +258,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     IMoodleGradingCapabilitiesGateway capabilities,
     IMoodleAssignmentGradeReadGateway gradeReadGateway,
     IMoodleAssignmentSubmissionStatusGateway submissionStatusGateway,
+    IMoodleParticipantsGateway participantsGateway,
     IMoodleAuditLogRepository auditLogs,
     IMediator mediator)
     : IRequestHandler<ConfirmMoodleBatchLaunchCommand, ConfirmMoodleBatchLaunchResult>
@@ -411,6 +413,45 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 continue;
             }
 
+            if (submissionAttemptResult.CurrentStatus?.HasFeedback == true &&
+                !string.IsNullOrWhiteSpace(payloadItem.FeedbackText))
+            {
+                var message = $"O Moodle ja possui feedback existente para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma confirmacao especifica de sobrescrita antes de lancar.";
+                item.MarkCommitFailed(message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new { item.CommitStatus, hasFeedback = true },
+                    errorCode: "moodle_existing_feedback",
+                    errorMessage: message,
+                    cancellationToken);
+                continue;
+            }
+
+            var enrollmentFailure = await ValidateStudentEnrollmentAsync(
+                userExternalId,
+                payloadItem.CourseId,
+                payloadItem.StudentId,
+                cancellationToken);
+            if (enrollmentFailure is not null)
+            {
+                item.MarkCommitFailed(enrollmentFailure.Message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, enrollmentFailure.Message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new { item.CommitStatus },
+                    errorCode: enrollmentFailure.ErrorCode,
+                    errorMessage: enrollmentFailure.Message,
+                    cancellationToken);
+                continue;
+            }
+
             try
             {
                 var writeResult = await mediator.Send(
@@ -557,6 +598,71 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 new CapabilityValidationFailure(
                     $"Nao foi possivel validar a tentativa atual da submissao no Moodle antes do lancamento: {ex.Message}",
                     "moodle_submission_status_validation_failed"));
+        }
+    }
+
+    private async Task<CapabilityValidationFailure?> ValidateStudentEnrollmentAsync(
+        string userExternalId,
+        string courseId,
+        string studentId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var page = await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId,
+                courseId,
+                ParticipantStatusFilter.All,
+                page: 1,
+                pageSize: 500,
+                studentsOnly: false,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken);
+
+            var found = page.Participants.Any(p =>
+                string.Equals(p.UserId, studentId, StringComparison.OrdinalIgnoreCase));
+
+            if (!found && page.HasMore)
+            {
+                // Se a primeira página não encontrou e há mais, buscar mais páginas
+                var currentPage = 2;
+                while (!found)
+                {
+                    var nextPage = await participantsGateway.GetCourseParticipantsAsync(
+                        userExternalId,
+                        courseId,
+                        ParticipantStatusFilter.All,
+                        page: currentPage,
+                        pageSize: 500,
+                        studentsOnly: false,
+                        includeEmail: false,
+                        groupId: null,
+                        cancellationToken);
+
+                    found = nextPage.Participants.Any(p =>
+                        string.Equals(p.UserId, studentId, StringComparison.OrdinalIgnoreCase));
+
+                    if (!nextPage.HasMore)
+                    {
+                        break;
+                    }
+
+                    currentPage++;
+                }
+            }
+
+            return found
+                ? null
+                : new CapabilityValidationFailure(
+                    $"O estudante {studentId} nao esta inscrito no curso {courseId}. Verifique se o estudante ainda pertence a turma antes de lancar a nota.",
+                    "moodle_student_not_enrolled");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new CapabilityValidationFailure(
+                $"Nao foi possivel validar se o estudante {studentId} esta inscrito no curso {courseId} antes do lancamento: {ex.Message}",
+                "moodle_enrollment_validation_failed");
         }
     }
 

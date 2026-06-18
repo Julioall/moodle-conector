@@ -102,7 +102,8 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
             assignmentId.ToString(CultureInfo.InvariantCulture),
             studentId.ToString(CultureInfo.InvariantCulture),
             attemptNumber,
-            string.IsNullOrWhiteSpace(submissionStatus) ? null : submissionStatus);
+            string.IsNullOrWhiteSpace(submissionStatus) ? null : submissionStatus,
+            HasFeedback: HasExistingFeedback(root));
     }
 
     private static int? ReadNullableIntProperty(JsonElement element, string propertyName)
@@ -128,6 +129,40 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
             value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
+    }
+
+    private static bool HasExistingFeedback(JsonElement root)
+    {
+        if (!root.TryGetProperty("feedback", out var feedback) ||
+            feedback.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        if (!feedback.TryGetProperty("plugins", out var plugins) ||
+            plugins.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var plugin in plugins.EnumerateArray())
+        {
+            if (plugin.TryGetProperty("editorfields", out var editorFields) &&
+                editorFields.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var field in editorFields.EnumerateArray())
+                {
+                    if (field.TryGetProperty("text", out var text) &&
+                        text.ValueKind == JsonValueKind.String &&
+                        !string.IsNullOrWhiteSpace(text.GetString()))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private static long ParseMoodleId(string value, string parameterName)
