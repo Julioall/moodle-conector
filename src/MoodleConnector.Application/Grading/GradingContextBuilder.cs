@@ -16,8 +16,8 @@ public sealed partial class GradingContextBuilder(
     IGradingReviewRepository repository,
     IOptions<GradingLimitsOptions> limits,
     IAssignmentContextSelectionService contextSelectionService,
-    IMoodleAssignmentSettingsGateway? settingsGateway = null,
-    ICriteriaGenerationService? criteriaGenerationService = null)
+    IMoodleAssignmentSettingsGateway settingsGateway,
+    ICriteriaGenerationService criteriaGenerationService)
     : IGradingContextBuilder
 {
     public async Task<GradingContext> BuildAsync(
@@ -137,7 +137,7 @@ public sealed partial class GradingContextBuilder(
             }
         }
 
-        if (maxGrade == null && settingsGateway != null)
+        if (maxGrade == null)
         {
             var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken);
             if (batch != null)
@@ -165,8 +165,7 @@ public sealed partial class GradingContextBuilder(
         // 4. Validação de qualidade dos critérios e fallback via geração estruturada.
         // Se os critérios extraídos por heurística são de baixa qualidade (contaminados,
         // truncados, formados apenas por metadados), tentar gerar critérios limpos.
-        if (criteriaGenerationService != null &&
-            string.IsNullOrWhiteSpace(rubricDescription) &&
+        if (string.IsNullOrWhiteSpace(rubricDescription) &&
             AreCriteriaLowQuality(criteria))
         {
             try

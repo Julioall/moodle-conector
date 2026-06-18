@@ -29,9 +29,9 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         }
 
         // --- Resolucao de criterios efetivos (cascata) ---
-        var criteriaSource = ResolveCriteria(request.RubricOrCriteria, request.ActivityDescription);
+        var criteriaSource = ResolveCriteria(request.RubricOrCriteria, request.ActivityDescription, request.TeacherInstructions);
         var effectiveCriteria = criteriaSource.Text;
-        var hasFormalCriteria = criteriaSource.Source == CriteriaSourceKind.Formal;
+        var hasFormalCriteria = criteriaSource.Source == CriteriaSourceKind.Formal || criteriaSource.Source == CriteriaSourceKind.TeacherOverride;
         var hasApproximateCriteria = criteriaSource.Source == CriteriaSourceKind.Approximate;
 
         // --- Resolucao de MaxGrade efetivo (cascata) ---
@@ -114,16 +114,32 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
             Blocks: []));
     }
 
-    private static CriteriaResolution ResolveCriteria(string? rubricOrCriteria, string? activityDescription)
+    private static CriteriaResolution ResolveCriteria(string? rubricOrCriteria, string? activityDescription, string? teacherInstructions)
     {
-        if (!string.IsNullOrWhiteSpace(rubricOrCriteria))
+        var hasTeacherInstructions = !string.IsNullOrWhiteSpace(teacherInstructions);
+        var criteriaText = rubricOrCriteria;
+
+        if (!string.IsNullOrWhiteSpace(criteriaText))
         {
-            return new CriteriaResolution(rubricOrCriteria, CriteriaSourceKind.Formal);
+            if (hasTeacherInstructions)
+            {
+                return new CriteriaResolution($"{criteriaText}\n{teacherInstructions}", CriteriaSourceKind.TeacherOverride);
+            }
+            return new CriteriaResolution(criteriaText, CriteriaSourceKind.Formal);
         }
 
         if (!string.IsNullOrWhiteSpace(activityDescription))
         {
+            if (hasTeacherInstructions)
+            {
+                return new CriteriaResolution($"{activityDescription}\n{teacherInstructions}", CriteriaSourceKind.TeacherOverride);
+            }
             return new CriteriaResolution(activityDescription, CriteriaSourceKind.Approximate);
+        }
+
+        if (hasTeacherInstructions)
+        {
+            return new CriteriaResolution(teacherInstructions, CriteriaSourceKind.TeacherOverride);
         }
 
         return new CriteriaResolution(null, CriteriaSourceKind.None);
@@ -224,7 +240,8 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
 
     private static string BuildGenericFeedback(string assignmentName, int wordCount)
     {
-        return $"Ola! Sua entrega para a atividade '{assignmentName}' foi recebida com {wordCount} palavra(s). " +
+        var cleanName = CleanAssignmentName(assignmentName);
+        return $"Ola! Sua entrega para a atividade '{cleanName}' foi recebida com {wordCount} palavra(s). " +
                "Agradecemos pela participacao. Para detalhes sobre a avaliacao, aguarde o retorno do professor/tutor.";
     }
 
@@ -234,7 +251,8 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         int wordCount)
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Ola! Obrigado pela sua entrega da atividade '{assignmentName}'.");
+        var cleanName = CleanAssignmentName(assignmentName);
+        sb.AppendLine($"Ola! Obrigado pela sua entrega da atividade '{cleanName}'.");
         sb.AppendLine();
 
         var strongCriteria = criteria.Where(c => (c.SuggestedPoints ?? 0) >= (c.MaxPoints ?? 0) * 0.7m).ToList();
@@ -242,10 +260,10 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
 
         if (strongCriteria.Count > 0)
         {
-            sb.AppendLine("**Pontos fortes identificados:**");
+            sb.AppendLine("**Pontos positivos identificados:**");
             foreach (var c in strongCriteria)
             {
-                sb.AppendLine($"- {c.CriterionText}: boa cobertura evidenciada no texto.");
+                sb.AppendLine($"- {c.CriterionText}: evidenciou o aspecto esperado na resolucao.");
             }
             sb.AppendLine();
         }
@@ -262,6 +280,23 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
 
         sb.AppendLine("Este e um parecer preliminar assistido. A avaliacao final sera feita pelo professor/tutor.");
         return sb.ToString().Trim();
+    }
+
+    private static string CleanAssignmentName(string name)
+    {
+        var cleaned = name;
+        var prefixMatch = Regex.Match(cleaned, @"^(?:Envio\s*(?:da\s*)?atividade|Atividade)\s*[-–:]\s*", RegexOptions.IgnoreCase);
+        if (prefixMatch.Success)
+        {
+            cleaned = cleaned[prefixMatch.Length..];
+        }
+
+        if (Regex.IsMatch(cleaned, @"^\d+$"))
+        {
+            return "Atividade"; // Fallback se so sobrou numero
+        }
+
+        return cleaned;
     }
 
     private static string BuildTeacherNotes(
@@ -287,6 +322,9 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         // Informar a origem dos criterios
         switch (criteriaSource)
         {
+            case CriteriaSourceKind.TeacherOverride:
+                notes.Append("Criterios modificados ou substituidos pelas instrucoes diretas do professor (TeacherInstructions usadas). ");
+                break;
             case CriteriaSourceKind.Formal:
                 notes.Append("Criterios extraidos de rubrica/criterios formais. ");
                 break;
@@ -294,7 +332,7 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 notes.Append("Criterios extraidos da descricao/enunciado da atividade (aproximados). Revise se os criterios estao corretos. ");
                 break;
             case CriteriaSourceKind.None:
-                notes.Append("Nenhum criterio formal ou descricao encontrados. Analise baseada apenas no conteudo da submissao. ");
+                notes.Append("Nenhum criterio formal, instrucao ou descricao encontrados. Analise baseada apenas no conteudo da submissao. ");
                 break;
         }
 
@@ -380,6 +418,6 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
 
     private sealed record CriteriaResolution(string? Text, CriteriaSourceKind Source);
 
-    private enum CriteriaSourceKind { None, Formal, Approximate }
+    private enum CriteriaSourceKind { None, Formal, Approximate, TeacherOverride }
 }
 

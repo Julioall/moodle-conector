@@ -40,6 +40,12 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
         "image/webp"
     };
 
+    private static readonly HashSet<string> RtfMimeTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "text/rtf",
+        "application/rtf"
+    };
+
     public Task<DocumentExtractionResult> ExtractAsync(
         string filename,
         string mimeType,
@@ -82,6 +88,32 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
         if (IsZip(filename, mimeType, content))
         {
             return Task.FromResult(ExtractZip(filename, mimeType, content));
+        }
+
+        if (IsRtf(filename, mimeType))
+        {
+            return Task.FromResult(new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.UnsupportedFormat,
+                ExtractedText: null,
+                WordCount: 0,
+                CharCount: 0,
+                Truncated: false,
+                ErrorMessage: "O formato RTF nao e suportado para extracao de texto automatica. Por favor, utilize PDF ou DOCX."));
+        }
+
+        if (IsImage(filename, mimeType))
+        {
+            return Task.FromResult(new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.UnsupportedFormat,
+                ExtractedText: null,
+                WordCount: 0,
+                CharCount: 0,
+                Truncated: false,
+                ErrorMessage: "O documento esta em formato de imagem (sem texto digital). A correcao assistida necessita do enunciado/texto em formato digital (PDF ou DOCX) e nao suporta OCR por enquanto."));
         }
 
         if (BinaryMimeTypes.Contains(mimeType))
@@ -478,6 +510,19 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
     private static bool IsNestedZip(string filename)
     {
         return filename.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRtf(string filename, string mimeType)
+    {
+        return RtfMimeTypes.Contains(mimeType) || filename.EndsWith(".rtf", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsImage(string filename, string mimeType)
+    {
+        return mimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) || 
+               filename.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+               filename.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+               filename.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

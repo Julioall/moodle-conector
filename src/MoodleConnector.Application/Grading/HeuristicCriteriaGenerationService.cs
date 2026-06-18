@@ -33,7 +33,19 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
         "turma",
         "polo",
         "tutor",
-        "professor"
+        "professor",
+        "nome",
+        "turma",
+        "av. araguaia",
+        "edifício albano",
+        "edificio albano",
+        "casa da indústria",
+        "casa da industria",
+        "senai",
+        "serviço nacional",
+        "servico nacional",
+        "endereço",
+        "endereco"
     ];
 
     /// <summary>
@@ -61,7 +73,11 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
         "definir",
         "listar",
         "formular",
-        "organizar"
+        "organizar",
+        "criar",
+        "responder",
+        "estruturar",
+        "demonstrar"
     ];
 
     private const int MinCriterionLength = 15;
@@ -312,6 +328,16 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
             cleaned = char.ToUpper(cleaned[0], CultureInfo.GetCultureInfo("pt-BR")) + cleaned[1..];
         }
 
+        // Remover "Nome:" ou "Turma:" remanescentes (ex: "Nome: aluno...")
+        var administrativePrefixes = new[] { "Nome:", "Turma:", "Data:" };
+        foreach (var prefix in administrativePrefixes)
+        {
+            if (cleaned.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned[prefix.Length..].Trim();
+            }
+        }
+
         // Remover ponto final redundante
         cleaned = cleaned.TrimEnd('.');
 
@@ -419,6 +445,9 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
             "definição" or "definicao" => "Definir",
             "organização" or "organizacao" => "Organizar",
             "formulação" or "formulacao" => "Formular",
+            "criação" or "criacao" => "Criar",
+            "resposta" => "Responder",
+            "estruturação" or "estruturacao" => "Estruturar",
             _ => null
         };
     }
@@ -432,6 +461,6 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
     [GeneratedRegex(@"^\s*(?:[-*•]|\d+[\.)]|[a-zA-Z][\.)])\s*")]
     private static partial Regex CriteriaPrefixRegex();
 
-    [GeneratedRegex(@"(?i)\b(?:elabora[cç][aã]o|indica[cç][aã]o|apresenta[cç][aã]o|descri[cç][aã]o|compara[cç][aã]o|justifica[cç][aã]o|justificativa|aplica[cç][aã]o|adequa[cç][aã]o|identifica[cç][aã]o|an[aá]lise|rela[cç][aã]o|proposi[cç][aã]o|proposta|planejamento|demonstra[cç][aã]o|avalia[cç][aã]o|explica[cç][aã]o|classifica[cç][aã]o|defini[cç][aã]o|organiza[cç][aã]o|formula[cç][aã]o)\b")]
+    [GeneratedRegex(@"(?i)\b(?:elabora[cç][aã]o|indica[cç][aã]o|apresenta[cç][aã]o|descri[cç][aã]o|compara[cç][aã]o|justifica[cç][aã]o|justificativa|aplica[cç][aã]o|adequa[cç][aã]o|identifica[cç][aã]o|an[aá]lise|rela[cç][aã]o|proposi[cç][aã]o|proposta|planejamento|demonstra[cç][aã]o|avalia[cç][aã]o|explica[cç][aã]o|classifica[cç][aã]o|defini[cç][aã]o|organiza[cç][aã]o|formula[cç][aã]o|cria[cç][aã]o|resposta|estrutura[cç][aã]o)\b")]
     private static partial Regex NominalizationToVerbRegex();
 }

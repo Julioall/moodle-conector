@@ -88,11 +88,11 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
         {
             if (title.Contains(token, StringComparison.OrdinalIgnoreCase))
             {
-                score += token.Length <= 2 ? 1.5m : 3m;
+                score += token.Length <= 2 ? 1.5m : 4m;
             }
             else if (text.Contains(token, StringComparison.OrdinalIgnoreCase))
             {
-                score += token.Length <= 2 ? 0.5m : 1.25m;
+                score += token.Length <= 2 ? 0.5m : 1.5m;
             }
         }
 
@@ -134,7 +134,7 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
 
         if (!string.IsNullOrWhiteSpace(candidate.ExtractedText))
         {
-            score += 1m;
+            score += 2m; // Maior incentivo para arquivos que possuem texto legivel
         }
 
         var normalizedAssignmentName = Normalize(assignmentName);
