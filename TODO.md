@@ -1,7 +1,7 @@
 # TODO.md — Correção Assistida SENAI para AVA/Moodle via GPT Apps
 
-**Status atual:** MVP funcional avançado em validação técnica controlada.
-**Data-base atualizada:** 2026-06-15
+**Status atual:** MVP funcional avançado, validado em leitura real em dois cursos Moodle.
+**Data-base atualizada:** 2026-06-17
 **Repositório:** `moodle-conector`
 **Objetivo:** transformar o GPT App/Conector do AVA em uma ferramenta de consulta, análise, rascunho, revisão e escrita assistida para apoiar professores/tutores na correção de atividades no Moodle, mantendo decisão humana, rastreabilidade, segurança institucional e confirmação explícita antes de qualquer escrita oficial.
 
@@ -33,13 +33,14 @@ Fluxo implementado:
 18. confirmação literal;
 19. escrita individual controlada no Moodle via `mod_assign_save_grade`;
 20. auditoria de criação de lote, revisão, bloqueios e commit Moodle;
-21. proteções contra reenvio, prévia obsoleta, nota existente e tentativa/submissão alterada antes do commit;
+21. proteções contra reenvio, prévia obsoleta, nota existente, tentativa/submissão alterada, feedback existente e estudante não inscrito antes do commit;
 22. exportação de relatório consolidado do lote para coordenação, com contadores, atenção e critérios com lacunas.
 
 Estado operacional correto:
 
 - [x] Pronto para testes controlados no conector e sandbox/homologação.
 - [x] Pronto para piloto pequeno sem escrita ampla em produção.
+- [x] Conector validado em leitura real nos cursos `29972` e `33442` do Moodle Goiás/FIEG.
 - [ ] Ainda não pronto para uso massivo 300–400 entregas sem fila real, governança e testes de carga.
 - [ ] Ainda não pronto para liberar escrita em produção sem validação institucional de permissões, rubricas/escalas e token de escrita.
 
@@ -118,6 +119,29 @@ Com base nos testes manuais relatados no Moodle Goiás/FIEG:
 - [x] PDF com texto embutido foi extraído com sucesso.
 - [x] Item antes bloqueado por falta de conteúdo legível passou para `DraftReady`.
 - [x] Escrita permaneceu bloqueada por feature flag, como esperado.
+- [x] Fluxo de ação pendente com confirmação humana validado no conector Moodle.
+- [x] Prévia de ação demonstrativa gerada sem escrita real.
+- [x] Confirmação literal exigida antes de qualquer ação sensível.
+
+### 2.1 Validação em Leitura Real (2026-06-17, commit `375b4b8`)
+
+**Curso 29972 — Manutenção de Sistemas:**
+
+- [x] Curso real localizado via `_get_course`.
+- [x] Atividades do curso listadas via `_list_course_activities` (7 atividades: 2 tarefas, 1 SCORM, 1 quiz, 3 fóruns).
+- [x] Tarefas listadas via `_list_course_assignments`.
+- [x] Tarefa `Envio SAP 01 - Etapa 1` (CMID 941458, Instance 101112) localizada por CMID.
+- [x] Submissão real aguardando correção localizada via `_list_submissions_awaiting_grading` (1 entrega, status `submitted`, `notgraded`, 1 arquivo, tentativa 0).
+- [x] Material de contexto `SAP 01.pdf` localizado na seção `Situações de Aprendizagem`.
+
+**Curso 33442 — Saude e Segurança do Trabalho:**
+
+- [x] Curso real localizado via `_get_course`.
+- [x] Atividades listadas (12 atividades: 5 tarefas, 1 SCORM, 1 quiz, 5 fóruns).
+- [x] Listagem de atividades com datas/prazos validada.
+- [x] Listagem de arquivos de curso validada com formatos PDF externo, PPSX e PNG.
+- [x] Tarefa `Poste Aqui a Superação B` (CMID 1039037, Instance 110669) localizada.
+- [x] 16 submissões aguardando correção localizadas (todas `submitted`/`notgraded`, maioria com 1 arquivo, uma com 3).
 
 Pendências Moodle reais:
 
@@ -128,6 +152,17 @@ Pendências Moodle reais:
 - [ ] Confirmar se `WriteServiceToken` será usado ou se a escrita deve usar token do usuário autenticado.
 - [ ] Validar governança do `WriteServiceToken`, caso seja usado.
 - [ ] Testar envio de nota/feedback em sandbox/homologação com feature flags habilitadas.
+
+### 2.2 Problemas Detectados na Validação Real
+
+- [ ] Investigar instabilidade do endpoint MCP em buscas textuais (`_search` retornou `Connection failed`).
+- [ ] Adicionar tratamento mais claro para falha de conexão em `_search`.
+- [ ] Registrar erro com `auditId` ou `correlationId` quando houver falha de rede.
+- [ ] Documentar que `_search` pesquisa cursos, não arquivos internos.
+- [ ] Criar ou expor busca específica para materiais/atividades do curso.
+- [ ] Validar se `fullName: null` nas submissões é decisão de privacidade, falta de permissão ou limitação da tool.
+- [ ] Se permitido institucionalmente, retornar nome do aluno para revisão docente.
+- [ ] Se não permitido, exibir explicitamente que os nomes foram omitidos por política de privacidade.
 
 ---
 
@@ -175,9 +210,9 @@ Implementado:
 
 Ainda pendente:
 
-- [ ] Retestar no conector a tool `consultar_contexto_item_correcao_assistida` no curso de teste (`curso_12345`).
-- [ ] Confirmar se `selectedContextFileName` aponta para o SAP correto no curso de teste (`curso_12345`).
-- [ ] Confirmar no curso de homologação (`curso_67890`) se SAP 01/SAP 02 são escolhidos conforme a atividade.
+- [x] Retestar no conector: material de contexto `SAP 01.pdf` localizado na seção correta do curso real `29972`.
+- [x] Retestar no conector: materiais `Descrição Superação B.PNG` e `Descrição Superação B_Parte 2.PNG` localizados no curso `33442`.
+- [ ] Confirmar se `selectedContextFileName` aponta para o SAP correto no curso de teste real.
 - [ ] Evoluir seleção heurística se houver falso positivo em materiais administrativos.
 - [ ] Futuro: plugar seleção por IA opcional apenas quando houver infraestrutura barata/viável.
 
@@ -318,12 +353,21 @@ Estado atual:
 - [x] Testes de observações internas e baixa confiança no rascunho.
 - [x] Testes de relatório consolidado para coordenação.
 - [x] Testes de chunking representativo para texto muito grande.
+- [x] Testes de bloqueio por estudante não inscrito.
+- [x] Testes de bloqueio por feedback existente.
 
 Última verificação conhecida:
 
 - [x] `dotnet.exe test MoodleConnector.slnx` passando com 211 testes em 2026-06-15.
-- [x] `dotnet.exe test tests/MoodleConnector.Application.Tests` passando com 242 testes em 2026-06-17.
+- [x] `dotnet.exe test tests/MoodleConnector.Application.Tests` passando com 243 testes em 2026-06-17.
 - [x] `dotnet.exe test tests/MoodleConnector.Application.Tests/MoodleConnector.Application.Tests.csproj --filter DocumentExtractionServiceTests` passando com 19 testes em 2026-06-15.
+
+### 9.1 Validação Manual no Conector Moodle (2026-06-17)
+
+- [x] Conector Moodle validado em leitura real no curso `29972 - Manutenção de Sistemas`.
+- [x] Conector Moodle validado em leitura real no curso `33442 - Saude e Segurança do Trabalho`.
+- [x] Fluxo de ação pendente com confirmação humana validado.
+- [ ] Tools de correção assistida (lote, contexto, rascunho, prévia, commit, auditoria) ainda não expostas no GPT App/MCP para teste ponta a ponta.
 
 Ainda pendente:
 
@@ -333,6 +377,7 @@ Ainda pendente:
 - [x] Testes de token expirado e token sem escopo de escrita.
 - [ ] Testes de usuário sem permissão Moodle real para corrigir.
 - [ ] Reescanear `/mcp` no ChatGPT Developer Mode após mudanças de metadata/tools.
+- [ ] Expor no GPT App/MCP as tools específicas de correção assistida para teste real ponta a ponta.
 
 ---
 
@@ -342,12 +387,18 @@ Ainda pendente:
 
 - [x] Retestar no conector `consultar_contexto_item_correcao_assistida`.
 - [x] Retestar no conector no curso de teste (`curso_12345`) e confirmar seleção do SAP correto (`SAP_01.pdf`).
+- [x] Validar leitura real em dois cursos Moodle (29972 e 33442).
+- [x] Validar fluxo de confirmação humana demonstrativo.
 - [ ] Retestar no conector no curso de homologação (`curso_67890`) e confirmar SAP 01/SAP 02 por atividade.
 - [ ] Confirmar rubricas/escalas reais no Moodle.
 - [ ] Confirmar permissões/capabilities reais de professor/tutor.
 - [ ] Definir definitivamente token de escrita: usuário autenticado ou `WriteServiceToken`.
 - [ ] Rodar teste de escrita em sandbox/homologação com feature flags habilitadas.
 - [ ] Documentar política de responsabilidade docente e retenção.
+- [ ] Expor tool de diagnóstico de capabilities/permissões por curso e atividade.
+- [ ] Expor tool de leitura de rubricas/grading forms quando disponível.
+- [ ] Expor tool de leitura de escala/nota máxima da atividade.
+- [ ] Expor tool de diagnóstico de versão/serviços Moodle disponíveis.
 
 ### P1 — robustez pedagógica e formatos
 
@@ -400,8 +451,10 @@ Ainda pendente:
 - [x] Sistema registra auditoria de commit Moodle.
 - [x] Sistema evita duplicidade com idempotência.
 - [x] Sistema bloqueia sobrescrita de nota existente.
+- [x] Sistema bloqueia sobrescrita de feedback existente.
 - [x] Sistema bloqueia commit com prévia obsoleta.
 - [x] Sistema bloqueia commit quando a tentativa/submissão mudou.
+- [x] Sistema bloqueia commit quando estudante não está inscrito no curso.
 - [ ] Envio validado em sandbox/homologação.
 - [ ] Piloto pedagógico aprovado.
 
