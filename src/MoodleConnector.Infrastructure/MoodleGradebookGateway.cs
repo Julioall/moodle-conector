@@ -1,0 +1,160 @@
+using System.Globalization;
+using System.Text.Json;
+using Microsoft.Extensions.Options;
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
+
+namespace MoodleConnector.Infrastructure;
+
+internal sealed class MoodleGradebookGateway(
+    HttpClient httpClient,
+    IOptions<MoodleApiOptions> options,
+    IMoodleAccessTokenProvider tokenProvider,
+    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleGradebookGateway
+{
+    private const string MoodleFunction = "gradereport_user_get_grade_items";
+    private readonly MoodleApiOptions _options = options.Value;
+
+    public async Task<CourseGradebook> GetStudentGradebookAsync(
+        string courseId,
+        string studentId,
+        CancellationToken cancellationToken)
+    {
+        var courseIdNumber = ParseMoodleId(courseId, nameof(courseId));
+        var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
+        
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
+        
+        var endpoint = $"{credentials.BaseUrl.TrimEnd('/')}/webservice/rest/server.php";
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["wstoken"] = token,
+            ["wsfunction"] = MoodleFunction,
+            ["moodlewsrestformat"] = "json",
+            ["courseid"] = courseIdNumber.ToString(CultureInfo.InvariantCulture),
+            ["userid"] = studentIdNumber.ToString(CultureInfo.InvariantCulture)
+        });
+        
+        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        ThrowIfMoodleReturnedError(payload);
+
+        return ParseGradebook(payload, courseId, studentId);
+    }
+
+    private static CourseGradebook ParseGradebook(string payload, string courseId, string studentId)
+    {
+        var items = new List<GradebookItem>();
+
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return new CourseGradebook(courseId, studentId, items);
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        
+        if (!document.RootElement.TryGetProperty("usergrades", out var userGrades) || userGrades.ValueKind != JsonValueKind.Array)
+        {
+            return new CourseGradebook(courseId, studentId, items);
+        }
+
+        foreach (var userGrade in userGrades.EnumerateArray())
+        {
+            if (userGrade.TryGetProperty("gradeitems", out var gradeItems) && gradeItems.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in gradeItems.EnumerateArray())
+                {
+                    items.Add(new GradebookItem(
+                        Id: ReadStringProperty(item, "id") ?? string.Empty,
+                        ItemName: ReadStringProperty(item, "itemname") ?? string.Empty,
+                        ItemType: ReadStringProperty(item, "itemtype") ?? string.Empty,
+                        ItemModule: ReadStringProperty(item, "itemmodule") ?? string.Empty,
+                        CategoryId: ReadStringProperty(item, "categoryid"),
+                        GradeRaw: ReadDecimalProperty(item, "graderaw"),
+                        GradeFormatted: ReadStringProperty(item, "gradeformatted"),
+                        GradeMin: ReadDecimalProperty(item, "grademin"),
+                        GradeMax: ReadDecimalProperty(item, "grademax"),
+                        PercentageFormatted: ReadDecimalProperty(item, "percentageformatted"),
+                        Feedback: ReadStringProperty(item, "feedback"),
+                        FeedbackFormat: ReadStringProperty(item, "feedbackformat"),
+                        GradedDateSubmitted: ReadLongProperty(item, "gradeddatesubmitted"),
+                        GradedDateGraded: ReadLongProperty(item, "gradeddategraded"),
+                        GraderId: ReadStringProperty(item, "grader")
+                    ));
+                }
+            }
+        }
+
+        return new CourseGradebook(courseId, studentId, items);
+    }
+
+    private static string? ReadStringProperty(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out var value))
+        {
+            if (value.ValueKind == JsonValueKind.String)
+                return value.GetString();
+            if (value.ValueKind == JsonValueKind.Number)
+                return value.GetRawText();
+        }
+        return null;
+    }
+
+    private static decimal? ReadDecimalProperty(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out var value))
+        {
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var d))
+                return d;
+            if (value.ValueKind == JsonValueKind.String && decimal.TryParse(value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var ds))
+                return ds;
+        }
+        return null;
+    }
+
+    private static long? ReadLongProperty(JsonElement element, string propertyName)
+    {
+        if (element.TryGetProperty(propertyName, out var value))
+        {
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var d))
+                return d;
+            if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var ds))
+                return ds;
+        }
+        return null;
+    }
+
+    private static long ParseMoodleId(string value, string parameterName)
+    {
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0)
+        {
+            return id;
+        }
+
+        throw new ArgumentException($"O parametro {parameterName} deve ser um identificador numerico do Moodle.", parameterName);
+    }
+
+    private static void ThrowIfMoodleReturnedError(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload) ||
+            string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("exception", out var exceptionElement))
+        {
+            return;
+        }
+
+        var errorCode = document.RootElement.TryGetProperty("errorcode", out var errorCodeElement)
+            ? errorCodeElement.GetString()
+            : exceptionElement.GetString();
+        throw new InvalidOperationException($"O Moodle rejeitou a leitura de notas (gradebook): {errorCode ?? "erro_desconhecido"}.");
+    }
+}

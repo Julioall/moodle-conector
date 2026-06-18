@@ -22,6 +22,7 @@ using MoodleConnector.Presentation.Configuration;
 using MoodleConnector.Presentation.Security;
 using MoodleConnector.Presentation.Tools;
 using MoodleConnector.Presentation.Tools.Grading;
+using MoodleConnector.Presentation.Tools.Gradebook;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.Threading.RateLimiting;
@@ -252,6 +253,7 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleCourseActivitiesTools>()
     .WithTools<MoodleAssignmentSubmissionsTools>()
     .WithTools<MoodleGradingTools>()
+    .WithTools<MoodleGradebookTools>()
     .WithTools<MoodleGradingContextDiagnosticsTools>();
 
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();

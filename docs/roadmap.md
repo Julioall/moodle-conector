@@ -442,6 +442,9 @@ listar_quizzes_curso
 consultar_quiz
 listar_scorms_curso
 consultar_prazos_atividades
+consultar_linha_do_tempo_curso
+listar_eventos_calendario_curso
+listar_foruns_curso
 ```
 
 ## Escopos
@@ -505,6 +508,8 @@ listar_entregas_pendentes
 listar_entregas_atrasadas
 listar_entregas_aguardando_correcao
 consultar_status_submissao
+consultar_tentativas_quiz
+consultar_tentativas_scorm
 ```
 
 ## Escopos
@@ -570,6 +575,7 @@ listar_itens_avaliativos
 consultar_distribuicao_notas
 listar_avaliacoes_sem_nota
 listar_avaliacoes_pendentes_correcao
+consultar_boletim_aluno
 ```
 
 ## Escopos
@@ -632,6 +638,9 @@ listar_alunos_sem_acesso
 listar_alunos_com_pendencias
 buscar_participacao_alunos
 consultar_participacao_foruns
+consultar_progresso_aluno
+consultar_acessos_aluno
+consultar_discussao_forum
 ```
 
 ## Escopos
@@ -695,6 +704,9 @@ listar_alunos_risco_inatividade
 listar_alunos_risco_desempenho
 listar_alunos_risco_combinado
 gerar_plano_intervencao
+gerar_relatorio_risco_estudantes
+consultar_recuperacao_aluno
+consultar_perfil_aluno_360
 ```
 
 ## Escopos
@@ -785,6 +797,14 @@ gerar_relatorio_risco_estudantil
 gerar_relatorio_participacao
 gerar_auditoria_sala
 gerar_relatorio_qualidade_dados
+relatorio_desempenho_quiz
+relatorio_participacao_foruns
+auditar_sala_virtual_senai
+validar_cronograma_vs_moodle
+relatorio_conselho_classe
+relatorio_pos_execucao
+consultar_pesquisas_curso
+exportar_painel_operacional
 ```
 
 ## Escopos
