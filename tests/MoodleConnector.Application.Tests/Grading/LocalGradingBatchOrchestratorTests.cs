@@ -4,6 +4,7 @@ using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Domain.Grading;
+using Microsoft.Extensions.Logging;
 
 namespace MoodleConnector.Application.Tests.Grading;
 
@@ -48,8 +49,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         var sut = new LocalGradingBatchOrchestrator(
             repository,
             DefaultLimits(),
-            new FakeCompleteGradingContextBuilder(),
-            new FakeGradingAnalysisService(),
+            new GradingItemProcessor(
+                new FakeCompleteGradingContextBuilder(),
+                new FakeGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
@@ -134,13 +137,15 @@ public sealed class LocalGradingBatchOrchestratorTests
         var sut = new LocalGradingBatchOrchestrator(
             repository,
             DefaultLimits(),
-            new GradingContextBuilder(
-                repository,
-                Options.Create(new GradingLimitsOptions()),
-                new HeuristicAssignmentContextSelectionService(),
-                new FakeMoodleAssignmentSettingsGateway(),
-                new FakeCriteriaGenerationService()),
-            new StructuredGradingAnalysisService(),
+            new GradingItemProcessor(
+                new GradingContextBuilder(
+                    repository,
+                    Options.Create(new GradingLimitsOptions()),
+                    new HeuristicAssignmentContextSelectionService(),
+                    new FakeMoodleAssignmentSettingsGateway(),
+                    new FakeCriteriaGenerationService()),
+                new StructuredGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
@@ -177,8 +182,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         var sut = new LocalGradingBatchOrchestrator(
             repository,
             DefaultLimits(),
-            new FakeCompleteGradingContextBuilder(),
-            new FakeGradingAnalysisService(),
+            new GradingItemProcessor(
+                new FakeCompleteGradingContextBuilder(),
+                new FakeGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
@@ -207,8 +214,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         var sut = new LocalGradingBatchOrchestrator(
             repository,
             DefaultLimits(),
-            new FailingOneItemContextBuilder(failedItem.Id),
-            new FakeGradingAnalysisService(),
+            new GradingItemProcessor(
+                new FailingOneItemContextBuilder(failedItem.Id),
+                new FakeGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
@@ -297,8 +306,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         var sut = new LocalGradingBatchOrchestrator(
             new FakeGradingReviewRepository(),
             DefaultLimits(),
-            new FakeGradingContextBuilder(new FakeGradingReviewRepository()),
-            new FakeGradingAnalysisService(),
+            new GradingItemProcessor(
+                new FakeGradingContextBuilder(new FakeGradingReviewRepository()),
+                new FakeGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
         await Assert.ThrowsAsync<ArgumentException>(() => sut.EnqueueAsync(Guid.Empty, CancellationToken.None));
@@ -320,8 +331,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         var sut = new LocalGradingBatchOrchestrator(
             repository,
             DefaultLimits(maxItems: 2),
-            new FakeGradingContextBuilder(repository),
-            new FakeGradingAnalysisService(),
+            new GradingItemProcessor(
+                new FakeGradingContextBuilder(repository),
+                new FakeGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -454,8 +467,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         return new LocalGradingBatchOrchestrator(
             repository,
             DefaultLimits(maxItems),
-            new FakeGradingContextBuilder(repository),
-            new FakeGradingAnalysisService(),
+            new GradingItemProcessor(
+                new FakeGradingContextBuilder(repository),
+                new FakeGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
             NullLogger<LocalGradingBatchOrchestrator>.Instance);
     }
 

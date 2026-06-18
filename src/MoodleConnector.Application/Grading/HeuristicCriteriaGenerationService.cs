@@ -45,7 +45,20 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
         "serviço nacional",
         "servico nacional",
         "endereço",
-        "endereco"
+        "endereco",
+        // Termos administrativos de SAP que contaminavam critérios
+        "forma de entrega",
+        "forma de feedback",
+        "feedback sumativo",
+        "feedback de autoavaliação",
+        "feedback de autoavaliacao",
+        "resumos de desempenho",
+        "etapa presencial",
+        "prazo estabelecido",
+        "entregar a atividade",
+        "data de entrega",
+        "forma de avaliação",
+        "forma de avaliacao"
     ];
 
     /// <summary>
@@ -232,7 +245,28 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
     }
 
     /// <summary>
-    /// Extrai frases que contêm verbos avaliáveis.
+    /// Prefixos administrativos que indicam frases não-avaliáveis mesmo com verbos presentes.
+    /// </summary>
+    private static readonly string[] AdministrativePrefixes =
+    [
+        "entregar a atividade",
+        "entregar o trabalho",
+        "forma de entrega",
+        "forma de feedback",
+        "feedback sumativo",
+        "feedback de auto",
+        "resumos de desempenho",
+        "a avaliação será",
+        "a avaliacao sera",
+        "prazo de entrega",
+        "prazo estabelecido",
+        "data de entrega",
+        "etapa presencial",
+        "atividade presencial"
+    ];
+
+    /// <summary>
+    /// Extrai frases que contêm verbos avaliáveis, excluindo frases administrativas.
     /// </summary>
     private static List<string> ExtractFromEvaluableVerbs(string text)
     {
@@ -246,6 +280,13 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
         foreach (var sentence in sentences)
         {
             if (IsMetadataOnly(sentence))
+            {
+                continue;
+            }
+
+            // Filtrar frases que começam com prefixos administrativos
+            var sentenceLower = sentence.ToLowerInvariant();
+            if (AdministrativePrefixes.Any(prefix => sentenceLower.Contains(prefix)))
             {
                 continue;
             }

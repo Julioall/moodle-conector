@@ -82,6 +82,14 @@ public sealed class GradingItemProcessor(
                 ? BuildPreliminaryTeacherNotes(context) + " " + result.PrivateNotesToTeacher
                 : result.PrivateNotesToTeacher;
 
+            // Appender observações de geração de critérios (separadas de TeacherInstructions)
+            if (!string.IsNullOrWhiteSpace(context.CriteriaGenerationNotes))
+            {
+                teacherNotes = string.IsNullOrWhiteSpace(teacherNotes)
+                    ? context.CriteriaGenerationNotes
+                    : $"{teacherNotes} {context.CriteriaGenerationNotes}";
+            }
+
             item.SetDraft(suggestedGrade, confidence, result.FeedbackToStudent, teacherNotes);
             return;
         }

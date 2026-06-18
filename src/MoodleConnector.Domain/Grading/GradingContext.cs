@@ -40,6 +40,12 @@ public sealed class GradingContext
 
     public string? TeacherInstructions { get; private init; }
 
+    /// <summary>
+    /// Observações geradas automaticamente pelo serviço de geração de critérios.
+    /// Separado de TeacherInstructions para não contaminar a resolução de critérios.
+    /// </summary>
+    public string? CriteriaGenerationNotes { get; private init; }
+
     public IReadOnlyList<string> Blockers { get; private init; } = [];
 
     public bool HasMinimumContext =>
@@ -61,7 +67,8 @@ public sealed class GradingContext
         string? submissionText,
         IReadOnlyList<GradingFileInfo>? attachedFiles,
         string? courseMaterials,
-        string? teacherInstructions)
+        string? teacherInstructions,
+        string? criteriaGenerationNotes = null)
     {
         var blockers = new List<string>();
 
@@ -113,6 +120,7 @@ public sealed class GradingContext
             AttachedFiles = attachedFiles ?? [],
             CourseMaterials = courseMaterials,
             TeacherInstructions = teacherInstructions,
+            CriteriaGenerationNotes = criteriaGenerationNotes,
             Blockers = blockers
         };
     }

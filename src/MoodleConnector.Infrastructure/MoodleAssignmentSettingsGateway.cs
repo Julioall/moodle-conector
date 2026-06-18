@@ -113,9 +113,14 @@ internal sealed class MoodleAssignmentSettingsGateway(
                         var grade = gradeElement.ValueKind == JsonValueKind.Number ? gradeElement.GetDecimal() :
                                     decimal.TryParse(gradeElement.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var gradeParsed) ? gradeParsed : 0m;
                         
+                        // Moodle retorna grade negativo para indicar que a atividade usa escala
+                        // (o valor absoluto é o ID da escala). Nesse caso, MaxGrade fica 0
+                        // pois não temos conversão de escala implementada.
+                        var effectiveMaxGrade = grade > 0 ? grade : 0m;
+
                         return new AssignmentSettingsSummary(
                             currentId.ToString(CultureInfo.InvariantCulture),
-                            grade);
+                            effectiveMaxGrade);
                     }
                 }
             }

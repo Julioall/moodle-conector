@@ -433,8 +433,10 @@ public sealed class GradingContextBuilderTests
             new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
             CancellationToken.None);
 
-        // As notas privadas devem informar que os critérios foram gerados a partir do contexto
-        Assert.Contains("gerados a partir do contexto", context.TeacherInstructions ?? "", StringComparison.OrdinalIgnoreCase);
+        // As notas de geração de critérios devem ficar em CriteriaGenerationNotes (separadas de TeacherInstructions)
+        Assert.Contains("gerados a partir do contexto", context.CriteriaGenerationNotes ?? "", StringComparison.OrdinalIgnoreCase);
+        // TeacherInstructions deve permanecer null quando não há instrução real do professor
+        Assert.Null(context.TeacherInstructions);
     }
 
     [Theory]

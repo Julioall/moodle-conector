@@ -1,6 +1,7 @@
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Domain.Grading;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -17,7 +18,8 @@ public sealed partial class GradingContextBuilder(
     IOptions<GradingLimitsOptions> limits,
     IAssignmentContextSelectionService contextSelectionService,
     IMoodleAssignmentSettingsGateway settingsGateway,
-    ICriteriaGenerationService criteriaGenerationService)
+    ICriteriaGenerationService criteriaGenerationService,
+    ILogger<GradingContextBuilder>? logger = null)
     : IGradingContextBuilder
 {
     public async Task<GradingContext> BuildAsync(
@@ -123,20 +125,19 @@ public sealed partial class GradingContextBuilder(
                 {
                     assignmentStatement = selected.ExtractedText;
                     criteria = ExtractCriteria(selected.ExtractedText);
-                    maxGrade ??= ExtractMaxGrade(selected.ExtractedText);
                     courseMaterials = $"{selected.Title}\n{selected.ExtractedText}";
 
-                    // 3. Fallback: se nenhum critério estruturado foi extraído, usar o enunciado
-                    // completo como critério aproximado — dá contexto suficiente para o serviço
-                    // gerar feedback relevante mesmo sem rubrica formal.
-                    if (string.IsNullOrWhiteSpace(criteria) && string.IsNullOrWhiteSpace(rubricDescription))
-                    {
-                        criteria = Truncate(selected.ExtractedText ?? string.Empty, maxChars);
-                    }
+                    // NÃO usar texto bruto do enunciado como critério direto.
+                    // Quando ExtractCriteria retorna null e não há rubrica, o campo criteria
+                    // fica null — o HeuristicCriteriaGenerationService abaixo tenta gerar
+                    // critérios semânticos, e o StructuredGradingAnalysisService usa o
+                    // assignmentStatement como contexto pedagógico (não como critérios).
                 }
             }
         }
 
+        // Buscar nota máxima oficial via Moodle API (mod_assign_get_assignments)
+        // PRIORIDADE sobre regex — a API é a fonte autoritativa.
         if (maxGrade == null)
         {
             var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken);
@@ -155,11 +156,21 @@ public sealed partial class GradingContextBuilder(
                         maxGrade = settings.MaxGrade;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Ignora falhas ao buscar nota máxima do Moodle, tenta continuar com o que foi extraído.
+                    logger?.LogWarning(
+                        ex,
+                        "Falha ao buscar MaxGrade via settingsGateway para assignment {AssignmentId} do curso {CourseId}. Usando fallback por regex.",
+                        item.AssignmentId,
+                        item.CourseId);
                 }
             }
+        }
+
+        // Fallback: tentar extrair nota máxima do texto via regex se API não retornou
+        if (maxGrade == null && !string.IsNullOrWhiteSpace(assignmentStatement))
+        {
+            maxGrade = ExtractMaxGrade(assignmentStatement);
         }
 
         // 4. Validação de qualidade dos critérios e fallback via geração estruturada.
@@ -192,13 +203,10 @@ public sealed partial class GradingContextBuilder(
             }
         }
 
+        // TeacherInstructions recebe SOMENTE instruções reais do professor (options).
+        // CriteriaGenerationNotes vai como campo separado no GradingContext para
+        // não contaminar a resolução de critérios no StructuredGradingAnalysisService.
         var teacherInstructions = options.TeacherInstructions;
-        if (!string.IsNullOrWhiteSpace(criteriaGenerationNotes))
-        {
-            teacherInstructions = string.IsNullOrWhiteSpace(teacherInstructions)
-                ? criteriaGenerationNotes
-                : $"{teacherInstructions}\n{criteriaGenerationNotes}";
-        }
 
         return GradingContext.Build(
             gradingItemId: item.Id,
@@ -215,7 +223,8 @@ public sealed partial class GradingContextBuilder(
             submissionText: submissionText,
             attachedFiles: attachedFiles,
             courseMaterials: courseMaterials,
-            teacherInstructions: teacherInstructions);
+            teacherInstructions: teacherInstructions,
+            criteriaGenerationNotes: criteriaGenerationNotes);
     }
 
     private static string Truncate(string text, int maxChars)

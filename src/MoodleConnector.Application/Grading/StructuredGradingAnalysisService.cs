@@ -104,9 +104,21 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 : BuildCriterionAnalysisWithoutGrade(criteria, request.SubmissionText))
             : [];
 
-        var totalSuggested = criterionResults.Count > 0 && hasMaxGrade 
-            ? criterionResults.Sum(c => c.SuggestedPoints ?? 0) 
-            : (decimal?)null;
+        decimal? totalSuggested;
+        if (criterionResults.Count > 0 && hasMaxGrade)
+        {
+            totalSuggested = criterionResults.Sum(c => c.SuggestedPoints ?? 0);
+        }
+        else if (hasApproximateCriteria && hasMaxGrade && !string.IsNullOrWhiteSpace(effectiveCriteria))
+        {
+            // Cenário Approximate sem critérios parseados mas com MaxGrade:
+            // gerar nota proporcional baseada em cobertura de keywords do enunciado.
+            totalSuggested = EstimateGradeFromCoverage(effectiveCriteria, request.SubmissionText, effectiveMaxGrade);
+        }
+        else
+        {
+            totalSuggested = null;
+        }
 
         // Confianca base depende da fonte dos criterios
         var baseConfidence = hasFormalCriteria
@@ -405,6 +417,33 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
             .Where(c => c.Length > 3)
             .Take(20)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Estima nota baseada na cobertura de palavras-chave do enunciado
+    /// na submissão, para o cenário Approximate sem critérios parseados.
+    /// </summary>
+    private static decimal EstimateGradeFromCoverage(string contextText, string submissionText, decimal maxGrade)
+    {
+        var contextWords = contextText.ToLowerInvariant()
+            .Split([' ', ',', ';', '.', ':', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => w.Length > 4) // Só palavras significativas
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(30)
+            .ToArray();
+
+        if (contextWords.Length == 0)
+        {
+            return 0m;
+        }
+
+        var submissionLower = submissionText.ToLowerInvariant();
+        var matchedWords = contextWords.Count(w => submissionLower.Contains(w));
+        var coverage = (decimal)matchedWords / contextWords.Length;
+
+        // Escala conservadora: coverage 100% → 70% da nota máxima (pois é aproximado)
+        var estimatedGrade = Math.Round(maxGrade * Math.Min(coverage * 0.7m, 0.7m), 2);
+        return Math.Max(0m, estimatedGrade);
     }
 
     private static int CountWords(string text)
