@@ -662,6 +662,11 @@ public sealed class MoodleGradingTools(
                 CanCommitToMoodle: false),
             pagedItems);
 
+        if (pagedItems.Any(item => item.StudentName is null))
+        {
+            warnings.Add("Os nomes dos estudantes nao estao disponiveis. Isso pode ocorrer por restricao de privacidade do Moodle ou por limitacao do token de acesso. Os estudantes sao identificados apenas pelo ID.");
+        }
+
         var response = new ToolResponse<ListarEntregasCorrigiveisResponse>(
             "ok",
             data,

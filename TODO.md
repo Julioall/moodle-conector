@@ -156,13 +156,13 @@ Pendências Moodle reais:
 ### 2.2 Problemas Detectados na Validação Real
 
 - [ ] Investigar instabilidade do endpoint MCP em buscas textuais (`_search` retornou `Connection failed`).
-- [ ] Adicionar tratamento mais claro para falha de conexão em `_search`.
+- [x] Adicionar tratamento mais claro para falha de conexão em `_search` (agora inclui `ex.GetType().Name`).
 - [ ] Registrar erro com `auditId` ou `correlationId` quando houver falha de rede.
-- [ ] Documentar que `_search` pesquisa cursos, não arquivos internos.
+- [x] Documentar que `_search` pesquisa cursos, não arquivos internos (Description atualizada nas tools `buscar_cursos`, `search_courses` e `search`).
 - [ ] Criar ou expor busca específica para materiais/atividades do curso.
-- [ ] Validar se `fullName: null` nas submissões é decisão de privacidade, falta de permissão ou limitação da tool.
+- [x] Validar se `fullName: null` nas submissões é decisão de privacidade, falta de permissão ou limitação da tool (confirmado: vem da API `core_enrol_get_enrolled_users` via `IMoodleParticipantsGateway`; quando o token não tem permissão, o Moodle omite os nomes).
 - [ ] Se permitido institucionalmente, retornar nome do aluno para revisão docente.
-- [ ] Se não permitido, exibir explicitamente que os nomes foram omitidos por política de privacidade.
+- [x] Se não permitido, exibir explicitamente que os nomes foram omitidos por política de privacidade (warning adicionado no response de `listar_entregas_corrigiveis`).
 
 ---
 

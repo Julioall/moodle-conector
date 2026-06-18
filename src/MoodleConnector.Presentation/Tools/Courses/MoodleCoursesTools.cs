@@ -108,7 +108,7 @@ public sealed class MoodleCoursesTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ListMyCoursesResponse>))]
-    [Description("Busca cursos vinculados ao usuario autenticado por termo, id, nome curto, idnumber, nome completo ou categoria.")]
+    [Description("Busca cursos vinculados ao usuario autenticado por termo, id, nome curto, idnumber, nome completo ou categoria. Pesquisa apenas cursos, nao arquivos internos, atividades ou materiais do curso.")]
     public async Task<CallToolResult> BuscarCursosAsync(
         [Description("Termo de busca. Pode ser courseId, shortName, idnumber, nome do curso ou categoria.")]
         string termo,
@@ -130,7 +130,7 @@ public sealed class MoodleCoursesTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ListMyCoursesResponse>))]
-    [Description("Searches courses linked to the authenticated Moodle user by id, short name, idnumber, full name, or category.")]
+    [Description("Searches courses linked to the authenticated Moodle user by id, short name, idnumber, full name, or category. Searches courses only, not internal files, activities, or course materials.")]
     public Task<CallToolResult> SearchCoursesAsync(
         [Description("Search term. Can be courseId, shortName, idnumber, course name, or category.")]
         string query,
@@ -152,7 +152,7 @@ public sealed class MoodleCoursesTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(SearchResponse))]
-    [Description("Use this when ChatGPT needs the standard connector search shape. Searches the authenticated user's Moodle courses and returns citation-ready course URLs.")]
+    [Description("Use this when ChatGPT needs the standard connector search shape. Searches the authenticated user's Moodle courses and returns citation-ready course URLs. Searches courses only, not internal files, activities, or course materials. To find files inside a course, use _list_course_files instead.")]
     public async Task<CallToolResult> SearchAsync(
         [Description("Search query for Moodle courses.")]
         string query,
@@ -180,9 +180,9 @@ public sealed class MoodleCoursesTools(
         {
             throw;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return StandardError("Nao foi possivel buscar cursos no Moodle neste momento.");
+            return StandardError($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
         }
 
         var response = new SearchResponse(courses.Select(course =>
@@ -324,9 +324,9 @@ public sealed class MoodleCoursesTools(
         {
             throw;
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Error<ListMyCoursesResponse>("Nao foi possivel buscar cursos no Moodle neste momento.");
+            return Error<ListMyCoursesResponse>($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
         }
 
         var data = new ListMyCoursesResponse(courses.Count, courses.Select(ToCourseItem).ToArray());
