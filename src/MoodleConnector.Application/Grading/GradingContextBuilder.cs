@@ -16,7 +16,8 @@ public sealed partial class GradingContextBuilder(
     IGradingReviewRepository repository,
     IOptions<GradingLimitsOptions> limits,
     IAssignmentContextSelectionService contextSelectionService,
-    IMoodleAssignmentSettingsGateway? settingsGateway = null)
+    IMoodleAssignmentSettingsGateway? settingsGateway = null,
+    ICriteriaGenerationService? criteriaGenerationService = null)
     : IGradingContextBuilder
 {
     public async Task<GradingContext> BuildAsync(
@@ -33,6 +34,7 @@ public sealed partial class GradingContextBuilder(
         string? rubricDescription = null;
         decimal? maxGrade = null;
         string? courseMaterials = null;
+        string? criteriaGenerationNotes = null;
         var attachedFiles = new List<GradingFileInfo>();
         IReadOnlyList<GradingArtifact> artifacts = [];
 
@@ -160,6 +162,45 @@ public sealed partial class GradingContextBuilder(
             }
         }
 
+        // 4. Validação de qualidade dos critérios e fallback via geração estruturada.
+        // Se os critérios extraídos por heurística são de baixa qualidade (contaminados,
+        // truncados, formados apenas por metadados), tentar gerar critérios limpos.
+        if (criteriaGenerationService != null &&
+            string.IsNullOrWhiteSpace(rubricDescription) &&
+            AreCriteriaLowQuality(criteria))
+        {
+            try
+            {
+                var genResult = await criteriaGenerationService.GenerateAsync(
+                    new CriteriaGenerationRequest(
+                        AssignmentName: $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
+                        AssignmentDescription: assignmentStatement,
+                        ContextText: courseMaterials,
+                        SupportingMaterials: null,
+                        MaxGrade: maxGrade ?? 0m),
+                    cancellationToken);
+
+                if (genResult.Criteria.Count > 0)
+                {
+                    // Converter critérios estruturados para o formato string esperado pelo GradingContext
+                    criteria = string.Join('\n', genResult.Criteria.Select(c => c.Description));
+                    criteriaGenerationNotes = genResult.PrivateNotesToTeacher;
+                }
+            }
+            catch
+            {
+                // Se a geração falhar, mantém os critérios heurísticos originais.
+            }
+        }
+
+        var teacherInstructions = options.TeacherInstructions;
+        if (!string.IsNullOrWhiteSpace(criteriaGenerationNotes))
+        {
+            teacherInstructions = string.IsNullOrWhiteSpace(teacherInstructions)
+                ? criteriaGenerationNotes
+                : $"{teacherInstructions}\n{criteriaGenerationNotes}";
+        }
+
         return GradingContext.Build(
             gradingItemId: item.Id,
             batchId: item.BatchId,
@@ -175,7 +216,7 @@ public sealed partial class GradingContextBuilder(
             submissionText: submissionText,
             attachedFiles: attachedFiles,
             courseMaterials: courseMaterials,
-            teacherInstructions: options.TeacherInstructions);
+            teacherInstructions: teacherInstructions);
     }
 
     private static string Truncate(string text, int maxChars)
@@ -260,6 +301,84 @@ public sealed partial class GradingContextBuilder(
             .Where(item => item.Length >= 8);
 
         criteria.AddRange(inlineCriteria);
+    }
+
+    /// <summary>
+    /// Verifica se os critérios extraídos por heurística são de baixa qualidade.
+    /// Retorna true quando os critérios estão vazios, contaminados por metadados,
+    /// truncados ou genéricos demais para serem usados na correção assistida.
+    /// </summary>
+    internal static bool AreCriteriaLowQuality(string? criteria)
+    {
+        if (string.IsNullOrWhiteSpace(criteria))
+        {
+            return true;
+        }
+
+        var lines = criteria
+            .Split(['\n', ';'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => l.Length > 0)
+            .ToArray();
+
+        if (lines.Length == 0)
+        {
+            return true;
+        }
+
+        var lowQualityCount = 0;
+        foreach (var line in lines)
+        {
+            if (IsLowQualityCriterion(line))
+            {
+                lowQualityCount++;
+            }
+        }
+
+        // Se mais de 50% dos critérios são de baixa qualidade, acionar fallback
+        return (double)lowQualityCount / lines.Length > 0.5;
+    }
+
+    private static bool IsLowQualityCriterion(string criterion)
+    {
+        var lower = criterion.ToLowerInvariant();
+
+        // Critério muito curto
+        if (criterion.Length < 15)
+        {
+            return true;
+        }
+
+        // Contém metadados bloqueados sem conteúdo avaliável
+        var metadataTokens = new[]
+        {
+            "à distância", "a distancia", "individual", "momento",
+            "carga horária", "carga horaria", "cabeçalho", "cabecalho",
+            "modalidade", "nível", "nivel"
+        };
+        var hasMetadata = metadataTokens.Any(m => lower.Contains(m));
+        var evaluableVerbs = new[]
+        {
+            "elaborar", "indicar", "apresentar", "descrever", "comparar",
+            "justificar", "aplicar", "adequar", "identificar", "analisar",
+            "relacionar", "propor", "planejar", "demonstrar", "avaliar",
+            "explicar", "classificar", "definir", "organizar", "formular"
+        };
+        var hasVerb = evaluableVerbs.Any(v => lower.Contains(v));
+
+        // Se tem metadado mas não tem verbo avaliável, é baixa qualidade
+        if (hasMetadata && !hasVerb)
+        {
+            return true;
+        }
+
+        // Se é um bloco grande de texto genérico sem marcadores avaliáveis
+        if (criterion.Length > 200 && !hasVerb)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     [GeneratedRegex(@"(?i)\b(?:valor(?:\s+da\s+atividade)?|nota\s*m[aá]xima|pontua[cç][aã]o|vale)\s*:?\s*(?<grade>\d+(?:[\.,]\d+)?)\s*(?:pontos?|pts?|%)?")]

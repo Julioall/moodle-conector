@@ -18,6 +18,7 @@ public static class DependencyInjection
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();
         services.AddSingleton<IGradingAnalysisService, StructuredGradingAnalysisService>();
+        services.AddSingleton<ICriteriaGenerationService, HeuristicCriteriaGenerationService>();
         services.AddSingleton<IAssignmentContextSelectionService, HeuristicAssignmentContextSelectionService>();
         services.AddScoped<IGradingBatchOrchestrator, LocalGradingBatchOrchestrator>();
         services.AddScoped<IGradingContextBuilder, GradingContextBuilder>();

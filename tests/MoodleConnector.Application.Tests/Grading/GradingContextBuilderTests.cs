@@ -298,6 +298,164 @@ public sealed class GradingContextBuilderTests
         Assert.Equal(0, repository.ListArtifactsCalls);
     }
 
+    [Fact]
+    public async Task BuildAsync_CriteriosContaminados_FallbackGeraCriteriosLimpos()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            "SAP 01.pdf",
+            "application/pdf",
+            "sha-sap-01",
+            SizeBytes: 4317,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef:
+                """
+                à distância - individual Resultados esperados: elaboração, em documento de texto, de um plano de gerenciamento de eventos, incidentes e problemas de TI;
+                indicação das boas práticas de ITIL aplicáveis ao cenário proposto;
+                apresentação de ações corretivas coerentes com o plano.
+                Produto esperado: Plano de Gerenciamento.
+                """,
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            settingsGateway: null,
+            criteriaGenerationService: new HeuristicCriteriaGenerationService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        // O critério contaminado "à distância - individual Resultados esperados..." NÃO deve aparecer
+        if (!string.IsNullOrWhiteSpace(context.Criteria))
+        {
+            Assert.DoesNotContain("à distância - individual", context.Criteria);
+        }
+
+        // Os critérios devem ser claros e avaliáveis
+        Assert.NotNull(context.Criteria);
+        Assert.NotEmpty(context.Criteria);
+    }
+
+    [Fact]
+    public async Task BuildAsync_CriteriosBons_NaoAcionaFallback()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            "Enunciado SAP 01.pdf",
+            "application/pdf",
+            "sha-enunciado",
+            SizeBytes: 300,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef:
+                """
+                Critérios de avaliação: organização do plano de gerenciamento; descrição do gerenciamento de eventos, incidentes e problemas; aderência às boas práticas de ITIL; clareza na proposta de ações corretivas.
+                Produto esperado: Plano.
+                """,
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+
+        // Usando FakeCriteriaGenerationService que registra chamadas
+        var fakeGenerator = new FakeCriteriaGenerationService();
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            settingsGateway: null,
+            criteriaGenerationService: fakeGenerator);
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        // Os critérios heurísticos são bons, o fallback NÃO deveria ter sido acionado
+        Assert.Equal(0, fakeGenerator.CallCount);
+        Assert.NotNull(context.Criteria);
+        Assert.Contains("organização do plano de gerenciamento", context.Criteria, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ComFallback_PrivateNotesInformaCriteriosGerados()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            "SAP 01.pdf",
+            "application/pdf",
+            "sha-sap-01",
+            SizeBytes: 200,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef:
+                """
+                à distância - individual Resultados esperados: elaboração, em documento de texto, de um plano de gerenciamento de eventos, incidentes e problemas de TI.
+                Produto esperado: Plano de Gerenciamento.
+                """,
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            settingsGateway: null,
+            criteriaGenerationService: new HeuristicCriteriaGenerationService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeSubmissionFiles: false, IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        // As notas privadas devem informar que os critérios foram gerados a partir do contexto
+        Assert.Contains("gerados a partir do contexto", context.TeacherInstructions ?? "", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("   ", true)]
+    [InlineData("à distância - individual momento atividade", true)]
+    [InlineData("modalidade a distancia individual", true)]
+    [InlineData("elaborar um plano de gerenciamento de eventos de TI", false)]
+    [InlineData("organização do plano de gerenciamento\ndescrição do gerenciamento de eventos\naderência às boas práticas", false)]
+    public void AreCriteriaLowQuality_DetectaCorretamente(string? criteria, bool expectedLowQuality)
+    {
+        var result = GradingContextBuilder.AreCriteriaLowQuality(criteria);
+        Assert.Equal(expectedLowQuality, result);
+    }
+
+    private sealed class FakeCriteriaGenerationService : ICriteriaGenerationService
+    {
+        public int CallCount { get; private set; }
+
+        public Task<CriteriaGenerationResult> GenerateAsync(
+            CriteriaGenerationRequest request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(new CriteriaGenerationResult(
+                Source: "fake",
+                MaxPoints: request.MaxGrade,
+                Confidence: 0.5m,
+                Criteria: [new GeneratedCriterion("C1", "Critério fake para teste", request.MaxGrade, null)],
+                Warnings: [],
+                PrivateNotesToTeacher: "Critérios gerados por fake service."));
+        }
+    }
+
     private sealed class FakeGradingReviewRepository : IGradingReviewRepository
     {
         public List<GradingArtifact> Artifacts { get; } = [];
