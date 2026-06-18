@@ -74,7 +74,7 @@ public sealed class GradingTechnicalDiscoveryQueryHandler(
         var permissions = BuildPermissions(credentials.CanWrite, blockers);
         var rubricsAndScales = BuildRubricsAndScales(functions, blockers);
         var writeToken = new GradingWriteTokenDiscovery(
-            environment.HasWriteServiceToken ? "write_service_token" : "user_token",
+            environment.HasWriteServiceToken ? "platform_token" : "user_token",
             environment.HasWriteServiceToken,
             credentials.CanWrite,
             environment.AssignmentGradeWriteEnabled,

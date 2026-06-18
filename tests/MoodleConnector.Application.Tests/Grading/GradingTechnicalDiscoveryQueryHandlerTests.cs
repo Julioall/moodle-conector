@@ -68,7 +68,7 @@ public sealed class GradingTechnicalDiscoveryQueryHandlerTests
 
         Assert.Equal("blocked", report.OverallStatus);
         Assert.Equal("blocked", report.GradeWrite.Status);
-        Assert.Equal("write_service_token", report.WriteToken.Mode);
+        Assert.Equal("platform_token", report.WriteToken.Mode);
         Assert.Contains(report.BlockingIssues, issue => issue.Contains("mod_assign_save_grade", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("A conexao Moodle atual nao permite escrita.", report.BlockingIssues);
     }

@@ -385,6 +385,31 @@ Ainda pendente:
 - [ ] Reescanear `/mcp` no ChatGPT Developer Mode após mudanças de metadata/tools.
 - [ ] Expor no GPT App/MCP as tools específicas de correção assistida para teste real ponta a ponta.
 
+### 9.2 Validação no Moodle Nacional (2026-06-18)
+
+Curso: `8886 - Infraestrutura de Redes de Computadores - TEC0015.2026.1-00037`.
+Tarefa: `Enviar - SAP 1` (CMID 295001, assignmentId 23796).
+
+- [x] Conexão Moodle Nacional OK.
+- [x] Busca de cursos OK.
+- [x] 7/7 funções de correção assistida disponíveis.
+- [x] Leitura de tarefas OK.
+- [x] Listagem de entregas aguardando correção OK (2 entregas: 190415/299202, 190472/300009).
+- [x] Nomes vieram como null — privacidade/permissão coerente.
+- [x] Criação de lote interno OK (batchId: 29d7c583-48ef-4892-9f34-498cb8ac150e).
+- [x] Processamento do lote 100% (2/2 prontos, 0 bloqueados, 0 falhos).
+- [x] Extração de material da atividade (Desafio 1.docx) OK.
+- [x] Seleção de contexto parcialmente OK (confidence 0.3, classification: possible_context).
+- [x] Auditoria sanitizada: sem PII evidente em logs técnicos.
+- [x] Escrita bloqueada corretamente (AssignmentGradeWriteEnabled=false, AssignmentFeedbackWriteEnabled=false).
+- [ ] Melhorar confiança/heurística da seleção de enunciado.
+- [ ] Melhorar extração de critérios/escala/valor máximo.
+- [x] Filtrar XML interno de OOXML (customXml/item1.xml) em extração DOCX tratada como ZIP.
+- [ ] Expor/validar tool de prévia de lançamento.
+- [ ] Rodar teste de escrita somente em sandbox com feature flags habilitadas.
+
+> **Nota sobre PII pedagógica:** O conteúdo pedagógico de itens pode conter PII extraída da entrega do aluno (nome dentro do documento). Isso é aceitável para professor/tutor, mas precisa continuar separado dos logs técnicos de auditoria.
+
 ---
 
 ## 10. Próximas Entregas Priorizadas

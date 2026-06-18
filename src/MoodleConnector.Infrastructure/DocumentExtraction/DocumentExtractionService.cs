@@ -218,6 +218,7 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
             var entries = archive.Entries
                 .Where(entry => !string.IsNullOrWhiteSpace(entry.Name))
+                .Where(entry => !IsOoxmlMetadataEntry(entry.FullName))
                 .OrderBy(entry => entry.FullName, StringComparer.OrdinalIgnoreCase)
                 .Take(MaxArchiveEntries)
                 .ToArray();
@@ -477,6 +478,23 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
     private static bool IsNestedZip(string filename)
     {
         return filename.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Filtra entries de metadados internos de pacotes OOXML (DOCX, PPTX, XLSX)
+    /// que podem aparecer quando um arquivo Office é tratado como ZIP genérico.
+    /// Exemplos: customXml/item1.xml, _rels/.rels, [Content_Types].xml, docProps/core.xml.
+    /// </summary>
+    private static bool IsOoxmlMetadataEntry(string fullName)
+    {
+        return fullName.StartsWith("customXml/", StringComparison.OrdinalIgnoreCase) ||
+            fullName.StartsWith("_rels/", StringComparison.OrdinalIgnoreCase) ||
+            fullName.StartsWith("docProps/", StringComparison.OrdinalIgnoreCase) ||
+            fullName.StartsWith("word/_rels/", StringComparison.OrdinalIgnoreCase) ||
+            fullName.StartsWith("word/theme/", StringComparison.OrdinalIgnoreCase) ||
+            fullName.StartsWith("xl/_rels/", StringComparison.OrdinalIgnoreCase) ||
+            fullName.StartsWith("ppt/_rels/", StringComparison.OrdinalIgnoreCase) ||
+            fullName.Equals("[Content_Types].xml", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string GuessMimeType(string filename)
