@@ -1,0 +1,93 @@
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Risk.Queries;
+using MoodleConnector.Domain;
+
+namespace MoodleConnector.Application.Tests.Risk.Queries;
+
+public sealed class GetStudentsAtRiskReportQueryHandlerTests
+{
+    [Fact]
+    public async Task Handle_IdentificaRiscoPorInatividade()
+    {
+        var participants = new FakeParticipantsGateway();
+        var gradebook = new FakeGradebookGateway();
+        var completion = new FakeCompletionGateway();
+        var currentUserId = new FakeCurrentUserIdGateway();
+        
+        var sut = new GetStudentsAtRiskReportQueryHandler(participants, gradebook, completion, currentUserId);
+
+        var result = await sut.Handle(new GetStudentsAtRiskReportQuery("10", 50, InactivityThresholdDays: 7, MinGradePercentage: 60m), CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Single(result);
+        Assert.Equal("123", result[0].StudentId);
+        Assert.Equal(RiskLevel.Alto, result[0].RiskLevel); // Multiple factors: inactive, low grade, low completion
+    }
+
+    private sealed class FakeParticipantsGateway : IMoodleParticipantsGateway
+    {
+        public Task<CourseParticipantsPage> GetCourseParticipantsAsync(string userExternalId, string courseId, ParticipantStatusFilter statusFilter, int page, int pageSize, bool studentsOnly, bool includeEmail, string? groupId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new CourseParticipantsPage(
+                CourseId: courseId,
+                Page: page,
+                PageSize: pageSize,
+                StatusFilter: statusFilter,
+                StudentsOnly: studentsOnly,
+                IncludeEmail: includeEmail,
+                HasMore: false,
+                Participants: [
+                    new CourseParticipantSummary(
+                        UserId: "123",
+                        FullName: "Aluno Teste",
+                        Email: "aluno@teste.com",
+                        Suspended: false,
+                        FirstAccessAt: DateTimeOffset.UtcNow.AddDays(-30),
+                        LastAccessAt: DateTimeOffset.UtcNow.AddDays(-10),
+                        LastCourseAccessAt: DateTimeOffset.UtcNow.AddDays(-10),
+                        Roles: [],
+                        Groups: [])
+                ]));
+        }
+
+        public Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(string userExternalId, string courseId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<CourseGroupSummary>>([]);
+        }
+    }
+
+    private sealed class FakeGradebookGateway : IMoodleGradebookGateway
+    {
+        public Task<CourseGradebook> GetStudentGradebookAsync(string courseId, string studentId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new CourseGradebook(
+                CourseId: courseId,
+                StudentId: studentId,
+                Items: [
+                    new GradebookItem("1", "Course Total", "course", "", "", 50, "50,00", 0, 100, 50, "", "", 0, 0, "")
+                ]));
+        }
+    }
+
+    private sealed class FakeCompletionGateway : IMoodleCompletionGateway
+    {
+        public Task<CourseCompletionStatus> GetStudentCompletionAsync(string courseId, string studentId, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new CourseCompletionStatus(
+                Completed: false,
+                Timecompleted: 0,
+                Activities: [
+                    new ActivityCompletionStatus("1", "assign", "2", 0, 0, 1, null, false), // State = 0 (Incomplete)
+                    new ActivityCompletionStatus("2", "quiz", "3", 0, 0, 1, null, false)    // State = 0 (Incomplete)
+                ]));
+        }
+    }
+
+    private sealed class FakeCurrentUserIdGateway : IMoodleCurrentUserIdGateway
+    {
+        public Task<long> GetCurrentUserIdAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(12345L);
+        }
+    }
+}
