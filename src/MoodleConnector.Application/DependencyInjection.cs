@@ -20,8 +20,11 @@ public static class DependencyInjection
         services.AddSingleton<IGradingAnalysisService, StructuredGradingAnalysisService>();
         services.AddSingleton<ICriteriaGenerationService, HeuristicCriteriaGenerationService>();
         services.AddSingleton<IAssignmentContextSelectionService, HeuristicAssignmentContextSelectionService>();
-        services.AddScoped<IGradingBatchOrchestrator, LocalGradingBatchOrchestrator>();
+        services.AddSingleton<GradingBatchChannel>();
+        services.AddScoped<GradingItemProcessor>();
+        services.AddScoped<IGradingBatchOrchestrator, BackgroundGradingBatchOrchestrator>();
         services.AddScoped<IGradingContextBuilder, GradingContextBuilder>();
+        services.AddHostedService<GradingBatchWorkerService>();
 
         return services;
     }

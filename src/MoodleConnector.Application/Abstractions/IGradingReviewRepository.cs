@@ -32,5 +32,9 @@ public interface IGradingReviewRepository
         Guid gradingItemId,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
+        GradingBatchStatus status,
+        CancellationToken cancellationToken);
+
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

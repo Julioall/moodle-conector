@@ -1,7 +1,9 @@
 # TODO.md — Correção Assistida SENAI para AVA/Moodle via GPT Apps
 
 **Status atual:** MVP funcional avançado, validado em leitura real em dois cursos Moodle.
-**Data-base atualizada:** 2026-06-17
+**Data-base atualizada:** 2026-06-18
+**Versão Moodle confirmada:** 5
+**Token de escrita:** usa o token configurado no cadastro da plataforma (particular de cada cliente, não há WriteServiceToken separado).
 **Repositório:** `moodle-conector`
 **Objetivo:** transformar o GPT App/Conector do AVA em uma ferramenta de consulta, análise, rascunho, revisão e escrita assistida para apoiar professores/tutores na correção de atividades no Moodle, mantendo decisão humana, rastreabilidade, segurança institucional e confirmação explícita antes de qualquer escrita oficial.
 
@@ -145,12 +147,11 @@ Com base nos testes manuais relatados no Moodle Goiás/FIEG:
 
 Pendências Moodle reais:
 
-- [ ] Confirmar versão do Moodle.
+- [x] Confirmar versão do Moodle (v5 confirmada).
 - [ ] Confirmar endpoint confiável para rubricas/grading forms.
 - [ ] Confirmar escalas/conceitos usados nas atividades reais.
 - [ ] Confirmar permissões reais de professor/tutor por curso e atividade.
-- [ ] Confirmar se `WriteServiceToken` será usado ou se a escrita deve usar token do usuário autenticado.
-- [ ] Validar governança do `WriteServiceToken`, caso seja usado.
+- [x] Definir token de escrita: usa o token configurado no cadastro da plataforma, particular de cada cliente (não há `WriteServiceToken` separado).
 - [ ] Testar envio de nota/feedback em sandbox/homologação com feature flags habilitadas.
 
 ### 2.2 Problemas Detectados na Validação Real
@@ -190,10 +191,12 @@ Ainda pendente:
 - [ ] Validar capability real `mod/assign:grade` por professor/tutor no curso/atividade.
 - [x] Validar se o estudante pertence à turma no momento do commit.
 - [x] Bloquear sobrescrita de feedback existente quando houver leitura confiável do feedback atual.
-- [ ] Separar escopos OAuth por domínio em fase posterior.
 - [ ] Definir política de retenção de arquivos brutos e textos extraídos.
 - [ ] Redigir PII em logs técnicos.
 - [ ] Separar logs técnicos de dados pedagógicos sensíveis.
+
+> **Prompt de teste futuro — Segurança de Logs:**
+> "Revisar os logs de auditoria do lote X e confirmar que nenhum dado pessoal (nome, email, RA) aparece em logs técnicos. Validar que PII só aparece em dados pedagógicos acessíveis ao professor/tutor."
 
 ---
 
@@ -355,11 +358,14 @@ Estado atual:
 - [x] Testes de chunking representativo para texto muito grande.
 - [x] Testes de bloqueio por estudante não inscrito.
 - [x] Testes de bloqueio por feedback existente.
+- [x] Testes de BackgroundGradingBatchOrchestrator (enqueue-only, sem processamento inline).
+- [x] Testes de GradingBatchChannel (enqueue/dequeue, pending count).
 
 Última verificação conhecida:
 
 - [x] `dotnet.exe test MoodleConnector.slnx` passando com 211 testes em 2026-06-15.
 - [x] `dotnet.exe test tests/MoodleConnector.Application.Tests` passando com 243 testes em 2026-06-17.
+- [x] `dotnet.exe test tests/MoodleConnector.Application.Tests` passando com 253 testes em 2026-06-18 (inclui testes de fila/background).
 - [x] `dotnet.exe test tests/MoodleConnector.Application.Tests/MoodleConnector.Application.Tests.csproj --filter DocumentExtractionServiceTests` passando com 19 testes em 2026-06-15.
 
 ### 9.1 Validação Manual no Conector Moodle (2026-06-17)
@@ -392,13 +398,19 @@ Ainda pendente:
 - [ ] Retestar no conector no curso de homologação (`curso_67890`) e confirmar SAP 01/SAP 02 por atividade.
 - [ ] Confirmar rubricas/escalas reais no Moodle.
 - [ ] Confirmar permissões/capabilities reais de professor/tutor.
-- [ ] Definir definitivamente token de escrita: usuário autenticado ou `WriteServiceToken`.
+- [x] Definir definitivamente token de escrita: usa token da plataforma por cliente.
 - [ ] Rodar teste de escrita em sandbox/homologação com feature flags habilitadas.
 - [ ] Documentar política de responsabilidade docente e retenção.
 - [ ] Expor tool de diagnóstico de capabilities/permissões por curso e atividade.
 - [ ] Expor tool de leitura de rubricas/grading forms quando disponível.
 - [ ] Expor tool de leitura de escala/nota máxima da atividade.
 - [ ] Expor tool de diagnóstico de versão/serviços Moodle disponíveis.
+
+> **Prompt de teste futuro — Sandbox de Escrita:**
+> "No curso de homologação, criar um lote de correção assistida para a tarefa X, revisar o rascunho, gerar prévia e confirmar o lançamento com feature flags habilitadas. Verificar nota e feedback no Moodle."
+
+> **Prompt de teste futuro — Rubricas e Escalas:**
+> "No curso 29972, verificar se a tarefa Envio SAP 01 usa rubrica ou escala. Se usar, validar se os critérios extraídos correspondem à rubrica real. Se não usar, confirmar que a extração heurística é suficiente."
 
 ### P1 — robustez pedagógica e formatos
 
@@ -416,7 +428,7 @@ Ainda pendente:
 
 ### P2 — escala e operação
 
-- [ ] Implementar fila real com workers.
+- [x] Implementar fila real com workers (BackgroundService + Channel<T> in-process, com catch-up de lotes em Processing no startup).
 - [x] Cachear materiais comuns por atividade/seção.
 - [x] Adicionar retry/backoff/circuit breaker.
 - [ ] Adicionar métricas e dashboard operacional.
@@ -460,8 +472,8 @@ Ainda pendente:
 
 ### 11.3 Escala
 
-- [ ] Lote com 400 entregas não trava o chat.
-- [ ] Processamento ocorre por fila/workers reais.
+- [x] Lote com 400 entregas não trava o chat (processamento em background via GradingBatchWorkerService).
+- [x] Processamento ocorre por fila/workers reais (GradingBatchChannel + GradingBatchWorkerService).
 - [x] Materiais comuns são cacheados dentro do lote.
 - [ ] Professor/tutor consegue revisar por páginas/filtros.
 - [x] Falhas parciais não bloqueiam todo o lote.

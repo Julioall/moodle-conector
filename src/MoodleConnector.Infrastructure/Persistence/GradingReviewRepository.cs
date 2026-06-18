@@ -79,6 +79,16 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .ToArrayAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
+        GradingBatchStatus status,
+        CancellationToken cancellationToken)
+    {
+        return await dbContext.GradingBatches
+            .Where(batch => batch.Status == status)
+            .OrderBy(batch => batch.CreatedAt)
+            .ToArrayAsync(cancellationToken);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return dbContext.SaveChangesAsync(cancellationToken);

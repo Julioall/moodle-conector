@@ -751,7 +751,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 .ToArray());
         }
 
-        public Task SaveChangesAsync(CancellationToken cancellationToken)
+        public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
+            GradingBatchStatus status, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());        public Task SaveChangesAsync(CancellationToken cancellationToken)
         {
             SaveChangesCount++;
             return Task.CompletedTask;
@@ -803,7 +805,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public Task<int> CountByBatchJobIdAsync(Guid batchJobId, CancellationToken cancellationToken)
             => Task.FromResult(0);
 
-        public Task SaveChangesAsync(CancellationToken cancellationToken)
+        public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
+            GradingBatchStatus status, CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());        public Task SaveChangesAsync(CancellationToken cancellationToken)
             => Task.CompletedTask;
     }
 
