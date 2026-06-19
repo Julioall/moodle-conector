@@ -2,14 +2,31 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Infrastructure.Configuration;
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.DocumentLayoutAnalysis.TextExtractor;
 
 namespace MoodleConnector.Infrastructure.DocumentExtraction;
 
 public sealed partial class DocumentExtractionService : IDocumentExtractionService
 {
+    private readonly IOcrService? _ocrService;
+    private readonly OcrOptions _ocrOptions;
+    private readonly ILogger<DocumentExtractionService>? _logger;
+
+    public DocumentExtractionService(
+        IOcrService? ocrService = null,
+        IOptions<OcrOptions>? ocrOptions = null,
+        ILogger<DocumentExtractionService>? logger = null)
+    {
+        _ocrService = ocrService;
+        _ocrOptions = ocrOptions?.Value ?? new OcrOptions();
+        _logger = logger;
+    }
     private const int MaxExtractedChars = 120_000;
     private const int MaxRepresentativeChunks = 6;
     private const int RepresentativeChunkChars = 18_000;
@@ -46,7 +63,7 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
         "application/rtf"
     };
 
-    public Task<DocumentExtractionResult> ExtractAsync(
+    public async Task<DocumentExtractionResult> ExtractAsync(
         string filename,
         string mimeType,
         byte[] content,
@@ -54,7 +71,7 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
     {
         if (content is null || content.Length == 0)
         {
-            return Task.FromResult(new DocumentExtractionResult(
+            return new DocumentExtractionResult(
                 filename,
                 mimeType,
                 ExtractionStatus.Empty,
@@ -62,37 +79,37 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
                 WordCount: 0,
                 CharCount: 0,
                 Truncated: false,
-                ErrorMessage: "O arquivo esta vazio."));
+                ErrorMessage: "O arquivo esta vazio.");
         }
 
         if (IsDocx(filename, mimeType))
         {
-            return Task.FromResult(ExtractCompressedXml(filename, mimeType, content, ExtractDocxText, "DOCX"));
+            return ExtractCompressedXml(filename, mimeType, content, ExtractDocxText, "DOCX");
         }
 
         if (IsPptx(filename, mimeType))
         {
-            return Task.FromResult(ExtractCompressedXml(filename, mimeType, content, ExtractPptxText, "PPTX"));
+            return ExtractCompressedXml(filename, mimeType, content, ExtractPptxText, "PPTX");
         }
 
         if (IsXlsx(filename, mimeType))
         {
-            return Task.FromResult(ExtractCompressedXml(filename, mimeType, content, ExtractXlsxText, "XLSX"));
+            return ExtractCompressedXml(filename, mimeType, content, ExtractXlsxText, "XLSX");
         }
 
         if (IsOpenDocument(filename, mimeType))
         {
-            return Task.FromResult(ExtractCompressedXml(filename, mimeType, content, ExtractOpenDocumentText, "OpenDocument"));
+            return ExtractCompressedXml(filename, mimeType, content, ExtractOpenDocumentText, "OpenDocument");
         }
 
         if (IsZip(filename, mimeType, content))
         {
-            return Task.FromResult(ExtractZip(filename, mimeType, content));
+            return ExtractZip(filename, mimeType, content);
         }
 
         if (IsRtf(filename, mimeType))
         {
-            return Task.FromResult(new DocumentExtractionResult(
+            return new DocumentExtractionResult(
                 filename,
                 mimeType,
                 ExtractionStatus.UnsupportedFormat,
@@ -100,25 +117,17 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
                 WordCount: 0,
                 CharCount: 0,
                 Truncated: false,
-                ErrorMessage: "O formato RTF nao e suportado para extracao de texto automatica. Por favor, utilize PDF ou DOCX."));
+                ErrorMessage: "O formato RTF nao e suportado para extracao de texto automatica. Por favor, utilize PDF ou DOCX.");
         }
 
         if (IsImage(filename, mimeType))
         {
-            return Task.FromResult(new DocumentExtractionResult(
-                filename,
-                mimeType,
-                ExtractionStatus.UnsupportedFormat,
-                ExtractedText: null,
-                WordCount: 0,
-                CharCount: 0,
-                Truncated: false,
-                ErrorMessage: "O documento esta em formato de imagem (sem texto digital). A correcao assistida necessita do enunciado/texto em formato digital (PDF ou DOCX) e nao suporta OCR por enquanto."));
+            return await ExtractImageViaOcrAsync(filename, mimeType, content, cancellationToken);
         }
 
         if (BinaryMimeTypes.Contains(mimeType))
         {
-            return Task.FromResult(new DocumentExtractionResult(
+            return new DocumentExtractionResult(
                 filename,
                 mimeType,
                 ExtractionStatus.UnsupportedFormat,
@@ -126,17 +135,17 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
                 WordCount: 0,
                 CharCount: 0,
                 Truncated: false,
-                ErrorMessage: $"Extracao de texto para o formato '{mimeType}' nao esta disponivel nesta versao. Requer biblioteca de conversao externa."));
+                ErrorMessage: $"Extracao de texto para o formato '{mimeType}' nao esta disponivel nesta versao. Requer biblioteca de conversao externa.");
         }
 
         if (IsPdf(filename, mimeType, content))
         {
-            return Task.FromResult(ExtractPdf(filename, mimeType, content));
+            return await ExtractPdfAsync(filename, mimeType, content, cancellationToken);
         }
 
         if (!SupportedMimeTypes.Contains(mimeType))
         {
-            return Task.FromResult(new DocumentExtractionResult(
+            return new DocumentExtractionResult(
                 filename,
                 mimeType,
                 ExtractionStatus.UnsupportedFormat,
@@ -144,13 +153,81 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
                 WordCount: 0,
                 CharCount: 0,
                 Truncated: false,
-                ErrorMessage: $"Formato nao suportado para extracao de texto: '{mimeType}'."));
+                ErrorMessage: $"Formato nao suportado para extracao de texto: '{mimeType}'.");
         }
 
-        return Task.FromResult(ExtractTextDocument(filename, mimeType, content));
+        return ExtractTextDocument(filename, mimeType, content);
     }
 
-    private static DocumentExtractionResult ExtractPdf(
+    private async Task<DocumentExtractionResult> ExtractPdfAsync(
+        string filename,
+        string mimeType,
+        byte[] content,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var document = PdfDocument.Open(content);
+            var builder = new StringBuilder();
+            foreach (var page in document.GetPages())
+            {
+                var pageText = ContentOrderTextExtractor.GetText(page);
+                if (!string.IsNullOrWhiteSpace(pageText))
+                {
+                    builder.AppendLine(pageText);
+                }
+            }
+
+            var text = MultiSpaceRegex().Replace(builder.ToString(), " ").Trim();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return BuildSucceededResult(filename, mimeType, text);
+            }
+
+            // PDF escaneado — tentar OCR nas imagens embutidas
+            if (_ocrService is not null && _ocrOptions.Enabled)
+            {
+                _logger?.LogDebug(
+                    "PDF '{Filename}' sem texto nativo. Tentando OCR nas imagens embutidas.",
+                    filename);
+
+                var ocrText = await ExtractPdfImagesViaOcrAsync(document, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(ocrText))
+                {
+                    return BuildOcrResult(filename, mimeType, ocrText,
+                        "Texto extraido via OCR de PDF escaneado.");
+                }
+            }
+
+            return new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.ScannedPdf,
+                ExtractedText: null,
+                WordCount: 0,
+                CharCount: 0,
+                Truncated: false,
+                ErrorMessage: "O PDF nao possui texto extraivel. Classificado como PDF escaneado ou composto apenas por imagens; requer OCR antes da correcao assistida.");
+        }
+        catch (Exception ex)
+        {
+            return new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.Failed,
+                ExtractedText: null,
+                WordCount: 0,
+                CharCount: 0,
+                Truncated: false,
+                ErrorMessage: $"Falha ao extrair texto do PDF: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Extracao nativa de texto de PDF (sem fallback OCR).
+    /// Usada para PDFs dentro de arquivos ZIP onde o processamento e sincrono.
+    /// </summary>
+    private static DocumentExtractionResult ExtractPdfNative(
         string filename,
         string mimeType,
         byte[] content)
@@ -196,6 +273,141 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
                 Truncated: false,
                 ErrorMessage: $"Falha ao extrair texto do PDF: {ex.Message}");
         }
+    }
+
+    private async Task<DocumentExtractionResult> ExtractImageViaOcrAsync(
+        string filename,
+        string mimeType,
+        byte[] content,
+        CancellationToken cancellationToken)
+    {
+        if (_ocrService is null || !_ocrOptions.Enabled)
+        {
+            return new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.UnsupportedFormat,
+                ExtractedText: null,
+                WordCount: 0,
+                CharCount: 0,
+                Truncated: false,
+                ErrorMessage: "O documento esta em formato de imagem. O servico de OCR nao esta disponivel ou esta desabilitado.");
+        }
+
+        _logger?.LogDebug("Processando imagem '{Filename}' via OCR.", filename);
+
+        var ocrResult = await _ocrService.RecognizeAsync(content, cancellationToken);
+        if (!ocrResult.Success || string.IsNullOrWhiteSpace(ocrResult.ExtractedText))
+        {
+            var errorMsg = ocrResult.ErrorMessage
+                ?? "Nao foi possivel reconhecer texto na imagem via OCR.";
+
+            return new DocumentExtractionResult(
+                filename,
+                mimeType,
+                ExtractionStatus.UnsupportedFormat,
+                ExtractedText: null,
+                WordCount: 0,
+                CharCount: 0,
+                Truncated: false,
+                ErrorMessage: errorMsg);
+        }
+
+        return BuildOcrResult(filename, mimeType, ocrResult.ExtractedText,
+            $"Texto extraido via OCR de imagem. Confianca media: {ocrResult.MeanConfidence:F0}%.");
+    }
+
+    private async Task<string?> ExtractPdfImagesViaOcrAsync(
+        PdfDocument document,
+        CancellationToken cancellationToken)
+    {
+        var builder = new StringBuilder();
+        var pageCount = 0;
+
+        foreach (var page in document.GetPages())
+        {
+            if (++pageCount > _ocrOptions.MaxPdfPagesForOcr)
+            {
+                _logger?.LogDebug(
+                    "Limite de {MaxPages} paginas OCR atingido. Paginas restantes ignoradas.",
+                    _ocrOptions.MaxPdfPagesForOcr);
+                break;
+            }
+
+            IReadOnlyList<IPdfImage> images;
+            try
+            {
+                images = page.GetImages().ToArray();
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var image in images)
+            {
+                byte[] imageBytes;
+                try
+                {
+                    if (!image.TryGetPng(out var pngBytes) || pngBytes is null || pngBytes.Length == 0)
+                    {
+                        imageBytes = image.RawBytes.ToArray();
+                        if (imageBytes.Length == 0)
+                        {
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        imageBytes = pngBytes;
+                    }
+                }
+                catch
+                {
+                    continue;
+                }
+
+                var ocrResult = await _ocrService!.RecognizeAsync(imageBytes, cancellationToken);
+                if (ocrResult.Success && !string.IsNullOrWhiteSpace(ocrResult.ExtractedText))
+                {
+                    builder.AppendLine(ocrResult.ExtractedText);
+                }
+            }
+        }
+
+        var text = MultiSpaceRegex().Replace(builder.ToString(), " ").Trim();
+        return string.IsNullOrWhiteSpace(text) ? null : text;
+    }
+
+    private static DocumentExtractionResult BuildOcrResult(
+        string filename,
+        string mimeType,
+        string text,
+        string? ocrNote = null)
+    {
+        var truncated = text.Length > MaxExtractedChars;
+        var chunks = BuildRepresentativeChunks(text, truncated);
+        var extracted = truncated
+            ? BuildChunkedText(chunks, text.Length)
+            : text;
+
+        if (extracted.Length > MaxExtractedChars)
+        {
+            extracted = extracted[..MaxExtractedChars];
+        }
+
+        var warning = ocrNote ?? "Texto extraido via OCR. Pode conter imprecisoes.";
+
+        return new DocumentExtractionResult(
+            filename,
+            mimeType,
+            ExtractionStatus.OcrExtracted,
+            extracted,
+            CountWords(extracted),
+            text.Length,
+            truncated,
+            warning,
+            chunks);
     }
 
     private static DocumentExtractionResult ExtractCompressedXml(
@@ -362,7 +574,7 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
 
         if (IsPdf(entry.FullName, mimeType, content))
         {
-            return ExtractPdf(entry.FullName, mimeType, content);
+            return ExtractPdfNative(entry.FullName, mimeType, content);
         }
 
         if (SupportedMimeTypes.Contains(mimeType))
@@ -522,7 +734,10 @@ public sealed partial class DocumentExtractionService : IDocumentExtractionServi
         return mimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) || 
                filename.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
                filename.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-               filename.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase);
+               filename.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+               filename.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
+               filename.EndsWith(".tiff", StringComparison.OrdinalIgnoreCase) ||
+               filename.EndsWith(".tif", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

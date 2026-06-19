@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Infrastructure.Configuration;
 using MoodleConnector.Infrastructure.DocumentExtraction;
 using Polly;
 using Polly.Extensions.Http;
@@ -139,6 +140,12 @@ public static class DependencyInjection
             .AddMoodleResilience(moodleApiResilience);
 
         services.AddSingleton<IDocumentExtractionService, DocumentExtractionService>();
+
+        services
+            .AddOptions<OcrOptions>()
+            .Bind(configuration.GetSection(OcrOptions.SectionName));
+
+        services.AddSingleton<IOcrService, TesseractOcrService>();
 
         services
             .AddHttpClient<IMoodleAccessTokenProvider, MoodleAccessTokenProvider>(ConfigureMoodleApiClient)

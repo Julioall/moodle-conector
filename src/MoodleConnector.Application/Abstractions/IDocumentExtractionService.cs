@@ -36,6 +36,7 @@ public static class ExtractionStatus
     public const string Succeeded = "succeeded";
     public const string UnsupportedFormat = "unsupported_format";
     public const string ScannedPdf = "scanned_pdf";
+    public const string OcrExtracted = "ocr_extracted";
     public const string FileTooLarge = "file_too_large";
     public const string Empty = "empty";
     public const string Failed = "failed";
