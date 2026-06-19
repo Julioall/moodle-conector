@@ -1318,4 +1318,117 @@ public sealed class MoodleGradingTools(
                 return false;
         }
     }
+
+    // ============================================================
+    // Tool: preparar_correcao_entrega
+    // ============================================================
+
+    [McpServerTool(
+        Name = "preparar_correcao_entrega",
+        Title = "Preparar Correcao Entrega",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<GradingContextForChatResult>))]
+    [Description("Retorna o contexto completo de uma entrega para correcao: enunciado da atividade, texto da entrega do aluno, nota maxima e instrucoes. Use este contexto para gerar feedback e nota sugerida diretamente no chat. Nao escreve no Moodle.")]
+    public async Task<CallToolResult> PrepararCorrecaoEntregaAsync(
+        [Description("Identificador do item retornado pelo status do lote.")]
+        Guid gradingItemId,
+        [Description("Identificador opcional do lote para validar vinculo.")]
+        Guid? batchJobId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (gradingItemId == Guid.Empty)
+        {
+            return Error<GradingContextForChatResult>("Informe um identificador de item valido.");
+        }
+
+        GradingContextForChatResult data;
+        try
+        {
+            data = await mediator.Send(
+                new PrepareGradingContextForChatQuery(gradingItemId, batchJobId),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<GradingContextForChatResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Error<GradingContextForChatResult>(ex.Message);
+        }
+        catch
+        {
+            return Error<GradingContextForChatResult>("Nao foi possivel preparar o contexto de correcao neste momento.");
+        }
+
+        var narration = BuildPrepareGradingNarration(data);
+        var response = new ToolResponse<GradingContextForChatResult>(
+            "ok",
+            data,
+            data.Warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = narration }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private static string BuildPrepareGradingNarration(GradingContextForChatResult data)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Contexto para Correcao — {data.AssignmentName ?? $"Tarefa {data.AssignmentId}"}");
+        sb.AppendLine();
+        sb.AppendLine($"**Nota maxima:** {data.MaxGrade} pontos");
+        sb.AppendLine($"**Aluno (ID):** {data.StudentId}");
+        sb.AppendLine($"**Item ID:** {data.GradingItemId}");
+        sb.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(data.AssignmentStatement))
+        {
+            var preview = data.AssignmentStatement.Length > 500
+                ? data.AssignmentStatement[..500] + "..."
+                : data.AssignmentStatement;
+            sb.AppendLine("### Enunciado da Atividade (resumo)");
+            sb.AppendLine(preview);
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(data.StudentSubmission))
+        {
+            var preview = data.StudentSubmission.Length > 500
+                ? data.StudentSubmission[..500] + "..."
+                : data.StudentSubmission;
+            sb.AppendLine("### Entrega do Aluno (resumo)");
+            sb.AppendLine(preview);
+            sb.AppendLine();
+        }
+        else
+        {
+            sb.AppendLine("### Entrega do Aluno");
+            sb.AppendLine("*Texto nao disponivel — verificar anexos.*");
+            sb.AppendLine();
+        }
+
+        if (data.SuggestedGrade != null)
+        {
+            sb.AppendLine($"**Nota sugerida pelo motor heuristico:** {data.SuggestedGrade} (confianca: {data.Confidence:P0})");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine(data.Instructions);
+
+        return sb.ToString();
+    }
 }

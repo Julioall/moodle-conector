@@ -40,6 +40,50 @@ public sealed partial class GradingContextBuilder(
         var attachedFiles = new List<GradingFileInfo>();
         IReadOnlyList<GradingArtifact> artifacts = [];
 
+        // ============================================================
+        // PASSO 1: Buscar MaxGrade PRIMEIRO via API Moodle.
+        // A API mod_assign_get_assignments retorna o campo 'grade'
+        // configurado pelo professor na atividade — é a fonte autoritativa.
+        // Deve ser chamada ANTES de qualquer regex/heurística para evitar
+        // que 'Valor: 16 pontos' do PDF sobrescreva os 49 reais da API.
+        // ============================================================
+        {
+            var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken);
+            if (batch != null)
+            {
+                try
+                {
+                    var settings = await settingsGateway.GetAssignmentSettingsAsync(
+                        batch.CreatedBySubject,
+                        item.CourseId.ToString(CultureInfo.InvariantCulture),
+                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                        cancellationToken);
+
+                    if (settings != null && settings.MaxGrade > 0)
+                    {
+                        maxGrade = settings.MaxGrade;
+                        logger?.LogInformation(
+                            "MaxGrade obtida via API Moodle (fonte autoritativa): {MaxGrade} para assignment {AssignmentId}",
+                            maxGrade, item.AssignmentId);
+                    }
+                    else if (settings != null)
+                    {
+                        logger?.LogWarning(
+                            "API Moodle retornou MaxGrade={MaxGrade} para assignment {AssignmentId}. Pode ser escala (negativo) ou nao configurada.",
+                            settings.MaxGrade, item.AssignmentId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger?.LogWarning(
+                        ex,
+                        "Falha ao buscar MaxGrade via API Moodle para assignment {AssignmentId} do curso {CourseId}. Tentando fallback por rubrica/regex.",
+                        item.AssignmentId,
+                        item.CourseId);
+                }
+            }
+        }
+
         if (options.IncludeSubmissionFiles || options.IncludeCourseMaterials)
         {
             artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
@@ -88,7 +132,17 @@ public sealed partial class GradingContextBuilder(
             if (rubricArtifacts.Length > 0)
             {
                 rubricDescription = Truncate(rubricArtifacts[0].ExtractedTextRef!, maxChars);
-                maxGrade ??= ExtractMaxGrade(rubricDescription);
+                // Só usar regex na rubrica se a API Moodle não retornou MaxGrade
+                if (maxGrade == null)
+                {
+                    maxGrade = ExtractMaxGrade(rubricDescription);
+                    if (maxGrade != null)
+                    {
+                        logger?.LogDebug(
+                            "MaxGrade extraida via regex de rubrica: {MaxGrade} para assignment {AssignmentId}",
+                            maxGrade, item.AssignmentId);
+                    }
+                }
             }
 
             // 2. Selecionar o melhor artefato de contexto como enunciado da atividade.
@@ -136,47 +190,8 @@ public sealed partial class GradingContextBuilder(
             }
         }
 
-        // Buscar nota máxima oficial via Moodle API (mod_assign_get_assignments)
-        // PRIORIDADE sobre regex — a API é a fonte autoritativa.
-        if (maxGrade == null)
-        {
-            var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken);
-            if (batch != null)
-            {
-                try
-                {
-                    var settings = await settingsGateway.GetAssignmentSettingsAsync(
-                        batch.CreatedBySubject,
-                        item.CourseId.ToString(CultureInfo.InvariantCulture),
-                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                        cancellationToken);
-                    
-                    if (settings != null && settings.MaxGrade > 0)
-                    {
-                        maxGrade = settings.MaxGrade;
-                        logger?.LogDebug(
-                            "MaxGrade obtida via API Moodle: {MaxGrade} para assignment {AssignmentId}",
-                            maxGrade, item.AssignmentId);
-                    }
-                    else if (settings != null)
-                    {
-                        logger?.LogWarning(
-                            "API Moodle retornou MaxGrade={MaxGrade} para assignment {AssignmentId}. Pode ser escala (negativo) ou nao configurada.",
-                            settings.MaxGrade, item.AssignmentId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger?.LogWarning(
-                        ex,
-                        "Falha ao buscar MaxGrade via settingsGateway para assignment {AssignmentId} do curso {CourseId}. Usando fallback por regex.",
-                        item.AssignmentId,
-                        item.CourseId);
-                }
-            }
-        }
-
-        // Fallback: tentar extrair nota máxima do texto via regex se API não retornou
+        // Fallback regex: tentar extrair nota máxima do texto do enunciado
+        // SOMENTE quando a API Moodle e a rubrica não retornaram MaxGrade.
         if (maxGrade == null && !string.IsNullOrWhiteSpace(assignmentStatement))
         {
             maxGrade = ExtractMaxGrade(assignmentStatement);

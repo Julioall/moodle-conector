@@ -1429,3 +1429,140 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
             "Lote cancelado com sucesso.");
     }
 }
+
+// ============================================================
+// Query para preparar contexto de correção para o LLM do chat
+// ============================================================
+
+public sealed record PrepareGradingContextForChatQuery(
+    Guid GradingItemId,
+    Guid? BatchJobId = null) : IRequest<GradingContextForChatResult>;
+
+public sealed record GradingContextForChatResult(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("courseId")] string CourseId,
+    [property: JsonPropertyName("assignmentId")] string AssignmentId,
+    [property: JsonPropertyName("assignmentName")] string? AssignmentName,
+    [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("submissionId")] string? SubmissionId,
+    [property: JsonPropertyName("studentId")] string StudentId,
+    [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
+    [property: JsonPropertyName("studentSubmission")] string? StudentSubmission,
+    [property: JsonPropertyName("extractedCriteria")] string? ExtractedCriteria,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("draftFeedback")] string? DraftFeedback,
+    [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
+    [property: JsonPropertyName("confidence")] decimal? Confidence,
+    [property: JsonPropertyName("instructions")] string Instructions,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+
+public sealed class PrepareGradingContextForChatQueryHandler(
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser,
+    IMoodleAssignmentSettingsGateway settingsGateway)
+    : IRequestHandler<PrepareGradingContextForChatQuery, GradingContextForChatResult>
+{
+    public async Task<GradingContextForChatResult> Handle(
+        PrepareGradingContextForChatQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (request.GradingItemId == Guid.Empty)
+        {
+            throw new ArgumentException("O item de correcao e obrigatorio.", nameof(request.GradingItemId));
+        }
+
+        var item = await repository.GetItemAsync(request.GradingItemId, cancellationToken)
+            ?? throw new InvalidOperationException("Item de correcao nao encontrado.");
+        var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken)
+            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
+
+        if (request.BatchJobId is Guid batchJobId && batchJobId != Guid.Empty && item.BatchId != batchJobId)
+        {
+            throw new InvalidOperationException("O item informado nao pertence ao lote solicitado.");
+        }
+
+        var warnings = new List<string>();
+        var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+
+        // Texto da entrega do aluno
+        var submissionArtifact = artifacts
+            .Where(a => a.ArtifactType == "submission_file" &&
+                        a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                        !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
+            .FirstOrDefault();
+        var studentSubmission = submissionArtifact?.ExtractedTextRef;
+        if (string.IsNullOrWhiteSpace(studentSubmission))
+        {
+            warnings.Add("Texto da entrega do aluno nao disponivel. Verifique se os anexos foram extraidos.");
+        }
+
+        // Texto do enunciado da atividade
+        var contextArtifact = artifacts
+            .Where(a => a.ArtifactType == "assignment_context" &&
+                        a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                        !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
+            .OrderByDescending(a => a.ExtractedTextRef?.Length ?? 0)
+            .FirstOrDefault();
+        var assignmentStatement = contextArtifact?.ExtractedTextRef;
+        var assignmentName = contextArtifact?.Filename;
+
+        // MaxGrade via API Moodle
+        decimal maxGrade = 100m;
+        try
+        {
+            var settings = await settingsGateway.GetAssignmentSettingsAsync(
+                batch.CreatedBySubject,
+                item.CourseId.ToString(CultureInfo.InvariantCulture),
+                item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                cancellationToken);
+            if (settings != null && settings.MaxGrade > 0)
+            {
+                maxGrade = settings.MaxGrade;
+            }
+            else
+            {
+                warnings.Add("Nota maxima nao encontrada via API Moodle. Usando padrao 100.");
+            }
+        }
+        catch
+        {
+            warnings.Add("Falha ao buscar nota maxima via API Moodle. Usando padrao 100.");
+        }
+
+        // Critérios extraídos (se existirem do processamento anterior)
+        var evidence = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
+        var extractedCriteria = evidence.Count > 0
+            ? string.Join("\n", evidence.Select(e => $"- {e.CriterionText}"))
+            : null;
+
+        var instructions = $"Voce e um tutor educacional. Analise a entrega do aluno comparando com o enunciado da atividade. " +
+            $"A nota maxima desta atividade e {maxGrade} pontos. " +
+            $"Gere um feedback pedagogico em linguagem natural (paragrafos, nao listas) que: " +
+            $"1) Reconheca os pontos fortes citando elementos concretos da entrega; " +
+            $"2) Indique melhorias especificas quando houver lacunas; " +
+            $"3) Sugira uma nota de 0 a {maxGrade}. " +
+            $"O feedback deve ser adequado para colar diretamente no Moodle. " +
+            $"Apos gerar, apresente ao tutor para revisao antes de salvar.";
+
+        return new GradingContextForChatResult(
+            item.Id,
+            item.BatchId,
+            item.CourseId.ToString(CultureInfo.InvariantCulture),
+            item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+            assignmentName,
+            maxGrade,
+            item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
+            item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
+            assignmentStatement,
+            studentSubmission,
+            extractedCriteria,
+            item.Status.ToString(),
+            item.DraftFeedback,
+            item.SuggestedGrade,
+            item.Confidence,
+            instructions,
+            warnings);
+    }
+}
