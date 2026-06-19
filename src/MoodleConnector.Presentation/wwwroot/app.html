@@ -4,123 +4,341 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Moodle Connector — Dashboard</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="description" content="Gerencie suas conexões Moodle e chaves de API do Moodle Connector." />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    .api-key-box { font-family: 'Courier New', monospace; word-break: break-all; }
-    input { background: #2a2521; color: #fff7ed; }
-    input::placeholder { color: #8c837a; }
-    input:focus { outline: none; box-shadow: 0 0 0 3px rgba(248,96,0,0.22); }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary: #09090b;
+      --bg-surface: #18181b;
+      --bg-elevated: #27272a;
+      --bg-input: #1e1e21;
+      --border-subtle: rgba(63,63,70,0.6);
+      --border-focus: rgba(249,115,22,0.5);
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #f97316;
+      --accent-hover: #ea580c;
+      --accent-glow: rgba(249,115,22,0.15);
+      --success: #22c55e;
+      --info: #3b82f6;
+      --warning: #eab308;
+      --danger: #ef4444;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      line-height: 1.6;
+    }
+    a { text-decoration: none; color: inherit; }
+
+    /* ── Layout ────────────────────────────────────── */
+    .shell { max-width: 760px; margin: 0 auto; padding: 0 20px; }
+
+    /* ── Header ────────────────────────────────────── */
+    .header {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(9,9,11,0.8);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .header-inner {
+      max-width: 760px; margin: 0 auto; padding: 0 20px;
+      height: 64px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .header-brand { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+    .header-brand img { width: 32px; height: 32px; object-fit: contain; }
+    .header-brand-text { font-weight: 800; font-size: 16px; letter-spacing: -0.02em; }
+    .header-brand-text span { color: var(--accent); }
+    .header-right { display: flex; align-items: center; gap: 16px; }
+    .header-greeting { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+    .btn-logout {
+      padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(239,68,68,0.2);
+      background: rgba(239,68,68,0.06); color: #fca5a5;
+      font-family: inherit; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn-logout:hover { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); }
+
+    /* ── Main Content ─────────────────────────────── */
+    .main { padding: 32px 0 64px; }
+    .section { margin-bottom: 28px; }
+    .card {
+      background: var(--bg-surface); border: 1px solid var(--border-subtle);
+      border-radius: 16px; overflow: hidden;
+    }
+    .card-header {
+      padding: 20px 24px; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .card-title { font-size: 15px; font-weight: 700; }
+    .card-body { padding: 24px; }
+
+    /* ── API Key ───────────────────────────────────── */
+    .api-key-wrapper { position: relative; }
+    .api-key-display {
+      width: 100%; padding: 14px 80px 14px 16px;
+      background: var(--bg-input); border: 1px solid var(--border-subtle);
+      border-radius: 10px; font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+      font-size: 13px; color: var(--text-primary); word-break: break-all;
+      user-select: all; line-height: 1.5;
+    }
+    .btn-copy {
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated); color: var(--accent);
+      font-family: inherit; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn-copy:hover { background: rgba(249,115,22,0.1); border-color: var(--accent); }
+    .api-key-hint {
+      margin-top: 12px; padding: 12px 16px; border-radius: 10px;
+      background: rgba(234,179,8,0.06); border: 1px solid rgba(234,179,8,0.15);
+      font-size: 12px; color: #fde68a; display: flex; align-items: flex-start; gap: 8px;
+    }
+    .api-key-hint code {
+      background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;
+      font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+    }
+
+    /* ── Connection Cards ──────────────────────────── */
+    .connections-empty {
+      text-align: center; padding: 40px 20px;
+      color: var(--text-muted); font-size: 14px;
+    }
+    .connections-empty svg { margin: 0 auto 12px; opacity: 0.3; }
+    .conn-item {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+      transition: background 0.15s;
+    }
+    .conn-item:last-child { border-bottom: none; }
+    .conn-item:hover { background: rgba(249,115,22,0.02); }
+    .conn-info { flex: 1; min-width: 0; }
+    .conn-name-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+    .conn-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .conn-url { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .badge {
+      display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 6px;
+      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge-default { background: rgba(249,115,22,0.1); color: var(--accent); border: 1px solid rgba(249,115,22,0.2); }
+    .badge-write { background: rgba(59,130,246,0.1); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+    .badge-read { background: rgba(113,113,122,0.1); color: var(--text-muted); border: 1px solid rgba(113,113,122,0.2); }
+    .conn-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .btn-icon {
+      width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated); color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn-icon:hover { color: var(--accent); border-color: rgba(249,115,22,0.3); background: rgba(249,115,22,0.05); }
+    .btn-icon.danger:hover { color: var(--danger); border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.05); }
+
+    /* ── Add Moodle Button ─────────────────────────── */
+    .btn-add {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 8px; border: none;
+      background: var(--accent); color: #000;
+      font-family: inherit; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .btn-add:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+    /* ── Modal ─────────────────────────────────────── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px); display: none;
+      align-items: center; justify-content: center;
+      padding: 24px; z-index: 100;
+    }
+    .modal-overlay.visible { display: flex; }
+    .modal {
+      background: var(--bg-surface); border: 1px solid var(--border-subtle);
+      border-radius: 20px; box-shadow: 0 32px 64px rgba(0,0,0,0.5);
+      width: 100%; max-width: 440px; overflow: hidden; position: relative;
+      animation: modalIn 0.2s ease-out;
+    }
+    @keyframes modalIn {
+      from { opacity: 0; transform: scale(0.95) translateY(8px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .modal-header {
+      padding: 20px 24px; border-bottom: 1px solid var(--border-subtle);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-title { font-size: 16px; font-weight: 700; }
+    .modal-close {
+      width: 32px; height: 32px; border-radius: 8px; border: none;
+      background: var(--bg-elevated); color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .modal-close:hover { color: var(--text-primary); }
+    .modal-body { padding: 24px; }
+    .form-group { margin-bottom: 18px; }
+    .form-label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+    }
+    .form-input {
+      width: 100%; padding: 12px 16px; border-radius: 10px;
+      background: var(--bg-input); border: 1px solid var(--border-subtle);
+      color: var(--text-primary); font-family: inherit; font-size: 14px;
+      transition: all 0.2s; outline: none;
+    }
+    .form-input::placeholder { color: var(--text-muted); }
+    .form-input:focus { border-color: var(--border-focus); box-shadow: 0 0 0 3px rgba(249,115,22,0.1); }
+    .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; display: none; }
+    .form-hint.visible { display: block; }
+    .form-checkbox {
+      display: flex; align-items: center; gap: 10px; padding: 4px 0;
+      cursor: pointer; font-size: 13px; font-weight: 500;
+    }
+    .form-checkbox input[type="checkbox"] {
+      width: 18px; height: 18px; accent-color: var(--accent);
+      border-radius: 4px; cursor: pointer;
+    }
+    .form-error {
+      padding: 12px 16px; border-radius: 10px; font-size: 13px;
+      background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2);
+      color: #fca5a5; margin-bottom: 18px; display: none;
+    }
+    .form-error.visible { display: block; }
+    .btn-submit {
+      width: 100%; padding: 14px; border: none; border-radius: 10px;
+      background: var(--accent); color: #000; font-family: inherit;
+      font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .btn-submit:hover { background: var(--accent-hover); }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Animations ────────────────────────────────── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.4s ease-out both; }
+    .spinner {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+    }
   </style>
 </head>
-<body class="min-h-screen bg-[#14110e] flex flex-col items-center p-4">
+<body>
 
   <!-- Header -->
-  <header class="w-full max-w-3xl flex items-center justify-between py-6">
-    <div class="flex items-center gap-3 cursor-pointer" onclick="window.location.href='/'">
-      <img src="/logo.png" alt="Moodle Connector" class="w-12 h-12 object-contain" />
-      <div>
-        <h1 class="text-xl font-bold text-[#f86000] tracking-tight leading-none">Moodle</h1>
-        <h1 class="text-xl font-bold text-white tracking-tight leading-none">Connector</h1>
+  <header class="header">
+    <div class="header-inner">
+      <div class="header-brand" onclick="window.location.href='/'">
+        <img src="/logo.png" alt="Moodle Connector" />
+        <div class="header-brand-text"><span>Moodle</span>Connector</div>
       </div>
-    </div>
-    <div class="flex items-center gap-4">
-      <span id="user-greeting" class="text-sm font-medium text-stone-300">Olá!</span>
-      <button onclick="handleLogout()" class="text-xs bg-red-950 hover:bg-red-900 text-red-300 border border-red-800 font-semibold px-3 py-1.5 rounded-md transition-all">Sair</button>
+      <div class="header-right">
+        <span id="user-greeting" class="header-greeting">Olá!</span>
+        <button onclick="handleLogout()" class="btn-logout">Sair</button>
+      </div>
     </div>
   </header>
 
-  <main class="w-full max-w-3xl space-y-6">
+  <!-- Main -->
+  <main class="main">
+    <div class="shell">
 
-    <!-- API Key Section -->
-    <div class="bg-[#1f1b18] text-orange-50 rounded-2xl shadow-xl border border-[#3a332d] p-6">
-      <h2 class="text-lg font-bold text-white mb-2">Sua API Key do Conector</h2>
-      <div class="relative">
-        <div id="api-key-display" class="api-key-box w-full px-4 py-3 bg-[#2a2521] border border-[#4a4038] rounded-lg text-sm text-orange-50 pr-20 select-all">
-          Aguarde...
+      <!-- API Key Section -->
+      <div class="section fade-up">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">API Key do Conector</h2>
+          </div>
+          <div class="card-body">
+            <div class="api-key-wrapper">
+              <div id="api-key-display" class="api-key-display">Carregando…</div>
+              <button onclick="copyApiKey()" id="copy-btn" class="btn-copy">Copiar</button>
+            </div>
+            <div class="api-key-hint">
+              <span>⚠️</span>
+              <span>Adicione o header <code>X-Mcp-Api-Key: &lt;sua-chave&gt;</code> em requisições para o endpoint <code>/mcp</code>.</span>
+            </div>
+          </div>
         </div>
-        <button onclick="copyApiKey()" id="copy-btn" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-neutral-800 hover:bg-neutral-700 text-orange-300 border border-neutral-700 font-semibold px-3 py-1.5 rounded-md transition-all">
-          Copiar
-        </button>
       </div>
-      <p class="text-xs text-amber-200 bg-amber-950/50 border border-amber-800 rounded-lg px-3 py-2 mt-3 inline-block">
-        ⚠️ Adicione o header <code class="bg-black px-1 rounded">X-Mcp-Api-Key: &lt;sua-chave&gt;</code> em requisições para o endpoint <code class="bg-black px-1 rounded">/mcp</code>.
-      </p>
-    </div>
 
-    <!-- Connections Section -->
-    <div class="bg-[#1f1b18] text-orange-50 rounded-2xl shadow-xl border border-[#3a332d] p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-bold text-white">Seus Moodles</h2>
-        <button onclick="openMoodleForm()" class="text-xs bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-          Adicionar Moodle
-        </button>
-      </div>
-      
-      <div id="connections-list" class="space-y-3">
-        <!-- Connections will be injected here -->
-      </div>
-    </div>
-
-  </main>
-
-  <!-- Moodle Form Modal -->
-  <div id="moodle-modal" class="fixed inset-0 bg-black/80 flex items-center justify-center p-4 hidden z-50 transition-opacity">
-    <div class="bg-[#1f1b18] border border-[#3a332d] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
-      <button onclick="closeMoodleForm()" class="absolute top-4 right-4 text-stone-400 hover:text-white">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
-      
-      <div class="p-6">
-        <h3 id="modal-title" class="text-xl font-bold text-white mb-4">Adicionar Moodle</h3>
-        
-        <form id="form-moodle" onsubmit="handleSaveMoodle(event)">
-          <input type="hidden" id="moodle-id" />
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">Alias do Moodle</label>
-              <input id="moodle-alias" type="text" placeholder="Goias, Nacional, CTM..." required class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">URL base do Moodle</label>
-              <input id="moodle-base-url" type="url" placeholder="https://ead.exemplo.com" required class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">Usuário do Moodle</label>
-              <input id="moodle-username" type="text" placeholder="seu.usuario" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
-              <p id="moodle-username-hint" class="text-xs text-stone-400 mt-1 hidden">Deixe em branco para não alterar.</p>
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">Senha do Moodle</label>
-              <input id="moodle-password" type="password" placeholder="Sua senha do Moodle" class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm focus:border-orange-400" />
-              <p id="moodle-password-hint" class="text-xs text-stone-400 mt-1 hidden">Deixe em branco para não alterar.</p>
-            </div>
-            <div class="flex items-center gap-3 py-1">
-              <input id="moodle-isdefault" type="checkbox" class="w-4 h-4 rounded accent-orange-500" />
-              <label for="moodle-isdefault" class="text-sm font-medium text-orange-50 cursor-pointer">Definir como Moodle padrão</label>
-            </div>
-            <div class="flex items-center gap-3 py-1">
-              <input id="moodle-canwrite" type="checkbox" class="w-4 h-4 rounded accent-orange-500" />
-              <label for="moodle-canwrite" class="text-sm font-medium text-orange-50 cursor-pointer">Habilitar permissão de escrita</label>
-            </div>
-            <div id="moodle-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
-            
-            <button type="submit" id="moodle-submit" class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-bold py-2.5 px-4 rounded-lg text-sm transition-all">
-              Salvar Moodle
+      <!-- Connections Section -->
+      <div class="section fade-up" style="animation-delay:0.1s">
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Seus Moodles</h2>
+            <button onclick="openMoodleForm()" class="btn-add">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 5v14m7-7H5"/></svg>
+              Adicionar
             </button>
           </div>
+          <div id="connections-list">
+            <!-- injected -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Modal -->
+  <div id="moodle-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="modal-title" class="modal-title">Adicionar Moodle</h3>
+        <button onclick="closeMoodleForm()" class="modal-close">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="form-moodle" onsubmit="handleSaveMoodle(event)">
+          <input type="hidden" id="moodle-id" />
+          <div class="form-group">
+            <label class="form-label">Alias do Moodle</label>
+            <input id="moodle-alias" type="text" placeholder="Goias, Nacional, CTM..." required class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">URL base do Moodle</label>
+            <input id="moodle-base-url" type="url" placeholder="https://ead.exemplo.com" required class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Usuário do Moodle</label>
+            <input id="moodle-username" type="text" placeholder="seu.usuario" class="form-input" />
+            <p id="moodle-username-hint" class="form-hint">Deixe em branco para não alterar.</p>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Senha do Moodle</label>
+            <input id="moodle-password" type="password" placeholder="Sua senha do Moodle" class="form-input" />
+            <p id="moodle-password-hint" class="form-hint">Deixe em branco para não alterar.</p>
+          </div>
+          <label class="form-checkbox">
+            <input id="moodle-isdefault" type="checkbox" />
+            Definir como Moodle padrão
+          </label>
+          <label class="form-checkbox" style="margin-bottom:20px">
+            <input id="moodle-canwrite" type="checkbox" />
+            Habilitar permissão de escrita
+          </label>
+          <div id="moodle-error" class="form-error"></div>
+          <button type="submit" id="moodle-submit" class="btn-submit">Salvar Moodle</button>
         </form>
       </div>
     </div>
   </div>
 
   <script>
-    const state = {
-      user: null,
-      connections: [],
-      apiKey: null,
-      editingId: null
-    };
+    const state = { user: null, connections: [], apiKey: null, editingId: null };
 
     async function boot() {
       try {
@@ -128,47 +346,39 @@
         state.user = me;
         state.apiKey = me.apiKey;
         state.connections = me.moodleConnections || [];
-        
         document.getElementById('user-greeting').textContent = `Olá, ${me.name}!`;
-        if (state.apiKey) {
-          document.getElementById('api-key-display').textContent = state.apiKey;
-        } else {
-          document.getElementById('api-key-display').textContent = 'Você não possui API Key. Adicione um Moodle.';
-        }
-        
+        document.getElementById('api-key-display').textContent = state.apiKey || 'Nenhuma API Key. Adicione um Moodle para gerar.';
         renderConnections();
-      } catch (e) {
-        window.location.href = '/auth.html';
-      }
+      } catch { window.location.href = '/auth.html'; }
     }
 
     function renderConnections() {
       const list = document.getElementById('connections-list');
       if (state.connections.length === 0) {
-        list.innerHTML = `<div class="text-center py-8 text-stone-400 text-sm">Nenhum Moodle cadastrado ainda.</div>`;
+        list.innerHTML = `<div class="connections-empty">
+          <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          <div>Nenhum Moodle cadastrado ainda.</div></div>`;
         return;
       }
-
       list.innerHTML = state.connections.map(c => `
-        <div class="bg-[#2a2521] border border-[#4a4038] rounded-xl p-4 flex items-center justify-between gap-4">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <h3 class="font-bold text-orange-50 truncate">${escapeHtml(c.alias)}</h3>
-              ${c.isDefault ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30 uppercase tracking-wider">Padrão</span>' : ''}
-              ${c.canWrite ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 uppercase tracking-wider">Escrita</span>' : '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-stone-500/20 text-stone-400 border border-stone-500/30 uppercase tracking-wider">Leitura</span>'}
+        <div class="conn-item">
+          <div class="conn-info">
+            <div class="conn-name-row">
+              <span class="conn-name">${esc(c.alias)}</span>
+              ${c.isDefault ? '<span class="badge badge-default">Padrão</span>' : ''}
+              ${c.canWrite ? '<span class="badge badge-write">Escrita</span>' : '<span class="badge badge-read">Leitura</span>'}
             </div>
-            <p class="text-xs text-stone-400 truncate">${escapeHtml(c.baseUrl)}</p>
+            <div class="conn-url">${esc(c.baseUrl)}</div>
           </div>
-          <div class="flex items-center gap-2">
-            <button onclick="editMoodle('${c.id}')" class="p-2 text-stone-400 hover:text-orange-400 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-all" title="Editar">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          <div class="conn-actions">
+            <button onclick="editMoodle('${c.id}')" class="btn-icon" title="Editar">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
             </button>
-            <button onclick="deleteMoodle('${c.id}')" class="p-2 text-stone-400 hover:text-red-400 bg-neutral-800 hover:bg-neutral-700 rounded-lg transition-all" title="Excluir">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            <button onclick="deleteMoodle('${c.id}')" class="btn-icon danger" title="Excluir">
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
             </button>
           </div>
-        </div>
-      `).join('');
+        </div>`).join('');
     }
 
     function openMoodleForm() {
@@ -181,20 +391,17 @@
       document.getElementById('moodle-password').value = '';
       document.getElementById('moodle-isdefault').checked = state.connections.length === 0;
       document.getElementById('moodle-canwrite').checked = false;
-      
       document.getElementById('moodle-username').required = true;
       document.getElementById('moodle-password').required = true;
-      document.getElementById('moodle-username-hint').classList.add('hidden');
-      document.getElementById('moodle-password-hint').classList.add('hidden');
-      
+      document.getElementById('moodle-username-hint').classList.remove('visible');
+      document.getElementById('moodle-password-hint').classList.remove('visible');
       hideError(document.getElementById('moodle-error'));
-      document.getElementById('moodle-modal').classList.remove('hidden');
+      document.getElementById('moodle-modal').classList.add('visible');
     }
 
     function editMoodle(id) {
       const c = state.connections.find(x => x.id === id);
       if (!c) return;
-      
       state.editingId = id;
       document.getElementById('modal-title').textContent = 'Editar Moodle';
       document.getElementById('moodle-id').value = c.id;
@@ -204,27 +411,23 @@
       document.getElementById('moodle-password').value = '';
       document.getElementById('moodle-isdefault').checked = c.isDefault;
       document.getElementById('moodle-canwrite').checked = c.canWrite;
-
       document.getElementById('moodle-username').required = false;
       document.getElementById('moodle-password').required = false;
-      document.getElementById('moodle-username-hint').classList.remove('hidden');
-      document.getElementById('moodle-password-hint').classList.remove('hidden');
-
+      document.getElementById('moodle-username-hint').classList.add('visible');
+      document.getElementById('moodle-password-hint').classList.add('visible');
       hideError(document.getElementById('moodle-error'));
-      document.getElementById('moodle-modal').classList.remove('hidden');
+      document.getElementById('moodle-modal').classList.add('visible');
     }
 
     function closeMoodleForm() {
-      document.getElementById('moodle-modal').classList.add('hidden');
+      document.getElementById('moodle-modal').classList.remove('visible');
     }
 
     async function handleSaveMoodle(e) {
       e.preventDefault();
       const btn = document.getElementById('moodle-submit');
       const errEl = document.getElementById('moodle-error');
-      setLoading(btn, true, 'Salvando...');
-      hideError(errEl);
-
+      setLoading(btn, true); hideError(errEl);
       const payload = {
         moodleAlias: document.getElementById('moodle-alias').value.trim(),
         moodleBaseUrl: document.getElementById('moodle-base-url').value.trim(),
@@ -233,7 +436,6 @@
         isDefault: document.getElementById('moodle-isdefault').checked,
         canWrite: document.getElementById('moodle-canwrite').checked
       };
-
       try {
         if (state.editingId) {
           await api(`/api/account/moodle/${state.editingId}`, { method: 'PUT', body: payload });
@@ -241,27 +443,19 @@
           await api('/api/account/connect-moodle', { method: 'POST', body: payload });
         }
         closeMoodleForm();
-        await boot(); // Refresh data
+        await boot();
       } catch (err) {
         showError(errEl, err.message || 'Erro ao salvar. Verifique os dados.');
-      } finally {
-        setLoading(btn, false, 'Salvar Moodle');
-      }
+      } finally { setLoading(btn, false, 'Salvar Moodle'); }
     }
 
     async function deleteMoodle(id) {
       if (!confirm('Tem certeza que deseja excluir esta conexão Moodle?')) return;
-      try {
-        await api(`/api/account/moodle/${id}`, { method: 'DELETE' });
-        await boot();
-      } catch (err) {
-        alert(err.message || 'Erro ao excluir.');
-      }
+      try { await api(`/api/account/moodle/${id}`, { method: 'DELETE' }); await boot(); }
+      catch (err) { alert(err.message || 'Erro ao excluir.'); }
     }
 
-    function handleLogout() {
-      window.location.href = '/auth/logout';
-    }
+    function handleLogout() { window.location.href = '/auth/logout'; }
 
     async function copyApiKey() {
       const key = state.apiKey;
@@ -269,23 +463,13 @@
       try {
         await navigator.clipboard.writeText(key);
         const btn = document.getElementById('copy-btn');
-        btn.textContent = 'Copiado!';
-        btn.classList.replace('bg-neutral-800', 'bg-orange-500');
-        btn.classList.replace('text-orange-300', 'text-white');
-        btn.classList.replace('border-neutral-700', 'border-orange-500');
-        setTimeout(() => {
-          btn.textContent = 'Copiar';
-          btn.classList.replace('bg-orange-500', 'bg-neutral-800');
-          btn.classList.replace('text-white', 'text-orange-300');
-          btn.classList.replace('border-orange-500', 'border-neutral-700');
-        }, 2000);
+        btn.textContent = '✓ Copiado';
+        btn.style.color = '#22c55e'; btn.style.borderColor = 'rgba(34,197,94,0.3)';
+        setTimeout(() => { btn.textContent = 'Copiar'; btn.style.color = ''; btn.style.borderColor = ''; }, 2000);
       } catch {
-        const display = document.getElementById('api-key-display');
-        const range = document.createRange();
-        range.selectNodeContents(display);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
+        const d = document.getElementById('api-key-display');
+        const r = document.createRange(); r.selectNodeContents(d);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
       }
     }
 
@@ -304,17 +488,12 @@
       btn.disabled = loading;
       if (loading) {
         btn.dataset.original = btn.textContent;
-        btn.innerHTML = `<span class="inline-flex items-center gap-2"><svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg> Aguarde...</span>`;
-      } else {
-        btn.textContent = defaultText || btn.dataset.original || 'Salvar Moodle';
-      }
+        btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px"><span class="spinner"></span>Aguarde…</span>';
+      } else { btn.textContent = defaultText || btn.dataset.original || 'Salvar'; }
     }
-
-    function showError(el, msg) { el.textContent = msg; el.classList.remove('hidden'); }
-    function hideError(el) { el.textContent = ''; el.classList.add('hidden'); }
-    function escapeHtml(value) {
-      return String(value ?? '').replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[m]);
-    }
+    function showError(el, msg) { el.textContent = msg; el.classList.add('visible'); }
+    function hideError(el) { el.textContent = ''; el.classList.remove('visible'); }
+    function esc(v) { return String(v ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#039;"})[m]); }
 
     boot();
   </script>

@@ -3,211 +3,346 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moodle Connector — Conecte seu EAD à Inteligência Artificial</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Moodle Connector — Inteligência Artificial para o EAD</title>
+  <meta name="description" content="Conecte suas plataformas Moodle a agentes inteligentes via MCP. Correção assistida, consultas e automação com segurança institucional." />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    
-    body {
-      font-family: 'Inter', sans-serif;
-      background-color: #0c0a09;
-      color: #fafaf9;
-      overflow-x: hidden;
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary: #09090b;
+      --bg-surface: #18181b;
+      --bg-elevated: #27272a;
+      --border-subtle: rgba(63,63,70,0.6);
+      --border-accent: rgba(249,115,22,0.25);
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #f97316;
+      --accent-hover: #ea580c;
+      --accent-glow: rgba(249,115,22,0.15);
+      --radius-lg: 16px;
+      --radius-xl: 24px;
     }
-    
-    .gradient-text {
-      background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      line-height: 1.6;
+    }
+    a { text-decoration: none; color: inherit; }
+
+    /* ── Navbar ────────────────────────────────────── */
+    .navbar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(9,9,11,0.75);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .navbar-inner {
+      max-width: 1200px; margin: 0 auto; padding: 0 24px;
+      height: 72px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .navbar-brand { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .navbar-brand img { width: 36px; height: 36px; object-fit: contain; }
+    .navbar-brand-text { font-weight: 800; font-size: 18px; letter-spacing: -0.02em; }
+    .navbar-brand-text span { color: var(--accent); }
+    .navbar-actions { display: flex; align-items: center; gap: 12px; }
+    .navbar-actions .spinner {
+      width: 20px; height: 20px; border: 2px solid var(--accent);
+      border-top-color: transparent; border-radius: 50%;
+      animation: spin 0.8s linear infinite;
     }
 
-    .hero-glow {
-      position: absolute;
-      width: 600px;
-      height: 600px;
-      background: radial-gradient(circle, rgba(249,115,22,0.15) 0%, rgba(0,0,0,0) 70%);
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      z-index: -1;
+    /* ── Buttons ───────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      font-family: inherit; font-weight: 600; font-size: 14px;
+      padding: 10px 20px; border-radius: 10px; border: none;
+      cursor: pointer; transition: all 0.2s ease;
+      text-decoration: none; white-space: nowrap;
+    }
+    .btn-primary {
+      background: var(--accent); color: #000;
+      box-shadow: 0 0 20px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+    .btn-primary:hover {
+      background: var(--accent-hover); transform: translateY(-1px);
+      box-shadow: 0 0 30px rgba(249,115,22,0.3), inset 0 1px 0 rgba(255,255,255,0.15);
+    }
+    .btn-ghost {
+      background: transparent; color: var(--text-secondary);
+      border: 1px solid var(--border-subtle);
+    }
+    .btn-ghost:hover { color: var(--text-primary); border-color: var(--accent); background: rgba(249,115,22,0.05); }
+    .btn-sm { padding: 8px 16px; font-size: 13px; border-radius: 8px; }
+    .btn-lg { padding: 16px 32px; font-size: 16px; border-radius: 12px; }
+
+    /* ── Hero ──────────────────────────────────────── */
+    .hero {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      padding: 120px 24px 80px; position: relative; text-align: center;
+    }
+    .hero::before {
+      content: ''; position: absolute; top: 20%; left: 50%; transform: translateX(-50%);
+      width: 800px; height: 800px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(249,115,22,0.08) 0%, transparent 70%);
       pointer-events: none;
     }
-    
-    .glass-card {
-      background: rgba(28, 25, 23, 0.7);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(249, 115, 22, 0.1);
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 16px; border-radius: 100px;
+      background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.15);
+      color: var(--accent); font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 32px;
+    }
+    .hero-badge::before {
+      content: ''; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent); animation: pulse 2s ease-in-out infinite;
+    }
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px); font-weight: 900;
+      letter-spacing: -0.03em; line-height: 1.05; margin-bottom: 24px;
+    }
+    .hero h1 .accent {
+      background: linear-gradient(135deg, #fb923c, #ea580c);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 18px; color: var(--text-secondary); max-width: 580px;
+      margin: 0 auto 40px; line-height: 1.7;
+    }
+    .hero-actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+    /* ── Features Grid ─────────────────────────────── */
+    .features {
+      padding: 120px 24px; border-top: 1px solid var(--border-subtle);
+      background: linear-gradient(180deg, var(--bg-primary), var(--bg-surface));
+    }
+    .features-inner { max-width: 1100px; margin: 0 auto; }
+    .features-header { text-align: center; margin-bottom: 64px; }
+    .features-header h2 { font-size: 36px; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
+    .features-header p { color: var(--text-secondary); font-size: 16px; max-width: 520px; margin: 0 auto; }
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; }
+    .feature-card {
+      padding: 36px; border-radius: var(--radius-lg);
+      background: var(--bg-surface); border: 1px solid var(--border-subtle);
+      transition: all 0.3s ease; position: relative; overflow: hidden;
+    }
+    .feature-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(249,115,22,0.3), transparent);
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .feature-card:hover { border-color: var(--border-accent); transform: translateY(-2px); }
+    .feature-card:hover::before { opacity: 1; }
+    .feature-icon {
+      width: 48px; height: 48px; border-radius: 12px;
+      background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.15);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 20px; color: var(--accent); transition: transform 0.3s;
+    }
+    .feature-card:hover .feature-icon { transform: scale(1.1); }
+    .feature-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+    .feature-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+
+    /* ── Preview Panel ─────────────────────────────── */
+    .preview {
+      max-width: 1000px; margin: -40px auto 100px; padding: 0 24px; position: relative; z-index: 10;
+    }
+    .preview-frame {
+      background: var(--bg-surface); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xl); padding: 4px; box-shadow: 0 32px 64px rgba(0,0,0,0.4);
+      animation: float 8s ease-in-out infinite;
+    }
+    .preview-inner {
+      background: var(--bg-primary); border-radius: 20px; overflow: hidden;
+      border: 1px solid rgba(63,63,70,0.3); display: flex; min-height: 280px;
+    }
+    .preview-sidebar {
+      width: 35%; border-right: 1px solid var(--border-subtle);
+      padding: 28px; background: linear-gradient(180deg, var(--bg-surface), var(--bg-primary));
+    }
+    .preview-dots { display: flex; gap: 6px; margin-bottom: 24px; }
+    .preview-dots span { width: 10px; height: 10px; border-radius: 50%; }
+    .preview-dots span:nth-child(1) { background: #ef4444; }
+    .preview-dots span:nth-child(2) { background: #eab308; }
+    .preview-dots span:nth-child(3) { background: #22c55e; }
+    .preview-lines { display: flex; flex-direction: column; gap: 12px; }
+    .preview-line {
+      height: 8px; border-radius: 4px;
+      background: rgba(63,63,70,0.3); animation: shimmer 2s ease-in-out infinite;
+    }
+    .preview-line:nth-child(1) { width: 100%; animation-delay: 0s; }
+    .preview-line:nth-child(2) { width: 70%; animation-delay: 0.3s; height: 40px; }
+    .preview-line:nth-child(3) { width: 85%; animation-delay: 0.6s; }
+    .preview-main {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      padding: 40px; position: relative;
+    }
+    .preview-main::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(circle at center, var(--accent-glow), transparent 70%);
+    }
+    .preview-content { text-align: center; position: relative; z-index: 1; }
+    .preview-icon-wrapper {
+      width: 72px; height: 72px; margin: 0 auto 20px; border-radius: 18px;
+      background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.2);
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 40px var(--accent-glow);
+    }
+    .preview-content h3 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .preview-content p { font-size: 14px; color: var(--text-secondary); max-width: 280px; }
+
+    /* ── Footer ────────────────────────────────────── */
+    .footer {
+      padding: 32px 24px; border-top: 1px solid var(--border-subtle);
+      text-align: center; font-size: 13px; color: var(--text-muted);
     }
 
-    /* Floating animation */
+    /* ── Animations ────────────────────────────────── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     @keyframes float {
-      0% { transform: translateY(0px); }
-      50% { transform: translateY(-10px); }
-      100% { transform: translateY(0px); }
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
     }
-    .animate-float {
-      animation: float 6s ease-in-out infinite;
+    @keyframes shimmer {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 0.6; }
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.6s ease-out both; }
+    .fade-up-d1 { animation-delay: 0.1s; }
+    .fade-up-d2 { animation-delay: 0.2s; }
+    .fade-up-d3 { animation-delay: 0.3s; }
+
+    @media (max-width: 768px) {
+      .preview-inner { flex-direction: column; }
+      .preview-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-subtle); }
+      .hero-actions { flex-direction: column; align-items: stretch; max-width: 340px; margin: 0 auto; }
     }
   </style>
 </head>
-<body class="antialiased min-h-screen flex flex-col relative">
-
-  <div class="hero-glow"></div>
+<body>
 
   <!-- Navbar -->
-  <nav class="w-full fixed top-0 z-50 transition-all duration-300 bg-black/50 backdrop-blur-md border-b border-white/5">
-    <div class="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <img src="/logo.png" alt="Logo" class="w-10 h-10 object-contain" />
-        <span class="font-bold text-xl tracking-tight flex gap-1">
-          <span class="text-orange-500">Moodle</span>
-          <span>Connector</span>
-        </span>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div class="navbar-brand" onclick="window.location.href='/'">
+        <img src="/logo.png" alt="Moodle Connector" />
+        <div class="navbar-brand-text"><span>Moodle</span>Connector</div>
       </div>
-      <div class="flex items-center gap-4" id="nav-actions">
-        <div class="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+      <div class="navbar-actions" id="nav-actions">
+        <div class="spinner"></div>
       </div>
     </div>
   </nav>
 
-  <!-- Hero Section -->
-  <main class="flex-1 flex items-center justify-center pt-32 pb-20 px-6 relative z-10">
-    <div class="max-w-5xl mx-auto text-center">
-      
-      <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-500/10 border border-orange-500/20 text-orange-400 text-xs font-semibold uppercase tracking-wider mb-8 animate-fade-in-up">
-        <span class="w-2 h-2 rounded-full bg-orange-500 animate-pulse"></span>
-        O futuro do EAD
-      </div>
-
-      <h1 class="text-5xl md:text-7xl font-extrabold tracking-tight mb-8 leading-tight">
-        Conecte o seu <span class="gradient-text">Moodle</span><br />
-        à Inteligência Artificial
+  <!-- Hero -->
+  <section class="hero">
+    <div style="position: relative; z-index: 1;">
+      <div class="hero-badge fade-up">Plataforma MCP para Educação</div>
+      <h1 class="fade-up fade-up-d1">
+        Conecte o seu <span class="accent">Moodle</span><br />à Inteligência Artificial
       </h1>
-
-      <p class="text-lg md:text-xl text-stone-400 max-w-2xl mx-auto mb-12 leading-relaxed">
-        Uma ponte invisível e poderosa entre suas plataformas educacionais e agentes inteligentes. Interaja, extraia e automatize processos no Moodle usando linguagem natural.
+      <p class="fade-up fade-up-d2">
+        Uma ponte segura entre suas plataformas educacionais e agentes inteligentes. Consulte, analise e automatize processos no Moodle usando linguagem natural.
       </p>
-
-      <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-        <button onclick="window.location.href='/auth.html'" class="w-full sm:w-auto px-8 py-4 bg-orange-500 hover:bg-orange-600 text-black font-bold rounded-xl text-lg transition-all shadow-[0_0_20px_rgba(249,115,22,0.3)] hover:shadow-[0_0_30px_rgba(249,115,22,0.5)] transform hover:-translate-y-1">
-          Começar Agora
-        </button>
-        <button onclick="document.getElementById('features').scrollIntoView({behavior: 'smooth'})" class="w-full sm:w-auto px-8 py-4 bg-transparent border border-stone-700 hover:border-orange-500 text-stone-300 hover:text-white font-semibold rounded-xl text-lg transition-all">
-          Como funciona
-        </button>
-      </div>
-
-    </div>
-  </main>
-
-  <!-- Dashboard Preview -->
-  <section class="max-w-6xl mx-auto px-6 mb-32 relative z-10 animate-float">
-    <div class="glass-card rounded-2xl p-2 md:p-4">
-      <div class="bg-[#14110e] rounded-xl overflow-hidden border border-stone-800 flex flex-col md:flex-row">
-        
-        <div class="w-full md:w-1/3 border-r border-stone-800 p-6 bg-gradient-to-b from-[#1c1917] to-[#14110e]">
-          <div class="flex items-center gap-3 mb-8">
-            <div class="w-3 h-3 rounded-full bg-red-500"></div>
-            <div class="w-3 h-3 rounded-full bg-amber-500"></div>
-            <div class="w-3 h-3 rounded-full bg-green-500"></div>
-          </div>
-          <div class="space-y-4">
-            <div class="h-8 bg-stone-800/50 rounded animate-pulse"></div>
-            <div class="h-24 bg-stone-800/30 rounded animate-pulse"></div>
-            <div class="h-12 bg-stone-800/50 rounded animate-pulse w-3/4"></div>
-          </div>
-        </div>
-
-        <div class="w-full md:w-2/3 p-8 flex items-center justify-center relative overflow-hidden">
-          <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(249,115,22,0.05)_0%,transparent_100%)]"></div>
-          <div class="text-center z-10">
-            <div class="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-orange-500/10 border border-orange-500/30 mb-6 shadow-[0_0_30px_rgba(249,115,22,0.2)]">
-              <svg class="w-10 h-10 text-orange-500" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-            </div>
-            <h3 class="text-2xl font-bold text-white mb-2">Múltiplos Moodles</h3>
-            <p class="text-stone-400">Gerencie e orquestre requisições para diversos ambientes Moodle através de uma única API unificada.</p>
-          </div>
-        </div>
-
+      <div class="hero-actions fade-up fade-up-d3">
+        <button onclick="window.location.href='/auth.html'" class="btn btn-primary btn-lg">Começar Agora</button>
+        <button onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})" class="btn btn-ghost btn-lg">Como funciona</button>
       </div>
     </div>
   </section>
 
-  <!-- Features Grid -->
-  <section id="features" class="bg-[#14110e] py-24 border-t border-stone-900">
-    <div class="max-w-7xl mx-auto px-6">
-      <div class="text-center mb-16">
-        <h2 class="text-3xl md:text-4xl font-bold mb-4">Poder além da interface padrão</h2>
-        <p class="text-stone-400 max-w-2xl mx-auto">Tudo que você precisa para automatizar sua rotina educacional de forma inteligente e segura.</p>
+  <!-- Preview -->
+  <section class="preview">
+    <div class="preview-frame">
+      <div class="preview-inner">
+        <div class="preview-sidebar">
+          <div class="preview-dots"><span></span><span></span><span></span></div>
+          <div class="preview-lines">
+            <div class="preview-line"></div>
+            <div class="preview-line"></div>
+            <div class="preview-line"></div>
+          </div>
+        </div>
+        <div class="preview-main">
+          <div class="preview-content">
+            <div class="preview-icon-wrapper">
+              <svg width="32" height="32" fill="none" stroke="#f97316" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            </div>
+            <h3>Múltiplos Moodles</h3>
+            <p>Gerencie conexões com diversos ambientes Moodle através de uma única API unificada.</p>
+          </div>
+        </div>
       </div>
+    </div>
+  </section>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-        
-        <!-- Feature 1 -->
-        <div class="p-8 rounded-2xl bg-[#1c1917] border border-stone-800 hover:border-orange-500/50 transition-colors group">
-          <div class="w-12 h-12 bg-orange-500/10 rounded-xl flex items-center justify-center mb-6 text-orange-500 group-hover:scale-110 transition-transform">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+  <!-- Features -->
+  <section id="features" class="features">
+    <div class="features-inner">
+      <div class="features-header">
+        <h2>Poder além da interface padrão</h2>
+        <p>Tudo que você precisa para automatizar sua rotina educacional de forma inteligente e segura.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           </div>
-          <h3 class="text-xl font-bold mb-3 text-stone-100">Protocolo MCP</h3>
-          <p class="text-stone-400 leading-relaxed text-sm">Integração nativa com Model Context Protocol. Permite que Agentes como ChatGPT ou Claude leiam e escrevam diretamente no Moodle.</p>
+          <h3>Protocolo MCP</h3>
+          <p>Integração nativa com Model Context Protocol. Permite que agentes como ChatGPT leiam e escrevam diretamente no Moodle com segurança.</p>
         </div>
-
-        <!-- Feature 2 -->
-        <div class="p-8 rounded-2xl bg-[#1c1917] border border-stone-800 hover:border-orange-500/50 transition-colors group">
-          <div class="w-12 h-12 bg-orange-500/10 rounded-xl flex items-center justify-center mb-6 text-orange-500 group-hover:scale-110 transition-transform">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
           </div>
-          <h3 class="text-xl font-bold mb-3 text-stone-100">Segurança Robusta</h3>
-          <p class="text-stone-400 leading-relaxed text-sm">Credenciais criptografadas em repouso. Autenticação via API Key com controle estrito de permissões (leitura e escrita separadas).</p>
+          <h3>Segurança Institucional</h3>
+          <p>Credenciais criptografadas em repouso. Autenticação OAuth2, API Key e controle granular de permissões de leitura e escrita.</p>
         </div>
-
-        <!-- Feature 3 -->
-        <div class="p-8 rounded-2xl bg-[#1c1917] border border-stone-800 hover:border-orange-500/50 transition-colors group">
-          <div class="w-12 h-12 bg-orange-500/10 rounded-xl flex items-center justify-center mb-6 text-orange-500 group-hover:scale-110 transition-transform">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+        <div class="feature-card">
+          <div class="feature-icon">
+            <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
           </div>
-          <h3 class="text-xl font-bold mb-3 text-stone-100">Orquestração Multi-Tenant</h3>
-          <p class="text-stone-400 leading-relaxed text-sm">Use "Alias" para gerenciar conexões simultâneas com múltiplas instâncias do Moodle de forma transparente.</p>
+          <h3>Multi-Tenant</h3>
+          <p>Gerencie conexões simultâneas com múltiplas instâncias Moodle usando aliases. Uma conta, vários ambientes.</p>
         </div>
-
       </div>
     </div>
   </section>
 
   <!-- Footer -->
-  <footer class="py-8 border-t border-stone-900 mt-auto text-center text-stone-500 text-sm">
-    <div class="max-w-7xl mx-auto px-6">
-      Moodle Connector &copy; <span id="year"></span>. Construído para educadores e desenvolvedores.
-    </div>
+  <footer class="footer">
+    Moodle Connector &copy; <span id="year"></span> — Construído para educadores e instituições.
   </footer>
 
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
 
     async function checkAuth() {
-      const actionsEl = document.getElementById('nav-actions');
+      const el = document.getElementById('nav-actions');
       try {
         const res = await fetch('/api/account/me');
         if (res.ok) {
-          const data = await res.json();
-          actionsEl.innerHTML = `
-            <a href="/app.html" class="px-5 py-2 text-sm font-semibold text-white bg-stone-800 hover:bg-stone-700 rounded-lg transition-colors border border-stone-700">Dashboard</a>
-          `;
-        } else {
-          actionsEl.innerHTML = `
-            <a href="/auth.html?tab=login" class="text-sm font-semibold text-stone-300 hover:text-white transition-colors">Entrar</a>
-            <a href="/auth.html?tab=register" class="px-5 py-2 text-sm font-semibold text-black bg-orange-500 hover:bg-orange-400 rounded-lg transition-colors">Criar conta</a>
-          `;
-        }
-      } catch (e) {
-        actionsEl.innerHTML = `
-          <a href="/auth.html?tab=login" class="text-sm font-semibold text-stone-300 hover:text-white transition-colors">Entrar</a>
-          <a href="/auth.html?tab=register" class="px-5 py-2 text-sm font-semibold text-black bg-orange-500 hover:bg-orange-400 rounded-lg transition-colors">Criar conta</a>
-        `;
-      }
+          el.innerHTML = '<a href="/app.html" class="btn btn-ghost btn-sm">Dashboard</a>';
+        } else { showLoginButtons(el); }
+      } catch { showLoginButtons(el); }
     }
-
+    function showLoginButtons(el) {
+      el.innerHTML = `
+        <a href="/auth.html?tab=login" class="btn btn-ghost btn-sm">Entrar</a>
+        <a href="/auth.html?tab=register" class="btn btn-primary btn-sm">Criar conta</a>`;
+    }
     checkAuth();
   </script>
 </body>

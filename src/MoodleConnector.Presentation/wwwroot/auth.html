@@ -4,134 +4,216 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Moodle Connector — Entrar</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <meta name="description" content="Acesse sua conta no Moodle Connector para gerenciar conexões Moodle e integrações com IA." />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    .tab-active   { border-bottom: 2px solid #f86000; color: #f86000; font-weight: 600; }
-    .tab-inactive { border-bottom: 2px solid transparent; color: #a8a29e; }
-    .tab-inactive:hover { color: #fff7ed; }
-    input { background: #2a2521; color: #fff7ed; }
-    input::placeholder { color: #8c837a; }
-    input:focus { outline: none; box-shadow: 0 0 0 3px rgba(248,96,0,0.22); }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-primary: #09090b;
+      --bg-surface: #18181b;
+      --bg-elevated: #27272a;
+      --bg-input: #1e1e21;
+      --border-subtle: rgba(63,63,70,0.6);
+      --border-focus: rgba(249,115,22,0.5);
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #f97316;
+      --accent-hover: #ea580c;
+      --accent-glow: rgba(249,115,22,0.15);
+      --danger: #ef4444;
+      --danger-bg: rgba(239,68,68,0.08);
+      --danger-border: rgba(239,68,68,0.2);
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+      position: relative;
+    }
+    body::before {
+      content: ''; position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+      width: 600px; height: 600px; border-radius: 50%;
+      background: radial-gradient(circle, rgba(249,115,22,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    a { text-decoration: none; color: inherit; }
+
+    /* ── Container ─────────────────────────────────── */
+    .auth-container { width: 100%; max-width: 420px; position: relative; z-index: 1; }
+
+    /* ── Logo ──────────────────────────────────────── */
+    .auth-header { text-align: center; margin-bottom: 32px; cursor: pointer; }
+    .auth-header img { width: 56px; height: 56px; object-fit: contain; margin-bottom: 16px; }
+    .auth-header-brand {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      font-size: 22px; font-weight: 800; letter-spacing: -0.02em;
+    }
+    .auth-header-brand span { color: var(--accent); }
+
+    /* ── Card ──────────────────────────────────────── */
+    .auth-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 20px;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.3);
+      overflow: hidden;
+    }
+
+    /* ── Tabs ──────────────────────────────────────── */
+    .auth-tabs {
+      display: flex; border-bottom: 1px solid var(--border-subtle);
+      background: rgba(9,9,11,0.5);
+    }
+    .auth-tab {
+      flex: 1; padding: 16px; border: none; background: none; cursor: pointer;
+      font-family: inherit; font-size: 14px; font-weight: 500;
+      color: var(--text-muted); transition: all 0.2s;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+    }
+    .auth-tab:hover { color: var(--text-secondary); }
+    .auth-tab.active {
+      color: var(--accent); border-bottom-color: var(--accent); font-weight: 600;
+    }
+
+    /* ── Form ──────────────────────────────────────── */
+    .auth-body { padding: 32px; }
+    .form-group { margin-bottom: 20px; }
+    .form-label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
+    }
+    .form-input {
+      width: 100%; padding: 12px 16px; border-radius: 10px;
+      background: var(--bg-input); border: 1px solid var(--border-subtle);
+      color: var(--text-primary); font-family: inherit; font-size: 14px;
+      transition: all 0.2s; outline: none;
+    }
+    .form-input::placeholder { color: var(--text-muted); }
+    .form-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(249,115,22,0.1);
+    }
+
+    /* ── Buttons ───────────────────────────────────── */
+    .btn-submit {
+      width: 100%; padding: 14px; border: none; border-radius: 10px;
+      background: var(--accent); color: #000; font-family: inherit;
+      font-size: 14px; font-weight: 700; cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+    .btn-submit:hover {
+      background: var(--accent-hover); transform: translateY(-1px);
+      box-shadow: 0 0 30px rgba(249,115,22,0.3);
+    }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* ── Error ─────────────────────────────────────── */
+    .form-error {
+      padding: 12px 16px; border-radius: 10px; font-size: 13px;
+      background: var(--danger-bg); border: 1px solid var(--danger-border);
+      color: #fca5a5; margin-bottom: 20px; display: none;
+    }
+    .form-error.visible { display: block; }
+
+    /* ── Animations ────────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.4s ease-out both; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+    }
   </style>
 </head>
-<body class="min-h-screen bg-[#14110e] flex items-center justify-center p-4">
+<body>
 
-  <div class="w-full max-w-md">
+  <div class="auth-container fade-up">
 
     <!-- Header -->
-    <div class="text-center mb-8">
-      <div class="inline-flex items-center justify-center w-32 h-24 cursor-pointer" onclick="window.location.href='/'">
-        <img src="/logo.png" alt="Moodle Connector" class="max-w-full max-h-full object-contain" />
-      </div>
-      <div class="flex items-center justify-center gap-2 mt-4 cursor-pointer" onclick="window.location.href='/'">
-        <h1 class="text-2xl font-bold text-[#f86000] tracking-tight">Moodle</h1>
-        <h1 class="text-2xl font-bold text-white tracking-tight">Connector</h1>
-      </div>
+    <div class="auth-header" onclick="window.location.href='/'">
+      <img src="/logo.png" alt="Moodle Connector" />
+      <div class="auth-header-brand"><span>Moodle</span>Connector</div>
     </div>
 
     <!-- Card -->
-    <div class="bg-[#1f1b18] text-orange-50 rounded-2xl shadow-2xl overflow-hidden border border-[#3a332d]">
+    <div class="auth-card">
 
       <!-- Tabs -->
-      <div class="flex border-b border-[#3a332d] bg-[#171412]">
-        <button id="tab-login-btn" onclick="switchTab('login')"
-          class="flex-1 py-4 text-sm transition-all tab-active">
-          Entrar
-        </button>
-        <button id="tab-register-btn" onclick="switchTab('register')"
-          class="flex-1 py-4 text-sm transition-all tab-inactive">
-          Criar conta
-        </button>
+      <div class="auth-tabs">
+        <button id="tab-login-btn" class="auth-tab active" onclick="switchTab('login')">Entrar</button>
+        <button id="tab-register-btn" class="auth-tab" onclick="switchTab('register')">Criar conta</button>
       </div>
 
-      <div class="p-8">
+      <div class="auth-body">
 
-        <!-- Login form -->
+        <!-- Login Form -->
         <form id="form-login" onsubmit="handleLogin(event)">
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
-                E-mail
-              </label>
-              <input id="login-email" type="email" placeholder="seu@email.com" required
-                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
-                Senha
-              </label>
-              <input id="login-password" type="password" placeholder="Sua senha" required
-                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
-            </div>
-            <div id="login-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
-            <button type="submit" id="login-submit"
-              class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-semibold py-2.5 px-4 rounded-lg text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
-              Entrar
-            </button>
+          <div class="form-group">
+            <label class="form-label">E-mail</label>
+            <input id="login-email" type="email" placeholder="seu@email.com" required class="form-input" />
           </div>
+          <div class="form-group">
+            <label class="form-label">Senha</label>
+            <input id="login-password" type="password" placeholder="Sua senha" required class="form-input" />
+          </div>
+          <div id="login-error" class="form-error"></div>
+          <button type="submit" id="login-submit" class="btn-submit">Entrar</button>
         </form>
 
-        <!-- Register form (hidden initially) -->
-        <form id="form-register" class="hidden" onsubmit="handleRegister(event)">
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
-                Nome completo
-              </label>
-              <input id="reg-name" type="text" placeholder="Seu nome" required
-                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
-                E-mail
-              </label>
-              <input id="reg-email" type="email" placeholder="seu@email.com" required
-                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-stone-300 uppercase tracking-wide mb-1">
-                Senha
-              </label>
-              <input id="reg-password" type="password" placeholder="Mínimo 12 caracteres" required
-                class="w-full px-4 py-2.5 rounded-lg border border-[#4a4038] text-sm transition-all focus:border-orange-400" />
-            </div>
-            <div id="reg-error" class="hidden text-sm text-red-200 bg-red-950 border border-red-800 rounded-lg px-4 py-2.5"></div>
-            <button type="submit" id="reg-submit"
-              class="w-full bg-orange-500 hover:bg-orange-600 text-[#1f1b18] font-semibold py-2.5 px-4 rounded-lg text-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
-              Criar conta
-            </button>
+        <!-- Register Form -->
+        <form id="form-register" style="display:none" onsubmit="handleRegister(event)">
+          <div class="form-group">
+            <label class="form-label">Nome completo</label>
+            <input id="reg-name" type="text" placeholder="Seu nome" required class="form-input" />
           </div>
+          <div class="form-group">
+            <label class="form-label">E-mail</label>
+            <input id="reg-email" type="email" placeholder="seu@email.com" required class="form-input" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Senha</label>
+            <input id="reg-password" type="password" placeholder="Mínimo 12 caracteres" required class="form-input" />
+          </div>
+          <div id="reg-error" class="form-error"></div>
+          <button type="submit" id="reg-submit" class="btn-submit">Criar conta</button>
         </form>
 
       </div>
-    </div><!-- /card -->
-
-  </div><!-- /max-w -->
+    </div>
+  </div>
 
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const returnUrl = urlParams.get('returnUrl') || '/app.html';
     const emailParam = urlParams.get('email');
     const errorParam = urlParams.get('error');
+    const tabParam = urlParams.get('tab');
 
     function boot() {
       if (emailParam) {
         document.getElementById('login-email').value = emailParam;
         document.getElementById('reg-email').value = emailParam;
       }
-      
-      if (errorParam) {
-        showError(document.getElementById('login-error'), errorParam);
-      }
+      if (errorParam) showError(document.getElementById('login-error'), errorParam);
+      if (tabParam === 'register') switchTab('register');
     }
 
     function switchTab(tab) {
       const isLogin = tab === 'login';
-      document.getElementById('form-login').classList.toggle('hidden', !isLogin);
-      document.getElementById('form-register').classList.toggle('hidden', isLogin);
-      document.getElementById('tab-login-btn').className = `flex-1 py-4 text-sm transition-all ${isLogin ? 'tab-active' : 'tab-inactive'}`;
-      document.getElementById('tab-register-btn').className = `flex-1 py-4 text-sm transition-all ${isLogin ? 'tab-inactive' : 'tab-active'}`;
-      
+      document.getElementById('form-login').style.display = isLogin ? 'block' : 'none';
+      document.getElementById('form-register').style.display = isLogin ? 'none' : 'block';
+      document.getElementById('tab-login-btn').className = `auth-tab ${isLogin ? 'active' : ''}`;
+      document.getElementById('tab-register-btn').className = `auth-tab ${isLogin ? '' : 'active'}`;
       hideError(document.getElementById('login-error'));
       hideError(document.getElementById('reg-error'));
     }
@@ -140,67 +222,46 @@
       e.preventDefault();
       const btn = document.getElementById('login-submit');
       const errEl = document.getElementById('login-error');
-      setLoading(btn, true);
-      hideError(errEl);
-
-      const email = document.getElementById('login-email').value.trim();
-      const password = document.getElementById('login-password').value;
-
+      setLoading(btn, true); hideError(errEl);
       try {
-        const res = await api('/api/account/login', {
+        await api('/api/account/login', {
           method: 'POST',
-          body: { email, password }
+          body: { email: document.getElementById('login-email').value.trim(), password: document.getElementById('login-password').value }
         });
         window.location.href = returnUrl;
       } catch (err) {
         showError(errEl, err.message || 'Erro ao entrar. Verifique seus dados.');
-      } finally {
-        setLoading(btn, false, 'Entrar');
-      }
+      } finally { setLoading(btn, false, 'Entrar'); }
     }
 
     async function handleRegister(e) {
       e.preventDefault();
       const btn = document.getElementById('reg-submit');
       const errEl = document.getElementById('reg-error');
-      setLoading(btn, true);
-      hideError(errEl);
-
-      const name = document.getElementById('reg-name').value.trim();
-      const email = document.getElementById('reg-email').value.trim();
-      const password = document.getElementById('reg-password').value;
-
+      setLoading(btn, true); hideError(errEl);
       try {
         const res = await api('/api/account/register', {
           method: 'POST',
-          body: { name, email, password }
+          body: {
+            name: document.getElementById('reg-name').value.trim(),
+            email: document.getElementById('reg-email').value.trim(),
+            password: document.getElementById('reg-password').value
+          }
         });
-        window.location.href = res.redirectUrl || `/auth.html?email=${encodeURIComponent(email)}&returnUrl=${encodeURIComponent(returnUrl)}`;
+        window.location.href = res.redirectUrl || `/auth.html?email=${encodeURIComponent(document.getElementById('reg-email').value.trim())}&returnUrl=${encodeURIComponent(returnUrl)}`;
       } catch (err) {
         showError(errEl, err.message || 'Erro ao criar conta. Tente novamente.');
-      } finally {
-        setLoading(btn, false, 'Criar conta');
-      }
+      } finally { setLoading(btn, false, 'Criar conta'); }
     }
 
     async function api(url, opts = {}) {
       const headers = { 'Content-Type': 'application/json' };
-      const fetchOpts = {
-        method: opts.method || 'GET',
-        headers,
-        credentials: 'include',
-      };
-      if (opts.body) {
-        fetchOpts.body = JSON.stringify(opts.body);
-      }
-
+      const fetchOpts = { method: opts.method || 'GET', headers, credentials: 'include' };
+      if (opts.body) fetchOpts.body = JSON.stringify(opts.body);
       const res = await fetch(url, fetchOpts);
       let data;
       try { data = await res.json(); } catch { data = {}; }
-
-      if (!res.ok) {
-        throw new Error(data.error || data.title || (res.status === 401 ? 'Sessão expirada. Faça login novamente.' : `Erro ${res.status}`));
-      }
+      if (!res.ok) throw new Error(data.error || data.title || (res.status === 401 ? 'Sessão expirada. Faça login novamente.' : `Erro ${res.status}`));
       return data;
     }
 
@@ -208,26 +269,11 @@
       btn.disabled = loading;
       if (loading) {
         btn.dataset.original = btn.textContent;
-        btn.innerHTML = `<span class="inline-flex items-center justify-center gap-2">
-          <svg class="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
-          </svg>
-          Aguarde…</span>`;
-      } else {
-        btn.textContent = defaultText || btn.dataset.original || 'Enviar';
-      }
+        btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:8px"><span class="spinner"></span>Aguarde…</span>';
+      } else { btn.textContent = defaultText || btn.dataset.original || 'Enviar'; }
     }
-
-    function showError(el, msg) {
-      el.textContent = msg;
-      el.classList.remove('hidden');
-    }
-
-    function hideError(el) {
-      el.textContent = '';
-      el.classList.add('hidden');
-    }
+    function showError(el, msg) { el.textContent = msg; el.classList.add('visible'); }
+    function hideError(el) { el.textContent = ''; el.classList.remove('visible'); }
 
     boot();
   </script>
