@@ -1,0 +1,1052 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "Moodle Connector",
+    "subtitle": "Moodle course tools",
+    "description": "Moodle Connector helps authorized educators and academic teams search Moodle courses, inspect participants, activities, submissions, grades, completion data, student risk signals, and assisted grading workflows through ChatGPT. Write workflows use private previews, pending actions, and explicit confirmation before committing grade or feedback changes to Moodle.",
+    "category": "EDUCATION"
+  },
+  "tools": {
+    "atualizar_rascunho_correcao": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Saves private reviewed grade and feedback draft data in the connector without writing to Moodle.",
+        "open_world_justification": "Operates within private connector state and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible Moodle actions."
+      }
+    },
+    "audit_course_structure": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "auditar_estrutura_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "buscar_cursos": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "cancelar_lote_correcao_assistida": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Updates private batch state to cancel processing without writing to Moodle.",
+        "open_world_justification": "Operates within private connector state and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible Moodle actions."
+      }
+    },
+    "confirmar_lancamento_lote_moodle": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Writes final grade and feedback records to Moodle after a pending action is confirmed.",
+        "open_world_justification": "Writes only to the authenticated private Moodle environment and cannot publish to public internet state.",
+        "destructive_justification": "Commits official Moodle grade and feedback records after confirmation, which can be hard to reverse."
+      }
+    },
+    "consultar_atividade": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_auditoria_correcao": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves sanitized connector audit records without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_auditoria_correcao_lote": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves sanitized connector audit records without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_boletim_aluno": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_contexto_item_correcao_assistida": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_entrega_aluno": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_item_correcao_assistida": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_membros_grupo": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_modulo_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_prazos_atividades": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_progresso_aluno": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_quiz": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_status_lote_correcao": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_status_submissao": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "consultar_tarefa": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "criar_lote_correcao_assistida": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a private assisted-grading batch and enqueues internal processing without writing to Moodle.",
+        "open_world_justification": "Operates within private connector state and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible Moodle actions."
+      }
+    },
+    "criar_previa_lancamento_lote": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a private pending action preview for a later Moodle grade and feedback write without executing it.",
+        "open_world_justification": "Operates within private connector state and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible Moodle actions."
+      }
+    },
+    "descobrir_funcoes_moodle_correcao": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "discover_moodle_grading_functions": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "executar_descoberta_tecnica_correcao": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "exportar_relatorio_correcao_coordenacao": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "fetch": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Fetches one authorized Moodle course document without modifying Moodle or connector records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "gerar_relatorio_risco_estudantes": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_assignment": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_course": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_course_activity": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_course_module": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_group_members": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_quiz": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_student_completion": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_student_gradebook": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_student_submission": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_submission_status": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_activity_deadlines": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_assignment_submissions": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_activities": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_assignments": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_contents": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_files": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_groups": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_pages": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_participants": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_quizzes": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_resources": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_scorms": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_students": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_course_urls": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_courses": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_late_submissions": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_pending_submissions": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_submissions_awaiting_grading": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_alunos_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_arquivos_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_atividades_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_conteudos_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_entregas_aguardando_correcao": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_entregas_atividade": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_entregas_atrasadas": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_entregas_corrigiveis": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_entregas_pendentes": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_grupos_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_meus_cursos": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_paginas_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_participantes_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_quizzes_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_recursos_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_scorms_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_tarefas_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "listar_urls_curso": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "preparar_correcao_entrega": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "report_students_at_risk": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "revisar_feedbacks_lote": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves batch review data and returns an interactive UI; draft updates and Moodle writes use separate tools.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "search": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Searches authorized Moodle courses and returns citation-ready results without modifying Moodle or connector records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "search_courses": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves Moodle or connector data for the requested academic context without creating or updating records.",
+        "open_world_justification": "Operates within the authenticated Moodle or connector context and cannot publish to public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Search authorized Moodle courses with the standard connector search tool.",
+      "user_prompt": "Search my Moodle courses for safety training.",
+      "file_attachment_urls": null,
+      "tools_triggered": "search",
+      "expected_output": "Returns matching Moodle courses with ids, titles, and citation-ready URLs.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Fetch one Moodle course document returned by search.",
+      "user_prompt": "Fetch the Moodle course with id 12345.",
+      "file_attachment_urls": null,
+      "tools_triggered": "fetch",
+      "expected_output": "Returns the selected course document with title, text, URL, and optional metadata.",
+      "expected_output_url": null
+    },
+    {
+      "description": "List participants in a course without returning email by default.",
+      "user_prompt": "List the students in course 12345, first page only.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_course_students",
+      "expected_output": "Returns a paginated list of students for the authorized course with only necessary participant fields.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Find submissions awaiting grading for one assignment.",
+      "user_prompt": "Show submissions awaiting grading for assignment 678 in course 12345.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_submissions_awaiting_grading",
+      "expected_output": "Returns submitted assignments that still await grading without downloading attachments or full submission text.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Prepare a human-confirmed Moodle grade and feedback launch preview.",
+      "user_prompt": "Create a launch preview for reviewed feedback in assisted grading batch 00000000-0000-0000-0000-000000000001.",
+      "file_attachment_urls": null,
+      "tools_triggered": "criar_previa_lancamento_lote",
+      "expected_output": "Returns a pending action preview with ready item counts, warnings if any, and exact confirmation text required before Moodle is changed.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not trigger for general LMS explanations.",
+      "user_prompt": "Explain what Moodle is and how learning management systems work.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because no connected Moodle data or action is requested.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for unrelated calendar requests.",
+      "user_prompt": "What meetings do I have tomorrow?",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because calendar lookup is outside its supported workflows.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for unsupported account recovery or credential collection.",
+      "user_prompt": "Reset my Moodle password and tell me what my current password is.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because password recovery and credential disclosure are outside its MCP tool surface.",
+      "expected_output_url": null
+    }
+  ]
+}

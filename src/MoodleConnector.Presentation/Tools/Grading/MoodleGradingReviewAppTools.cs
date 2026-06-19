@@ -137,11 +137,6 @@ public sealed class MoodleGradingReviewAppTools(
             AuditId: null,
             DateTimeOffset.UtcNow);
 
-        // OpenAI Apps SDK: _meta["openai/outputTemplate"] tells ChatGPT to
-        // fetch the HTML resource and render it in a sandboxed iframe.
-        // The structuredContent is injected as window.openai.toolOutput.
-        var resourceUri = $"ui://grading-review/{batchJobId}";
-
         var result = new CallToolResult
         {
             Content =
@@ -149,10 +144,7 @@ public sealed class MoodleGradingReviewAppTools(
                 new TextContentBlock { Text = narration }
             ],
             StructuredContent = JsonSerializer.SerializeToElement(response),
-            Meta = new JsonObject
-            {
-                ["openai/outputTemplate"] = resourceUri
-            },
+            Meta = MoodleGradingReviewAppMetadata.CreateToolMeta(),
             IsError = false
         };
 
@@ -324,29 +316,30 @@ public sealed class MoodleGradingReviewAppTools(
 }
 
 // ============================================================
-// MCP Resource: ui://grading-review/{batchJobId}
+// MCP Resource: ui://grading-review/app.html
 // ============================================================
 
 [McpServerResourceType]
 public sealed class MoodleGradingReviewAppResources
 {
     [McpServerResource(
-        UriTemplate = "ui://grading-review/{batchJobId}",
+        UriTemplate = MoodleGradingReviewAppMetadata.ResourceUri,
         Name = "grading-review-app",
         Title = "Interface de Revisão de Feedbacks",
-        MimeType = "text/html")]
+        MimeType = MoodleGradingReviewAppMetadata.ResourceMimeType)]
     [Description("Interface HTML interativa para revisar feedbacks de correção assistida.")]
-    public IEnumerable<ResourceContents> GetReviewApp(string batchJobId)
+    public IEnumerable<ResourceContents> GetReviewApp()
     {
         // The resource serves the base HTML template.
-        // Actual data is injected when the tool returns the HTML with embedded JSON.
+        // Actual data is delivered through window.openai.toolOutput.
         var html = LoadResourceHtml();
 
         yield return new TextResourceContents
         {
-            Uri = $"ui://grading-review/{batchJobId}",
-            MimeType = "text/html",
-            Text = html
+            Uri = MoodleGradingReviewAppMetadata.ResourceUri,
+            MimeType = MoodleGradingReviewAppMetadata.ResourceMimeType,
+            Text = html,
+            Meta = MoodleGradingReviewAppMetadata.CreateResourceMeta()
         };
     }
 
@@ -366,6 +359,72 @@ public sealed class MoodleGradingReviewAppResources
         var assemblyDir = Path.GetDirectoryName(assembly.Location) ?? ".";
         var htmlPath = Path.Combine(assemblyDir, "Tools", "Grading", "GradingReviewApp.html");
         return File.Exists(htmlPath) ? File.ReadAllText(htmlPath, Encoding.UTF8) : "<html><body>Template não encontrado</body></html>";
+    }
+}
+
+public static class MoodleGradingReviewAppMetadata
+{
+    public const string ToolName = "revisar_feedbacks_lote";
+    public const string ResourceUri = "ui://grading-review/app.html";
+    public const string ResourceMimeType = "text/html;profile=mcp-app";
+
+    public static JsonObject CreateToolMeta()
+    {
+        return new JsonObject
+        {
+            ["ui"] = new JsonObject
+            {
+                ["resourceUri"] = ResourceUri
+            },
+            ["openai/outputTemplate"] = ResourceUri
+        };
+    }
+
+    public static JsonObject CreateResourceMeta()
+    {
+        var domain = ResolveWidgetDomain();
+
+        return new JsonObject
+        {
+            ["ui"] = new JsonObject
+            {
+                ["prefersBorder"] = true,
+                ["domain"] = domain,
+                ["csp"] = new JsonObject
+                {
+                    ["connectDomains"] = new JsonArray(),
+                    ["resourceDomains"] = new JsonArray()
+                }
+            },
+            ["openai/widgetDescription"] = "Interface para revisar feedbacks de correção assistida e acionar tools de confirmação humana.",
+            ["openai/widgetPrefersBorder"] = true,
+            ["openai/widgetDomain"] = domain,
+            ["openai/widgetCSP"] = new JsonObject
+            {
+                ["connect_domains"] = new JsonArray(),
+                ["resource_domains"] = new JsonArray()
+            }
+        };
+    }
+
+    private static string ResolveWidgetDomain()
+    {
+        var configured = Environment.GetEnvironmentVariable("APP_DOMAIN");
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return "https://novascript.com.br";
+        }
+
+        configured = configured.Trim().TrimEnd('/');
+        if (!configured.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !configured.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            configured = $"https://{configured}";
+        }
+
+        return Uri.TryCreate(configured, UriKind.Absolute, out var uri)
+            ? uri.GetLeftPart(UriPartial.Authority)
+            : "https://novascript.com.br";
     }
 }
 

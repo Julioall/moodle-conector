@@ -240,9 +240,11 @@ var mcpServerBuilder = builder.Services
             }
 
             var security = request.Services.GetRequiredService<IOptions<McpServerSecurityOptions>>().Value;
-            if (security.RequireJwt)
+            foreach (var tool in result.Tools)
             {
-                foreach (var tool in result.Tools)
+                AddGradingReviewToolMetadata(tool);
+
+                if (security.RequireJwt)
                 {
                     AddOAuthSecuritySchemes(tool);
                 }
@@ -1353,6 +1355,19 @@ static JsonArray CreateOAuthSecuritySchemesNode()
             ["scopes"] = scopes
         }
     };
+}
+
+static void AddGradingReviewToolMetadata(ModelContextProtocol.Protocol.Tool tool)
+{
+    if (!string.Equals(tool.Name, MoodleGradingReviewAppMetadata.ToolName, StringComparison.Ordinal))
+    {
+        return;
+    }
+
+    tool.Meta ??= new JsonObject();
+    var toolMeta = MoodleGradingReviewAppMetadata.CreateToolMeta();
+    tool.Meta["ui"] = toolMeta["ui"]?.DeepClone();
+    tool.Meta["openai/outputTemplate"] = MoodleGradingReviewAppMetadata.ResourceUri;
 }
 
 static string GetPublicBaseUrl(HttpContext context)

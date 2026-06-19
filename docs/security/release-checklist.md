@@ -10,6 +10,8 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
 - [ ] `tools/list` expõe `securitySchemes` OAuth quando `McpServerSecurity:RequireJwt=true`.
 - [ ] Tools read-only declaram `ReadOnly=true`, `Destructive=false`, `OpenWorld=false` e `Idempotent=true`.
 - [ ] Tools connector-like mantêm `search` e `fetch` no formato padrão.
+- [ ] Resources de UI usam `text/html;profile=mcp-app`, `_meta.ui.csp`, `_meta.ui.domain` e `openai/widgetDescription`.
+- [ ] Tools que renderizam UI expõem `_meta.ui.resourceUri`; `openai/outputTemplate` fica apenas como alias de compatibilidade.
 
 ## Autenticação E OAuth
 
@@ -36,6 +38,7 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
   - `Features__AssignmentFeedbackWriteEnabled=false`;
   - `Features__AssignmentGradeWriteEnabled=false`;
   - `Features__CourseContentWriteEnabled=false`.
+- [ ] `Features__DemoToolsEnabled=false` em qualquer endpoint submetido ao ChatGPT ou publicado.
 - [ ] Qualquer escrita nova usa fluxo `prepare_*` e `confirm_*`.
 - [ ] Confirmação exige usuário correto, escopo requerido, expiração e texto exato.
 - [ ] Idempotência de confirmação está coberta por teste.

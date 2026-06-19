@@ -152,7 +152,7 @@ public sealed class MoodleCoursesTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(SearchResponse))]
-    [Description("Use this when ChatGPT needs the standard connector search shape. Searches the authenticated user's Moodle courses and returns citation-ready course URLs. Searches courses only, not internal files, activities, or course materials. To find files inside a course, use _list_course_files instead.")]
+    [Description("Use this when ChatGPT needs the standard connector search shape. Searches the authenticated user's Moodle courses and returns citation-ready course URLs. Searches courses only, not internal files, activities, or course materials. To find files inside a course, use list_course_files instead.")]
     public async Task<CallToolResult> SearchAsync(
         [Description("Search query for Moodle courses.")]
         string query,
