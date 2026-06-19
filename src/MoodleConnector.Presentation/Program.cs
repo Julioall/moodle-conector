@@ -260,7 +260,9 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleGradebookTools>()
     .WithTools<MoodleCompletionTools>()
     .WithTools<MoodleRiskAnalysisTools>()
-    .WithTools<MoodleGradingContextDiagnosticsTools>();
+    .WithTools<MoodleGradingContextDiagnosticsTools>()
+    .WithTools<MoodleGradingReviewAppTools>()
+    .WithResources<MoodleGradingReviewAppResources>();
 
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();
 if (featureOptions.DemoToolsEnabled)
