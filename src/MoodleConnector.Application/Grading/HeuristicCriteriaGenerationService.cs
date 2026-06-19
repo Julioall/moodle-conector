@@ -94,7 +94,7 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
     ];
 
     private const int MinCriterionLength = 15;
-    private const int MaxCriteria = 20;
+    private const int MaxCriteria = 6;
 
     public Task<CriteriaGenerationResult> GenerateAsync(
         CriteriaGenerationRequest request,
@@ -205,6 +205,9 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
             warnings.Add("Nota máxima não informada; pontuação por critério indisponível.");
         }
 
+        // Garantir criterios pedagogicos padrao quando nao presentes
+        criteria = AppendDefaultCriteria(criteria, effectiveMaxGrade);
+
         return Task.FromResult(new CriteriaGenerationResult(
             Source: "model_generated_from_activity_context",
             MaxPoints: effectiveMaxGrade,
@@ -300,6 +303,69 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
         }
 
         return criteria;
+    }
+
+    /// <summary>
+    /// Adiciona criterios pedagogicos padrao (organizacao e linguagem)
+    /// quando nao estao ja presentes nos criterios gerados.
+    /// Redistribui pontos proporcionalmente.
+    /// </summary>
+    private static List<GeneratedCriterion> AppendDefaultCriteria(
+        List<GeneratedCriterion> criteria,
+        decimal maxGrade)
+    {
+        var lower = string.Join(" ", criteria.Select(c => c.Description)).ToLowerInvariant();
+
+        var defaults = new List<string>();
+        if (!lower.Contains("organiza") && !lower.Contains("coerencia") && !lower.Contains("coerência") && !lower.Contains("clareza"))
+        {
+            defaults.Add("Clareza, organizacao e coerencia textual");
+        }
+        if (!lower.Contains("lingua") && !lower.Contains("língua") && !lower.Contains("linguagem") && !lower.Contains("portugues"))
+        {
+            defaults.Add("Adequacao da linguagem e normas da lingua portuguesa");
+        }
+
+        if (defaults.Count == 0)
+        {
+            return criteria;
+        }
+
+        var totalCriteria = criteria.Count + defaults.Count;
+        if (totalCriteria > MaxCriteria)
+        {
+            totalCriteria = MaxCriteria;
+        }
+
+        // Redistribuir pontos
+        var newPointsPer = maxGrade > 0 ? Math.Round(maxGrade / totalCriteria, 2) : 0m;
+        var result = new List<GeneratedCriterion>();
+        var accumulated = 0m;
+        var idx = 0;
+
+        foreach (var c in criteria.Take(totalCriteria - defaults.Count))
+        {
+            idx++;
+            var pts = newPointsPer;
+            accumulated += pts;
+            result.Add(c with { MaxPoints = pts });
+        }
+
+        foreach (var d in defaults)
+        {
+            idx++;
+            var pts = (idx == totalCriteria && maxGrade > 0)
+                ? maxGrade - accumulated
+                : newPointsPer;
+            accumulated += pts;
+            result.Add(new GeneratedCriterion(
+                Id: $"C{idx}",
+                Description: d,
+                MaxPoints: pts,
+                EvidenceBasis: "Criterio pedagogico padrao aplicavel a todas as atividades."));
+        }
+
+        return result;
     }
 
     private static List<string> SplitCriteriaText(string text)

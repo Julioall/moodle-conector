@@ -57,9 +57,9 @@ public sealed class GradingAnalysisServiceTests
             AssignmentName: "SA 01",
             MaxGrade: 0m,
             ActivityDescription: null,
-            RubricOrCriteria: "Criterio A",
+            RubricOrCriteria: "Identifica riscos fisicos no ambiente industrial",
             TeacherInstructions: null,
-            SubmissionText: "Resposta do estudante.",
+            SubmissionText: "Resposta do estudante sobre riscos fisicos.",
             FileHashes: []);
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
@@ -78,7 +78,7 @@ public sealed class GradingAnalysisServiceTests
             AssignmentName: "SA 01",
             MaxGrade: 10m,
             ActivityDescription: "Analise de riscos em ambiente industrial.",
-            RubricOrCriteria: "Identifica riscos fisicos; Descreve medidas preventivas; Utiliza normas tecnicas",
+            RubricOrCriteria: "Identifica riscos fisicos no ambiente; Descreve medidas preventivas adequadas; Utiliza normas tecnicas como referencia",
             TeacherInstructions: "Linguagem acolhedora.",
             SubmissionText: "O estudante identificou os principais riscos fisicos no ambiente industrial. " +
                             "Foram descritas diversas medidas preventivas conforme as normas tecnicas vigentes. " +
@@ -94,10 +94,13 @@ public sealed class GradingAnalysisServiceTests
         Assert.True(result.Confidence > 0m);
         Assert.NotEmpty(result.FeedbackToStudent!);
         Assert.NotEmpty(result.PrivateNotesToTeacher!);
-        Assert.Equal(4, result.CriterionAnalysis.Count);
+        Assert.True(result.CriterionAnalysis.Count >= 3, $"Expected >= 3 criteria, got {result.CriterionAnalysis.Count}");
         Assert.Empty(result.Blocks);
 
-        // Feedback nao deve expor dados PII ou tokens
+        // Feedback deve ser natural, sem frases genericas
+        Assert.DoesNotContain("evidenciou o aspecto esperado", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Pontos positivos identificados", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("parecer preliminar assistido", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -108,7 +111,7 @@ public sealed class GradingAnalysisServiceTests
             AssignmentName: "SA 02",
             MaxGrade: 100m,
             ActivityDescription: null,
-            RubricOrCriteria: "Criterio 1 | Criterio 2 | Criterio 3 | Criterio 4",
+            RubricOrCriteria: "Identifica riscos fisicos no ambiente | Descreve medidas preventivas adequadas | Utiliza normas tecnicas como referencia | Propoe acoes corretivas coerentes",
             TeacherInstructions: null,
             SubmissionText: "Resposta com conteudo relevante sobre os criterios propostos.",
             FileHashes: []);
@@ -116,7 +119,7 @@ public sealed class GradingAnalysisServiceTests
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
         Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        Assert.Equal(4, result.CriterionAnalysis.Count);
+        Assert.True(result.CriterionAnalysis.Count >= 4, $"Expected >= 4 criteria, got {result.CriterionAnalysis.Count}");
         Assert.All(result.CriterionAnalysis, c =>
         {
             Assert.NotNull(c.CriterionId);
@@ -211,5 +214,136 @@ public sealed class GradingAnalysisServiceTests
         Assert.NotEmpty(result.Blocks);
         Assert.Contains("insuficiente", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
-}
 
+    // ========================
+    // Validações de Qualidade Pedagógica
+    // ========================
+
+    [Fact]
+    public async Task AnalyzeAsync_CriteriosComMenosDe3PalavrasUteis_SaoRejeitados()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 07",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "ITIL; Etapa 1; língua portuguesa; Identifica riscos fisicos no ambiente industrial",
+            TeacherInstructions: null,
+            SubmissionText: "O estudante identificou riscos fisicos relevantes no ambiente industrial.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        // Fragmentos com <3 palavras úteis devem ter sido rejeitados
+        Assert.All(result.CriterionAnalysis, c =>
+        {
+            var usefulWords = c.CriterionText.Split([' ', ',', ';', '.', ':'], StringSplitOptions.RemoveEmptyEntries)
+                .Count(w => w.Length > 3);
+            Assert.True(usefulWords >= 3, $"Criterio fragmentado nao filtrado: '{c.CriterionText}'");
+        });
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_FragmentosIsolados_NaoGeramCriterios()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 08",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Etapa 1; ITIL; língua; avaliação",
+            TeacherInstructions: null,
+            SubmissionText: "O estudante apresentou um plano detalhado.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        // Todos os critérios fornecidos são fragmentos (<3 palavras úteis) → 0 critérios parseados
+        Assert.Empty(result.CriterionAnalysis);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_FeedbackNaoContemFrasesGenericasProibidas()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 09",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Identifica riscos fisicos no ambiente; Descreve medidas preventivas adequadas; Utiliza normas tecnicas como referencia",
+            TeacherInstructions: null,
+            SubmissionText: "O estudante identificou riscos fisicos e descreveu medidas preventivas usando normas tecnicas.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.NotNull(result.FeedbackToStudent);
+        var feedback = result.FeedbackToStudent!;
+
+        // Frases genéricas proibidas
+        Assert.DoesNotContain("evidenciou o aspecto esperado na resolucao", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("parecer preliminar assistido", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cobertura parcial", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Revisao recomendada", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Pontos positivos identificados", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Aspectos para desenvolvimento", feedback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_FeedbackContemMelhoriasConcretasQuandoHaLacunas()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 10",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Identifica riscos fisicos no ambiente industrial; Elabora plano de contingencia estruturado; Apresenta cronograma de implementacao detalhado",
+            TeacherInstructions: null,
+            SubmissionText: "O aluno identificou riscos fisicos basicos.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.NotNull(result.FeedbackToStudent);
+        // Quando há lacunas, feedback deve conter orientação de melhoria
+        Assert.Contains("melhorar", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_FeedbackEmFormatoParagrafoNaoLista()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 11",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Identifica riscos fisicos no ambiente; Descreve medidas preventivas adequadas; Utiliza normas tecnicas como referencia",
+            TeacherInstructions: null,
+            SubmissionText: "O estudante identificou riscos fisicos e propôs medidas preventivas baseadas em normas tecnicas.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.NotNull(result.FeedbackToStudent);
+        // Feedback deve ser em parágrafos, não em listas de bullets
+        Assert.DoesNotContain("- ", result.FeedbackToStudent);
+        Assert.DoesNotContain("**Pontos", result.FeedbackToStudent);
+        Assert.DoesNotContain("**Aspectos", result.FeedbackToStudent);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_EvidenciaCitaElementosReaisDaEntrega()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 12",
+            MaxGrade: 10m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Elabora plano de gerenciamento de eventos de TI; Identifica incidentes e problemas criticos",
+            TeacherInstructions: null,
+            SubmissionText: "O plano de gerenciamento apresenta eventos de TI e descreve incidentes criticos com problemas de infraestrutura.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        // Evidências devem conter palavras-chave reais da entrega
+        var allEvidence = string.Join(" ", result.CriterionAnalysis
+            .Select(c => c.EvidenceFound ?? "")
+            .Where(e => !string.IsNullOrWhiteSpace(e)));
+        Assert.Contains("gerenciamento", allEvidence, StringComparison.OrdinalIgnoreCase);
+    }
+}

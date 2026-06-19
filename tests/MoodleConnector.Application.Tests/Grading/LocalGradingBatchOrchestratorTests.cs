@@ -154,7 +154,7 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.NotNull(item.SuggestedGrade);
         Assert.True(item.SuggestedGrade > 0);
         Assert.True(item.Confidence > 0m);
-        Assert.Contains("Pontos positivos", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Bom trabalho", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Analise estruturada", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(1, batch.ReadyItems);
     }

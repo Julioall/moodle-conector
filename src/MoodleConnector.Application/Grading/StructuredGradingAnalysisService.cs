@@ -189,38 +189,49 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
             return [];
         }
 
-        var pointsPerCriterion = Math.Round(maxGrade / criteria.Count, 2);
         var results = new List<GradingCriterionAnalysis>();
         var submissionLower = submissionText.ToLowerInvariant();
+
+        // Distribuir pontos com residual no ultimo criterio
+        var pointsPerCriterion = Math.Round(maxGrade / criteria.Count, 2);
+        var accumulatedPoints = 0m;
 
         for (var i = 0; i < criteria.Count; i++)
         {
             var criterion = criteria[i].Trim();
-            var criterionWords = criterion.ToLowerInvariant()
-                .Split([' ', ',', ';', '.', ':'], StringSplitOptions.RemoveEmptyEntries)
-                .Where(word => word.Length > 3)
-                .Take(5)
-                .ToArray();
+            var criterionWords = ExtractSignificantWords(criterion);
 
-            var matchedWords = criterionWords.Count(word => submissionLower.Contains(word));
+            var matchedWords = criterionWords.Where(word => submissionLower.Contains(word)).ToArray();
             var coverage = criterionWords.Length > 0
-                ? (decimal)matchedWords / criterionWords.Length
+                ? (decimal)matchedWords.Length / criterionWords.Length
                 : 0m;
 
-            var suggestedPoints = Math.Round(pointsPerCriterion * Math.Min(coverage * 1.5m, 1m), 2);
+            // Ultimo criterio recebe o residual
+            var currentMax = (i == criteria.Count - 1 && maxGrade > 0)
+                ? maxGrade - accumulatedPoints
+                : pointsPerCriterion;
+            accumulatedPoints += currentMax;
+
+            var suggestedPoints = Math.Round(currentMax * Math.Min(coverage * 1.5m, 1m), 2);
             var needsReview = coverage < 0.5m;
+
+            // Evidence com palavras-chave concretas da entrega
+            var evidence = matchedWords.Length > 0
+                ? BuildConcreteEvidence(criterion, matchedWords)
+                : "Nao foram identificados elementos diretamente relacionados a este aspecto no texto analisado.";
+
+            // Gaps com orientacao especifica
+            var gaps = needsReview
+                ? BuildConcreteGaps(criterion, criterionWords, matchedWords)
+                : null;
 
             results.Add(new GradingCriterionAnalysis(
                 CriterionId: $"C{i + 1}",
                 CriterionText: criterion,
-                MaxPoints: pointsPerCriterion,
+                MaxPoints: currentMax,
                 SuggestedPoints: suggestedPoints,
-                EvidenceFound: matchedWords > 0
-                    ? $"O estudante abordou {matchedWords} de {criterionWords.Length} aspecto(s) identificado(s) no criterio."
-                    : "Nao foram encontradas evidencias diretamente relacionadas ao criterio no texto analisado.",
-                Gaps: needsReview
-                    ? $"O texto apresenta cobertura parcial ({Math.Round(coverage * 100)}%) dos aspectos esperados. Revisao recomendada."
-                    : null,
+                EvidenceFound: evidence,
+                Gaps: gaps,
                 TeacherReviewRequired: needsReview));
         }
 
@@ -242,15 +253,11 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         for (var i = 0; i < criteria.Count; i++)
         {
             var criterion = criteria[i].Trim();
-            var criterionWords = criterion.ToLowerInvariant()
-                .Split([' ', ',', ';', '.', ':'], StringSplitOptions.RemoveEmptyEntries)
-                .Where(word => word.Length > 3)
-                .Take(5)
-                .ToArray();
+            var criterionWords = ExtractSignificantWords(criterion);
 
-            var matchedWords = criterionWords.Count(word => submissionLower.Contains(word));
+            var matchedWords = criterionWords.Where(word => submissionLower.Contains(word)).ToArray();
             var coverage = criterionWords.Length > 0
-                ? (decimal)matchedWords / criterionWords.Length
+                ? (decimal)matchedWords.Length / criterionWords.Length
                 : 0m;
 
             var needsReview = coverage < 0.5m;
@@ -260,11 +267,11 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 CriterionText: criterion,
                 MaxPoints: null,
                 SuggestedPoints: null,
-                EvidenceFound: matchedWords > 0
-                    ? $"O estudante abordou {matchedWords} de {criterionWords.Length} aspecto(s) identificado(s) no criterio."
-                    : "Nao foram encontradas evidencias diretamente relacionadas ao criterio no texto analisado.",
+                EvidenceFound: matchedWords.Length > 0
+                    ? BuildConcreteEvidence(criterion, matchedWords)
+                    : "Nao foram identificados elementos diretamente relacionados a este aspecto no texto analisado.",
                 Gaps: needsReview
-                    ? $"O texto apresenta cobertura parcial ({Math.Round(coverage * 100)}%) dos aspectos esperados. Revisao recomendada."
+                    ? BuildConcreteGaps(criterion, criterionWords, matchedWords)
                     : null,
                 TeacherReviewRequired: needsReview));
         }
@@ -275,45 +282,127 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
     private static string BuildGenericFeedback(string assignmentName, int wordCount)
     {
         var cleanName = CleanAssignmentName(assignmentName);
-        return $"Ola! Sua entrega para a atividade '{cleanName}' foi recebida com {wordCount} palavra(s). " +
-               "Agradecemos pela participacao. Para detalhes sobre a avaliacao, aguarde o retorno do professor/tutor.";
+        return $"O trabalho para a atividade '{cleanName}' foi recebido. " +
+               "Aguarde o retorno do professor/tutor com a avaliacao detalhada.";
     }
 
+    /// <summary>
+    /// Gera feedback natural em paragrafos, com evidencias reais da entrega.
+    /// Formato: abertura positiva + pontos fortes concretos + melhorias objetivas.
+    /// Pronto para copiar no Moodle — sem listas mecanicas nem frases genericas.
+    /// </summary>
     private static string BuildStructuredFeedback(
         string assignmentName,
         IReadOnlyList<GradingCriterionAnalysis> criteria,
         int wordCount)
     {
         var sb = new System.Text.StringBuilder();
-        var cleanName = CleanAssignmentName(assignmentName);
-        sb.AppendLine($"Ola! Obrigado pela sua entrega da atividade '{cleanName}'.");
-        sb.AppendLine();
 
-        var strongCriteria = criteria.Where(c => (c.SuggestedPoints ?? 0) >= (c.MaxPoints ?? 0) * 0.7m).ToList();
+        var strongCriteria = criteria.Where(c => (c.SuggestedPoints ?? 0) >= (c.MaxPoints ?? 0) * 0.5m).ToList();
         var weakCriteria = criteria.Where(c => c.TeacherReviewRequired).ToList();
 
+        // --- Abertura positiva ---
+        if (strongCriteria.Count >= criteria.Count / 2)
+        {
+            sb.Append("Bom trabalho. ");
+        }
+        else
+        {
+            sb.Append("O trabalho apresenta esforco na resolucao da atividade. ");
+        }
+
+        // --- Pontos fortes: texto corrido com elementos reais ---
         if (strongCriteria.Count > 0)
         {
-            sb.AppendLine("**Pontos positivos identificados:**");
-            foreach (var c in strongCriteria)
+            var strongTexts = strongCriteria
+                .Select(c => SummarizeCriterionPositive(c))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+
+            if (strongTexts.Count > 0)
             {
-                sb.AppendLine($"- {c.CriterionText}: evidenciou o aspecto esperado na resolucao.");
+                sb.Append(JoinNaturalList(strongTexts));
+                sb.Append(". ");
             }
-            sb.AppendLine();
         }
 
+        // --- Melhorias: texto corrido com orientacoes concretas ---
         if (weakCriteria.Count > 0)
         {
-            sb.AppendLine("**Aspectos para desenvolvimento:**");
-            foreach (var c in weakCriteria)
+            sb.Append("Para melhorar, ");
+            var improvementTexts = weakCriteria
+                .Select(c => SummarizeCriterionImprovement(c))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+
+            if (improvementTexts.Count > 0)
             {
-                sb.AppendLine($"- {c.CriterionText}: {c.Gaps}");
+                sb.Append(JoinNaturalList(improvementTexts));
+                sb.Append('.');
             }
-            sb.AppendLine();
+            else
+            {
+                sb.Append("revise os aspectos que precisam de maior aprofundamento.");
+            }
+        }
+        else if (strongCriteria.Count < criteria.Count)
+        {
+            sb.Append("Considere revisar os pontos que podem ser aprofundados.");
         }
 
-        sb.AppendLine("Este e um parecer preliminar assistido. A avaliacao final sera feita pelo professor/tutor.");
         return sb.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Gera resumo positivo de um criterio atendido, usando as evidencias encontradas.
+    /// </summary>
+    private static string SummarizeCriterionPositive(GradingCriterionAnalysis criterion)
+    {
+        // Usar a evidencia concreta se disponivel
+        if (!string.IsNullOrWhiteSpace(criterion.EvidenceFound) &&
+            !criterion.EvidenceFound.StartsWith("Nao foram", StringComparison.OrdinalIgnoreCase))
+        {
+            return LowercaseFirst(criterion.EvidenceFound.TrimEnd('.'));
+        }
+
+        return $"demonstrou compreensao do aspecto '{LowercaseFirst(criterion.CriterionText)}'";
+    }
+
+    /// <summary>
+    /// Gera sugestao de melhoria a partir das lacunas identificadas.
+    /// </summary>
+    private static string SummarizeCriterionImprovement(GradingCriterionAnalysis criterion)
+    {
+        if (!string.IsNullOrWhiteSpace(criterion.Gaps))
+        {
+            return LowercaseFirst(criterion.Gaps.TrimEnd('.'));
+        }
+
+        return $"aprofunde o aspecto '{LowercaseFirst(criterion.CriterionText)}'";
+    }
+
+    /// <summary>
+    /// Junta itens em lista natural com virgulas e 'e' antes do ultimo.
+    /// </summary>
+    private static string JoinNaturalList(IReadOnlyList<string> items)
+    {
+        return items.Count switch
+        {
+            0 => string.Empty,
+            1 => UppercaseFirst(items[0]),
+            2 => $"{UppercaseFirst(items[0])} e {items[1]}",
+            _ => $"{UppercaseFirst(string.Join(", ", items.Take(items.Count - 1)))} e {items[^1]}"
+        };
+    }
+
+    private static string LowercaseFirst(string text)
+    {
+        return string.IsNullOrEmpty(text) ? text : char.ToLowerInvariant(text[0]) + text[1..];
+    }
+
+    private static string UppercaseFirst(string text)
+    {
+        return string.IsNullOrEmpty(text) ? text : char.ToUpperInvariant(text[0]) + text[1..];
     }
 
     private static string CleanAssignmentName(string name)
@@ -411,14 +500,83 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         return 0.7m;
     }
 
+    /// <summary>
+    /// Parseia criterios de uma string, rejeitando fragmentos inuteis.
+    /// Requer pelo menos 3 palavras uteis (>3 chars) por criterio.
+    /// Limita a 6 criterios para manter qualidade.
+    /// </summary>
     private static IReadOnlyList<string> ParseCriteria(string rubricOrCriteria)
     {
         return rubricOrCriteria
             .Split(['\n', ';', '|'], StringSplitOptions.RemoveEmptyEntries)
             .Select(c => c.TrimStart('-', '*', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '.', ' ').Trim())
-            .Where(c => c.Length > 3)
-            .Take(20)
+            .Where(c => CountUsefulWords(c) >= 3)
+            .Take(6)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Conta palavras uteis (>3 chars) em um texto.
+    /// </summary>
+    private static int CountUsefulWords(string text)
+    {
+        return text.Split([' ', ',', ';', '.', ':'], StringSplitOptions.RemoveEmptyEntries)
+            .Count(word => word.Length > 3);
+    }
+
+    /// <summary>
+    /// Extrai palavras significativas de um criterio para matching.
+    /// Usa palavras >3 chars, ate 8 por criterio.
+    /// </summary>
+    private static string[] ExtractSignificantWords(string criterion)
+    {
+        return criterion.ToLowerInvariant()
+            .Split([' ', ',', ';', '.', ':', '(', ')'], StringSplitOptions.RemoveEmptyEntries)
+            .Where(word => word.Length > 3)
+            .Where(word => !IsStopWord(word))
+            .Take(8)
+            .ToArray();
+    }
+
+    private static bool IsStopWord(string word)
+    {
+        return word is "para" or "como" or "pela" or "pelo" or "pelas" or "pelos"
+            or "mais" or "cada" or "este" or "esta" or "esse" or "essa"
+            or "entre" or "sobre" or "tambem" or "também" or "deve" or "devem"
+            or "sendo" or "foram" or "será" or "sera" or "quando" or "onde"
+            or "toda" or "todo" or "todas" or "todos" or "seus" or "suas";
+    }
+
+    /// <summary>
+    /// Constroi evidencia concreta com palavras-chave encontradas na entrega.
+    /// </summary>
+    private static string BuildConcreteEvidence(string criterion, string[] matchedWords)
+    {
+        if (matchedWords.Length == 0)
+        {
+            return "Nao foram identificados elementos diretamente relacionados a este aspecto no texto analisado.";
+        }
+
+        var keywordsDisplay = matchedWords.Length <= 4
+            ? string.Join(", ", matchedWords)
+            : string.Join(", ", matchedWords.Take(4)) + " e outros";
+
+        return $"O texto aborda elementos relacionados ({keywordsDisplay}), demonstrando compreensao do aspecto solicitado";
+    }
+
+    /// <summary>
+    /// Constroi lacunas com orientacao especifica sobre o que melhorar.
+    /// </summary>
+    private static string BuildConcreteGaps(string criterion, string[] criterionWords, string[] matchedWords)
+    {
+        var missingWords = criterionWords.Except(matchedWords).Take(3).ToArray();
+        if (missingWords.Length > 0)
+        {
+            var missing = string.Join(", ", missingWords);
+            return $"Aprofunde os aspectos relacionados a {missing} para atender melhor ao criterio";
+        }
+
+        return $"Aprofunde a abordagem sobre '{LowercaseFirst(criterion)}' com mais detalhamento";
     }
 
     /// <summary>

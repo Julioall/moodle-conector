@@ -64,7 +64,8 @@ public sealed class HeuristicCriteriaGenerationServiceTests
 
         Assert.Equal("model_generated_from_activity_context", result.Source);
         Assert.Equal(49m, result.MaxPoints);
-        Assert.True(result.Criteria.Count == 4, $"Esperava 4 critérios, obteve {result.Criteria.Count}");
+        Assert.True(result.Criteria.Count >= 4 && result.Criteria.Count <= 6,
+            $"Esperava 4-6 critérios (4 originais + até 2 padrão), obteve {result.Criteria.Count}");
         Assert.Equal(49m, result.Criteria.Sum(c => c.MaxPoints));
 
         // Verificar que critérios contêm conteúdo relevante
