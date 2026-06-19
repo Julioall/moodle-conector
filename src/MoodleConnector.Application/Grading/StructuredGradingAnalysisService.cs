@@ -61,7 +61,7 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 SuggestedGrade: null,
                 Confidence: 0.15m,
                 AnalysisStatus.Draft,
-                FeedbackToStudent: BuildGenericFeedback(request.AssignmentName, wordCount),
+                FeedbackToStudent: BuildGenericHumanizedFeedback(request.AssignmentName),
                 PrivateNotesToTeacher: lowConfNotes.ToString(),
                 CriterionAnalysis: [],
                 Blocks: []));
@@ -94,7 +94,7 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 SuggestedGrade: null,
                 Confidence: 0.2m,
                 AnalysisStatus.Draft,
-                FeedbackToStudent: BuildGenericFeedback(request.AssignmentName, wordCount),
+                FeedbackToStudent: BuildGenericHumanizedFeedback(request.AssignmentName),
                 PrivateNotesToTeacher: $"Criterios extraidos do contexto nao geraram itens avaliáveis. Revisao manual obrigatoria. Trecho da submissao: {submissionSnippet}",
                 CriterionAnalysis: [],
                 Blocks: []));
@@ -142,7 +142,8 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
             SuggestedGrade: totalSuggested,
             Confidence: baseConfidence,
             AnalysisStatus.Draft,
-            FeedbackToStudent: BuildStructuredFeedback(request.AssignmentName, criterionResults, wordCount),
+            FeedbackToStudent: GenerateStudentFriendlyFeedback(
+                request.AssignmentName, criterionResults, totalSuggested, effectiveMaxGrade, request.SubmissionText),
             PrivateNotesToTeacher: teacherNotes,
             criterionResults,
             Blocks: []));
@@ -279,19 +280,377 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         return results;
     }
 
-    private static string BuildGenericFeedback(string assignmentName, int wordCount)
+    /// <summary>
+    /// Feedback genérico humanizado quando não há critérios suficientes para análise detalhada.
+    /// </summary>
+    private static string BuildGenericHumanizedFeedback(string assignmentName)
     {
         var cleanName = CleanAssignmentName(assignmentName);
-        return $"O trabalho para a atividade '{cleanName}' foi recebido. " +
-               "Aguarde o retorno do professor/tutor com a avaliacao detalhada.";
+        return $"Olá.\n\n" +
+               $"Sua entrega para a atividade '{cleanName}' foi recebida. " +
+               "No momento, não foi possível realizar uma avaliação detalhada por critérios. " +
+               "Aguarde o retorno do professor/tutor com o feedback completo.";
     }
 
     /// <summary>
-    /// Gera feedback natural em paragrafos, com evidencias reais da entrega.
-    /// Formato: abertura positiva + pontos fortes concretos + melhorias objetivas.
-    /// Pronto para copiar no Moodle — sem listas mecanicas nem frases genericas.
+    /// Gera feedback pedagógico humanizado a partir dos dados estruturados da análise.
+    /// Este método é a "segunda etapa de síntese" — transforma evidências técnicas,
+    /// gaps e notas por critério em texto natural adequado para envio direto ao aluno.
+    /// 
+    /// Regras seguidas:
+    /// 1. Escrever diretamente para o aluno, em tom respeitoso e acolhedor.
+    /// 2. Linguagem natural de professor/tutor.
+    /// 3. Sem frases repetitivas tipo "o texto aborda elementos relacionados".
+    /// 4. Sem palavras-chave soltas entre parênteses.
+    /// 5. Sem IDs, hashes ou detalhes internos.
+    /// 6. Sem mencionar análise automática.
+    /// 7. Sem inventar informações ausentes na entrega.
+    /// 8. Tom respeitoso mesmo para entregas fracas.
+    /// 9. Justificativa resumida da nota.
+    /// 10. Texto corrido com tópicos pontuais quando melhora a leitura.
+    /// 11. Nota sugerida no final.
+    /// 12. Português do Brasil.
+    /// 13. Sem tom punitivo.
+    /// 14. Sem elogios genéricos quando nota for baixa.
     /// </summary>
-    private static string BuildStructuredFeedback(
+    private static string GenerateStudentFriendlyFeedback(
+        string assignmentName,
+        IReadOnlyList<GradingCriterionAnalysis> criteria,
+        decimal? suggestedGrade,
+        decimal maxGrade,
+        string submissionText)
+    {
+        var sb = new System.Text.StringBuilder();
+        var cleanName = CleanAssignmentName(assignmentName);
+
+        var strongCriteria = criteria.Where(c => (c.SuggestedPoints ?? 0) >= (c.MaxPoints ?? 0) * 0.5m).ToList();
+        var weakCriteria = criteria.Where(c => c.TeacherReviewRequired).ToList();
+        var gradeRatio = (suggestedGrade.HasValue && maxGrade > 0) ? suggestedGrade.Value / maxGrade : 0m;
+
+        // --- Saudação ---
+        sb.AppendLine("Olá.");
+        sb.AppendLine();
+
+        // --- Parágrafo de abertura — contextualizado pela nota e atividade ---
+        sb.Append(BuildOpeningParagraph(cleanName, gradeRatio, strongCriteria.Count, criteria.Count));
+        sb.AppendLine();
+        sb.AppendLine();
+
+        // --- Pontos positivos (apenas se houver critérios atendidos) ---
+        if (strongCriteria.Count > 0)
+        {
+            var positivePoints = strongCriteria
+                .Select(c => BuildHumanizedPositivePoint(c))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (positivePoints.Count > 0)
+            {
+                sb.AppendLine("Você demonstrou pontos positivos, como:");
+                foreach (var point in positivePoints)
+                {
+                    sb.AppendLine($"- {LowercaseFirst(point)};");
+                }
+                sb.AppendLine();
+            }
+        }
+
+        // --- Pontos de melhoria (apenas se houver lacunas reais) ---
+        if (weakCriteria.Count > 0)
+        {
+            var improvementPoints = weakCriteria
+                .Select(c => BuildHumanizedImprovementPoint(c))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (improvementPoints.Count > 0)
+            {
+                sb.Append(BuildImprovementParagraph(improvementPoints));
+                sb.AppendLine();
+                sb.AppendLine();
+            }
+        }
+
+        // --- Parágrafo de fechamento com justificativa da nota ---
+        sb.Append(BuildClosingParagraph(gradeRatio, strongCriteria.Count, weakCriteria.Count, criteria.Count));
+        sb.AppendLine();
+
+        // --- Nota sugerida no final ---
+        if (suggestedGrade.HasValue && maxGrade > 0)
+        {
+            sb.AppendLine();
+            sb.Append($"Nota sugerida: {suggestedGrade.Value:0.#}/{maxGrade:0.#}");
+        }
+
+        return sb.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Parágrafo de abertura do feedback — varia com a qualidade da entrega.
+    /// Evita elogios genéricos para notas baixas e tom punitivo.
+    /// </summary>
+    private static string BuildOpeningParagraph(
+        string activityName, decimal gradeRatio, int strongCount, int totalCount)
+    {
+        if (gradeRatio >= 0.8m)
+        {
+            return $"Sua atividade apresenta um bom desenvolvimento do tema proposto. " +
+                   $"Foi possível identificar que você compreendeu os aspectos centrais solicitados na atividade.";
+        }
+
+        if (gradeRatio >= 0.5m)
+        {
+            return $"Sua atividade aborda o tema proposto e apresenta elementos relevantes. " +
+                   $"Alguns aspectos foram bem desenvolvidos, mas há pontos que podem ser aprimorados.";
+        }
+
+        if (strongCount > 0)
+        {
+            return $"Sua atividade demonstra esforço na abordagem do tema proposto. " +
+                   $"Alguns pontos foram contemplados, porém há aspectos importantes que precisam de maior aprofundamento.";
+        }
+
+        return $"Sua atividade foi recebida e analisada. " +
+               $"Alguns dos aspectos solicitados precisam de maior desenvolvimento para atender aos critérios da atividade.";
+    }
+
+    /// <summary>
+    /// Transforma um critério atendido em ponto positivo humanizado.
+    /// Usa a descrição do critério como base, NÃO as palavras-chave brutas.
+    /// </summary>
+    private static string BuildHumanizedPositivePoint(GradingCriterionAnalysis criterion)
+    {
+        var criterionDesc = ConsolidateCriterionDescription(criterion.CriterionText);
+
+        // Transformar a descrição do critério em ponto positivo natural
+        // Ex: "Elaborar um plano de gerenciamento" → "elaboração de um plano de gerenciamento"
+        //     "Identificar riscos físicos" → "identificação de riscos físicos"
+        var lower = criterionDesc.ToLowerInvariant();
+
+        // Se o critério começa com verbo, nominalizar para soar natural como ponto positivo
+        var nominalized = TryNominalizeVerb(criterionDesc);
+        if (nominalized != null)
+        {
+            return nominalized;
+        }
+
+        // Fallback: usar a descrição diretamente, prefixada com "abordagem sobre"
+        return $"abordagem sobre {LowercaseFirst(criterionDesc)}";
+    }
+
+    /// <summary>
+    /// Transforma um critério com lacuna em ponto de melhoria humanizado.
+    /// Gera orientação específica baseada no critério, sem palavras-chave soltas.
+    /// </summary>
+    private static string BuildHumanizedImprovementPoint(GradingCriterionAnalysis criterion)
+    {
+        var criterionDesc = ConsolidateCriterionDescription(criterion.CriterionText);
+        var lower = criterionDesc.ToLowerInvariant();
+
+        // Gerar sugestão de melhoria baseada no verbo do critério
+        if (lower.StartsWith("elaborar") || lower.StartsWith("criar") || lower.StartsWith("produzir"))
+        {
+            return $"desenvolva com mais detalhamento a parte referente a {RemoveLeadingVerb(criterionDesc)}";
+        }
+
+        if (lower.StartsWith("identificar") || lower.StartsWith("indicar") || lower.StartsWith("listar"))
+        {
+            return $"identifique de forma mais clara e específica os elementos referentes a {RemoveLeadingVerb(criterionDesc)}";
+        }
+
+        if (lower.StartsWith("descrever") || lower.StartsWith("explicar") || lower.StartsWith("apresentar"))
+        {
+            return $"apresente com mais profundidade os aspectos referentes a {RemoveLeadingVerb(criterionDesc)}";
+        }
+
+        if (lower.StartsWith("relacionar") || lower.StartsWith("comparar") || lower.StartsWith("analisar"))
+        {
+            return $"aprofunde a análise e a relação entre os elementos referentes a {RemoveLeadingVerb(criterionDesc)}";
+        }
+
+        if (lower.StartsWith("adequar") || lower.StartsWith("organizar") || lower.StartsWith("estruturar"))
+        {
+            return $"revise a organização e adequação referente a {RemoveLeadingVerb(criterionDesc)}";
+        }
+
+        // Fallback genérico mas contextualizado
+        return $"aprofunde os aspectos referentes a {LowercaseFirst(criterionDesc)}";
+    }
+
+    /// <summary>
+    /// Constrói parágrafo de melhorias em texto corrido, não como lista mecânica.
+    /// </summary>
+    private static string BuildImprovementParagraph(IReadOnlyList<string> improvements)
+    {
+        if (improvements.Count == 1)
+        {
+            return $"Para melhorar sua entrega, {improvements[0]}.";
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("Para melhorar sua entrega, considere os seguintes pontos: ");
+        sb.Append(LowercaseFirst(improvements[0]));
+        for (var i = 1; i < improvements.Count; i++)
+        {
+            sb.Append(i == improvements.Count - 1 ? "; e " : "; ");
+            sb.Append(LowercaseFirst(improvements[i]));
+        }
+        sb.Append('.');
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parágrafo de fechamento com justificativa resumida da nota.
+    /// </summary>
+    private static string BuildClosingParagraph(
+        decimal gradeRatio, int strongCount, int weakCount, int totalCount)
+    {
+        if (gradeRatio >= 0.8m)
+        {
+            return "De forma geral, sua entrega atende aos critérios da atividade de maneira satisfatória.";
+        }
+
+        if (gradeRatio >= 0.5m)
+        {
+            return "De forma geral, sua entrega atende parcialmente aos critérios da atividade, " +
+                   "mas ainda pode ser aprimorada em alguns aspectos.";
+        }
+
+        if (strongCount > 0)
+        {
+            return "De forma geral, sua entrega apresenta elementos relevantes, " +
+                   "mas precisa ser aprofundada em aspectos centrais dos critérios da atividade.";
+        }
+
+        return "De forma geral, sua entrega precisa de maior desenvolvimento " +
+               "para atender aos critérios propostos na atividade. Caso tenha dúvidas, " +
+               "procure orientação com o professor/tutor.";
+    }
+
+    /// <summary>
+    /// Consolida critérios "quebrados" (vindos de extração bruta de PDF) em descrições
+    /// pedagógicas legíveis. Remove fragmentos soltos, junta partes truncadas.
+    /// Ex: "Elaborar, em documento de texto, de um plano de gerenciamento de"
+    ///   → "Elaborar um plano de gerenciamento em documento de texto"
+    /// </summary>
+    private static string ConsolidateCriterionDescription(string rawCriterion)
+    {
+        var cleaned = rawCriterion.Trim().TrimEnd('.', ',', ';');
+
+        // Remover preposições soltas no final (texto truncado)
+        var trailingPrepositions = new[] { " de", " da", " do", " das", " dos", " em", " no", " na", " nos", " nas", " para", " com" };
+        foreach (var prep in trailingPrepositions)
+        {
+            if (cleaned.EndsWith(prep, StringComparison.OrdinalIgnoreCase))
+            {
+                cleaned = cleaned[..^prep.Length].TrimEnd(',', ' ');
+            }
+        }
+
+        // Remover vírgulas desnecessárias antes de preposições ("Elaborar, em documento" → "Elaborar em documento")
+        cleaned = Regex.Replace(cleaned, @",\s+(em|de|da|do|no|na|para|com|das|dos|nos|nas)\b", " $1");
+
+        // Remover "de" redundante ("de um plano de" → "um plano de")
+        cleaned = Regex.Replace(cleaned, @"\bde\s+de\b", "de", RegexOptions.IgnoreCase);
+
+        // Capitalizar primeira letra
+        if (cleaned.Length > 0 && char.IsLower(cleaned[0]))
+        {
+            cleaned = char.ToUpperInvariant(cleaned[0]) + cleaned[1..];
+        }
+
+        return cleaned;
+    }
+
+    /// <summary>
+    /// Tenta nominalizar o verbo inicial de um critério para usar como ponto positivo.
+    /// Ex: "Elaborar um plano" → "elaboração de um plano"
+    ///     "Identificar riscos" → "identificação de riscos"
+    /// </summary>
+    private static string? TryNominalizeVerb(string criterionText)
+    {
+        var firstSpace = criterionText.IndexOf(' ');
+        if (firstSpace <= 0)
+        {
+            return null;
+        }
+
+        var verb = criterionText[..firstSpace].ToLowerInvariant();
+        var rest = criterionText[firstSpace..].Trim();
+
+        var nominalization = verb switch
+        {
+            "elaborar" => "elaboração",
+            "identificar" => "identificação",
+            "descrever" => "descrição",
+            "apresentar" => "apresentação",
+            "analisar" => "análise",
+            "comparar" => "comparação",
+            "relacionar" => "relação entre",
+            "propor" => "proposição",
+            "planejar" => "planejamento",
+            "demonstrar" => "demonstração",
+            "explicar" => "explicação",
+            "classificar" => "classificação",
+            "definir" => "definição",
+            "organizar" => "organização",
+            "criar" => "criação",
+            "aplicar" => "aplicação",
+            "adequar" => "adequação",
+            "avaliar" => "avaliação",
+            "indicar" => "indicação",
+            "formular" => "formulação",
+            "estruturar" => "estruturação",
+            "listar" => "listagem",
+            "justificar" => "justificativa",
+            "responder" => "resposta referente a",
+            _ => null
+        };
+
+        if (nominalization == null)
+        {
+            return null;
+        }
+
+        // Ajustar preposição: "elaboração um plano" → "elaboração de um plano"
+        var needsDe = !rest.StartsWith("de ", StringComparison.OrdinalIgnoreCase) &&
+                      !rest.StartsWith("da ", StringComparison.OrdinalIgnoreCase) &&
+                      !rest.StartsWith("do ", StringComparison.OrdinalIgnoreCase) &&
+                      !rest.StartsWith("dos ", StringComparison.OrdinalIgnoreCase) &&
+                      !rest.StartsWith("das ", StringComparison.OrdinalIgnoreCase) &&
+                      !rest.StartsWith("entre ", StringComparison.OrdinalIgnoreCase) &&
+                      !rest.StartsWith("sobre ", StringComparison.OrdinalIgnoreCase) &&
+                      !nominalization.EndsWith(" ");
+
+        return needsDe
+            ? $"{nominalization} de {LowercaseFirst(rest)}"
+            : $"{nominalization} {LowercaseFirst(rest)}";
+    }
+
+    /// <summary>
+    /// Remove o verbo inicial de um critério, retornando o complemento.
+    /// Ex: "Elaborar um plano de gerenciamento" → "um plano de gerenciamento"
+    /// </summary>
+    private static string RemoveLeadingVerb(string criterionText)
+    {
+        var firstSpace = criterionText.IndexOf(' ');
+        if (firstSpace <= 0)
+        {
+            return LowercaseFirst(criterionText);
+        }
+
+        return LowercaseFirst(criterionText[(firstSpace + 1)..].Trim());
+    }
+
+    // --- Métodos legacy preservados para referência e debug ---
+
+    /// <summary>
+    /// [LEGACY] Feedback antigo baseado em concatenação de evidências.
+    /// Preservado para comparação durante transição. Será removido em versão futura.
+    /// </summary>
+    private static string BuildStructuredFeedbackLegacy(
         string assignmentName,
         IReadOnlyList<GradingCriterionAnalysis> criteria,
         int wordCount)
@@ -301,7 +660,6 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         var strongCriteria = criteria.Where(c => (c.SuggestedPoints ?? 0) >= (c.MaxPoints ?? 0) * 0.5m).ToList();
         var weakCriteria = criteria.Where(c => c.TeacherReviewRequired).ToList();
 
-        // --- Abertura positiva ---
         if (strongCriteria.Count >= criteria.Count / 2)
         {
             sb.Append("Bom trabalho. ");
@@ -311,7 +669,6 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
             sb.Append("O trabalho apresenta esforco na resolucao da atividade. ");
         }
 
-        // --- Pontos fortes: texto corrido com elementos reais ---
         if (strongCriteria.Count > 0)
         {
             var strongTexts = strongCriteria
@@ -326,7 +683,6 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
             }
         }
 
-        // --- Melhorias: texto corrido com orientacoes concretas ---
         if (weakCriteria.Count > 0)
         {
             sb.Append("Para melhorar, ");
@@ -353,12 +709,8 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         return sb.ToString().Trim();
     }
 
-    /// <summary>
-    /// Gera resumo positivo de um criterio atendido, usando as evidencias encontradas.
-    /// </summary>
     private static string SummarizeCriterionPositive(GradingCriterionAnalysis criterion)
     {
-        // Usar a evidencia concreta se disponivel
         if (!string.IsNullOrWhiteSpace(criterion.EvidenceFound) &&
             !criterion.EvidenceFound.StartsWith("Nao foram", StringComparison.OrdinalIgnoreCase))
         {
@@ -368,9 +720,6 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         return $"demonstrou compreensao do aspecto '{LowercaseFirst(criterion.CriterionText)}'";
     }
 
-    /// <summary>
-    /// Gera sugestao de melhoria a partir das lacunas identificadas.
-    /// </summary>
     private static string SummarizeCriterionImprovement(GradingCriterionAnalysis criterion)
     {
         if (!string.IsNullOrWhiteSpace(criterion.Gaps))
@@ -381,9 +730,6 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         return $"aprofunde o aspecto '{LowercaseFirst(criterion.CriterionText)}'";
     }
 
-    /// <summary>
-    /// Junta itens em lista natural com virgulas e 'e' antes do ultimo.
-    /// </summary>
     private static string JoinNaturalList(IReadOnlyList<string> items)
     {
         return items.Count switch

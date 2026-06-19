@@ -102,6 +102,11 @@ public sealed class GradingAnalysisServiceTests
         Assert.DoesNotContain("Pontos positivos identificados", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("parecer preliminar assistido", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("token", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("o texto aborda elementos relacionados", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+
+        // Novo formato humanizado: saudação + nota sugerida
+        Assert.StartsWith("Olá", result.FeedbackToStudent);
+        Assert.Contains("Nota sugerida:", result.FeedbackToStudent);
     }
 
     [Fact]
@@ -303,6 +308,8 @@ public sealed class GradingAnalysisServiceTests
         Assert.NotNull(result.FeedbackToStudent);
         // Quando há lacunas, feedback deve conter orientação de melhoria
         Assert.Contains("melhorar", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+        // Novo formato: deve ter saudação
+        Assert.StartsWith("Olá", result.FeedbackToStudent);
     }
 
     [Fact]
@@ -320,10 +327,11 @@ public sealed class GradingAnalysisServiceTests
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
         Assert.NotNull(result.FeedbackToStudent);
-        // Feedback deve ser em parágrafos, não em listas de bullets
-        Assert.DoesNotContain("- ", result.FeedbackToStudent);
+        // Feedback não deve ter formatação tipo markdown bold
         Assert.DoesNotContain("**Pontos", result.FeedbackToStudent);
         Assert.DoesNotContain("**Aspectos", result.FeedbackToStudent);
+        // Feedback humanizado usa "- " para pontos positivos, mas não para estrutura mecânica
+        Assert.DoesNotContain("o texto aborda elementos relacionados", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -345,5 +353,106 @@ public sealed class GradingAnalysisServiceTests
             .Select(c => c.EvidenceFound ?? "")
             .Where(e => !string.IsNullOrWhiteSpace(e)));
         Assert.Contains("gerenciamento", allEvidence, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ========================
+    // Validações de Feedback Humanizado
+    // ========================
+
+    [Fact]
+    public async Task AnalyzeAsync_FeedbackHumanizado_NaoContemPalavrasChaveSoltas()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "Envio SAP 01 - Etapa 1",
+            MaxGrade: 49m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Elaborar um plano de gerenciamento de eventos de TI; Indicar eventos que podem impactar a operacao; Relacionar o plano as orientacoes da ITIL; Adequar o texto conforme norma culta da lingua portuguesa",
+            TeacherInstructions: null,
+            SubmissionText: "O plano de gerenciamento de eventos de TI apresenta os principais eventos " +
+                            "que podem impactar a operacao da empresa, incluindo falhas de hardware, " +
+                            "problemas de rede e incidentes de seguranca. O plano segue as orientacoes da ITIL " +
+                            "para monitoramento e tratamento de eventos.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.NotNull(result.FeedbackToStudent);
+        var feedback = result.FeedbackToStudent!;
+
+        // Regra 3: Sem frases repetitivas de palavras-chave
+        Assert.DoesNotContain("o texto aborda elementos relacionados", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("demonstrando compreensao do aspecto", feedback, StringComparison.OrdinalIgnoreCase);
+
+        // Regra 4: Sem palavras-chave soltas entre parenteses
+        Assert.DoesNotMatch(@"\([a-z]+,\s*[a-z]+\)", feedback);
+
+        // Regra 1: Saudação direta
+        Assert.StartsWith("Olá", feedback);
+
+        // Regra 12: Nota sugerida no final
+        Assert.Contains("Nota sugerida:", feedback);
+        Assert.Matches(@"Nota sugerida:\s+\d+", feedback);
+
+        // Regra 5: Sem detalhes internos
+        Assert.DoesNotContain("C1", feedback);
+        Assert.DoesNotContain("C2", feedback);
+        Assert.DoesNotContain("criterion", feedback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_FeedbackHumanizado_TomAdequadoANota()
+    {
+        // Cenário com nota baixa — não deve ter elogios genéricos
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 13",
+            MaxGrade: 100m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Elaborar plano de gerenciamento de eventos de TI; Indicar eventos que impactam operacao; Relacionar com ITIL; Organizar texto com norma culta",
+            TeacherInstructions: null,
+            SubmissionText: "Entrega breve sem muito conteudo.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.NotNull(result.FeedbackToStudent);
+        var feedback = result.FeedbackToStudent!;
+
+        // Regra 15: Sem elogios genéricos para nota baixa
+        Assert.DoesNotContain("excelente trabalho", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Bom trabalho", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("bom desenvolvimento", feedback, StringComparison.OrdinalIgnoreCase);
+
+        // Regra 14: Sem tom punitivo
+        Assert.DoesNotContain("insuficiente", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("inadequado", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ruim", feedback, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AnalyzeAsync_FeedbackHumanizado_ContemPontosPositivosEMelhorias()
+    {
+        var request = new GradingAnalysisRequest(
+            AssignmentName: "SA 14",
+            MaxGrade: 49m,
+            ActivityDescription: null,
+            RubricOrCriteria: "Elaborar plano de gerenciamento de eventos de TI; Indicar eventos que impactam operacao; Relacionar com ITIL; Organizar texto com norma culta",
+            TeacherInstructions: null,
+            SubmissionText: "O estudante elaborou um plano de gerenciamento de eventos de TI. " +
+                            "O texto indica alguns eventos mas nao relaciona com ITIL.",
+            FileHashes: []);
+
+        var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
+
+        Assert.NotNull(result.FeedbackToStudent);
+        var feedback = result.FeedbackToStudent!;
+
+        // Deve ter pontos positivos reais
+        Assert.Contains("pontos positivos", feedback, StringComparison.OrdinalIgnoreCase);
+
+        // Deve ter orientação de melhoria
+        Assert.Contains("melhorar", feedback, StringComparison.OrdinalIgnoreCase);
+
+        // Deve ter parágrafo de fechamento
+        Assert.Contains("De forma geral", feedback);
     }
 }
