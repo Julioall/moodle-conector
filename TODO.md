@@ -1,7 +1,7 @@
 # TODO.md — Correção Assistida SENAI para AVA/Moodle via GPT Apps
 
 **Status atual:** MVP funcional avançado, validado em leitura real em dois cursos Moodle.
-**Data-base atualizada:** 2026-06-18
+**Data-base atualizada:** 2026-06-19
 **Versão Moodle confirmada:** 5
 **Token de escrita:** usa o token configurado no cadastro da plataforma (particular de cada cliente, não há WriteServiceToken separado).
 **Repositório:** `moodle-conector`
@@ -243,8 +243,8 @@ Implementado:
 
 Ainda pendente:
 
-- [ ] Imagens.
-- [ ] OCR para PDF escaneado/imagem.
+- [x] Imagens.
+- [x] OCR para PDF escaneado/imagem (Tesseract + tesseract-ocr-por).
 - [ ] Arquivo protegido por senha.
 
 ---
@@ -366,6 +366,7 @@ Estado atual:
 - [x] `dotnet.exe test MoodleConnector.slnx` passando com 211 testes em 2026-06-15.
 - [x] `dotnet.exe test tests/MoodleConnector.Application.Tests` passando com 243 testes em 2026-06-17.
 - [x] `dotnet.exe test tests/MoodleConnector.Application.Tests` passando com 253 testes em 2026-06-18 (inclui testes de fila/background).
+- [x] `dotnet.exe test MoodleConnector.slnx` passando com 256 testes em 2026-06-19 (inclui OCR/Tesseract).
 - [x] `dotnet.exe test tests/MoodleConnector.Application.Tests/MoodleConnector.Application.Tests.csproj --filter DocumentExtractionServiceTests` passando com 19 testes em 2026-06-15.
 
 ### 9.1 Validação Manual no Conector Moodle (2026-06-17)
@@ -379,7 +380,7 @@ Ainda pendente:
 
 - [ ] Testes de integração em sandbox para escrita real.
 - [ ] Testes de carga 25/100/400.
-- [ ] Testes com imagens e PDF escaneado/OCR quando suporte for implementado.
+- [x] Testes com imagens e PDF escaneado/OCR (Tesseract integrado, testes passando).
 - [x] Testes de token expirado e token sem escopo de escrita.
 - [ ] Testes de usuário sem permissão Moodle real para corrigir.
 - [ ] Reescanear `/mcp` no ChatGPT Developer Mode após mudanças de metadata/tools.
