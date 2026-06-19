@@ -154,6 +154,15 @@ public sealed partial class GradingContextBuilder(
                     if (settings != null && settings.MaxGrade > 0)
                     {
                         maxGrade = settings.MaxGrade;
+                        logger?.LogDebug(
+                            "MaxGrade obtida via API Moodle: {MaxGrade} para assignment {AssignmentId}",
+                            maxGrade, item.AssignmentId);
+                    }
+                    else if (settings != null)
+                    {
+                        logger?.LogWarning(
+                            "API Moodle retornou MaxGrade={MaxGrade} para assignment {AssignmentId}. Pode ser escala (negativo) ou nao configurada.",
+                            settings.MaxGrade, item.AssignmentId);
                     }
                 }
                 catch (Exception ex)
@@ -171,6 +180,23 @@ public sealed partial class GradingContextBuilder(
         if (maxGrade == null && !string.IsNullOrWhiteSpace(assignmentStatement))
         {
             maxGrade = ExtractMaxGrade(assignmentStatement);
+            if (maxGrade != null)
+            {
+                logger?.LogDebug(
+                    "MaxGrade extraida via regex do enunciado: {MaxGrade} para assignment {AssignmentId}",
+                    maxGrade, item.AssignmentId);
+            }
+        }
+
+        // Fallback final: usar padrão Moodle (100 pontos) quando todas as fontes falham.
+        // O Moodle v5 cria atividades com grade=100 por padrão. Melhor estimar com 100
+        // e reduzir confiança do que não gerar nota nenhuma.
+        if (maxGrade == null || maxGrade == 0m)
+        {
+            maxGrade = 100m;
+            logger?.LogInformation(
+                "MaxGrade nao identificada para assignment {AssignmentId}. Usando padrao Moodle (100 pontos).",
+                item.AssignmentId);
         }
 
         // 4. Validação de qualidade dos critérios e fallback via geração estruturada.

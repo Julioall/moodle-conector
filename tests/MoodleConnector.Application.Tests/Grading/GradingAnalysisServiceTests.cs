@@ -180,14 +180,15 @@ public sealed class GradingAnalysisServiceTests
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
         Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        // No cenário Approximate com MaxGrade disponível, agora gera nota proporcional conservadora
+        // No cenário Approximate com MaxGrade disponível, agora gera critérios e nota por critério
         Assert.NotNull(result.SuggestedGrade);
         Assert.True(result.SuggestedGrade >= 0m);
-        Assert.True(result.SuggestedGrade <= 10m * 0.7m); // Escala conservadora: máximo 70% da nota
+        Assert.True(result.SuggestedGrade <= 10m);
         Assert.True(result.Confidence > 0m);
         Assert.True(result.Confidence <= 0.5m);
         Assert.Contains("INSTRUCAO PARA A IA", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(result.CriterionAnalysis);
+        // Agora gera critérios parseados do enunciado quando MaxGrade está disponível
+        Assert.NotEmpty(result.CriterionAnalysis);
         Assert.Empty(result.Blocks);
     }
 

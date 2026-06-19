@@ -81,8 +81,10 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         }
 
         // --- Analise estruturada por criterio ---
-        var criteria = hasApproximateCriteria 
-            ? Array.Empty<string>() 
+        // Quando temos criterios Approximate E MaxGrade disponivel, permitir
+        // parsing dos criterios para gerar nota estimada (cenario SAP/PDF).
+        var criteria = hasApproximateCriteria
+            ? (hasMaxGrade ? ParseCriteria(effectiveCriteria) : Array.Empty<string>())
             : ParseCriteria(effectiveCriteria);
 
         if (criteria.Count == 0 && hasFormalCriteria)
