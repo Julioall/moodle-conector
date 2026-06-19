@@ -59,11 +59,25 @@ public sealed class MoodleGradingReviewAppTools(
             return Error("Não foi possível consultar o lote de correção assistida neste momento.");
         }
 
-        // Enrich items with detail data (feedback, evidence, maxGrade)
+        // Enrich items with detail data (feedback, grade, maxGrade)
+        // Uses GetAssistedGradingItemQuery which returns BOTH suggested and final values
         var enrichedItems = new List<GradingReviewItem>();
         foreach (var item in batchStatus.Items)
         {
+            AssistedGradingItemDetailResult? detail = null;
             GradingContextForChatResult? context = null;
+            try
+            {
+                detail = await mediator.Send(
+                    new GetAssistedGradingItemQuery(item.GradingItemId, batchJobId),
+                    cancellationToken);
+            }
+            catch
+            {
+                // Non-critical: fall back to context query
+            }
+
+            // Always try to get maxGrade/assignmentName from context
             try
             {
                 context = await mediator.Send(
@@ -72,23 +86,34 @@ public sealed class MoodleGradingReviewAppTools(
             }
             catch
             {
-                // Non-critical: item will render with partial data
+                // Non-critical
             }
+
+            // Carry all 4 fields separately so the UI has full visibility
+            var finalGrade = detail?.FinalGrade;
+            var finalFeedback = !string.IsNullOrWhiteSpace(detail?.FinalFeedback) ? detail!.FinalFeedback : null;
+            var suggestedGrade = detail?.SuggestedGrade ?? context?.SuggestedGrade;
+            var draftFeedback = detail?.DraftFeedback ?? context?.DraftFeedback;
+            var maxGrade = context?.MaxGrade ?? 100m;
+            var assignmentName = context?.AssignmentName;
+            var confidence = detail?.Confidence ?? context?.Confidence;
 
             enrichedItems.Add(new GradingReviewItem(
                 item.GradingItemId,
                 item.AssignmentId,
                 item.SubmissionId,
                 item.StudentId,
-                StudentName: null, // Student name resolved by the UI from Moodle data when available
+                StudentName: null,
                 item.Status,
                 item.ReviewStatus,
                 item.CommitStatus,
-                context?.SuggestedGrade,
-                context?.MaxGrade ?? 100m,
-                context?.DraftFeedback,
-                context?.AssignmentName,
-                context?.Confidence));
+                finalGrade,
+                finalFeedback,
+                suggestedGrade,
+                draftFeedback,
+                maxGrade,
+                assignmentName,
+                confidence));
         }
 
         var appData = new GradingReviewAppData(
@@ -155,9 +180,11 @@ public sealed class MoodleGradingReviewAppTools(
                 status = i.Status,
                 reviewStatus = i.ReviewStatus,
                 commitStatus = i.CommitStatus,
+                finalGrade = i.FinalGrade,
+                finalFeedback = i.FinalFeedback,
                 suggestedGrade = i.SuggestedGrade,
-                maxGrade = i.MaxGrade,
                 draftFeedback = i.DraftFeedback,
+                maxGrade = i.MaxGrade,
                 assignmentName = i.AssignmentName,
                 confidence = i.Confidence
             }),
@@ -235,22 +262,31 @@ public sealed class MoodleGradingReviewAppTools(
             var displayName = !string.IsNullOrWhiteSpace(item.StudentName)
                 ? item.StudentName
                 : $"Aluno {item.StudentId}";
-            var gradeStr = item.SuggestedGrade.HasValue
-                ? $"{item.SuggestedGrade.Value:F1}/{item.MaxGrade:F0}"
+
+            // Prioritize final over suggested
+            var displayGrade = item.FinalGrade ?? item.SuggestedGrade;
+            var displayFeedback = !string.IsNullOrWhiteSpace(item.FinalFeedback)
+                ? item.FinalFeedback
+                : item.DraftFeedback;
+
+            var gradeStr = displayGrade.HasValue
+                ? $"{displayGrade.Value:F1}/{item.MaxGrade:F0}"
                 : "—";
 
+            var gradeLabel = item.FinalGrade.HasValue ? "Nota final" : "Nota sugerida";
+
             sb.AppendLine($"---");
-            sb.AppendLine($"### {displayName} — Nota sugerida: {gradeStr}");
+            sb.AppendLine($"### {displayName} — {gradeLabel}: {gradeStr}");
             if (!string.IsNullOrWhiteSpace(item.AssignmentName))
             {
                 sb.AppendLine($"*{item.AssignmentName}*");
             }
             sb.AppendLine();
 
-            if (!string.IsNullOrWhiteSpace(item.DraftFeedback))
+            if (!string.IsNullOrWhiteSpace(displayFeedback))
             {
                 sb.AppendLine("**Feedback:**");
-                sb.AppendLine($"> {item.DraftFeedback.Replace("\n", "\n> ")}");
+                sb.AppendLine($"> {displayFeedback.Replace("\n", "\n> ")}");
             }
             else
             {
@@ -357,8 +393,10 @@ public sealed record GradingReviewItem(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("reviewStatus")] string ReviewStatus,
     [property: JsonPropertyName("commitStatus")] string CommitStatus,
+    [property: JsonPropertyName("finalGrade")] decimal? FinalGrade,
+    [property: JsonPropertyName("finalFeedback")] string? FinalFeedback,
     [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
-    [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
     [property: JsonPropertyName("draftFeedback")] string? DraftFeedback,
+    [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
     [property: JsonPropertyName("confidence")] decimal? Confidence);

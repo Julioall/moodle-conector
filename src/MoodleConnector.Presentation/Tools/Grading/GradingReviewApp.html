@@ -362,7 +362,11 @@ function renderAll() {
   const sumEl = document.getElementById("summary");
   sumEl.style.display = "";
   document.getElementById("s-total").textContent = state.items.length;
-  const grades = state.items.filter(i => i.suggestedGrade != null).map(i => Number(i.suggestedGrade));
+  // Summary: use final grades when available
+  const grades = state.items
+    .map(i => i.finalGrade ?? i.suggestedGrade)
+    .filter(g => g != null)
+    .map(Number);
   if (grades.length > 0) {
     const avg = (grades.reduce((a,b)=>a+b,0)/grades.length).toFixed(1);
     document.getElementById("s-avg").textContent = avg;
@@ -377,10 +381,12 @@ function renderAll() {
   state.items.forEach((item, idx) => {
     const initials = getInitials(item.studentId, item.studentName);
     const displayName = item.studentName || ("Aluno " + item.studentId);
-    const grade = item.suggestedGrade != null ? Number(item.suggestedGrade).toFixed(1) : "—";
+    // CRITICAL: prioritize final over suggested
+    const displayGrade = item.finalGrade ?? item.suggestedGrade;
+    const grade = displayGrade != null ? Number(displayGrade).toFixed(1) : "—";
     const max = item.maxGrade ? Number(item.maxGrade).toFixed(0) : "100";
-    const gradeClass = getGradeClass(item.suggestedGrade, item.maxGrade);
-    const feedback = item.draftFeedback || "";
+    const gradeClass = getGradeClass(displayGrade, item.maxGrade);
+    const feedback = item.finalFeedback || item.draftFeedback || "";
 
     const card = document.createElement("div");
     card.className = "student-card";
@@ -408,7 +414,7 @@ function renderAll() {
           <div>
             <div class="field-label" style="margin-bottom:4px">Nota</div>
             <input type="number" class="grade-field" id="grade-${item.gradingItemId}"
-              value="${item.suggestedGrade ?? ''}" step="0.1" min="0" max="${max}"
+              value="${displayGrade ?? ''}" step="0.1" min="0" max="${max}"
               oninput="onGradeEdit('${item.gradingItemId}')">
           </div>
           <span class="grade-max" style="margin-top:20px">/ ${max}</span>
@@ -482,7 +488,7 @@ document.getElementById("btn-send").addEventListener("click", async ()=>{
         finalGrade: gr ? parseFloat(gr) : null,
         finalFeedback: fb,
         teacherDecision: "approved",
-        expectedReviewStatus: "NotReviewed"
+        expectedReviewStatus: item.reviewStatus || "NotReviewed"
       });
       savedCount++;
     } catch(e) {
