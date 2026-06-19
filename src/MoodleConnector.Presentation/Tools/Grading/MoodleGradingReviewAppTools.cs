@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using MediatR;
 using ModelContextProtocol.Protocol;
@@ -126,9 +127,6 @@ public sealed class MoodleGradingReviewAppTools(
             batchStatus.ProcessingMetrics.ProgressPercent,
             enrichedItems);
 
-        // Build the interactive HTML by injecting data into the template
-        var html = BuildReviewAppHtml(appData);
-
         // Build structured content for fallback (hosts without MCP Apps)
         var narration = BuildReviewNarration(appData);
 
@@ -139,21 +137,22 @@ public sealed class MoodleGradingReviewAppTools(
             AuditId: null,
             DateTimeOffset.UtcNow);
 
+        // OpenAI Apps SDK: _meta["openai/outputTemplate"] tells ChatGPT to
+        // fetch the HTML resource and render it in a sandboxed iframe.
+        // The structuredContent is injected as window.openai.toolOutput.
+        var resourceUri = $"ui://grading-review/{batchJobId}";
+
         var result = new CallToolResult
         {
             Content =
             [
-                new TextContentBlock { Text = narration },
-                new TextContentBlock
-                {
-                    Text = html,
-                    Annotations = new Annotations
-                    {
-                        Audience = [Role.User]
-                    }
-                }
+                new TextContentBlock { Text = narration }
             ],
             StructuredContent = JsonSerializer.SerializeToElement(response),
+            Meta = new JsonObject
+            {
+                ["openai/outputTemplate"] = resourceUri
+            },
             IsError = false
         };
 
