@@ -1067,7 +1067,7 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
-        var items = await LoadAllItemsAsync(batch.Id, cancellationToken);
+        var items = await GradingItemProcessor.LoadAllBatchItemsAsync(repository, batch.Id, cancellationToken);
         var evidenceByItem = new Dictionary<Guid, IReadOnlyList<GradingEvidence>>();
         foreach (var item in items)
         {
@@ -1121,25 +1121,6 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         return report with { ReportMarkdown = BuildReportMarkdown(report) };
     }
 
-    private async Task<IReadOnlyList<AssistedGradingItem>> LoadAllItemsAsync(
-        Guid batchId,
-        CancellationToken cancellationToken)
-    {
-        var totalItems = await repository.CountItemsByBatchAsync(batchId, cancellationToken);
-        var items = new List<AssistedGradingItem>(totalItems);
-        for (var page = 1; items.Count < totalItems; page++)
-        {
-            var pageItems = await repository.ListItemsByBatchAsync(batchId, page, PageSize, cancellationToken);
-            if (pageItems.Count == 0)
-            {
-                break;
-            }
-
-            items.AddRange(pageItems);
-        }
-
-        return items;
-    }
 
     private static IReadOnlyDictionary<string, int> CountBy(
         IReadOnlyList<AssistedGradingItem> items,
@@ -1628,14 +1609,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             var itemWarnings = new List<string>();
             var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
 
-            // Texto da submissão
-            var submissionText = artifacts
-                .Where(a => a.ArtifactType == "submission_file" &&
-                            a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
-                            !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
-                .Select(a => a.ExtractedTextRef)
-                .FirstOrDefault();
-
+            // Texto da submissão (combina múltiplos arquivos se houver)
             var allSubmissionTexts = artifacts
                 .Where(a => a.ArtifactType == "submission_file" &&
                             a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
@@ -1643,9 +1617,12 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 .Select(a => a.ExtractedTextRef!)
                 .ToArray();
 
-            var combinedSubmission = allSubmissionTexts.Length > 1
-                ? string.Join("\n\n---\n\n", allSubmissionTexts)
-                : submissionText;
+            var combinedSubmission = allSubmissionTexts.Length switch
+            {
+                0 => (string?)null,
+                1 => allSubmissionTexts[0],
+                _ => string.Join("\n\n---\n\n", allSubmissionTexts)
+            };
 
             if (string.IsNullOrWhiteSpace(combinedSubmission))
             {
@@ -1751,25 +1728,11 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             globalWarnings);
     }
 
-    private async Task<IReadOnlyList<AssistedGradingItem>> LoadAllBatchItemsAsync(
+    private Task<IReadOnlyList<AssistedGradingItem>> LoadAllBatchItemsAsync(
         Guid batchId,
         CancellationToken cancellationToken)
     {
-        var allItems = new List<AssistedGradingItem>();
-        var page = 1;
-        while (true)
-        {
-            var pageItems = await repository.ListItemsByBatchAsync(batchId, page, PageSize, cancellationToken);
-            allItems.AddRange(pageItems);
-            if (pageItems.Count < PageSize)
-            {
-                break;
-            }
-
-            page++;
-        }
-
-        return allItems;
+        return GradingItemProcessor.LoadAllBatchItemsAsync(repository, batchId, cancellationToken);
     }
 }
 
@@ -1870,7 +1833,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
 
                 item.SetDraft(
                     suggestedGrade: input.Nota,
-                    confidence: null,
+                    confidence: 0.8m,
                     draftFeedback: input.Feedback,
                     privateNotesToTeacher: "Rascunho gerado pelo ChatGPT via fluxo IA.");
 
@@ -1888,20 +1851,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
         }
 
         // Atualizar contadores do lote
-        var allItems = new List<AssistedGradingItem>();
-        var page = 1;
-        while (true)
-        {
-            var pageItems = await repository.ListItemsByBatchAsync(batch.Id, page, 100, cancellationToken);
-            allItems.AddRange(pageItems);
-            if (pageItems.Count < 100)
-            {
-                break;
-            }
-
-            page++;
-        }
-
+        var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(repository, batch.Id, cancellationToken);
         GradingItemProcessor.UpdateBatchCounters(batch, allItems);
         await repository.SaveChangesAsync(cancellationToken);
 

@@ -114,6 +114,33 @@ public sealed class GradingItemProcessor(
         batch.UpdateCounters(processedItems, readyItems, blockedItems, failedItems);
     }
 
+    /// <summary>
+    /// Carrega todos os itens de um lote via paginação.
+    /// Reutilizado por múltiplos handlers que precisam iterar o lote inteiro.
+    /// </summary>
+    public static async Task<IReadOnlyList<AssistedGradingItem>> LoadAllBatchItemsAsync(
+        IGradingReviewRepository repository,
+        Guid batchId,
+        CancellationToken cancellationToken,
+        int pageSize = 100)
+    {
+        var allItems = new List<AssistedGradingItem>();
+        var page = 1;
+        while (true)
+        {
+            var pageItems = await repository.ListItemsByBatchAsync(batchId, page, pageSize, cancellationToken);
+            allItems.AddRange(pageItems);
+            if (pageItems.Count < pageSize)
+            {
+                break;
+            }
+
+            page++;
+        }
+
+        return allItems;
+    }
+
     private static string? FirstReadableText(GradingContext context)
     {
         if (!string.IsNullOrWhiteSpace(context.SubmissionText))

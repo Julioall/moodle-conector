@@ -42,10 +42,10 @@ public sealed class McpToolMetadataTests
                 Assert.False(attribute.ReadOnly, $"{toolName} executa escrita Moodle e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe pelo pendingActionId.");
             }
-            else if (toolName == "atualizar_rascunho_correcao")
+            else if (toolName is "atualizar_rascunho_correcao" or "salvar_correcoes_ia_lote")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} atualiza estado interno e deve declarar ReadOnly=false.");
-                Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente com expectedReviewStatus e payload identico.");
+                Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente com payload identico.");
             }
             else if (toolName == "cancelar_lote_correcao_assistida")
             {
