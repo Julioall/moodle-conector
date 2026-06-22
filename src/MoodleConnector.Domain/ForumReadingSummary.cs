@@ -59,3 +59,10 @@ public sealed record ForumAttachmentSummary(
     long? SizeBytes,
     string? FileUrl,
     bool? IsExternalFile);
+
+public sealed record ForumInfo(
+    string ForumId,
+    string CourseId,
+    string? Type,
+    string? Name,
+    int? NumDiscussions);

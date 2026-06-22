@@ -61,6 +61,53 @@ public sealed class MoodleForumToolsTests
     }
 
     [Fact]
+    public async Task Deve_criar_previa_de_post_forum()
+    {
+        var mediator = new FakeMediator();
+        var selection = new FakeMoodleConnectionSelection();
+        var sut = new MoodleForumTools(mediator, selection, new FakeMoodleUserResolver(777));
+
+        var result = await sut.CriarPreviaPostForumAsync(
+            "CURSO",
+            "21",
+            "Aviso",
+            "<p>Mensagem.</p>",
+            moodleAlias: "goias");
+
+        Assert.False(result.IsError ?? false);
+        Assert.Equal("goias", selection.Alias);
+        Assert.NotNull(mediator.LastPreviewCommand);
+        Assert.Equal("777", mediator.LastPreviewCommand!.UserExternalId);
+        Assert.Equal("CURSO", mediator.LastPreviewCommand.CourseId);
+        Assert.Equal("21", mediator.LastPreviewCommand.ForumId);
+        Assert.Equal("Aviso", mediator.LastPreviewCommand.Subject);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("pending_confirmation", structured.GetProperty("status").GetString());
+        Assert.Equal("discussion", structured.GetProperty("data").GetProperty("mode").GetString());
+    }
+
+    [Fact]
+    public async Task Deve_confirmar_post_forum()
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleForumTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var actionId = Guid.Parse("00000000-0000-0000-0000-000000000900");
+        var result = await sut.ConfirmarPostForumMoodleAsync(actionId, "CONFIRMO POST FORUM");
+
+        Assert.False(result.IsError ?? false);
+        Assert.NotNull(mediator.LastConfirmCommand);
+        Assert.Equal(actionId, mediator.LastConfirmCommand!.PendingActionId);
+        Assert.Equal("CONFIRMO POST FORUM", mediator.LastConfirmCommand.ConfirmationText);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("ok", structured.GetProperty("status").GetString());
+        Assert.Equal("9901", structured.GetProperty("data").GetProperty("discussionId").GetString());
+    }
+
+    [Fact]
     public async Task Deve_retornar_erro_controlado_quando_moodle_falhar()
     {
         var sut = new MoodleForumTools(
@@ -91,6 +138,8 @@ public sealed class MoodleForumToolsTests
     private sealed class FakeMediator : IMediator
     {
         public ReadForumQuery? LastQuery { get; private set; }
+        public CreateForumPostPreviewCommand? LastPreviewCommand { get; private set; }
+        public ConfirmForumPostCommand? LastConfirmCommand { get; private set; }
 
         public bool ThrowOnRead { get; init; }
 
@@ -118,6 +167,18 @@ public sealed class MoodleForumToolsTests
                 return Task.FromResult((TResponse)(object)CreatePage(readForum));
             }
 
+            if (request is CreateForumPostPreviewCommand preview)
+            {
+                LastPreviewCommand = preview;
+                return Task.FromResult((TResponse)(object)CreatePreview(preview));
+            }
+
+            if (request is ConfirmForumPostCommand confirm)
+            {
+                LastConfirmCommand = confirm;
+                return Task.FromResult((TResponse)(object)CreateConfirmResult(confirm));
+            }
+
             throw new NotSupportedException($"Request nao suportado no fake mediator: {request.GetType().Name}");
         }
 
@@ -132,6 +193,18 @@ public sealed class MoodleForumToolsTests
                 }
 
                 return Task.FromResult<object?>(CreatePage(readForum));
+            }
+
+            if (request is CreateForumPostPreviewCommand preview)
+            {
+                LastPreviewCommand = preview;
+                return Task.FromResult<object?>(CreatePreview(preview));
+            }
+
+            if (request is ConfirmForumPostCommand confirm)
+            {
+                LastConfirmCommand = confirm;
+                return Task.FromResult<object?>(CreateConfirmResult(confirm));
             }
 
             throw new NotSupportedException($"Request nao suportado no fake mediator: {request.GetType().Name}");
@@ -197,6 +270,42 @@ public sealed class MoodleForumToolsTests
                 ReturnedCount: 1,
                 HasMore: false,
                 [discussion]);
+        }
+
+        private static CreateForumPostPreviewResult CreatePreview(CreateForumPostPreviewCommand command)
+        {
+            return new CreateForumPostPreviewResult(
+                Guid.Parse("00000000-0000-0000-0000-000000000900"),
+                "123",
+                "701",
+                "21",
+                "Forum Geral",
+                string.IsNullOrWhiteSpace(command.DiscussionId) ? "discussion" : "reply",
+                command.DiscussionId,
+                command.ReplyToPostId,
+                command.Subject,
+                command.MessageHtml,
+                command.GroupId,
+                "CONFIRMO POST FORUM",
+                DateTimeOffset.UtcNow.AddMinutes(15),
+                []);
+        }
+
+        private static ConfirmForumPostResult CreateConfirmResult(ConfirmForumPostCommand command)
+        {
+            return new ConfirmForumPostResult(
+                "confirmed",
+                command.PendingActionId,
+                "123",
+                "701",
+                "21",
+                "Forum Geral",
+                "discussion",
+                "9901",
+                PostId: null,
+                "mod_forum_add_discussion",
+                "audit-1",
+                []);
         }
     }
 }

@@ -109,6 +109,138 @@ public sealed class MoodleForumTools(
             language: "en");
     }
 
+    [McpServerTool(
+        Name = "criar_previa_post_forum",
+        Title = "Criar Previa Post Forum",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CreateForumPostPreviewResult>))]
+    [Description("Cria uma previa de publicacao em forum Moodle. A publicacao real exige confirmar_post_forum_moodle com o texto literal retornado.")]
+    public Task<CallToolResult> CriarPreviaPostForumAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Identificador do forum. Pode ser cmid ou instance id.")]
+        string forumId,
+        [Description("Assunto da nova discussao ou resposta.")]
+        string assunto,
+        [Description("Mensagem HTML a publicar no forum. Texto simples tambem e aceito, mas sera enviado como conteudo HTML ao Moodle.")]
+        string mensagemHtml,
+        [Description("Identificador da discussao quando a publicacao for uma resposta. Omitir para criar nova discussao.")]
+        string? discussionId = null,
+        [Description("Post alvo da resposta. Quando omitido e discussionId for informado, responde ao post inicial da discussao.")]
+        string? replyToPostId = null,
+        [Description("Grupo Moodle para nova discussao. Use 0 para o padrao do Moodle.")]
+        int groupId = 0,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return CreateForumPostPreviewCoreAsync(
+            courseId,
+            forumId,
+            assunto,
+            mensagemHtml,
+            discussionId,
+            replyToPostId,
+            groupId,
+            moodleAlias,
+            cancellationToken,
+            language: "pt");
+    }
+
+    [McpServerTool(
+        Name = "create_forum_post_preview",
+        Title = "Create Forum Post Preview",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CreateForumPostPreviewResult>))]
+    [Description("Creates a pending Moodle forum post preview. The real post requires confirm_forum_post with the returned literal confirmation text.")]
+    public Task<CallToolResult> CreateForumPostPreviewAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
+        string courseId,
+        [Description("Forum identifier. Can be cmid or instance id.")]
+        string forumId,
+        [Description("Subject for the new discussion or reply.")]
+        string subject,
+        [Description("HTML message to publish in the forum. Plain text is accepted but sent to Moodle as HTML content.")]
+        string messageHtml,
+        [Description("Discussion identifier when publishing a reply. Omit to create a new discussion.")]
+        string? discussionId = null,
+        [Description("Target post for the reply. When omitted and discussionId is provided, replies to the initial discussion post.")]
+        string? replyToPostId = null,
+        [Description("Moodle group for a new discussion. Use 0 for Moodle default behavior.")]
+        int groupId = 0,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return CreateForumPostPreviewCoreAsync(
+            courseId,
+            forumId,
+            subject,
+            messageHtml,
+            discussionId,
+            replyToPostId,
+            groupId,
+            moodleAlias,
+            cancellationToken,
+            language: "en");
+    }
+
+    [McpServerTool(
+        Name = "confirmar_post_forum_moodle",
+        Title = "Confirmar Post Forum Moodle",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ConfirmForumPostResult>))]
+    [Description("Confirma e executa uma publicacao pendente em forum Moodle. Exige pendingActionId e confirmationText literal da previa.")]
+    public Task<CallToolResult> ConfirmarPostForumMoodleAsync(
+        [Description("Identificador da acao pendente gerado por criar_previa_post_forum.")]
+        Guid pendingActionId,
+        [Description("Texto literal de confirmacao retornado na previa.")]
+        string confirmationText,
+        CancellationToken cancellationToken = default)
+    {
+        return ConfirmForumPostCoreAsync(
+            pendingActionId,
+            confirmationText,
+            cancellationToken,
+            language: "pt");
+    }
+
+    [McpServerTool(
+        Name = "confirm_forum_post",
+        Title = "Confirm Forum Post",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ConfirmForumPostResult>))]
+    [Description("Confirms and executes a pending Moodle forum post. Requires pendingActionId and the literal confirmationText from the preview.")]
+    public Task<CallToolResult> ConfirmForumPostAsync(
+        [Description("Pending action id returned by create_forum_post_preview.")]
+        Guid pendingActionId,
+        [Description("Literal confirmation text returned by the preview.")]
+        string confirmationText,
+        CancellationToken cancellationToken = default)
+    {
+        return ConfirmForumPostCoreAsync(
+            pendingActionId,
+            confirmationText,
+            cancellationToken,
+            language: "en");
+    }
+
     private async Task<CallToolResult> ReadForumCoreAsync(
         string courseId,
         string forumId,
@@ -205,6 +337,165 @@ public sealed class MoodleForumTools(
         };
     }
 
+    private async Task<CallToolResult> CreateForumPostPreviewCoreAsync(
+        string courseId,
+        string forumId,
+        string subject,
+        string messageHtml,
+        string? discussionId,
+        string? replyToPostId,
+        int groupId,
+        string? moodleAlias,
+        CancellationToken cancellationToken,
+        string language)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+        {
+            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe um identificador de curso." : "Provide a course identifier.");
+        }
+
+        if (string.IsNullOrWhiteSpace(forumId))
+        {
+            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe um identificador de forum." : "Provide a forum identifier.");
+        }
+
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe o assunto do post." : "Provide the post subject.");
+        }
+
+        if (string.IsNullOrWhiteSpace(messageHtml))
+        {
+            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe a mensagem do post." : "Provide the post message.");
+        }
+
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return Error<CreateForumPostPreviewResult>(
+                language == "pt"
+                    ? "Usuario nao autenticado para publicar em forum."
+                    : "User is not authenticated to publish in forum.");
+        }
+
+        CreateForumPostPreviewResult? data;
+        try
+        {
+            data = await mediator.Send(
+                new CreateForumPostPreviewCommand(
+                    moodleUserId.Value.ToString(),
+                    courseId,
+                    forumId,
+                    subject,
+                    messageHtml,
+                    discussionId,
+                    replyToPostId,
+                    groupId),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            return Error<CreateForumPostPreviewResult>(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<CreateForumPostPreviewResult>(ex.Message);
+        }
+        catch
+        {
+            return Error<CreateForumPostPreviewResult>(
+                language == "pt"
+                    ? "Nao foi possivel criar a previa de publicacao no forum neste momento."
+                    : "Could not create the forum post preview at this time.");
+        }
+
+        if (data is null)
+        {
+            return Error<CreateForumPostPreviewResult>(
+                language == "pt"
+                    ? "Curso, forum, discussao ou post nao encontrados entre os dados autorizados do usuario."
+                    : "Course, forum, discussion, or post was not found in the user's authorized data.");
+        }
+
+        var response = new ToolResponse<CreateForumPostPreviewResult>(
+            "pending_confirmation",
+            data,
+            data.Warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildForumPostPreviewNarration(data, language) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private async Task<CallToolResult> ConfirmForumPostCoreAsync(
+        Guid pendingActionId,
+        string confirmationText,
+        CancellationToken cancellationToken,
+        string language)
+    {
+        if (pendingActionId == Guid.Empty)
+        {
+            return Error<ConfirmForumPostResult>(language == "pt" ? "Informe uma acao pendente valida." : "Provide a valid pending action id.");
+        }
+
+        if (string.IsNullOrWhiteSpace(confirmationText))
+        {
+            return Error<ConfirmForumPostResult>(language == "pt" ? "Informe o texto literal de confirmacao." : "Provide the literal confirmation text.");
+        }
+
+        ConfirmForumPostResult data;
+        try
+        {
+            data = await mediator.Send(
+                new ConfirmForumPostCommand(pendingActionId, confirmationText),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<ConfirmForumPostResult>(ex.Message);
+        }
+        catch
+        {
+            return Error<ConfirmForumPostResult>(
+                language == "pt"
+                    ? "Nao foi possivel confirmar a publicacao no forum neste momento."
+                    : "Could not confirm the forum post at this time.");
+        }
+
+        var status = data.Status == "failed"
+            ? "error"
+            : data.Status == "already_confirmed"
+                ? "already_confirmed"
+                : "ok";
+        var response = new ToolResponse<ConfirmForumPostResult>(
+            status,
+            data,
+            data.Warnings,
+            data.AuditId,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildConfirmForumPostNarration(data, language) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = data.Status == "failed"
+        };
+    }
+
     private static string BuildNarration(ReadForumResponse response, string language)
     {
         if (language == "pt")
@@ -217,6 +508,48 @@ public sealed class MoodleForumTools(
         return response.ReturnedCount == 0
             ? $"No discussions were found in forum {response.ForumName} for the requested page."
             : $"Read {response.ReturnedCount} discussion(s) from forum {response.ForumName}. Posts loaded: {response.IncludePosts}.";
+    }
+
+    private static string BuildForumPostPreviewNarration(CreateForumPostPreviewResult response, string language)
+    {
+        if (language == "pt")
+        {
+            return response.Mode == "reply"
+                ? $"Previa criada para responder a discussao {response.DiscussionId} no forum {response.ForumName}. Confirme com o texto literal retornado."
+                : $"Previa criada para nova discussao no forum {response.ForumName}. Confirme com o texto literal retornado.";
+        }
+
+        return response.Mode == "reply"
+            ? $"Preview created to reply to discussion {response.DiscussionId} in forum {response.ForumName}. Confirm with the returned literal text."
+            : $"Preview created for a new discussion in forum {response.ForumName}. Confirm with the returned literal text.";
+    }
+
+    private static string BuildConfirmForumPostNarration(ConfirmForumPostResult response, string language)
+    {
+        if (response.Status == "already_confirmed")
+        {
+            return language == "pt"
+                ? "A acao ja estava confirmada e nao foi executada novamente."
+                : "The action was already confirmed and was not executed again.";
+        }
+
+        if (response.Status == "failed")
+        {
+            return language == "pt"
+                ? "A publicacao no forum falhou. Consulte os avisos retornados."
+                : "The forum post failed. Check the returned warnings.";
+        }
+
+        if (language == "pt")
+        {
+            return response.Mode == "reply"
+                ? $"Resposta publicada no forum {response.ForumName}. Post Moodle: {response.PostId}."
+                : $"Discussao publicada no forum {response.ForumName}. Discussao Moodle: {response.DiscussionId}.";
+        }
+
+        return response.Mode == "reply"
+            ? $"Reply published in forum {response.ForumName}. Moodle post: {response.PostId}."
+            : $"Discussion published in forum {response.ForumName}. Moodle discussion: {response.DiscussionId}.";
     }
 
     private static ReadForumResponse ToResponse(ForumReadPage page)

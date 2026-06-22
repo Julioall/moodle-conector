@@ -1566,3 +1566,380 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             warnings);
     }
 }
+
+// ============================================================
+// Query para preparar pacote IA em lote (preparar_lote_correcao_ia)
+// ============================================================
+
+public sealed record PrepareAiGradingBatchQuery(
+    Guid BatchJobId) : IRequest<AiGradingBatchPackageResult>;
+
+public sealed record AiGradingBatchPackageResult(
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("courseId")] string CourseId,
+    [property: JsonPropertyName("assignmentIds")] IReadOnlyList<string> AssignmentIds,
+    [property: JsonPropertyName("totalItems")] int TotalItems,
+    [property: JsonPropertyName("items")] IReadOnlyList<AiGradingBatchItemPackage> Items,
+    [property: JsonPropertyName("instructions")] string Instructions,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+
+public sealed record AiGradingBatchItemPackage(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("assignmentId")] string AssignmentId,
+    [property: JsonPropertyName("submissionId")] string? SubmissionId,
+    [property: JsonPropertyName("studentId")] string StudentId,
+    [property: JsonPropertyName("assignmentName")] string? AssignmentName,
+    [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
+    [property: JsonPropertyName("extractedCriteria")] string? ExtractedCriteria,
+    [property: JsonPropertyName("extractedText")] string? ExtractedText,
+    [property: JsonPropertyName("textTruncated")] bool TextTruncated,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+
+public sealed class PrepareAiGradingBatchQueryHandler(
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser,
+    IMoodleAssignmentSettingsGateway settingsGateway)
+    : IRequestHandler<PrepareAiGradingBatchQuery, AiGradingBatchPackageResult>
+{
+    private const int MaxTextLength = 3000;
+    private const int PageSize = 100;
+
+    public async Task<AiGradingBatchPackageResult> Handle(
+        PrepareAiGradingBatchQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (request.BatchJobId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
+        }
+
+        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
+            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
+
+        var globalWarnings = new List<string>();
+        var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
+        var items = await LoadAllBatchItemsAsync(batch.Id, cancellationToken);
+        var packageItems = new List<AiGradingBatchItemPackage>();
+
+        foreach (var item in items)
+        {
+            var itemWarnings = new List<string>();
+            var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+
+            // Texto da submissão
+            var submissionText = artifacts
+                .Where(a => a.ArtifactType == "submission_file" &&
+                            a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                            !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
+                .Select(a => a.ExtractedTextRef)
+                .FirstOrDefault();
+
+            var allSubmissionTexts = artifacts
+                .Where(a => a.ArtifactType == "submission_file" &&
+                            a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                            !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
+                .Select(a => a.ExtractedTextRef!)
+                .ToArray();
+
+            var combinedSubmission = allSubmissionTexts.Length > 1
+                ? string.Join("\n\n---\n\n", allSubmissionTexts)
+                : submissionText;
+
+            if (string.IsNullOrWhiteSpace(combinedSubmission))
+            {
+                itemWarnings.Add("Texto da entrega nao disponivel. Verifique se os anexos foram extraidos.");
+            }
+
+            var textTruncated = false;
+            if (combinedSubmission is not null && combinedSubmission.Length > MaxTextLength)
+            {
+                combinedSubmission = combinedSubmission[..MaxTextLength];
+                textTruncated = true;
+                itemWarnings.Add($"Texto da entrega truncado a {MaxTextLength} caracteres.");
+            }
+
+            // Falhas de extração como warnings
+            foreach (var failedArtifact in artifacts.Where(a =>
+                a.ArtifactType == "submission_file" &&
+                a.ExtractionStatus is "failed" or "unsupported"))
+            {
+                itemWarnings.Add($"Arquivo {failedArtifact.Filename ?? "desconhecido"}: extracao falhou ({failedArtifact.SummaryRef ?? "sem detalhe"}).");
+            }
+
+            // Contexto da atividade
+            var contextArtifact = artifacts
+                .Where(a => a.ArtifactType == "assignment_context" &&
+                            a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                            !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
+                .OrderByDescending(a => a.ExtractedTextRef?.Length ?? 0)
+                .FirstOrDefault();
+            var assignmentStatement = contextArtifact?.ExtractedTextRef;
+            var assignmentName = contextArtifact?.Filename;
+
+            // Critérios (evidências do processamento anterior, se existirem)
+            var evidence = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
+            var extractedCriteria = evidence.Count > 0
+                ? string.Join("\n", evidence.Select(e => $"- {e.CriterionText}"))
+                : null;
+
+            // MaxGrade via API Moodle (cache por assignmentId)
+            decimal maxGrade = 100m;
+            if (!settingsCache.TryGetValue(item.AssignmentId, out var settings))
+            {
+                try
+                {
+                    settings = await settingsGateway.GetAssignmentSettingsAsync(
+                        batch.CreatedBySubject,
+                        item.CourseId.ToString(CultureInfo.InvariantCulture),
+                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                        cancellationToken);
+                }
+                catch
+                {
+                    settings = null;
+                }
+
+                settingsCache[item.AssignmentId] = settings;
+            }
+
+            if (settings is not null && settings.MaxGrade > 0)
+            {
+                maxGrade = settings.MaxGrade;
+            }
+            else
+            {
+                itemWarnings.Add("Nota maxima nao encontrada via API Moodle. Usando padrao 100.");
+            }
+
+            packageItems.Add(new AiGradingBatchItemPackage(
+                item.Id,
+                item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
+                item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
+                assignmentName,
+                maxGrade,
+                assignmentStatement,
+                extractedCriteria,
+                combinedSubmission,
+                textTruncated,
+                itemWarnings));
+        }
+
+        if (packageItems.Count == 0)
+        {
+            globalWarnings.Add("Nenhum item encontrado no lote.");
+        }
+
+        var instructions =
+            "Voce e um tutor educacional. Para cada aluno no pacote, analise a entrega comparando com o enunciado e criterios da atividade. " +
+            "Gere um feedback pedagogico em linguagem natural (paragrafos, nao listas) que: " +
+            "1) Reconheca os pontos fortes citando elementos concretos da entrega; " +
+            "2) Indique melhorias especificas quando houver lacunas; " +
+            "3) Atribua uma nota de 0 ate a nota maxima informada. " +
+            "O feedback deve ser adequado para colar diretamente no Moodle. " +
+            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida revisar_feedbacks_lote para revisao antes de lancar.";
+
+        return new AiGradingBatchPackageResult(
+            batch.Id,
+            batch.CourseId.ToString(CultureInfo.InvariantCulture),
+            batch.AssignmentIds.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToArray(),
+            packageItems.Count,
+            packageItems,
+            instructions,
+            globalWarnings);
+    }
+
+    private async Task<IReadOnlyList<AssistedGradingItem>> LoadAllBatchItemsAsync(
+        Guid batchId,
+        CancellationToken cancellationToken)
+    {
+        var allItems = new List<AssistedGradingItem>();
+        var page = 1;
+        while (true)
+        {
+            var pageItems = await repository.ListItemsByBatchAsync(batchId, page, PageSize, cancellationToken);
+            allItems.AddRange(pageItems);
+            if (pageItems.Count < PageSize)
+            {
+                break;
+            }
+
+            page++;
+        }
+
+        return allItems;
+    }
+}
+
+// ============================================================
+// Command para salvar correções geradas pela IA (salvar_correcoes_ia_lote)
+// ============================================================
+
+public sealed record SaveAiGradingBatchCommand(
+    Guid BatchJobId,
+    IReadOnlyList<AiGradingItemInput> Items) : IRequest<SaveAiGradingBatchResult>;
+
+public sealed record AiGradingItemInput(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("nome")] string? Nome,
+    [property: JsonPropertyName("nota")] decimal? Nota,
+    [property: JsonPropertyName("feedback")] string Feedback);
+
+public sealed record SaveAiGradingBatchResult(
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("savedItems")] int SavedItems,
+    [property: JsonPropertyName("skippedItems")] int SkippedItems,
+    [property: JsonPropertyName("failedItems")] int FailedItems,
+    [property: JsonPropertyName("totalItems")] int TotalItems,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("nextStep")] string NextStep);
+
+public sealed class SaveAiGradingBatchCommandHandler(
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser,
+    IMoodleUserResolver moodleUserResolver,
+    IMoodleAuditLogRepository auditLogs)
+    : IRequestHandler<SaveAiGradingBatchCommand, SaveAiGradingBatchResult>
+{
+    public async Task<SaveAiGradingBatchResult> Handle(
+        SaveAiGradingBatchCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (request.BatchJobId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
+        }
+
+        if (request.Items.Count == 0)
+        {
+            throw new ArgumentException("Informe pelo menos um item.", nameof(request.Items));
+        }
+
+        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
+            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
+
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        var warnings = new List<string>();
+        var savedCount = 0;
+        var skippedCount = 0;
+        var failedCount = 0;
+
+        foreach (var input in request.Items)
+        {
+            try
+            {
+                if (input.GradingItemId == Guid.Empty)
+                {
+                    warnings.Add($"Item ignorado: gradingItemId vazio.");
+                    skippedCount++;
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(input.Feedback))
+                {
+                    warnings.Add($"Item {input.GradingItemId} ignorado: feedback vazio.");
+                    skippedCount++;
+                    continue;
+                }
+
+                var item = await repository.GetItemAsync(input.GradingItemId, cancellationToken);
+                if (item is null)
+                {
+                    warnings.Add($"Item {input.GradingItemId} nao encontrado.");
+                    failedCount++;
+                    continue;
+                }
+
+                if (item.BatchId != batch.Id)
+                {
+                    warnings.Add($"Item {input.GradingItemId} nao pertence ao lote {batch.Id}.");
+                    failedCount++;
+                    continue;
+                }
+
+                // Pular itens que já foram revisados ou commitados
+                if (item.Status is GradingItemStatus.ReadyToCommit or GradingItemStatus.Committed)
+                {
+                    warnings.Add($"Item {input.GradingItemId} ja foi revisado/commitado. Ignorado.");
+                    skippedCount++;
+                    continue;
+                }
+
+                item.SetDraft(
+                    suggestedGrade: input.Nota,
+                    confidence: null,
+                    draftFeedback: input.Feedback,
+                    privateNotesToTeacher: "Rascunho gerado pelo ChatGPT via fluxo IA.");
+
+                savedCount++;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Falha ao salvar item {input.GradingItemId}: {ex.Message}");
+                failedCount++;
+            }
+        }
+
+        // Atualizar contadores do lote
+        var allItems = new List<AssistedGradingItem>();
+        var page = 1;
+        while (true)
+        {
+            var pageItems = await repository.ListItemsByBatchAsync(batch.Id, page, 100, cancellationToken);
+            allItems.AddRange(pageItems);
+            if (pageItems.Count < 100)
+            {
+                break;
+            }
+
+            page++;
+        }
+
+        GradingItemProcessor.UpdateBatchCounters(batch, allItems);
+        await repository.SaveChangesAsync(cancellationToken);
+
+        await auditLogs.AddAsync(new MoodleAuditLog
+        {
+            CorrelationId = $"grading-batch-{batch.Id:N}",
+            BatchJobId = batch.Id,
+            ToolName = "salvar_correcoes_ia_lote",
+            RiskLevel = ToolRiskLevel.HumanConfirmedWrite,
+            ActorSubject = currentUser.Subject,
+            ActorEmail = currentUser.Email,
+            ActorMoodleUserId = moodleUserId,
+            CourseId = batch.CourseId,
+            MoodleFunction = null,
+            RequestSanitizedJson = AuditPayloadSanitizer.SerializeSanitized(new
+            {
+                batchJobId = batch.Id,
+                itemCount = request.Items.Count
+            }),
+            ResponseSummaryJson = AuditPayloadSanitizer.SerializeSanitized(new
+            {
+                savedCount,
+                skippedCount,
+                failedCount
+            }),
+            Status = "ai_drafts_saved"
+        }, cancellationToken);
+        await auditLogs.SaveChangesAsync(cancellationToken);
+
+        return new SaveAiGradingBatchResult(
+            batch.Id,
+            savedCount,
+            skippedCount,
+            failedCount,
+            request.Items.Count,
+            warnings,
+            NextStep: savedCount > 0
+                ? "Use revisar_feedbacks_lote para revisar e ajustar os feedbacks antes de lancar no Moodle."
+                : "Nenhum item foi salvo. Verifique os avisos.");
+    }
+}

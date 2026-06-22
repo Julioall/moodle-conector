@@ -19,4 +19,24 @@ public interface IMoodleForumGateway
         string sortBy,
         string sortDirection,
         CancellationToken cancellationToken);
+
+    Task<ForumWriteResult> AddDiscussionAsync(
+        string userExternalId,
+        string forumId,
+        string subject,
+        string messageHtml,
+        int groupId,
+        CancellationToken cancellationToken);
+
+    Task<ForumWriteResult> AddDiscussionPostAsync(
+        string userExternalId,
+        string postId,
+        string subject,
+        string messageHtml,
+        CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<ForumInfo>> GetForumsByCoursesAsync(
+        string userExternalId,
+        string courseId,
+        CancellationToken cancellationToken);
 }

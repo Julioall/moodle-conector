@@ -17,6 +17,9 @@ internal sealed partial class MoodleForumGateway(
     IMoodleAccessTokenProvider tokenProvider,
     IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleForumGateway
 {
+    private const string AddDiscussionFunction = "mod_forum_add_discussion";
+    private const string AddDiscussionPostFunction = "mod_forum_add_discussion_post";
+    private const string HtmlMessageFormat = "1";
     private static readonly string[] DiscussionSortFields = ["id", "timemodified", "timestart", "timeend"];
     private static readonly string[] PostSortFields = ["id", "created", "modified"];
     private readonly MoodleApiOptions _options = options.Value;
@@ -42,7 +45,7 @@ internal sealed partial class MoodleForumGateway(
         var endpoint = BuildMoodleGetUrl(
             credentials.BaseUrl,
             token,
-            "mod_forum_get_forum_discussions_paginated",
+            "mod_forum_get_forum_discussions",
             new Dictionary<string, string>
             {
                 ["forumid"] = normalizedForumId.ToString(CultureInfo.InvariantCulture),
@@ -96,6 +99,132 @@ internal sealed partial class MoodleForumGateway(
         return (payload?.Posts ?? [])
             .Select(ToPost)
             .Where(post => !string.IsNullOrWhiteSpace(post.PostId))
+            .ToArray();
+    }
+
+    public async Task<ForumWriteResult> AddDiscussionAsync(
+        string userExternalId,
+        string forumId,
+        string subject,
+        string messageHtml,
+        int groupId,
+        CancellationToken cancellationToken)
+    {
+        if (_options.UseStubData)
+        {
+            throw new InvalidOperationException("UseStubData esta desativado para escritas Moodle reais.");
+        }
+
+        ValidateWriteInput(userExternalId, subject, messageHtml);
+        var normalizedForumId = ParseMoodleId(forumId, "forumId");
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        EnsureCanWrite(credentials);
+
+        var token = await ResolveWriteTokenAsync(cancellationToken);
+        var endpoint = BuildMoodlePostEndpoint(credentials.BaseUrl);
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["wstoken"] = token,
+            ["wsfunction"] = AddDiscussionFunction,
+            ["moodlewsrestformat"] = "json",
+            ["forumid"] = normalizedForumId.ToString(CultureInfo.InvariantCulture),
+            ["subject"] = subject.Trim(),
+            ["message"] = messageHtml.Trim(),
+            ["groupid"] = groupId.ToString(CultureInfo.InvariantCulture)
+        });
+        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        var root = ParseMoodleSuccessPayload(payload, "O Moodle rejeitou a criacao de discussao no forum");
+        return new ForumWriteResult(
+            Success: true,
+            AddDiscussionFunction,
+            MoodleStatus: "ok",
+            DiscussionId: root is null ? null : GetOptionalIdString(root.Value, "discussionid"),
+            PostId: null,
+            Warnings: root is null ? [] : GetWarningMessages(root.Value));
+    }
+
+    public async Task<ForumWriteResult> AddDiscussionPostAsync(
+        string userExternalId,
+        string postId,
+        string subject,
+        string messageHtml,
+        CancellationToken cancellationToken)
+    {
+        if (_options.UseStubData)
+        {
+            throw new InvalidOperationException("UseStubData esta desativado para escritas Moodle reais.");
+        }
+
+        ValidateWriteInput(userExternalId, subject, messageHtml);
+        var normalizedPostId = ParseMoodleId(postId, "postId");
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        EnsureCanWrite(credentials);
+
+        var token = await ResolveWriteTokenAsync(cancellationToken);
+        var endpoint = BuildMoodlePostEndpoint(credentials.BaseUrl);
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["wstoken"] = token,
+            ["wsfunction"] = AddDiscussionPostFunction,
+            ["moodlewsrestformat"] = "json",
+            ["postid"] = normalizedPostId.ToString(CultureInfo.InvariantCulture),
+            ["subject"] = subject.Trim(),
+            ["message"] = messageHtml.Trim(),
+            ["messageformat"] = HtmlMessageFormat
+        });
+        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        var root = ParseMoodleSuccessPayload(payload, "O Moodle rejeitou a resposta no forum");
+        return new ForumWriteResult(
+            Success: true,
+            AddDiscussionPostFunction,
+            MoodleStatus: "ok",
+            DiscussionId: null,
+            PostId: root is null ? null : GetOptionalIdString(root.Value, "postid"),
+            Warnings: root is null ? [] : GetWarningMessages(root.Value));
+    }
+
+    public async Task<IReadOnlyList<ForumInfo>> GetForumsByCoursesAsync(
+        string userExternalId,
+        string courseId,
+        CancellationToken cancellationToken)
+    {
+        if (_options.UseStubData)
+        {
+            throw new InvalidOperationException("UseStubData esta desativado para fluxos reais. Ajuste a configuracao para usar Moodle real.");
+        }
+
+        var normalizedCourseId = ParseMoodleId(courseId, "courseId");
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var token = await ResolveReadTokenAsync(cancellationToken);
+
+        var endpoint = BuildMoodleGetUrl(
+            credentials.BaseUrl,
+            token,
+            "mod_forum_get_forums_by_courses",
+            new Dictionary<string, string>
+            {
+                ["courseids[0]"] = normalizedCourseId.ToString(CultureInfo.InvariantCulture)
+            });
+
+        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        var payload = await response.Content.ReadFromJsonAsync<IReadOnlyList<JsonElement>>(cancellationToken: cancellationToken) ?? [];
+        return payload
+            .Where(element => element.ValueKind == JsonValueKind.Object)
+            .Select(element => new ForumInfo(
+                GetIdString(element, "id"),
+                GetIdString(element, "course"),
+                GetString(element, "type"),
+                GetString(element, "name"),
+                GetNullableInt(element, "numdiscussions")))
+            .Where(info => !string.IsNullOrWhiteSpace(info.ForumId))
             .ToArray();
     }
 
@@ -211,6 +340,11 @@ internal sealed partial class MoodleForumGateway(
         return builder.ToString();
     }
 
+    private static string BuildMoodlePostEndpoint(string baseUrl)
+    {
+        return $"{baseUrl.TrimEnd('/')}/webservice/rest/server.php";
+    }
+
     private static int ParseMoodleId(string value, string parameterName)
     {
         if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0)
@@ -302,6 +436,41 @@ internal sealed partial class MoodleForumGateway(
         }
 
         return GetString(nested, propertyName);
+    }
+
+    private static IReadOnlyList<string> GetWarningMessages(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty("warnings", out var warnings) ||
+            warnings.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return warnings
+            .EnumerateArray()
+            .Select(ToWarningMessage)
+            .Where(warning => !string.IsNullOrWhiteSpace(warning))
+            .ToArray();
+    }
+
+    private static string ToWarningMessage(JsonElement warning)
+    {
+        if (warning.ValueKind != JsonValueKind.Object)
+        {
+            return warning.ToString();
+        }
+
+        var code = GetString(warning, "warningcode") ?? GetString(warning, "errorcode");
+        var message = GetString(warning, "message");
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            return message ?? string.Empty;
+        }
+
+        return string.IsNullOrWhiteSpace(message)
+            ? code
+            : $"{code}: {message}";
     }
 
     private static int? GetNullableInt(JsonElement element, string propertyName)
@@ -397,6 +566,68 @@ internal sealed partial class MoodleForumGateway(
         }
 
         return await tokenProvider.GetAccessTokenAsync(cancellationToken);
+    }
+
+    private async Task<string> ResolveWriteTokenAsync(CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(_options.WriteServiceToken))
+        {
+            return _options.WriteServiceToken;
+        }
+
+        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
+    }
+
+    private static void ValidateWriteInput(string userExternalId, string subject, string messageHtml)
+    {
+        if (string.IsNullOrWhiteSpace(userExternalId))
+        {
+            throw new ArgumentException("O usuario Moodle e obrigatorio.", nameof(userExternalId));
+        }
+
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            throw new ArgumentException("O assunto do post e obrigatorio.", nameof(subject));
+        }
+
+        if (string.IsNullOrWhiteSpace(messageHtml))
+        {
+            throw new ArgumentException("A mensagem do post e obrigatoria.", nameof(messageHtml));
+        }
+    }
+
+    private static void EnsureCanWrite(MoodleConnectorCredentials credentials)
+    {
+        if (!credentials.CanWrite)
+        {
+            throw new InvalidOperationException("A conexao Moodle atual nao permite escrita.");
+        }
+    }
+
+    private static JsonElement? ParseMoodleSuccessPayload(string payload, string errorPrefix)
+    {
+        if (string.IsNullOrWhiteSpace(payload) ||
+            string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement.Clone();
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return root;
+        }
+
+        if (!root.TryGetProperty("exception", out var exceptionElement))
+        {
+            return root;
+        }
+
+        var errorCode = root.TryGetProperty("errorcode", out var errorCodeElement)
+            ? errorCodeElement.GetString()
+            : exceptionElement.GetString();
+        throw new InvalidOperationException($"{errorPrefix}: {errorCode ?? "erro_desconhecido"}.");
     }
 
     [GeneratedRegex(@"<script[^>]*>[\s\S]*?</script>", RegexOptions.IgnoreCase | RegexOptions.Compiled)]

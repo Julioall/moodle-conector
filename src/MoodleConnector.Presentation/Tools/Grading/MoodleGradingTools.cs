@@ -366,6 +366,139 @@ public sealed class MoodleGradingTools(
         return GetAuditByBatchCoreAsync(batchJobId, pagina, tamanhoPagina, cancellationToken);
     }
 
+    // ============================================================
+    // Tool: preparar_lote_correcao_ia
+    // ============================================================
+
+    [McpServerTool(
+        Name = "preparar_lote_correcao_ia",
+        Title = "Preparar Lote Correcao IA",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
+    [Description("Retorna o pacote estruturado de um lote para correcao via IA: textos extraidos das entregas, enunciado, criterios e nota maxima por aluno. Use apos criar_lote_correcao_assistida para obter o contexto completo e gerar nota e feedback no chat. Nao escreve no Moodle.")]
+    public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
+        [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
+        Guid batchJobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return Error<AiGradingBatchPackageResult>("Informe um identificador de lote valido.");
+        }
+
+        AiGradingBatchPackageResult data;
+        try
+        {
+            data = await mediator.Send(
+                new PrepareAiGradingBatchQuery(batchJobId),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<AiGradingBatchPackageResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Error<AiGradingBatchPackageResult>(ex.Message);
+        }
+        catch
+        {
+            return Error<AiGradingBatchPackageResult>("Nao foi possivel preparar o pacote IA do lote neste momento.");
+        }
+
+        var response = new ToolResponse<AiGradingBatchPackageResult>(
+            "ok",
+            data,
+            data.Warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildPrepareAiBatchNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    // ============================================================
+    // Tool: salvar_correcoes_ia_lote
+    // ============================================================
+
+    [McpServerTool(
+        Name = "salvar_correcoes_ia_lote",
+        Title = "Salvar Correcoes IA Lote",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<SaveAiGradingBatchResult>))]
+    [Description("Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote. Nao escreve no Moodle. Apos salvar, use revisar_feedbacks_lote para revisao humana antes de lancar.")]
+    public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
+        [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
+        Guid batchJobId,
+        [Description("Array de correcoes. Cada item deve conter gradingItemId, nota e feedback.")]
+        AiGradingItemInput[] items,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return Error<SaveAiGradingBatchResult>("Informe um identificador de lote valido.");
+        }
+
+        if (items.Length == 0)
+        {
+            return Error<SaveAiGradingBatchResult>("Informe pelo menos um item de correcao.");
+        }
+
+        SaveAiGradingBatchResult data;
+        try
+        {
+            data = await mediator.Send(
+                new SaveAiGradingBatchCommand(batchJobId, items),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Error<SaveAiGradingBatchResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Error<SaveAiGradingBatchResult>(ex.Message);
+        }
+        catch
+        {
+            return Error<SaveAiGradingBatchResult>("Nao foi possivel salvar as correcoes IA neste momento.");
+        }
+
+        var response = new ToolResponse<SaveAiGradingBatchResult>(
+            data.SavedItems > 0 ? "ok" : "partial_failure",
+            data,
+            data.Warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildSaveAiGradingNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = data.SavedItems == 0 && data.FailedItems > 0
+        };
+    }
+
     private async Task<CallToolResult> DiscoverCoreAsync(
         string? moodleAlias,
         CancellationToken cancellationToken)
@@ -1211,6 +1344,43 @@ public sealed class MoodleGradingTools(
             : $"Auditoria do lote {response.BatchJobId}";
         var suffix = response.HasMore ? " Ha mais eventos para consultar." : string.Empty;
         return $"{scope}: {response.Events.Count} evento(s) nesta pagina de {response.TotalEvents} total(is).{suffix}";
+    }
+
+    private static string BuildPrepareAiBatchNarration(AiGradingBatchPackageResult data)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Pacote IA — Lote {data.BatchJobId}");
+        sb.AppendLine();
+        sb.AppendLine($"**{data.TotalItems} aluno(s)** com dados extraidos para correcao.");
+        sb.AppendLine();
+
+        foreach (var item in data.Items)
+        {
+            var textInfo = string.IsNullOrWhiteSpace(item.ExtractedText)
+                ? "sem texto extraido"
+                : item.TextTruncated
+                    ? $"texto truncado ({item.ExtractedText.Length} chars)"
+                    : $"texto completo ({item.ExtractedText.Length} chars)";
+            var gradeInfo = $"nota maxima: {item.MaxGrade}";
+            sb.AppendLine($"- **Aluno {item.StudentId}** (item {item.GradingItemId}): {textInfo}, {gradeInfo}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine(data.Instructions);
+        return sb.ToString();
+    }
+
+    private static string BuildSaveAiGradingNarration(SaveAiGradingBatchResult data)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Resultado — Salvar Correcoes IA");
+        sb.AppendLine();
+        sb.AppendLine($"- **Salvos:** {data.SavedItems}");
+        sb.AppendLine($"- **Ignorados:** {data.SkippedItems}");
+        sb.AppendLine($"- **Falhas:** {data.FailedItems}");
+        sb.AppendLine();
+        sb.AppendLine($"**Proximo passo:** {data.NextStep}");
+        return sb.ToString();
     }
 
     private static CallToolResult Error<T>(string message)

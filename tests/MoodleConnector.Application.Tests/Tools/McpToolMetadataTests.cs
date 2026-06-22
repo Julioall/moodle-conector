@@ -19,7 +19,7 @@ public sealed class McpToolMetadataTests
             var toolName = attribute.Name ?? method.Name;
 
             Assert.False(attribute.OpenWorld, $"{toolName} deve declarar OpenWorld=false.");
-            if (toolName == "confirmar_lancamento_lote_moodle")
+            if (toolName is "confirmar_lancamento_lote_moodle" or "confirmar_post_forum_moodle" or "confirm_forum_post")
             {
                 Assert.True(attribute.Destructive, $"{toolName} deve declarar Destructive=true.");
             }
@@ -32,12 +32,12 @@ public sealed class McpToolMetadataTests
                 Assert.False(attribute.ReadOnly, $"{toolName} cria job interno e deve declarar ReadOnly=false.");
                 Assert.False(attribute.Idempotent, $"{toolName} nao deve ser idempotente sem chave de idempotencia.");
             }
-            else if (toolName == "criar_previa_lancamento_lote")
+            else if (toolName is "criar_previa_lancamento_lote" or "criar_previa_post_forum" or "create_forum_post_preview")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} cria acao pendente e deve declarar ReadOnly=false.");
                 Assert.False(attribute.Idempotent, $"{toolName} nao deve ser idempotente sem chave de idempotencia.");
             }
-            else if (toolName == "confirmar_lancamento_lote_moodle")
+            else if (toolName is "confirmar_lancamento_lote_moodle" or "confirmar_post_forum_moodle" or "confirm_forum_post")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} executa escrita Moodle e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe pelo pendingActionId.");

@@ -27,6 +27,8 @@ MoodleApi__LoginService=moodle_mobile_app
 | `core_course_get_contents` | Ler seções, módulos, recursos, atividades, datas e metadados de arquivos do curso. | Implementado |
 | `mod_forum_get_forum_discussions_paginated` | Ler discussões paginadas de um fórum autorizado. | Implementado |
 | `mod_forum_get_discussion_posts` | Ler posts de uma discussão de fórum autorizada. | Implementado |
+| `mod_forum_add_discussion` | Criar nova discussão em fórum autorizado após confirmação humana. | Implementado |
+| `mod_forum_add_discussion_post` | Responder a um post de discussão em fórum autorizado após confirmação humana. | Implementado |
 | `mod_assign_get_assignments` | Ler atividades dos cursos listados. | Planejado |
 | `mod_assign_get_submissions` | Ler submissões de tarefas para compor resumo de pendências, atrasos, tentativas e correção pendente, sem baixar anexos. | Implementado |
 | `gradereport_user_get_grade_items` | Ler nota/resumo do curso. | Planejado |
@@ -39,14 +41,20 @@ Para as próximas tools de leitura acadêmica, será necessário validar permiss
 
 ## Escrita no Moodle
 
-Tools reais de escrita no Moodle não estão implementadas no estado atual.
+As tools reais de escrita implementadas hoje são:
 
-Qualquer escrita futura deve seguir o fluxo:
+- publicação em fórum por `mod_forum_add_discussion`;
+- resposta em fórum por `mod_forum_add_discussion_post`;
+- lançamento individual de nota/feedback por `mod_assign_save_grade`.
+
+Qualquer escrita deve seguir o fluxo:
 
 1. preparar ação;
 2. exibir prévia;
 3. exigir confirmação humana;
 4. executar somente após confirmação válida.
+
+Além das permissões Moodle da função, a conexão cadastrada precisa estar com `CanWrite=true` e o chamador precisa ter escopo `moodle.write` para confirmar ações pendentes.
 
 ## Cadastro de conexão Moodle
 

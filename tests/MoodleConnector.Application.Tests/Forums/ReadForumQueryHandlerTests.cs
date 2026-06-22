@@ -247,6 +247,8 @@ public sealed class ReadForumQueryHandlerTests
 
         public IReadOnlyList<ForumPostSummary> Posts { get; init; } = [];
 
+        public IReadOnlyList<ForumInfo> Forums { get; init; } = [];
+
         public bool WasDiscussionsCalled { get; private set; }
 
         public string LastForumId { get; private set; } = string.Empty;
@@ -280,6 +282,35 @@ public sealed class ReadForumQueryHandlerTests
             PostDiscussionIds.Add(discussionId);
             return Task.FromResult<IReadOnlyList<ForumPostSummary>>(
                 Posts.Where(post => post.DiscussionId == discussionId).ToArray());
+        }
+
+        public Task<ForumWriteResult> AddDiscussionAsync(
+            string userExternalId,
+            string forumId,
+            string subject,
+            string messageHtml,
+            int groupId,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<ForumWriteResult> AddDiscussionPostAsync(
+            string userExternalId,
+            string postId,
+            string subject,
+            string messageHtml,
+            CancellationToken cancellationToken)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyList<ForumInfo>> GetForumsByCoursesAsync(
+            string userExternalId,
+            string courseId,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(Forums);
         }
     }
 }

@@ -44,6 +44,12 @@ Este catálogo reflete o estado real do repositório.
 | `list_course_assignments` | List Course Assignments | `ReadOnly` | Sim | Não | Implementada |
 | `consultar_tarefa` | Consultar Tarefa | `ReadOnly` | Sim | Não | Implementada |
 | `get_assignment` | Get Assignment | `ReadOnly` | Sim | Não | Implementada |
+| `ler_forum` | Ler Forum | `ReadOnly` | Sim | Não | Implementada |
+| `read_forum` | Read Forum | `ReadOnly` | Sim | Não | Implementada |
+| `criar_previa_post_forum` | Criar Previa Post Forum | `HumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
+| `create_forum_post_preview` | Create Forum Post Preview | `HumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
+| `confirmar_post_forum_moodle` | Confirmar Post Forum Moodle | `HumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
+| `confirm_forum_post` | Confirm Forum Post | `HumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
 | `listar_quizzes_curso` | Listar Quizzes Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_quizzes` | List Course Quizzes | `ReadOnly` | Sim | Não | Implementada |
 | `consultar_quiz` | Consultar Quiz | `ReadOnly` | Sim | Não | Implementada |
@@ -435,6 +441,47 @@ Parâmetros:
 | `ordenarPor` / `sortBy` | `string` | Campo de ordenação das discussões: `id`, `timemodified`, `timestart` ou `timeend`. |
 | `ordem` / `sortDirection` | `string` | Direção de ordenação: `ASC` ou `DESC`. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
+
+## `criar_previa_post_forum` / `create_forum_post_preview`
+
+Descrição:
+
+- Prepara uma publicação em fórum Moodle sem escrever imediatamente.
+- Resolve `courseId` e `forumId` contra dados autorizados do usuário.
+- Sem `discussionId`, cria prévia para nova discussão via `mod_forum_add_discussion`.
+- Com `discussionId`, cria prévia para resposta via `mod_forum_add_discussion_post`.
+- Se `replyToPostId` não for informado em uma resposta, usa o post inicial da discussão.
+- Retorna `pendingActionId`, prévia completa e `confirmationText` literal.
+
+Parâmetros:
+
+| Nome | Tipo | Descrição |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso, nome curto ou idnumber. |
+| `forumId` | `string` | Identificador do fórum. Pode ser `cmid` ou `instanceId`. |
+| `assunto` / `subject` | `string` | Assunto da discussão ou resposta. |
+| `mensagemHtml` / `messageHtml` | `string` | Mensagem enviada ao Moodle como HTML. |
+| `discussionId` | `string?` | Discussão alvo quando for resposta. Omitir para nova discussão. |
+| `replyToPostId` | `string?` | Post alvo da resposta. Quando omitido, usa o post inicial da discussão. |
+| `groupId` | `int` | Grupo Moodle para nova discussão. `0` usa o padrão do Moodle. |
+| `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
+
+## `confirmar_post_forum_moodle` / `confirm_forum_post`
+
+Descrição:
+
+- Confirma e executa uma publicação pendente em fórum Moodle.
+- Exige `pendingActionId` e `confirmationText` literal retornado pela prévia.
+- Usa token de escrita, conexão com `CanWrite=true` e escopo `moodle.write`.
+- Grava auditoria com a função Moodle executada e o resumo da resposta.
+- Não executa novamente uma ação que já esteja confirmada, evitando duplicidade no fórum.
+
+Parâmetros:
+
+| Nome | Tipo | Descrição |
+| --- | --- | --- |
+| `pendingActionId` | `Guid` | Identificador da ação pendente. |
+| `confirmationText` | `string` | Texto literal de confirmação retornado na prévia. |
 
 ## `listar_quizzes_curso` / `list_course_quizzes`
 
