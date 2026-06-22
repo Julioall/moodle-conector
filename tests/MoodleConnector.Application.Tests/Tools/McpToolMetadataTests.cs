@@ -114,6 +114,7 @@ public sealed class McpToolMetadataTests
             typeof(MoodleParticipantsTools),
             typeof(MoodleCourseContentsTools),
             typeof(MoodleCourseActivitiesTools),
+            typeof(MoodleForumTools),
             typeof(MoodleAssignmentSubmissionsTools),
             typeof(MoodleGradingTools),
             typeof(MoodleGradebookTools),

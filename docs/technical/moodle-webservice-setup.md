@@ -25,6 +25,8 @@ MoodleApi__LoginService=moodle_mobile_app
 | `core_enrol_get_enrolled_users` | Listar participantes, estudantes e membros de grupo de cursos autorizados. | Implementado |
 | `core_group_get_course_groups` | Listar grupos de cursos autorizados. | Implementado |
 | `core_course_get_contents` | Ler seções, módulos, recursos, atividades, datas e metadados de arquivos do curso. | Implementado |
+| `mod_forum_get_forum_discussions_paginated` | Ler discussões paginadas de um fórum autorizado. | Implementado |
+| `mod_forum_get_discussion_posts` | Ler posts de uma discussão de fórum autorizada. | Implementado |
 | `mod_assign_get_assignments` | Ler atividades dos cursos listados. | Planejado |
 | `mod_assign_get_submissions` | Ler submissões de tarefas para compor resumo de pendências, atrasos, tentativas e correção pendente, sem baixar anexos. | Implementado |
 | `gradereport_user_get_grade_items` | Ler nota/resumo do curso. | Planejado |

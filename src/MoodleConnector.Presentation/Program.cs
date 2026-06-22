@@ -257,6 +257,7 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleParticipantsTools>()
     .WithTools<MoodleCourseContentsTools>()
     .WithTools<MoodleCourseActivitiesTools>()
+    .WithTools<MoodleForumTools>()
     .WithTools<MoodleAssignmentSubmissionsTools>()
     .WithTools<MoodleGradingTools>()
     .WithTools<MoodleGradebookTools>()

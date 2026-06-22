@@ -411,6 +411,31 @@ Descrição:
 - Consulta uma tarefa por `cmid` ou `instanceId`.
 - Não consulta entregas, submissões ou notas.
 
+## `ler_forum` / `read_forum`
+
+Descrição:
+
+- Lê discussões e posts de um fórum por `courseId` e `forumId`.
+- Resolve `forumId` como `cmid` ou `instanceId` usando `core_course_get_contents`.
+- Usa `mod_forum_get_forum_discussions_paginated` para listar discussões.
+- Usa `mod_forum_get_discussion_posts` para carregar posts quando `incluirPosts` / `includePosts` estiver ativo.
+- Retorna texto limpo em `messageText`, sem HTML bruto, e sanitiza URLs de anexos.
+- É uma tool somente leitura.
+
+Parâmetros:
+
+| Nome | Tipo | Descrição |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso, nome curto ou idnumber. |
+| `forumId` | `string` | Identificador do fórum. Pode ser `cmid` ou `instanceId`. |
+| `pagina` / `page` | `int` | Página de discussões, iniciando em 1. |
+| `tamanhoPagina` / `pageSize` | `int` | Tamanho da página de discussões, de 1 a 25. |
+| `incluirPosts` / `includePosts` | `bool` | Carrega posts de cada discussão. |
+| `postsPorDiscussao` / `postsPerDiscussion` | `int` | Máximo de posts retornados por discussão, de 1 a 100. |
+| `ordenarPor` / `sortBy` | `string` | Campo de ordenação das discussões: `id`, `timemodified`, `timestart` ou `timeend`. |
+| `ordem` / `sortDirection` | `string` | Direção de ordenação: `ASC` ou `DESC`. |
+| `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
+
 ## `listar_quizzes_curso` / `list_course_quizzes`
 
 Descrição:
