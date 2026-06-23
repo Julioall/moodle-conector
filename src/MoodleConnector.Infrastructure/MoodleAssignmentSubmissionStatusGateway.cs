@@ -53,14 +53,9 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
         return ParseStatus(payload, assignmentIdNumber, studentIdNumber);
     }
 
-    private async Task<string> ResolveTokenAsync(CancellationToken cancellationToken)
+    private Task<string> ResolveTokenAsync(CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(_options.ServiceToken))
-        {
-            return _options.ServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
+        return tokenProvider.GetAccessTokenAsync(cancellationToken);
     }
 
     private static AssignmentSubmissionAttemptStatus? ParseStatus(
