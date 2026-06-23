@@ -304,7 +304,14 @@ body{
 
 <script>
 // ─── State ───
-const state = { batchJobId:null, items:[], pendingActionId:null, confirmationText:null, selectedIds:new Set() };
+const state = {
+  batchJobId: null,
+  items: [],
+  pendingActionId: null,
+  confirmationText: null,
+  selectedIds: new Set(),
+  courseName: null
+};
 let rpcId = 0;
 const pendingRpc = {};
 
@@ -332,9 +339,6 @@ function callTool(name, args) {
     // Guard: clean up pendingRpc entry if host dies without responding
     setTimeout(() => { if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("Host nao respondeu.")); } }, RPC_GUARD_MS);
   });
-}
-
-
 
 // ─── Utils ───
 function getFirstName(fullName) {
@@ -388,23 +392,24 @@ function tryInit() {
   return false;
 }
 
-// Retry with exponential backoff (200ms, 400ms, 800ms, 1.6s, 3.2s)
-// Handles cases where data arrives after DOMContentLoaded
+// Retry with exponential backoff: 200ms, 400ms, 800ms, 1.6s, 3.2s
+// Uses recursive setTimeout (not setInterval) so each delay is computed fresh.
 function startRetryLoop() {
   if (tryInit()) return;
-  let attempt = 0;
   const maxAttempts = 5;
-  const retryTimer = setInterval(() => {
-    attempt++;
-    if (tryInit() || attempt >= maxAttempts) {
-      clearInterval(retryTimer);
+  function attempt(n) {
+    if (n >= maxAttempts) {
       if (!initialized) {
-        // Show empty state after all retries exhausted
         document.getElementById("loading").style.display = "none";
         document.getElementById("empty-state").style.display = "";
       }
+      return;
     }
-  }, 200 * Math.pow(2, attempt));
+    setTimeout(() => {
+      if (!tryInit()) attempt(n + 1);
+    }, 200 * Math.pow(2, n));
+  }
+  attempt(0);
 }
 
 // Listen for late-arriving data via postMessage (MCP hosts)
@@ -731,7 +736,7 @@ async function doSend() {
   }
 }
 
-// ─── Utils ───
+// ─── Helpers ───
 function extractData(result) {
   if (!result) return null;
   if (result.structuredContent?.data) return result.structuredContent.data;
