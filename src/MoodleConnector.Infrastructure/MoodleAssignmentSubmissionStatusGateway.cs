@@ -55,9 +55,9 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
 
     private async Task<string> ResolveTokenAsync(CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(_options.WriteServiceToken))
+        if (!string.IsNullOrWhiteSpace(_options.ServiceToken))
         {
-            return _options.WriteServiceToken;
+            return _options.ServiceToken;
         }
 
         return await tokenProvider.GetAccessTokenAsync(cancellationToken);
