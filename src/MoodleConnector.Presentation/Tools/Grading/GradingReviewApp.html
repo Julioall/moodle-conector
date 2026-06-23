@@ -68,6 +68,8 @@ body{
 }
 .student-card:hover{box-shadow:var(--shadow);border-color:#adb5bd}
 .student-card.sent{opacity:.6;pointer-events:none}
+.student-card.sent .card-header-right,
+.student-card.send-error .card-header-right{display:none}
 .student-card.sent .card-header::after{
   content:'Enviado ✓';position:absolute;right:12px;top:50%;transform:translateY(-50%);
   font-size:.65rem;font-weight:600;color:var(--success);
@@ -82,7 +84,7 @@ body{
 /* ─── Card checkbox ─── */
 .card-checkbox{
   width:16px;height:16px;cursor:pointer;accent-color:var(--primary);
-  flex-shrink:0;border-radius:3px;
+  flex-shrink:0;
 }
 
 .card-header{
