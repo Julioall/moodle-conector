@@ -26,7 +26,7 @@ internal sealed class MoodleAssignmentSettingsGateway(
     {
         if (_options.UseStubData)
         {
-            return new AssignmentSettingsSummary(assignmentId, 100m);
+            return new AssignmentSettingsSummary(assignmentId, 100m, Name: null);
         }
 
         var normalizedCourseId = ParseMoodleId(courseId, nameof(courseId));
@@ -108,6 +108,14 @@ internal sealed class MoodleAssignmentSettingsGateway(
 
                 if (currentId == assignmentId || cmid == assignmentId)
                 {
+                    // Parse assignment name
+                    string? assignmentName = null;
+                    if (assignment.TryGetProperty("name", out var nameElement) &&
+                        nameElement.ValueKind == JsonValueKind.String)
+                    {
+                        assignmentName = nameElement.GetString();
+                    }
+
                     if (assignment.TryGetProperty("grade", out var gradeElement))
                     {
                         var grade = gradeElement.ValueKind == JsonValueKind.Number ? gradeElement.GetDecimal() :
@@ -120,7 +128,17 @@ internal sealed class MoodleAssignmentSettingsGateway(
 
                         return new AssignmentSettingsSummary(
                             currentId.ToString(CultureInfo.InvariantCulture),
-                            effectiveMaxGrade);
+                            effectiveMaxGrade,
+                            assignmentName);
+                    }
+
+                    // No grade property but found the assignment — return with name only
+                    if (assignmentName is not null)
+                    {
+                        return new AssignmentSettingsSummary(
+                            currentId.ToString(CultureInfo.InvariantCulture),
+                            MaxGrade: 0m,
+                            assignmentName);
                     }
                 }
             }

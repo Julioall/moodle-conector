@@ -1542,9 +1542,11 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             .OrderByDescending(a => a.ExtractedTextRef?.Length ?? 0)
             .FirstOrDefault();
         var assignmentStatement = contextArtifact?.ExtractedTextRef;
+        // Prefer the official Moodle assignment name from the settings API;
+        // fall back to the context artifact filename (usually the PDF name).
         var assignmentName = contextArtifact?.Filename;
 
-        // MaxGrade via API Moodle
+        // MaxGrade + assignment name via API Moodle
         decimal maxGrade = 100m;
         try
         {
@@ -1560,6 +1562,12 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             else
             {
                 warnings.Add("Nota maxima nao encontrada via API Moodle. Usando padrao 100.");
+            }
+
+            // Override assignmentName with the real Moodle name when available
+            if (!string.IsNullOrWhiteSpace(settings?.Name))
+            {
+                assignmentName = settings.Name;
             }
         }
         catch

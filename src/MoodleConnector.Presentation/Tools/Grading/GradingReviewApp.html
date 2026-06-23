@@ -222,6 +222,13 @@ body{
 .empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
 .empty-state p{font-size:.82rem;max-width:300px;margin:6px auto 0}
 
+/* ─── No-feedback alert ─── */
+.no-feedback-badge{
+  font-size:.6rem;font-weight:600;padding:2px 6px;border-radius:8px;
+  background:var(--warning-light);color:var(--warning);
+  white-space:nowrap;flex-shrink:0;
+}
+
 /* ─── Responsive ─── */
 @media(max-width:600px){
   .content{padding:12px 10px 80px}
@@ -317,8 +324,9 @@ function getFirstName(fullName) {
 
 function personalizeGreeting(feedback, firstName) {
   if (!feedback || !firstName) return feedback;
-  // Replace "Olá!" or "Olá." at the beginning with "Olá, Nome!"
-  return feedback.replace(/^Olá[!.]/, `Olá, ${firstName}!`);
+  // Replace various greeting forms at the start with "Olá, Nome!"
+  // Handles: "Olá!", "Olá.", "Olá,", "Olá ", "Olá" (end of string)
+  return feedback.replace(/^Olá[!.,]?(?=\s|$)/, `Olá, ${firstName}!`);
 }
 
 // ─── Init ───
@@ -433,12 +441,20 @@ function renderAll() {
     return;
   }
 
-  // Update topbar with course name
+  // Update topbar with course name and batch progress
+  const readyItems  = state.items.filter(i => i.draftFeedback || i.finalFeedback).length;
+  const totalItems  = state.items.length;
+  const allReady    = readyItems === totalItems;
+
   if (state.courseName) {
     document.getElementById("page-subtitle").textContent = state.courseName;
   }
 
-  document.getElementById("count-label").textContent = state.items.length + " aluno" + (state.items.length!==1?"s":"");
+  const statusLabel = allReady
+    ? totalItems + " aluno" + (totalItems !== 1 ? "s" : "") + " prontos"
+    : readyItems + " / " + totalItems + " prontos";
+  document.getElementById("count-label").textContent = statusLabel;
+
   document.getElementById("bottom-bar").style.display = "";
   updateSendButton();
 
@@ -452,6 +468,7 @@ function renderAll() {
     const max = item.maxGrade ? Number(item.maxGrade).toFixed(0) : "100";
     const gradeClass = getGradeClass(displayGrade, item.maxGrade);
     let feedback = item.finalFeedback || item.draftFeedback || "";
+    const hasFeedback = feedback.trim().length > 0;
 
     // Personalize the greeting with student's first name
     if (firstName) {
@@ -460,6 +477,11 @@ function renderAll() {
 
     // Assignment name instead of file name
     const metaText = item.assignmentName ? item.assignmentName : ('Atividade ' + item.assignmentId);
+
+    // No-feedback badge
+    const noFeedbackBadge = !hasFeedback
+      ? `<span class="no-feedback-badge">Sem feedback</span>`
+      : '';
 
     const card = document.createElement("div");
     card.className = "student-card";
@@ -472,6 +494,7 @@ function renderAll() {
           <div class="student-meta">${esc(metaText)}</div>
         </div>
         <div class="card-header-right">
+          ${noFeedbackBadge}
           <span class="grade-badge ${gradeClass}" id="badge-${item.gradingItemId}">${grade} / ${max}</span>
           <span class="chevron">▶</span>
         </div>
@@ -495,6 +518,12 @@ function renderAll() {
       </div>`;
     container.appendChild(card);
   });
+
+  // Auto-open card when there is only one student
+  if (state.items.length === 1) {
+    const onlyCard = document.getElementById("card-" + state.items[0].gradingItemId);
+    if (onlyCard) onlyCard.classList.add("open");
+  }
 }
 
 function getInitials(id, name) {

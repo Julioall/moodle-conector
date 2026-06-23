@@ -98,23 +98,31 @@ public sealed class MoodleGradingReviewAppTools(
 
                 try
                 {
-                    var participantsPage = await mediator.Send(
-                        new ListCourseParticipantsQuery(
-                            currentUser.Subject,
-                            courseId,
-                            ParticipantStatusFilter.All,
-                            Page: 1,
-                            PageSize: 50,
-                            StudentsOnly: true,
-                            IncludeEmail: false),
-                        cancellationToken);
-                    if (participantsPage is not null)
+                    // Paginate through all participants (max 200 to avoid excessive calls)
+                    var page = 1;
+                    const int pageSize = 50;
+                    const int maxPages = 4;
+                    bool hasMore;
+                    do
                     {
+                        var participantsPage = await mediator.Send(
+                            new ListCourseParticipantsQuery(
+                                currentUser.Subject,
+                                courseId,
+                                ParticipantStatusFilter.All,
+                                Page: page,
+                                PageSize: pageSize,
+                                StudentsOnly: true,
+                                IncludeEmail: false),
+                            cancellationToken);
+                        if (participantsPage is null) break;
                         foreach (var p in participantsPage.Participants)
                         {
                             studentNameMap[p.UserId] = p.FullName;
                         }
-                    }
+                        hasMore = participantsPage.HasMore;
+                        page++;
+                    } while (hasMore && page <= maxPages);
                 }
                 catch { /* non-critical: fallback to "Aluno {id}" */ }
             }

@@ -4,7 +4,8 @@ namespace MoodleConnector.Application.Abstractions;
 
 public sealed record AssignmentSettingsSummary(
     string AssignmentId,
-    decimal MaxGrade);
+    decimal MaxGrade,
+    string? Name = null);
 
 public interface IMoodleAssignmentSettingsGateway
 {
