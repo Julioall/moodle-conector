@@ -10,108 +10,90 @@
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#f8f9fc;
+  --bg:#f1f3f5;
   --bg-card:#ffffff;
-  --bg-input:#f1f3f8;
-  --border:#e2e5ed;
-  --border-focus:#2563eb;
-  --text:#1e293b;
-  --text-secondary:#475569;
-  --text-muted:#94a3b8;
-  --primary:#1d4ed8;
-  --primary-hover:#1e40af;
-  --primary-light:#dbeafe;
-  --primary-lighter:#eff6ff;
-  --success:#16a34a;
-  --success-light:#dcfce7;
-  --warning:#ca8a04;
-  --warning-light:#fef9c3;
-  --danger:#dc2626;
-  --danger-light:#fee2e2;
-  --radius:10px;
-  --radius-sm:6px;
-  --shadow-sm:0 1px 3px rgba(0,0,0,.06);
-  --shadow:0 2px 8px rgba(0,0,0,.08);
-  --shadow-lg:0 4px 16px rgba(0,0,0,.1);
+  --bg-input:#f8f9fa;
+  --border:#dee2e6;
+  --border-focus:#1177d1;
+  --text:#212529;
+  --text-secondary:#495057;
+  --text-muted:#868e96;
+  --primary:#1177d1;
+  --primary-dark:#0b5ea7;
+  --primary-light:#d0ebff;
+  --primary-lighter:#e7f5ff;
+  --success:#2b8a3e;
+  --success-light:#d3f9d8;
+  --warning:#e67700;
+  --warning-light:#fff3bf;
+  --danger:#c92a2a;
+  --danger-light:#ffe3e3;
+  --radius:8px;
+  --radius-sm:5px;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.05);
+  --shadow:0 1px 4px rgba(0,0,0,.08);
 }
-html{font-size:15px}
+html{font-size:13px}
 body{
   font-family:'Inter',system-ui,-apple-system,sans-serif;
   background:var(--bg);color:var(--text);
-  min-height:100vh;line-height:1.6;padding:0;
+  min-height:100vh;line-height:1.55;padding:0;
 }
 
 /* ─── Top Bar ─── */
 .topbar{
-  background:#ffffff;
-  border-bottom:1px solid var(--border);
-  padding:18px 28px;
+  background:var(--primary);
+  padding:12px 20px;
   display:flex;align-items:center;justify-content:space-between;
   position:sticky;top:0;z-index:50;
 }
-.topbar-left{display:flex;align-items:center;gap:14px}
-.topbar-logo{
-  width:36px;height:36px;border-radius:8px;
-  background:var(--primary);display:flex;align-items:center;justify-content:center;
-  color:#fff;font-weight:700;font-size:1rem;
-}
-.topbar-title{font-size:1.05rem;font-weight:700;color:var(--text)}
-.topbar-subtitle{font-size:.78rem;color:var(--text-muted);margin-top:1px}
+.topbar-left{display:flex;align-items:center;gap:10px}
+
+.topbar-title{font-size:.9rem;font-weight:700;color:#fff}
+.topbar-subtitle{font-size:.7rem;color:rgba(255,255,255,.75);margin-top:1px}
 .topbar-badge{
-  display:inline-flex;align-items:center;gap:5px;
-  padding:5px 14px;border-radius:20px;font-size:.75rem;font-weight:600;
-  background:var(--primary-light);color:var(--primary);
+  display:inline-flex;align-items:center;gap:4px;
+  padding:3px 10px;border-radius:12px;font-size:.7rem;font-weight:600;
+  background:rgba(255,255,255,.2);color:#fff;
 }
 
 /* ─── Content ─── */
-.content{max-width:780px;margin:0 auto;padding:24px 20px 100px}
-
-/* ─── Summary ─── */
-.summary{
-  display:flex;gap:12px;margin-bottom:24px;flex-wrap:wrap;
-}
-.summary-item{
-  flex:1;min-width:120px;
-  background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
-  padding:14px 16px;text-align:center;box-shadow:var(--shadow-sm);
-}
-.summary-value{font-size:1.6rem;font-weight:700;color:var(--primary)}
-.summary-label{font-size:.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+.content{max-width:640px;margin:0 auto;padding:16px 14px 80px}
 
 /* ─── Student Card ─── */
 .student-card{
   background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);
-  margin-bottom:14px;box-shadow:var(--shadow-sm);overflow:hidden;
+  margin-bottom:10px;box-shadow:var(--shadow-sm);overflow:hidden;
   transition:box-shadow .2s ease, border-color .2s ease;
 }
-.student-card:hover{box-shadow:var(--shadow);border-color:#cbd5e1}
-.student-card.sent{opacity:.65;pointer-events:none}
+.student-card:hover{box-shadow:var(--shadow);border-color:#adb5bd}
+.student-card.sent{opacity:.6;pointer-events:none}
 .student-card.sent .card-header::after{
-  content:'Enviado ✓';position:absolute;right:16px;top:50%;transform:translateY(-50%);
-  font-size:.75rem;font-weight:600;color:var(--success);
-  background:var(--success-light);padding:3px 10px;border-radius:12px;
+  content:'Enviado ✓';position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  font-size:.65rem;font-weight:600;color:var(--success);
+  background:var(--success-light);padding:2px 8px;border-radius:10px;
 }
 
 .card-header{
-  display:flex;align-items:center;gap:12px;
-  padding:14px 18px;cursor:pointer;border-bottom:1px solid transparent;
+  display:flex;align-items:center;gap:10px;
+  padding:10px 14px;cursor:pointer;border-bottom:1px solid transparent;
   position:relative;transition:background .15s ease;
 }
 .card-header:hover{background:var(--primary-lighter)}
 .student-card.open .card-header{border-bottom-color:var(--border)}
 
 .avatar{
-  width:38px;height:38px;border-radius:50%;
-  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  width:32px;height:32px;border-radius:50%;
+  background:var(--primary);
   display:flex;align-items:center;justify-content:center;
-  color:#fff;font-weight:700;font-size:.85rem;flex-shrink:0;
+  color:#fff;font-weight:700;font-size:.7rem;flex-shrink:0;
 }
-.student-name{font-weight:600;font-size:.92rem;color:var(--text)}
-.student-meta{font-size:.75rem;color:var(--text-muted);margin-top:1px}
-.card-header-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.student-name{font-weight:600;font-size:.82rem;color:var(--text)}
+.student-meta{font-size:.68rem;color:var(--text-muted);margin-top:1px}
+.card-header-right{margin-left:auto;display:flex;align-items:center;gap:8px}
 
 .grade-badge{
-  padding:4px 12px;border-radius:16px;font-size:.82rem;font-weight:700;
+  padding:3px 9px;border-radius:12px;font-size:.72rem;font-weight:700;
   white-space:nowrap;
 }
 .grade-badge.high{background:var(--success-light);color:var(--success)}
@@ -119,96 +101,96 @@ body{
 .grade-badge.low{background:var(--danger-light);color:var(--danger)}
 
 .chevron{
-  color:var(--text-muted);transition:transform .2s ease;font-size:.7rem;
+  color:var(--text-muted);transition:transform .2s ease;font-size:.6rem;
 }
 .student-card.open .chevron{transform:rotate(90deg)}
 
 /* ─── Card Body ─── */
-.card-body{display:none;padding:18px;animation:fadeIn .2s ease}
+.card-body{display:none;padding:14px;animation:fadeIn .2s ease}
 .student-card.open .card-body{display:block}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
 .field-label{
-  font-size:.72rem;font-weight:600;color:var(--text-muted);
-  text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;
+  font-size:.65rem;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;
 }
 
 .feedback-textarea{
-  width:100%;min-height:130px;border:1px solid var(--border);
+  width:100%;min-height:110px;border:1px solid var(--border);
   border-radius:var(--radius-sm);background:var(--bg-input);
-  color:var(--text);padding:12px 14px;font-family:inherit;
-  font-size:.88rem;line-height:1.65;resize:vertical;
+  color:var(--text);padding:10px 12px;font-family:inherit;
+  font-size:.8rem;line-height:1.6;resize:vertical;
   outline:none;transition:border-color .2s ease, box-shadow .2s ease;
 }
 .feedback-textarea:focus{
   border-color:var(--border-focus);
-  box-shadow:0 0 0 3px rgba(37,99,235,.12);
+  box-shadow:0 0 0 2px rgba(17,119,209,.12);
   background:#fff;
 }
 
 .grade-row{
-  display:flex;align-items:center;gap:10px;margin-top:14px;
+  display:flex;align-items:center;gap:8px;margin-top:10px;
 }
 .grade-field{
-  width:80px;border:1px solid var(--border);border-radius:var(--radius-sm);
-  background:var(--bg-input);color:var(--text);padding:9px 12px;
-  font-size:.95rem;font-weight:600;text-align:center;font-family:inherit;
+  width:70px;border:1px solid var(--border);border-radius:var(--radius-sm);
+  background:var(--bg-input);color:var(--text);padding:7px 10px;
+  font-size:.85rem;font-weight:600;text-align:center;font-family:inherit;
   outline:none;transition:border-color .2s ease;
 }
-.grade-field:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(37,99,235,.12);background:#fff}
-.grade-max{font-size:.85rem;color:var(--text-muted);font-weight:500}
+.grade-field:focus{border-color:var(--border-focus);box-shadow:0 0 0 2px rgba(17,119,209,.12);background:#fff}
+.grade-max{font-size:.78rem;color:var(--text-muted);font-weight:500}
 
-.char-count{font-size:.7rem;color:var(--text-muted);text-align:right;margin-top:4px}
+.char-count{font-size:.62rem;color:var(--text-muted);text-align:right;margin-top:3px}
 
 /* ─── Bottom Bar ─── */
 .bottom-bar{
   position:fixed;bottom:0;left:0;right:0;
-  background:rgba(255,255,255,.95);backdrop-filter:blur(8px);
+  background:rgba(255,255,255,.96);backdrop-filter:blur(6px);
   border-top:1px solid var(--border);
-  padding:14px 28px;display:flex;align-items:center;justify-content:center;gap:16px;
+  padding:10px 20px;display:flex;align-items:center;justify-content:center;gap:12px;
   z-index:50;
 }
 .btn-send{
-  padding:12px 36px;border-radius:var(--radius);border:none;
-  background:var(--primary);color:#fff;font-size:.92rem;font-weight:600;
+  padding:9px 28px;border-radius:var(--radius);border:none;
+  background:var(--primary);color:#fff;font-size:.82rem;font-weight:600;
   cursor:pointer;font-family:inherit;
-  transition:background .15s ease, transform .1s ease, box-shadow .15s ease;
-  box-shadow:0 2px 8px rgba(29,78,216,.25);
+  transition:background .15s ease, transform .1s ease;
+  box-shadow:0 1px 4px rgba(17,119,209,.2);
 }
-.btn-send:hover:not(:disabled){background:var(--primary-hover);transform:translateY(-1px);box-shadow:0 4px 14px rgba(29,78,216,.3)}
+.btn-send:hover:not(:disabled){background:var(--primary-dark);transform:translateY(-1px)}
 .btn-send:active:not(:disabled){transform:translateY(0)}
-.btn-send:disabled{opacity:.45;cursor:not-allowed;transform:none}
-.btn-send-count{font-size:.78rem;color:var(--text-muted);font-weight:500}
+.btn-send:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-send-count{font-size:.7rem;color:var(--text-muted);font-weight:500}
 
 /* ─── Confirm Modal ─── */
 .modal-overlay{
-  position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200;display:none;
-  align-items:center;justify-content:center;backdrop-filter:blur(3px);
+  position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:200;display:none;
+  align-items:center;justify-content:center;backdrop-filter:blur(2px);
 }
 .modal-overlay.show{display:flex}
 .modal{
-  background:#fff;border-radius:var(--radius);padding:28px 32px;
-  max-width:420px;width:92%;box-shadow:var(--shadow-lg);
+  background:#fff;border-radius:var(--radius);padding:22px 26px;
+  max-width:380px;width:92%;box-shadow:0 4px 16px rgba(0,0,0,.12);
 }
-.modal h2{font-size:1.05rem;font-weight:700;color:var(--text);margin-bottom:8px}
-.modal p{font-size:.88rem;color:var(--text-secondary);line-height:1.6;margin-bottom:20px}
-.modal-actions{display:flex;gap:10px;justify-content:flex-end}
+.modal h2{font-size:.92rem;font-weight:700;color:var(--text);margin-bottom:6px}
+.modal p{font-size:.8rem;color:var(--text-secondary);line-height:1.55;margin-bottom:16px}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end}
 .btn{
-  padding:9px 20px;border-radius:var(--radius-sm);font-size:.85rem;font-weight:600;
+  padding:7px 16px;border-radius:var(--radius-sm);font-size:.78rem;font-weight:600;
   border:none;cursor:pointer;font-family:inherit;transition:all .15s ease;
 }
 .btn-cancel{background:var(--bg-input);color:var(--text-secondary);border:1px solid var(--border)}
-.btn-cancel:hover{background:#e8eaef}
-.btn-confirm{background:var(--primary);color:#fff;box-shadow:0 2px 6px rgba(29,78,216,.2)}
-.btn-confirm:hover:not(:disabled){background:var(--primary-hover)}
+.btn-cancel:hover{background:#e9ecef}
+.btn-confirm{background:var(--primary);color:#fff}
+.btn-confirm:hover:not(:disabled){background:var(--primary-dark)}
 .btn-confirm:disabled{opacity:.5;cursor:not-allowed}
 
 /* ─── Toast ─── */
 .toast{
-  position:fixed;top:18px;left:50%;transform:translateX(-50%) translateY(-80px);
-  padding:12px 24px;border-radius:var(--radius-sm);
-  font-size:.85rem;font-weight:500;z-index:300;
-  transition:transform .3s ease;box-shadow:var(--shadow-lg);
+  position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-60px);
+  padding:9px 18px;border-radius:var(--radius-sm);
+  font-size:.78rem;font-weight:500;z-index:300;
+  transition:transform .3s ease;box-shadow:0 2px 8px rgba(0,0,0,.12);
 }
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast-success{background:var(--success);color:#fff}
@@ -217,22 +199,33 @@ body{
 
 /* ─── Loading ─── */
 .skeleton{
-  background:linear-gradient(90deg,var(--bg-input) 25%,#e8eaef 50%,var(--bg-input) 75%);
+  background:linear-gradient(90deg,#e9ecef 25%,#dee2e6 50%,#e9ecef 75%);
   background-size:200% 100%;animation:shimmer 1.5s infinite;border-radius:var(--radius);
 }
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.skeleton-card{height:56px;margin-bottom:12px}
+.skeleton-card{height:46px;margin-bottom:10px}
+
+/* ─── Spinner ─── */
+.loading-spinner-wrap{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:60px 20px;gap:14px;
+}
+.loading-spinner{
+  width:32px;height:32px;border:3px solid var(--border);
+  border-top-color:var(--primary);border-radius:50%;
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:.8rem;color:var(--text-muted);font-weight:500}
 
 /* ─── Empty ─── */
-.empty-state{text-align:center;padding:60px 24px;color:var(--text-muted)}
-.empty-state p{font-size:.92rem;max-width:340px;margin:8px auto 0}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-muted)}
+.empty-state p{font-size:.82rem;max-width:300px;margin:6px auto 0}
 
 /* ─── Responsive ─── */
 @media(max-width:600px){
-  .content{padding:16px 12px 100px}
-  .topbar{padding:14px 16px}
-  .summary-item{min-width:80px;padding:10px 12px}
-  .summary-value{font-size:1.3rem}
+  .content{padding:12px 10px 80px}
+  .topbar{padding:10px 14px}
 }
 </style>
 </head>
@@ -241,7 +234,6 @@ body{
 <!-- Top Bar -->
 <div class="topbar">
   <div class="topbar-left">
-    <div class="topbar-logo">EA</div>
     <div>
       <div class="topbar-title" id="page-title">Revisão de Correções</div>
       <div class="topbar-subtitle" id="page-subtitle">Confira e ajuste os feedbacks antes do envio</div>
@@ -254,28 +246,12 @@ body{
 
 <!-- Content -->
 <div class="content">
-  <!-- Summary -->
-  <div class="summary" id="summary" style="display:none">
-    <div class="summary-item">
-      <div class="summary-value" id="s-total">0</div>
-      <div class="summary-label">Alunos</div>
-    </div>
-    <div class="summary-item">
-      <div class="summary-value" id="s-avg" style="color:var(--success)">—</div>
-      <div class="summary-label">Média</div>
-    </div>
-    <div class="summary-item">
-      <div class="summary-value" id="s-max" style="color:var(--text-secondary)">—</div>
-      <div class="summary-label">Nota máx.</div>
-    </div>
-  </div>
-
   <!-- Loading -->
   <div id="loading">
-    <div class="skeleton skeleton-card"></div>
-    <div class="skeleton skeleton-card"></div>
-    <div class="skeleton skeleton-card"></div>
-    <div class="skeleton skeleton-card"></div>
+    <div class="loading-spinner-wrap">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">Carregando correções…</div>
+    </div>
   </div>
 
   <!-- Student Cards -->
@@ -338,6 +314,19 @@ window.addEventListener("message", e => {
   }
 });
 
+// ─── Utils ───
+function getFirstName(fullName) {
+  if (!fullName) return null;
+  const parts = fullName.trim().split(/\s+/);
+  return parts[0] || null;
+}
+
+function personalizeGreeting(feedback, firstName) {
+  if (!feedback || !firstName) return feedback;
+  // Replace "Olá!" or "Olá." at the beginning with "Olá, Nome!"
+  return feedback.replace(/^Olá[!.]/, `Olá, ${firstName}!`);
+}
+
 // ─── Init ───
 function init() {
   // 1. OpenAI Apps SDK: data injected as window.openai.toolOutput by ChatGPT
@@ -346,6 +335,7 @@ function init() {
   if (openaiData && openaiData.items && openaiData.items.length > 0) {
     state.batchJobId = openaiData.batchJobId;
     state.items = openaiData.items;
+    state.courseName = openaiData.courseName;
     renderAll();
     return;
   }
@@ -357,6 +347,7 @@ function init() {
     const data = JSON.parse(el.textContent);
     state.batchJobId = data.batchJobId;
     state.items = data.items || [];
+    state.courseName = data.courseName;
     renderAll();
   } catch(e) {
     toast("Erro ao carregar dados: "+e.message, "error");
@@ -375,35 +366,33 @@ function renderAll() {
     return;
   }
 
-  // Summary
-  const sumEl = document.getElementById("summary");
-  sumEl.style.display = "";
-  document.getElementById("s-total").textContent = state.items.length;
-  // Summary: use final grades when available
-  const grades = state.items
-    .map(i => i.finalGrade ?? i.suggestedGrade)
-    .filter(g => g != null)
-    .map(Number);
-  if (grades.length > 0) {
-    const avg = (grades.reduce((a,b)=>a+b,0)/grades.length).toFixed(1);
-    document.getElementById("s-avg").textContent = avg;
+  // Update topbar with course name
+  if (state.courseName) {
+    document.getElementById("page-subtitle").textContent = state.courseName;
   }
-  const maxG = state.items[0]?.maxGrade;
-  if (maxG) document.getElementById("s-max").textContent = Number(maxG).toFixed(0);
 
   document.getElementById("count-label").textContent = state.items.length + " aluno" + (state.items.length!==1?"s":"");
   document.getElementById("bottom-bar").style.display = "";
   updateSendButton();
 
   state.items.forEach((item, idx) => {
+    const firstName = getFirstName(item.studentName);
+    const displayName = firstName || item.studentName || ("Aluno " + item.studentId);
     const initials = getInitials(item.studentId, item.studentName);
-    const displayName = item.studentName || ("Aluno " + item.studentId);
     // CRITICAL: prioritize final over suggested
     const displayGrade = item.finalGrade ?? item.suggestedGrade;
     const grade = displayGrade != null ? Number(displayGrade).toFixed(1) : "—";
     const max = item.maxGrade ? Number(item.maxGrade).toFixed(0) : "100";
     const gradeClass = getGradeClass(displayGrade, item.maxGrade);
-    const feedback = item.finalFeedback || item.draftFeedback || "";
+    let feedback = item.finalFeedback || item.draftFeedback || "";
+
+    // Personalize the greeting with student's first name
+    if (firstName) {
+      feedback = personalizeGreeting(feedback, firstName);
+    }
+
+    // Assignment name instead of file name
+    const metaText = item.assignmentName ? item.assignmentName : ('Atividade ' + item.assignmentId);
 
     const card = document.createElement("div");
     card.className = "student-card";
@@ -413,7 +402,7 @@ function renderAll() {
         <div class="avatar">${esc(initials)}</div>
         <div>
           <div class="student-name">${esc(displayName)}</div>
-          <div class="student-meta">${item.assignmentName ? esc(item.assignmentName) : 'Atividade '+item.assignmentId}</div>
+          <div class="student-meta">${esc(metaText)}</div>
         </div>
         <div class="card-header-right">
           <span class="grade-badge ${gradeClass}" id="badge-${item.gradingItemId}">${grade} / ${max}</span>
@@ -429,12 +418,12 @@ function renderAll() {
 
         <div class="grade-row">
           <div>
-            <div class="field-label" style="margin-bottom:4px">Nota</div>
+            <div class="field-label" style="margin-bottom:3px">Nota</div>
             <input type="number" class="grade-field" id="grade-${item.gradingItemId}"
               value="${displayGrade ?? ''}" step="0.1" min="0" max="${max}"
               oninput="onGradeEdit('${item.gradingItemId}')">
           </div>
-          <span class="grade-max" style="margin-top:20px">/ ${max}</span>
+          <span class="grade-max" style="margin-top:16px">/ ${max}</span>
         </div>
       </div>`;
     container.appendChild(card);
@@ -595,7 +584,8 @@ function extractData(result) {
 }
 
 function getDisplayName(item) {
-  return item.studentName || ("Aluno "+item.studentId);
+  const firstName = getFirstName(item.studentName);
+  return firstName || item.studentName || ("Aluno "+item.studentId);
 }
 
 function esc(s) {

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -7,8 +8,11 @@ using System.Text.Json.Serialization;
 using MediatR;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.Participants;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
@@ -18,7 +22,9 @@ namespace MoodleConnector.Presentation.Tools.Grading;
 
 [McpServerToolType]
 public sealed class MoodleGradingReviewAppTools(
-    IMediator mediator)
+    IMediator mediator,
+    IMoodleCoursesGateway coursesGateway,
+    ICurrentUserContext currentUser)
 {
     [McpServerTool(
         Name = "revisar_feedbacks_lote",
@@ -60,6 +66,64 @@ public sealed class MoodleGradingReviewAppTools(
             return Error("Não foi possível consultar o lote de correção assistida neste momento.");
         }
 
+        // Resolve student names from Moodle participants API
+        var studentNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? resolvedCourseName = null;
+        try
+        {
+            // Get course name
+            var courseIdStr = batchStatus.Items.FirstOrDefault()?.AssignmentId;
+            if (courseIdStr is not null)
+            {
+                // Need the courseId from the batch — get it from the first item's detail
+                AssistedGradingItemDetailResult? firstDetail = null;
+                try
+                {
+                    firstDetail = await mediator.Send(
+                        new GetAssistedGradingItemQuery(batchStatus.Items[0].GradingItemId, batchJobId),
+                        cancellationToken);
+                }
+                catch { /* non-critical */ }
+
+                var courseId = firstDetail?.CourseId;
+                if (!string.IsNullOrWhiteSpace(courseId))
+                {
+                    // Resolve course name
+                    try
+                    {
+                        var course = await coursesGateway.GetMyCourseAsync(
+                            currentUser.Subject, courseId, cancellationToken);
+                        resolvedCourseName = course?.FullName ?? course?.DisplayName;
+                    }
+                    catch { /* non-critical */ }
+
+                    // Resolve student names via participants
+                    try
+                    {
+                        var participantsPage = await mediator.Send(
+                            new ListCourseParticipantsQuery(
+                                currentUser.Subject,
+                                courseId,
+                                ParticipantStatusFilter.All,
+                                Page: 1,
+                                PageSize: 50,
+                                StudentsOnly: true,
+                                IncludeEmail: false),
+                            cancellationToken);
+                        if (participantsPage is not null)
+                        {
+                            foreach (var p in participantsPage.Participants)
+                            {
+                                studentNameMap[p.UserId] = p.FullName;
+                            }
+                        }
+                    }
+                    catch { /* non-critical: fallback to "Aluno {id}" */ }
+                }
+            }
+        }
+        catch { /* non-critical */ }
+
         // Enrich items with detail data (feedback, grade, maxGrade)
         // Uses GetAssistedGradingItemQuery which returns BOTH suggested and final values
         var enrichedItems = new List<GradingReviewItem>();
@@ -99,12 +163,27 @@ public sealed class MoodleGradingReviewAppTools(
             var assignmentName = context?.AssignmentName;
             var confidence = detail?.Confidence ?? context?.Confidence;
 
+            // Resolve student name from participants map
+            studentNameMap.TryGetValue(item.StudentId, out var studentName);
+
+            // If course name was not resolved yet, try from context
+            if (resolvedCourseName is null && context is not null)
+            {
+                try
+                {
+                    var course = await coursesGateway.GetMyCourseAsync(
+                        currentUser.Subject, context.CourseId, cancellationToken);
+                    resolvedCourseName = course?.FullName ?? course?.DisplayName;
+                }
+                catch { /* non-critical */ }
+            }
+
             enrichedItems.Add(new GradingReviewItem(
                 item.GradingItemId,
                 item.AssignmentId,
                 item.SubmissionId,
                 item.StudentId,
-                StudentName: null,
+                StudentName: studentName,
                 item.Status,
                 item.ReviewStatus,
                 item.CommitStatus,
@@ -125,7 +204,8 @@ public sealed class MoodleGradingReviewAppTools(
             batchStatus.BlockedItems,
             batchStatus.FailedItems,
             batchStatus.ProcessingMetrics.ProgressPercent,
-            enrichedItems);
+            enrichedItems,
+            resolvedCourseName);
 
         // Build structured content for fallback (hosts without MCP Apps)
         var narration = BuildReviewNarration(appData);
@@ -183,7 +263,8 @@ public sealed class MoodleGradingReviewAppTools(
             readyItems = data.ReadyItems,
             blockedItems = data.BlockedItems,
             failedItems = data.FailedItems,
-            progressPercent = data.ProgressPercent
+            progressPercent = data.ProgressPercent,
+            courseName = data.CourseName
         });
 
         // Replace the placeholder init-data script content
@@ -440,7 +521,8 @@ public sealed record GradingReviewAppData(
     [property: JsonPropertyName("blockedItems")] int BlockedItems,
     [property: JsonPropertyName("failedItems")] int FailedItems,
     [property: JsonPropertyName("progressPercent")] int ProgressPercent,
-    [property: JsonPropertyName("items")] IReadOnlyList<GradingReviewItem> Items);
+    [property: JsonPropertyName("items")] IReadOnlyList<GradingReviewItem> Items,
+    [property: JsonPropertyName("courseName")] string? CourseName = null);
 
 public sealed record GradingReviewItem(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
