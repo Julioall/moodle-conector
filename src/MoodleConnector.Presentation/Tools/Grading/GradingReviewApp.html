@@ -309,12 +309,14 @@ let rpcId = 0;
 const pendingRpc = {};
 
 // ─── MCP postMessage RPC ───
-// Timeout: we do NOT impose our own timeout on postMessage RPC calls.
-// The actual limit is the MCP host (Claude Desktop / ChatGPT), which typically
-// caps tool calls at ~60 s. Adding a shorter JS timeout would only make us
-// fail earlier with a worse error message. We use Number.MAX_SAFE_INTEGER
-// (~285,616 years) so the setTimeout below never fires in practice.
-const RPC_TIMEOUT_MS = Number.MAX_SAFE_INTEGER;
+// Guard timeout: browsers store setTimeout delays as a 32-bit signed integer.
+// The maximum safe value is 2^31-1 = 2,147,483,647 ms (~24.8 days).
+// Values above this overflow and fire IMMEDIATELY — do NOT use Number.MAX_SAFE_INTEGER.
+// In practice this guard never fires: the MCP host (Claude / ChatGPT) caps
+// tool calls at ~60 s and will close the session long before 24.8 days.
+// It exists only as a memory-safety net to clear pendingRpc if the host
+// dies without sending a JSON-RPC reply.
+const RPC_GUARD_MS = 2147483647; // 2^31 - 1, the 32-bit signed integer max
 
 function callTool(name, args) {
   return new Promise((resolve, reject) => {
@@ -327,8 +329,8 @@ function callTool(name, args) {
     const id = ++rpcId;
     pendingRpc[id] = { resolve, reject };
     window.parent.postMessage({ jsonrpc:"2.0", id, method:"tools/call", params:{ name, arguments:args } }, "*");
-    // Guard: clean up only if the host kills the connection without responding
-    setTimeout(() => { if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("Host nao respondeu.")); } }, RPC_TIMEOUT_MS);
+    // Guard: clean up pendingRpc entry if host dies without responding
+    setTimeout(() => { if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("Host nao respondeu.")); } }, RPC_GUARD_MS);
   });
 }
 
