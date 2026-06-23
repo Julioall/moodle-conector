@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -66,107 +65,97 @@ public sealed class MoodleGradingReviewAppTools(
             return Error("Não foi possível consultar o lote de correção assistida neste momento.");
         }
 
-        // Resolve student names from Moodle participants API
+        // ── Phase 1: Resolve course name + student names (non-critical, single pass) ─────
         var studentNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string? resolvedCourseName = null;
-        try
+
+        // Cache the first item's detail result so it is not fetched twice in Phase 2
+        var detailCache = new Dictionary<Guid, AssistedGradingItemDetailResult>();
+
+        if (batchStatus.Items.Count > 0)
         {
-            // Get course name
-            var courseIdStr = batchStatus.Items.FirstOrDefault()?.AssignmentId;
-            if (courseIdStr is not null)
+            var firstItem = batchStatus.Items[0];
+            AssistedGradingItemDetailResult? firstDetail = null;
+            try
             {
-                // Need the courseId from the batch — get it from the first item's detail
-                AssistedGradingItemDetailResult? firstDetail = null;
+                firstDetail = await mediator.Send(
+                    new GetAssistedGradingItemQuery(firstItem.GradingItemId, batchJobId),
+                    cancellationToken);
+                detailCache[firstItem.GradingItemId] = firstDetail;
+            }
+            catch { /* non-critical */ }
+
+            var courseId = firstDetail?.CourseId;
+            if (!string.IsNullOrWhiteSpace(courseId))
+            {
                 try
                 {
-                    firstDetail = await mediator.Send(
-                        new GetAssistedGradingItemQuery(batchStatus.Items[0].GradingItemId, batchJobId),
-                        cancellationToken);
+                    var course = await coursesGateway.GetMyCourseAsync(
+                        currentUser.Subject, courseId, cancellationToken);
+                    resolvedCourseName = course?.FullName ?? course?.DisplayName;
                 }
                 catch { /* non-critical */ }
 
-                var courseId = firstDetail?.CourseId;
-                if (!string.IsNullOrWhiteSpace(courseId))
+                try
                 {
-                    // Resolve course name
-                    try
+                    var participantsPage = await mediator.Send(
+                        new ListCourseParticipantsQuery(
+                            currentUser.Subject,
+                            courseId,
+                            ParticipantStatusFilter.All,
+                            Page: 1,
+                            PageSize: 50,
+                            StudentsOnly: true,
+                            IncludeEmail: false),
+                        cancellationToken);
+                    if (participantsPage is not null)
                     {
-                        var course = await coursesGateway.GetMyCourseAsync(
-                            currentUser.Subject, courseId, cancellationToken);
-                        resolvedCourseName = course?.FullName ?? course?.DisplayName;
-                    }
-                    catch { /* non-critical */ }
-
-                    // Resolve student names via participants
-                    try
-                    {
-                        var participantsPage = await mediator.Send(
-                            new ListCourseParticipantsQuery(
-                                currentUser.Subject,
-                                courseId,
-                                ParticipantStatusFilter.All,
-                                Page: 1,
-                                PageSize: 50,
-                                StudentsOnly: true,
-                                IncludeEmail: false),
-                            cancellationToken);
-                        if (participantsPage is not null)
+                        foreach (var p in participantsPage.Participants)
                         {
-                            foreach (var p in participantsPage.Participants)
-                            {
-                                studentNameMap[p.UserId] = p.FullName;
-                            }
+                            studentNameMap[p.UserId] = p.FullName;
                         }
                     }
-                    catch { /* non-critical: fallback to "Aluno {id}" */ }
                 }
+                catch { /* non-critical: fallback to "Aluno {id}" */ }
             }
         }
-        catch { /* non-critical */ }
 
-        // Enrich items with detail data (feedback, grade, maxGrade)
-        // Uses GetAssistedGradingItemQuery which returns BOTH suggested and final values
+        // ── Phase 2: Enrich each item (feedback, grade, maxGrade, assignmentName) ─────────
         var enrichedItems = new List<GradingReviewItem>();
         foreach (var item in batchStatus.Items)
         {
-            AssistedGradingItemDetailResult? detail = null;
-            GradingContextForChatResult? context = null;
-            try
+            // Reuse cached detail from Phase 1 (avoids double-fetching for item[0])
+            if (!detailCache.TryGetValue(item.GradingItemId, out var detail))
             {
-                detail = await mediator.Send(
-                    new GetAssistedGradingItemQuery(item.GradingItemId, batchJobId),
-                    cancellationToken);
-            }
-            catch
-            {
-                // Non-critical: fall back to context query
+                try
+                {
+                    detail = await mediator.Send(
+                        new GetAssistedGradingItemQuery(item.GradingItemId, batchJobId),
+                        cancellationToken);
+                }
+                catch { /* non-critical: fall back to context query */ }
             }
 
-            // Always try to get maxGrade/assignmentName from context
+            GradingContextForChatResult? context = null;
             try
             {
                 context = await mediator.Send(
                     new PrepareGradingContextForChatQuery(item.GradingItemId, batchJobId),
                     cancellationToken);
             }
-            catch
-            {
-                // Non-critical
-            }
+            catch { /* non-critical */ }
 
-            // Carry all 4 fields separately so the UI has full visibility
-            var finalGrade = detail?.FinalGrade;
+            var finalGrade    = detail?.FinalGrade;
             var finalFeedback = !string.IsNullOrWhiteSpace(detail?.FinalFeedback) ? detail!.FinalFeedback : null;
             var suggestedGrade = detail?.SuggestedGrade ?? context?.SuggestedGrade;
-            var draftFeedback = detail?.DraftFeedback ?? context?.DraftFeedback;
-            var maxGrade = context?.MaxGrade ?? 100m;
+            var draftFeedback  = detail?.DraftFeedback  ?? context?.DraftFeedback;
+            var maxGrade       = context?.MaxGrade       ?? 100m;
             var assignmentName = context?.AssignmentName;
-            var confidence = detail?.Confidence ?? context?.Confidence;
+            var confidence     = detail?.Confidence      ?? context?.Confidence;
 
-            // Resolve student name from participants map
             studentNameMap.TryGetValue(item.StudentId, out var studentName);
 
-            // If course name was not resolved yet, try from context
+            // Lazy fallback: resolve course name from context if Phase 1 didn't get it
             if (resolvedCourseName is null && context is not null)
             {
                 try
@@ -232,46 +221,8 @@ public sealed class MoodleGradingReviewAppTools(
     }
 
     // ============================================================
-    // HTML Builder
+    // HTML Template (used by MCP Resource only; data is delivered via StructuredContent)
     // ============================================================
-
-    private static string BuildReviewAppHtml(GradingReviewAppData data)
-    {
-        var templateHtml = LoadHtmlTemplate();
-        var jsonData = JsonSerializer.Serialize(new
-        {
-            batchJobId = data.BatchJobId,
-            items = data.Items.Select(i => new
-            {
-                gradingItemId = i.GradingItemId,
-                assignmentId = i.AssignmentId,
-                submissionId = i.SubmissionId,
-                studentId = i.StudentId,
-                studentName = i.StudentName,
-                status = i.Status,
-                reviewStatus = i.ReviewStatus,
-                commitStatus = i.CommitStatus,
-                finalGrade = i.FinalGrade,
-                finalFeedback = i.FinalFeedback,
-                suggestedGrade = i.SuggestedGrade,
-                draftFeedback = i.DraftFeedback,
-                maxGrade = i.MaxGrade,
-                assignmentName = i.AssignmentName,
-                confidence = i.Confidence
-            }),
-            totalItems = data.TotalItems,
-            readyItems = data.ReadyItems,
-            blockedItems = data.BlockedItems,
-            failedItems = data.FailedItems,
-            progressPercent = data.ProgressPercent,
-            courseName = data.CourseName
-        });
-
-        // Replace the placeholder init-data script content
-        return templateHtml.Replace(
-            "{\"batchJobId\":null,\"items\":[],\"totalItems\":0,\"readyItems\":0,\"blockedItems\":0,\"failedItems\":0}",
-            jsonData);
-    }
 
     private static string LoadHtmlTemplate()
     {
