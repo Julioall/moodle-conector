@@ -508,47 +508,128 @@ function renderAll() {
     // Assignment name instead of file name
     const metaText = item.assignmentName ? item.assignmentName : ('Atividade ' + item.assignmentId);
 
-    // No-feedback badge
-    const noFeedbackBadge = !hasFeedback
-      ? `<span class="no-feedback-badge">Sem feedback</span>`
-      : '';
+    const gid = item.gradingItemId;
 
+    // ── Card root ──
     const card = document.createElement("div");
     card.className = "student-card";
-    card.id = "card-"+item.gradingItemId;
-    card.innerHTML = `
-      <div class="card-header" onclick="toggle('${item.gradingItemId}')">
-        <input type="checkbox" class="card-checkbox" id="chk-${item.gradingItemId}"
-          checked onclick="event.stopPropagation()"
-          onchange="toggleSelect('${item.gradingItemId}', this.checked)">
-        <div class="avatar">${esc(initials)}</div>
-        <div>
-          <div class="student-name">${esc(displayName)}</div>
-          <div class="student-meta">${esc(metaText)}</div>
-        </div>
-        <div class="card-header-right">
-          ${noFeedbackBadge}
-          <span class="grade-badge ${gradeClass}" id="badge-${item.gradingItemId}">${grade} / ${max}</span>
-          <span class="chevron">▶</span>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="field-label">Feedback para o aluno</div>
-        <textarea class="feedback-textarea" id="fb-${item.gradingItemId}"
-          oninput="onEdit('${item.gradingItemId}')"
-          placeholder="Escreva o feedback para o aluno...">${esc(feedback)}</textarea>
-        <div class="char-count" id="cc-${item.gradingItemId}">${feedback.length} caracteres</div>
+    card.id = "card-" + gid;
 
-        <div class="grade-row">
-          <div>
-            <div class="field-label" style="margin-bottom:3px">Nota</div>
-            <input type="number" class="grade-field" id="grade-${item.gradingItemId}"
-              value="${displayGrade ?? ''}" step="0.1" min="0" max="${max}"
-              oninput="onGradeEdit('${item.gradingItemId}')">
-          </div>
-          <span class="grade-max" style="margin-top:16px">/ ${max}</span>
-        </div>
-      </div>`;
+    // ── Card Header ──
+    const header = document.createElement("div");
+    header.className = "card-header";
+    header.addEventListener("click", () => toggle(gid));
+
+    // Checkbox
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.className = "card-checkbox";
+    chk.id = "chk-" + gid;
+    chk.checked = true;
+    chk.addEventListener("click", e => e.stopPropagation());
+    chk.addEventListener("change", () => toggleSelect(gid, chk.checked));
+
+    // Avatar
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = initials;
+
+    // Name + meta
+    const nameWrap = document.createElement("div");
+    const nameEl = document.createElement("div");
+    nameEl.className = "student-name";
+    nameEl.textContent = displayName;
+    const metaEl = document.createElement("div");
+    metaEl.className = "student-meta";
+    metaEl.textContent = metaText;
+    nameWrap.appendChild(nameEl);
+    nameWrap.appendChild(metaEl);
+
+    // Header right (grade badge + chevron)
+    const headerRight = document.createElement("div");
+    headerRight.className = "card-header-right";
+
+    if (!hasFeedback) {
+      const nfb = document.createElement("span");
+      nfb.className = "no-feedback-badge";
+      nfb.textContent = "Sem feedback";
+      headerRight.appendChild(nfb);
+    }
+
+    const badge = document.createElement("span");
+    badge.className = "grade-badge " + gradeClass;
+    badge.id = "badge-" + gid;
+    badge.textContent = grade + " / " + max;
+
+    const chevron = document.createElement("span");
+    chevron.className = "chevron";
+    chevron.textContent = "▶";
+
+    headerRight.appendChild(badge);
+    headerRight.appendChild(chevron);
+
+    header.appendChild(chk);
+    header.appendChild(avatar);
+    header.appendChild(nameWrap);
+    header.appendChild(headerRight);
+
+    // ── Card Body ──
+    const body = document.createElement("div");
+    body.className = "card-body";
+
+    const fbLabel = document.createElement("div");
+    fbLabel.className = "field-label";
+    fbLabel.textContent = "Feedback para o aluno";
+
+    const textarea = document.createElement("textarea");
+    textarea.className = "feedback-textarea";
+    textarea.id = "fb-" + gid;
+    textarea.placeholder = "Escreva o feedback para o aluno...";
+    textarea.value = feedback;
+    textarea.addEventListener("input", () => onEdit(gid));
+
+    const charCount = document.createElement("div");
+    charCount.className = "char-count";
+    charCount.id = "cc-" + gid;
+    charCount.textContent = feedback.length + " caracteres";
+
+    const gradeRow = document.createElement("div");
+    gradeRow.className = "grade-row";
+
+    const gradeFieldWrap = document.createElement("div");
+    const gradeLabel = document.createElement("div");
+    gradeLabel.className = "field-label";
+    gradeLabel.style.marginBottom = "3px";
+    gradeLabel.textContent = "Nota";
+
+    const gradeInput = document.createElement("input");
+    gradeInput.type = "number";
+    gradeInput.className = "grade-field";
+    gradeInput.id = "grade-" + gid;
+    if (displayGrade != null) gradeInput.value = displayGrade;
+    gradeInput.step = "0.1";
+    gradeInput.min = "0";
+    gradeInput.max = max;
+    gradeInput.addEventListener("input", () => onGradeEdit(gid));
+
+    gradeFieldWrap.appendChild(gradeLabel);
+    gradeFieldWrap.appendChild(gradeInput);
+
+    const gradeMaxSpan = document.createElement("span");
+    gradeMaxSpan.className = "grade-max";
+    gradeMaxSpan.style.marginTop = "16px";
+    gradeMaxSpan.textContent = "/ " + max;
+
+    gradeRow.appendChild(gradeFieldWrap);
+    gradeRow.appendChild(gradeMaxSpan);
+
+    body.appendChild(fbLabel);
+    body.appendChild(textarea);
+    body.appendChild(charCount);
+    body.appendChild(gradeRow);
+
+    card.appendChild(header);
+    card.appendChild(body);
     container.appendChild(card);
   });
 
