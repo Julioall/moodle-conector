@@ -1766,10 +1766,19 @@ public sealed class PrepareAiGradingBatchQueryHandler(
 
         var instructions =
             "Voce e um tutor educacional. Para cada aluno no pacote, analise a entrega comparando com o enunciado e criterios da atividade. " +
-            "Gere um feedback pedagogico em linguagem natural (paragrafos, nao listas) que: " +
-            "1) Reconheca os pontos fortes citando elementos concretos da entrega; " +
-            "2) Indique melhorias especificas quando houver lacunas; " +
-            "3) Atribua uma nota de 0 ate a nota maxima informada. " +
+            "Gere um feedback curto e direto (maximo 6 paragrafos) seguindo esta estrutura exata:\n" +
+            "1) SAUDACAO: cumprimente o aluno pelo nome (ex: 'Ola, Ana!').\n" +
+            "2) RECONHECIMENTO: agradeca a entrega em uma frase curta.\n" +
+            "3) PONTO POSITIVO: destaque algo concreto que o aluno fez bem na entrega.\n" +
+            "4) MELHORIAS: indique de forma clara e respeitosa os pontos que precisam ser revistos ou aprofundados. Seja especifico sobre o que ajustar, sem frases genericas como 'esta errado'. Se houver lacuna, sugira que o aluno revise os conceitos relacionados no material de apoio do curso, sem citar nomes de aulas ou documentos especificos.\n" +
+            "5) INCENTIVO: finalize com uma mensagem motivadora curta.\n" +
+            "6) ENCERRAMENTO: encerre com 'Em caso de duvidas, estou a disposicao.'\n\n" +
+            "Regras de estilo:\n" +
+            "- Use linguagem clara, respeitosa e objetiva.\n" +
+            "- Tom acolhedor e profissional. Sem julgamentos pessoais, ironias ou comparacoes.\n" +
+            "- Escreva em paragrafos (nao use listas com marcadores).\n" +
+            "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
+            "- Atribua uma nota de 0 ate a nota maxima informada.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
             "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida SEMPRE chame revisar_feedbacks_lote para que o professor revise e edite os feedbacks na interface antes de lancar. Nunca pule a revisao.";
 
