@@ -1801,6 +1801,23 @@ static async Task SeedChatGptOAuthClientAsync(
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Scopes.Profile);
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + "offline_access");
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + oauth.ScopeName);
+    // Moodle granular scopes
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadCourses);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadStudents);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadGroups);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadAccess);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadContents);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadResources);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadActivities);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadAssignments);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadSubmissions);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadQuizzes);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadScorms);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteMessages);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteAssignmentsFeedback);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteAssignmentsGrade);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteCourseContent);
+    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.Admin);
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Resource + oauthAudience);
     descriptor.Requirements.Add(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange);
 
