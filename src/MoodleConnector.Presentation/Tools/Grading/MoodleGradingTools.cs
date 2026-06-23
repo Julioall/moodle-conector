@@ -285,7 +285,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<CreateGradingLaunchPreviewResult>))]
-    [Description("Cria uma acao pendente com previa revisavel para lancar nota e feedback no Moodle. Nao executa escrita oficial.")]
+    [Description("Cria uma acao pendente com previa revisavel para lancar nota e feedback no Moodle. Nao executa escrita oficial. PRE-REQUISITO: o professor deve ter revisado os feedbacks usando revisar_feedbacks_lote antes de chamar esta tool.")]
     public Task<CallToolResult> CriarPreviaLancamentoLoteAsync(
         [Description("Identificador do lote de correcao assistida.")]
         Guid batchJobId,
@@ -442,7 +442,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<SaveAiGradingBatchResult>))]
-    [Description("Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote. Nao escreve no Moodle. Apos salvar, use revisar_feedbacks_lote para revisao humana antes de lancar.")]
+    [Description("Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote. Nao escreve no Moodle. OBRIGATORIO: apos salvar, sempre chame revisar_feedbacks_lote para exibir a interface de revisao humana. Nunca pule a revisao.")]
     public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
         [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
         Guid batchJobId,

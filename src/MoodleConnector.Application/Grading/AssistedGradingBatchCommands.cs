@@ -1771,7 +1771,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "2) Indique melhorias especificas quando houver lacunas; " +
             "3) Atribua uma nota de 0 ate a nota maxima informada. " +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
-            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida revisar_feedbacks_lote para revisao antes de lancar.";
+            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida SEMPRE chame revisar_feedbacks_lote para que o professor revise e edite os feedbacks na interface antes de lancar. Nunca pule a revisao.";
 
         return new AiGradingBatchPackageResult(
             batch.Id,
@@ -1944,7 +1944,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
             request.Items.Count,
             warnings,
             NextStep: savedCount > 0
-                ? "Use revisar_feedbacks_lote para revisar e ajustar os feedbacks antes de lancar no Moodle."
+                ? "IMPORTANTE: agora chame revisar_feedbacks_lote para exibir a interface de revisao ao professor. O professor precisa revisar e editar nota e feedback antes do lancamento. Nunca pule esta etapa."
                 : "Nenhum item foi salvo. Verifique os avisos.");
     }
 }
