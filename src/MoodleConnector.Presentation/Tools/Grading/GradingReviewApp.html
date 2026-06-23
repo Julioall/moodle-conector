@@ -305,14 +305,8 @@ function callTool(name, args) {
     setTimeout(() => { if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("Timeout")); } }, 30000);
   });
 }
-window.addEventListener("message", e => {
-  const d = e.data;
-  if (d && d.jsonrpc==="2.0" && d.id && pendingRpc[d.id]) {
-    const { resolve, reject } = pendingRpc[d.id];
-    delete pendingRpc[d.id];
-    d.error ? reject(new Error(d.error.message||"Erro")) : resolve(d.result);
-  }
-});
+
+
 
 // ─── Utils ───
 function getFirstName(fullName) {
@@ -328,35 +322,108 @@ function personalizeGreeting(feedback, firstName) {
 }
 
 // ─── Init ───
-function init() {
+let initialized = false;
+
+function loadData(data) {
+  if (initialized) return;
+  if (!data || !data.items || data.items.length === 0) return;
+  initialized = true;
+  state.batchJobId = data.batchJobId;
+  state.items = data.items;
+  state.courseName = data.courseName;
+  renderAll();
+}
+
+function tryInit() {
+  if (initialized) return true;
+
   // 1. OpenAI Apps SDK: data injected as window.openai.toolOutput by ChatGPT
-  const openaiOutput = window.openai?.toolOutput;
-  const openaiData = openaiOutput?.data;
+  const openaiData = window.openai?.toolOutput?.data;
   if (openaiData && openaiData.items && openaiData.items.length > 0) {
-    state.batchJobId = openaiData.batchJobId;
-    state.items = openaiData.items;
-    state.courseName = openaiData.courseName;
-    renderAll();
-    return;
+    loadData(openaiData);
+    return true;
   }
 
   // 2. Fallback: server-injected JSON in #init-data element
   const el = document.getElementById("init-data");
-  if (!el) return;
-  try {
-    const data = JSON.parse(el.textContent);
-    state.batchJobId = data.batchJobId;
-    state.items = data.items || [];
-    state.courseName = data.courseName;
-    renderAll();
-  } catch(e) {
-    toast("Erro ao carregar dados: "+e.message, "error");
+  if (el) {
+    try {
+      const data = JSON.parse(el.textContent);
+      if (data && data.items && data.items.length > 0) {
+        loadData(data);
+        return true;
+      }
+    } catch(e) { /* will retry */ }
   }
+
+  return false;
+}
+
+// Retry with exponential backoff (200ms, 400ms, 800ms, 1.6s, 3.2s)
+// Handles cases where data arrives after DOMContentLoaded
+function startRetryLoop() {
+  if (tryInit()) return;
+  let attempt = 0;
+  const maxAttempts = 5;
+  const retryTimer = setInterval(() => {
+    attempt++;
+    if (tryInit() || attempt >= maxAttempts) {
+      clearInterval(retryTimer);
+      if (!initialized) {
+        // Show empty state after all retries exhausted
+        document.getElementById("loading").style.display = "none";
+        document.getElementById("empty-state").style.display = "";
+      }
+    }
+  }, 200 * Math.pow(2, attempt));
+}
+
+// Listen for late-arriving data via postMessage (MCP hosts)
+window.addEventListener("message", e => {
+  const d = e.data;
+  if (!d) return;
+
+  // Handle JSON-RPC responses (existing)
+  if (d.jsonrpc === "2.0" && d.id && pendingRpc[d.id]) {
+    const { resolve, reject } = pendingRpc[d.id];
+    delete pendingRpc[d.id];
+    d.error ? reject(new Error(d.error.message || "Erro")) : resolve(d.result);
+    return;
+  }
+
+  // Handle late data delivery from host
+  if (d.type === "tool-output" && d.data) {
+    loadData(d.data);
+    return;
+  }
+  // Some hosts send structuredContent directly
+  if (d.structuredContent?.data) {
+    loadData(d.structuredContent.data);
+    return;
+  }
+});
+
+// Watch #init-data for mutations (in case server replaces it after load)
+function watchInitData() {
+  const el = document.getElementById("init-data");
+  if (!el) return;
+  const observer = new MutationObserver(() => {
+    if (initialized) { observer.disconnect(); return; }
+    try {
+      const data = JSON.parse(el.textContent);
+      if (data && data.items && data.items.length > 0) {
+        loadData(data);
+        observer.disconnect();
+      }
+    } catch(e) { /* ignore parse errors */ }
+  });
+  observer.observe(el, { childList: true, characterData: true, subtree: true });
 }
 
 // ─── Render ───
 function renderAll() {
   document.getElementById("loading").style.display = "none";
+  document.getElementById("empty-state").style.display = "none";
   const container = document.getElementById("cards-container");
   container.style.display = "";
   container.innerHTML = "";
@@ -603,7 +670,10 @@ function toast(msg, type) {
 }
 
 // ─── Boot ───
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => {
+  startRetryLoop();
+  watchInitData();
+});
 </script>
 
 <!-- Server-injected data -->
