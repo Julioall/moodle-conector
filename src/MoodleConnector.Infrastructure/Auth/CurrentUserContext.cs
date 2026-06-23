@@ -23,7 +23,15 @@ public sealed class CurrentUserContext(IHttpContextAccessor httpContextAccessor)
 
     public bool HasScope(string scope)
     {
-        return Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
+        var currentScopes = Scopes;
+        if (currentScopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Hierarchical match: "moodle.write" is satisfied by "moodle.write.assignments.grade" etc.
+        var prefix = scope + ".";
+        return currentScopes.Any(s => s.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
     private ClaimsPrincipal? Principal => httpContextAccessor.HttpContext?.User;
