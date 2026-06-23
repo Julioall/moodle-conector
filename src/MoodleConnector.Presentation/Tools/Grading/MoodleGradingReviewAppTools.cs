@@ -98,10 +98,10 @@ public sealed class MoodleGradingReviewAppTools(
 
                 try
                 {
-                    // Paginate through all participants (max 200 to avoid excessive calls)
+                    // Paginate through all participants (max 1000 students = 20 pages × 50)
                     var page = 1;
                     const int pageSize = 50;
-                    const int maxPages = 4;
+                    const int maxPages = 20;
                     bool hasMore;
                     do
                     {

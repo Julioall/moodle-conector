@@ -73,6 +73,17 @@ body{
   font-size:.65rem;font-weight:600;color:var(--success);
   background:var(--success-light);padding:2px 8px;border-radius:10px;
 }
+.student-card.send-error .card-header::after{
+  content:'Falha ✗';position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  font-size:.65rem;font-weight:600;color:var(--danger);
+  background:var(--danger-light);padding:2px 8px;border-radius:10px;
+}
+
+/* ─── Card checkbox ─── */
+.card-checkbox{
+  width:16px;height:16px;cursor:pointer;accent-color:var(--primary);
+  flex-shrink:0;border-radius:3px;
+}
 
 .card-header{
   display:flex;align-items:center;gap:10px;
@@ -293,7 +304,7 @@ body{
 
 <script>
 // ─── State ───
-const state = { batchJobId:null, items:[], pendingActionId:null, confirmationText:null };
+const state = { batchJobId:null, items:[], pendingActionId:null, confirmationText:null, selectedIds:new Set() };
 let rpcId = 0;
 const pendingRpc = {};
 
@@ -309,7 +320,7 @@ function callTool(name, args) {
     const id = ++rpcId;
     pendingRpc[id] = { resolve, reject };
     window.parent.postMessage({ jsonrpc:"2.0", id, method:"tools/call", params:{ name, arguments:args } }, "*");
-    setTimeout(() => { if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("Timeout")); } }, 30000);
+    setTimeout(() => { if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("Timeout")); } }, 60000);
   });
 }
 
@@ -435,6 +446,8 @@ function renderAll() {
   const container = document.getElementById("cards-container");
   container.style.display = "";
   container.innerHTML = "";
+  // Reset selection on each render (all cards start checked = all selected by default)
+  state.selectedIds.clear();
 
   if (state.items.length === 0) {
     document.getElementById("empty-state").style.display = "";
@@ -488,6 +501,9 @@ function renderAll() {
     card.id = "card-"+item.gradingItemId;
     card.innerHTML = `
       <div class="card-header" onclick="toggle('${item.gradingItemId}')">
+        <input type="checkbox" class="card-checkbox" id="chk-${item.gradingItemId}"
+          checked onclick="event.stopPropagation()"
+          onchange="toggleSelect('${item.gradingItemId}', this.checked)">
         <div class="avatar">${esc(initials)}</div>
         <div>
           <div class="student-name">${esc(displayName)}</div>
@@ -566,22 +582,38 @@ function onGradeEdit(id) {
   }
 }
 
+function toggleSelect(id, checked) {
+  if (checked) {
+    state.selectedIds.add(id);
+  } else {
+    state.selectedIds.delete(id);
+  }
+  updateSendButton();
+}
+
 function updateSendButton() {
-  const n = state.items.length;
-  document.getElementById("send-count-label").textContent =
-    n + " aluno"+(n!==1?"s":"")+" para enviar";
-  document.getElementById("btn-send").disabled = n===0;
+  const n = state.selectedIds.size > 0 ? state.selectedIds.size : state.items.length;
+  const label = state.selectedIds.size > 0
+    ? n + " selecionado" + (n!==1?"s":"")
+    : n + " aluno" + (n!==1?"s":"")+" para enviar";
+  document.getElementById("send-count-label").textContent = label;
+  document.getElementById("btn-send").disabled = state.items.length === 0;
 }
 
 // ─── Send Flow ───
 document.getElementById("btn-send").addEventListener("click", async ()=>{
-  // Save all drafts first
   const btn = document.getElementById("btn-send");
   btn.disabled = true;
   btn.textContent = "Salvando rascunhos...";
 
+  // Only send selected items; fall back to all if none explicitly selected
+  const toSend = state.selectedIds.size > 0
+    ? state.items.filter(i => state.selectedIds.has(i.gradingItemId))
+    : state.items;
+
   let savedCount = 0;
-  for (const item of state.items) {
+  const savedIds = [];
+  for (const item of toSend) {
     const fb = document.getElementById("fb-"+item.gradingItemId)?.value || "";
     const gr = document.getElementById("grade-"+item.gradingItemId)?.value;
     try {
@@ -593,6 +625,7 @@ document.getElementById("btn-send").addEventListener("click", async ()=>{
         expectedReviewStatus: item.reviewStatus || "NotReviewed"
       });
       savedCount++;
+      savedIds.push(item.gradingItemId);
     } catch(e) {
       toast("Erro ao salvar "+getDisplayName(item)+": "+e.message, "error");
     }
@@ -605,11 +638,12 @@ document.getElementById("btn-send").addEventListener("click", async ()=>{
     return;
   }
 
-  // Create preview
+  // Create preview — pass only the saved item IDs
   btn.textContent = "Preparando envio...";
   try {
     const result = await callTool("criar_previa_lancamento_lote", {
       batchJobId: state.batchJobId,
+      gradingItemIds: savedIds,
       onlyReviewed: true
     });
     const data = extractData(result);
@@ -619,7 +653,7 @@ document.getElementById("btn-send").addEventListener("click", async ()=>{
       document.getElementById("confirm-count").textContent = data.readyItems || savedCount;
       document.getElementById("confirm-modal").classList.add("show");
     } else {
-      toast("Não foi possível preparar o envio.", "error");
+      toast("Não foi possível preparar o envio. Verifique se os itens têm nota e feedback.", "error");
     }
   } catch(e) {
     toast("Erro ao preparar: "+e.message, "error");
@@ -647,15 +681,32 @@ async function doSend() {
     if (data) {
       const ok = data.sentItems || 0;
       const fail = data.failedItems || 0;
-      if (fail > 0) {
-        toast(ok+" enviado(s), "+fail+" com falha.", "error");
+
+      // Build a set of failed gradingItemIds for per-card marking
+      const failedIds = new Set(
+        (data.failures || []).map(f => f.gradingItemId)
+      );
+
+      // Mark cards individually: sent = green, failed = red
+      state.items.forEach(i => {
+        const c = document.getElementById("card-"+i.gradingItemId);
+        if (!c) return;
+        if (failedIds.has(i.gradingItemId)) {
+          c.classList.add("send-error");
+        } else {
+          // Only mark as sent if we were trying to send this item
+          const wasSending = state.selectedIds.size === 0 || state.selectedIds.has(i.gradingItemId);
+          if (wasSending) c.classList.add("sent");
+        }
+      });
+
+      if (fail > 0 && ok === 0) {
+        toast("Falha no envio: "+fail+" item(ns) não foram enviados.", "error");
+      } else if (fail > 0) {
+        toast(ok+" enviado(s) com sucesso, "+fail+" com falha. Verifique os cards marcados.", "error");
+        document.getElementById("btn-send").textContent = "Retentar falhas";
       } else {
         toast("Correções enviadas com sucesso! ("+ok+" aluno"+(ok!==1?"s":"")+")", "success");
-        // Mark all cards as sent
-        state.items.forEach(i => {
-          const c = document.getElementById("card-"+i.gradingItemId);
-          if (c) c.classList.add("sent");
-        });
         document.getElementById("btn-send").disabled = true;
         document.getElementById("btn-send").textContent = "Enviado ✓";
       }
