@@ -604,7 +604,7 @@ Descricao:
 
 - Consolida a Fase 0 de descoberta tecnica para correcao assistida.
 - Consulta o catalogo de funcoes Moodle e classifica disponibilidade de leitura de entregas, leitura de notas, anexos, `mod_assign_save_grade`, `mod_assign_save_grades`, rubricas/escalas e modo de token de escrita.
-- Relata `CanWrite`, feature flags de escrita e se a configuracao usara token do usuario ou `MoodleApi:WriteServiceToken`, sem retornar o valor do token.
+- Relata `CanWrite`, feature flags de escrita e que a escrita sempre usa o token do usuario do tenant correspondente, sem retornar o valor do token.
 - Nao baixa anexos, nao lista estudantes e nao executa escrita no Moodle.
 - Campos como permissao real de professor/tutor, acesso efetivo a pluginfile, rubricas e escalas ficam marcados como prova pendente quando dependem de curso/tarefa Moodle real.
 

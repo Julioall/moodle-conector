@@ -16,7 +16,6 @@ public sealed record GradingTechnicalDiscoveryArea(
 
 public sealed record GradingWriteTokenDiscovery(
     [property: JsonPropertyName("mode")] string Mode,
-    [property: JsonPropertyName("writeServiceTokenConfigured")] bool WriteServiceTokenConfigured,
     [property: JsonPropertyName("connectorCanWrite")] bool ConnectorCanWrite,
     [property: JsonPropertyName("assignmentGradeWriteEnabled")] bool AssignmentGradeWriteEnabled,
     [property: JsonPropertyName("assignmentFeedbackWriteEnabled")] bool AssignmentFeedbackWriteEnabled,
@@ -74,8 +73,7 @@ public sealed class GradingTechnicalDiscoveryQueryHandler(
         var permissions = BuildPermissions(credentials.CanWrite, blockers);
         var rubricsAndScales = BuildRubricsAndScales(functions, blockers);
         var writeToken = new GradingWriteTokenDiscovery(
-            environment.HasWriteServiceToken ? "platform_token" : "user_token",
-            environment.HasWriteServiceToken,
+            "user_token",
             credentials.CanWrite,
             environment.AssignmentGradeWriteEnabled,
             environment.AssignmentFeedbackWriteEnabled,

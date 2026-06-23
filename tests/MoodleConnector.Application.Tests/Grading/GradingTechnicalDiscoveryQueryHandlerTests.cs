@@ -22,7 +22,6 @@ public sealed class GradingTechnicalDiscoveryQueryHandlerTests
         var environment = new FakeGradingTechnicalDiscoveryEnvironment(
             assignmentGradeWriteEnabled: true,
             assignmentFeedbackWriteEnabled: true,
-            hasWriteServiceToken: false,
             allowServiceTokenForReadOnlyQueries: true);
         var sut = new GradingTechnicalDiscoveryQueryHandler(gateway, credentials, environment);
 
@@ -58,7 +57,6 @@ public sealed class GradingTechnicalDiscoveryQueryHandlerTests
         var environment = new FakeGradingTechnicalDiscoveryEnvironment(
             assignmentGradeWriteEnabled: true,
             assignmentFeedbackWriteEnabled: true,
-            hasWriteServiceToken: true,
             allowServiceTokenForReadOnlyQueries: false);
         var sut = new GradingTechnicalDiscoveryQueryHandler(gateway, credentials, environment);
 
@@ -68,7 +66,7 @@ public sealed class GradingTechnicalDiscoveryQueryHandlerTests
 
         Assert.Equal("blocked", report.OverallStatus);
         Assert.Equal("blocked", report.GradeWrite.Status);
-        Assert.Equal("platform_token", report.WriteToken.Mode);
+        Assert.Equal("user_token", report.WriteToken.Mode);
         Assert.Contains(report.BlockingIssues, issue => issue.Contains("mod_assign_save_grade", StringComparison.OrdinalIgnoreCase));
         Assert.Contains("A conexao Moodle atual nao permite escrita.", report.BlockingIssues);
     }
@@ -104,14 +102,11 @@ public sealed class GradingTechnicalDiscoveryQueryHandlerTests
     private sealed class FakeGradingTechnicalDiscoveryEnvironment(
         bool assignmentGradeWriteEnabled,
         bool assignmentFeedbackWriteEnabled,
-        bool hasWriteServiceToken,
         bool allowServiceTokenForReadOnlyQueries) : IGradingTechnicalDiscoveryEnvironment
     {
         public bool AssignmentGradeWriteEnabled { get; } = assignmentGradeWriteEnabled;
 
         public bool AssignmentFeedbackWriteEnabled { get; } = assignmentFeedbackWriteEnabled;
-
-        public bool HasWriteServiceToken { get; } = hasWriteServiceToken;
 
         public bool AllowServiceTokenForReadOnlyQueries { get; } = allowServiceTokenForReadOnlyQueries;
     }

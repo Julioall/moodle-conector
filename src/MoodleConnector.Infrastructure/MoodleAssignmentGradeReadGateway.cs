@@ -54,9 +54,6 @@ internal sealed class MoodleAssignmentGradeReadGateway(
 
     private async Task<string> ResolveTokenAsync(CancellationToken cancellationToken)
     {
-        // For read operations (mod_assign_get_grades), prefer the regular service token or user login token.
-        // WriteServiceToken is only needed for write operations. Using it here caused invalidtoken
-        // errors when the write token was misconfigured or had limited function permissions.
         if (!string.IsNullOrWhiteSpace(_options.ServiceToken))
         {
             return _options.ServiceToken;

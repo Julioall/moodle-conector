@@ -8,7 +8,6 @@ public sealed class MoodleApiOptions
 
     public string ServiceToken { get; init; } = string.Empty;
 
-    public string? WriteServiceToken { get; init; }
 
     public string LoginService { get; init; } = "moodle_mobile_app";
 

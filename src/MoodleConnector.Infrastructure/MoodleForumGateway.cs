@@ -568,14 +568,9 @@ internal sealed partial class MoodleForumGateway(
         return await tokenProvider.GetAccessTokenAsync(cancellationToken);
     }
 
-    private async Task<string> ResolveWriteTokenAsync(CancellationToken cancellationToken)
+    private Task<string> ResolveWriteTokenAsync(CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(_options.WriteServiceToken))
-        {
-            return _options.WriteServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
+        return tokenProvider.GetAccessTokenAsync(cancellationToken);
     }
 
     private static void ValidateWriteInput(string userExternalId, string subject, string messageHtml)

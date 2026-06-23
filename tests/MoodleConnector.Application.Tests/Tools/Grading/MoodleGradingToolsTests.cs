@@ -888,7 +888,6 @@ public sealed class MoodleGradingToolsTests
                     ["Consultar tarefa com rubrica e escala configuradas."]),
                 new GradingWriteTokenDiscovery(
                     "user_token",
-                    WriteServiceTokenConfigured: false,
                     ConnectorCanWrite: true,
                     AssignmentGradeWriteEnabled: true,
                     AssignmentFeedbackWriteEnabled: true,

@@ -15,7 +15,5 @@ internal sealed class GradingTechnicalDiscoveryEnvironment(
 
     public bool AssignmentFeedbackWriteEnabled => _featureOptions.AssignmentFeedbackWriteEnabled;
 
-    public bool HasWriteServiceToken => !string.IsNullOrWhiteSpace(_moodleApiOptions.WriteServiceToken);
-
     public bool AllowServiceTokenForReadOnlyQueries => _moodleApiOptions.AllowServiceTokenForReadOnlyQueries;
 }
