@@ -124,6 +124,22 @@ public sealed class AssistedGradingItem
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Marca o item como tendo passado na pré-validação diagnóstica e pronto
+    /// para análise pela IA. Não gera nota, feedback nem critérios heurísticos.
+    /// O tutor deve usar o fluxo de IA para gerar nota e feedback.
+    /// </summary>
+    public void MarkAwaitingAiAnalysis(string? diagnosticNotes)
+    {
+        SuggestedGrade = null;
+        Confidence = null;
+        DraftFeedback = null;
+        PrivateNotesToTeacher = string.IsNullOrWhiteSpace(diagnosticNotes) ? null : diagnosticNotes.Trim();
+        Status = GradingItemStatus.AwaitingAiAnalysis;
+        CommitStatus = GradingCommitStatus.NotReady;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void MarkAnalysisFailed(string error)
     {
         var message = string.IsNullOrWhiteSpace(error)

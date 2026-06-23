@@ -28,7 +28,7 @@ public sealed class GradingAnalysisServiceTests
     }
 
     [Fact]
-    public async Task AnalyzeAsync_SemCriteriosNemDescricao_GeraRascunhoComBaixaConfianca()
+    public async Task AnalyzeAsync_SemCriteriosNemDescricao_RetornaAwaitingAiAnalysis()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 01",
@@ -41,17 +41,16 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
         Assert.Null(result.SuggestedGrade);
-        Assert.True(result.Confidence > 0m);
-        Assert.True(result.Confidence < 0.3m);
-        Assert.NotEmpty(result.FeedbackToStudent!);
-        Assert.Contains("Revisao manual obrigatoria", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Empty(result.CriterionAnalysis);
         Assert.Empty(result.Blocks);
+        Assert.Contains("Pre-validacao concluida", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_SemMaxGrade_GeraRascunhoSemNotaSugerida()
+    public async Task AnalyzeAsync_SemMaxGrade_RetornaAwaitingAiComDiagnostico()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 01",
@@ -64,15 +63,16 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
         Assert.Null(result.SuggestedGrade);
-        Assert.NotEmpty(result.FeedbackToStudent!);
-        Assert.Contains("Escala de nota nao identificada", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Empty(result.CriterionAnalysis);
+        Assert.Contains("Nota maxima nao identificada", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(result.Blocks);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_SubmissaoComCriterios_RetornaDraftComNotaSugerida()
+    public async Task AnalyzeAsync_SubmissaoComCriterios_RetornaAwaitingAiSemNotaSugerida()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 01",
@@ -87,30 +87,21 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        Assert.NotNull(result.SuggestedGrade);
-        Assert.True(result.SuggestedGrade >= 0m);
-        Assert.True(result.SuggestedGrade <= 10m);
-        Assert.True(result.Confidence > 0m);
-        Assert.NotEmpty(result.FeedbackToStudent!);
-        Assert.NotEmpty(result.PrivateNotesToTeacher!);
-        Assert.True(result.CriterionAnalysis.Count >= 3, $"Expected >= 3 criteria, got {result.CriterionAnalysis.Count}");
+        // IA-first: pré-validação diagnóstica, sem nota/feedback heurístico
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Empty(result.CriterionAnalysis);
         Assert.Empty(result.Blocks);
 
-        // Feedback deve ser natural, sem frases genericas
-        Assert.DoesNotContain("evidenciou o aspecto esperado", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Pontos positivos identificados", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("parecer preliminar assistido", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("token", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("o texto aborda elementos relacionados", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
-
-        // Novo formato humanizado: saudação + nota sugerida
-        Assert.StartsWith("Olá", result.FeedbackToStudent);
-        Assert.Contains("Nota sugerida:", result.FeedbackToStudent);
+        // Notas diagnósticas devem indicar contexto identificado
+        Assert.NotEmpty(result.PrivateNotesToTeacher!);
+        Assert.Contains("Pre-validacao concluida", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Nota maxima: 10", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_CriteriosComBarraVertical_ParseaCorretamente()
+    public async Task AnalyzeAsync_CriteriosComBarraVertical_RetornaAwaitingAi()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 02",
@@ -123,19 +114,15 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        Assert.True(result.CriterionAnalysis.Count >= 4, $"Expected >= 4 criteria, got {result.CriterionAnalysis.Count}");
-        Assert.All(result.CriterionAnalysis, c =>
-        {
-            Assert.NotNull(c.CriterionId);
-            Assert.NotNull(c.CriterionText);
-            Assert.NotNull(c.MaxPoints);
-            Assert.NotNull(c.SuggestedPoints);
-        });
+        // IA-first: nenhum critério heurístico é gerado
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Empty(result.CriterionAnalysis);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Null(result.FeedbackToStudent);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_SubmissaoSemCoberturaDeCriterios_MarcarParaRevisao()
+    public async Task AnalyzeAsync_SubmissaoSemCoberturaDeCriterios_RetornaAwaitingAi()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 03",
@@ -148,13 +135,14 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        var criterion = Assert.Single(result.CriterionAnalysis);
-        Assert.True(criterion.TeacherReviewRequired);
+        // IA-first: sem critérios heurísticos, sem revisão de cobertura
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Empty(result.CriterionAnalysis);
+        Assert.Null(result.FeedbackToStudent);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_BaixaConfianca_IncluiObservacaoPrivada()
+    public async Task AnalyzeAsync_TextoLegivelComCriterios_DiagnosticoContemInformacaoContextual()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 04",
@@ -167,13 +155,14 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        Assert.True(result.Confidence < 0.5m);
-        Assert.Contains("Baixa confianca", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.NotNull(result.PrivateNotesToTeacher);
+        Assert.Contains("Pre-validacao concluida", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("palavras", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_ComDescricaoComoFallback_DelegaParaIA()
+    public async Task AnalyzeAsync_ComDescricaoComoFallback_RetornaAwaitingAi()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 05",
@@ -187,17 +176,14 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.Equal(AnalysisStatus.Draft, result.AnalysisStatus);
-        // No cenário Approximate com MaxGrade disponível, agora gera critérios e nota por critério
-        Assert.NotNull(result.SuggestedGrade);
-        Assert.True(result.SuggestedGrade >= 0m);
-        Assert.True(result.SuggestedGrade <= 10m);
-        Assert.True(result.Confidence > 0m);
-        Assert.True(result.Confidence <= 0.5m);
-        Assert.Contains("INSTRUCAO PARA A IA", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
-        // Agora gera critérios parseados do enunciado quando MaxGrade está disponível
-        Assert.NotEmpty(result.CriterionAnalysis);
+        // IA-first: não gera critérios nem nota
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Empty(result.CriterionAnalysis);
         Assert.Empty(result.Blocks);
+        // Diagnóstico indica contexto disponível
+        Assert.Contains("Enunciado da atividade disponivel", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -221,11 +207,11 @@ public sealed class GradingAnalysisServiceTests
     }
 
     // ========================
-    // Validações de Qualidade Pedagógica
+    // Validações do novo fluxo IA-first
     // ========================
 
     [Fact]
-    public async Task AnalyzeAsync_CriteriosComMenosDe3PalavrasUteis_SaoRejeitados()
+    public async Task AnalyzeAsync_CriteriosComMenosDe3PalavrasUteis_NaoGeramCriteriosHeuristicos()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 07",
@@ -238,13 +224,9 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        // Fragmentos com <3 palavras úteis devem ter sido rejeitados
-        Assert.All(result.CriterionAnalysis, c =>
-        {
-            var usefulWords = c.CriterionText.Split([' ', ',', ';', '.', ':'], StringSplitOptions.RemoveEmptyEntries)
-                .Count(w => w.Length > 3);
-            Assert.True(usefulWords >= 3, $"Criterio fragmentado nao filtrado: '{c.CriterionText}'");
-        });
+        // IA-first: nenhum critério heurístico é retornado, independente da qualidade
+        Assert.Empty(result.CriterionAnalysis);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
     }
 
     [Fact]
@@ -261,12 +243,11 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        // Todos os critérios fornecidos são fragmentos (<3 palavras úteis) → 0 critérios parseados
         Assert.Empty(result.CriterionAnalysis);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_FeedbackNaoContemFrasesGenericasProibidas()
+    public async Task AnalyzeAsync_NuncaGeraFeedbackHeuristico()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 09",
@@ -279,20 +260,13 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.NotNull(result.FeedbackToStudent);
-        var feedback = result.FeedbackToStudent!;
-
-        // Frases genéricas proibidas
-        Assert.DoesNotContain("evidenciou o aspecto esperado na resolucao", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("parecer preliminar assistido", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("cobertura parcial", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Revisao recomendada", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Pontos positivos identificados", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Aspectos para desenvolvimento", feedback, StringComparison.OrdinalIgnoreCase);
+        // IA-first: feedback é sempre null (será gerado pela IA)
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_FeedbackContemMelhoriasConcretasQuandoHaLacunas()
+    public async Task AnalyzeAsync_NuncaGeraNotaSugeridaHeuristica()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 10",
@@ -305,15 +279,13 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.NotNull(result.FeedbackToStudent);
-        // Quando há lacunas, feedback deve conter orientação de melhoria
-        Assert.Contains("melhorar", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
-        // Novo formato: deve ter saudação
-        Assert.StartsWith("Olá", result.FeedbackToStudent);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_FeedbackEmFormatoParagrafoNaoLista()
+    public async Task AnalyzeAsync_RetornaDiagnosticoComInformacaoDeEscala()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 11",
@@ -326,16 +298,13 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.NotNull(result.FeedbackToStudent);
-        // Feedback não deve ter formatação tipo markdown bold
-        Assert.DoesNotContain("**Pontos", result.FeedbackToStudent);
-        Assert.DoesNotContain("**Aspectos", result.FeedbackToStudent);
-        // Feedback humanizado usa "- " para pontos positivos, mas não para estrutura mecânica
-        Assert.DoesNotContain("o texto aborda elementos relacionados", result.FeedbackToStudent, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Contains("Nota maxima: 10", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("preparar_lote_correcao_ia", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_EvidenciaCitaElementosReaisDaEntrega()
+    public async Task AnalyzeAsync_DiagnosticoIdentificaCriteriosFormais()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 12",
@@ -348,25 +317,18 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        // Evidências devem conter palavras-chave reais da entrega
-        var allEvidence = string.Join(" ", result.CriterionAnalysis
-            .Select(c => c.EvidenceFound ?? "")
-            .Where(e => !string.IsNullOrWhiteSpace(e)));
-        Assert.Contains("gerenciamento", allEvidence, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Contains("Criterios formais", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
-    // ========================
-    // Validações de Feedback Humanizado
-    // ========================
-
     [Fact]
-    public async Task AnalyzeAsync_FeedbackHumanizado_NaoContemPalavrasChaveSoltas()
+    public async Task AnalyzeAsync_DiagnosticoSemCriterios_IndicaAusencia()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "Envio SAP 01 - Etapa 1",
             MaxGrade: 49m,
             ActivityDescription: null,
-            RubricOrCriteria: "Elaborar um plano de gerenciamento de eventos de TI; Indicar eventos que podem impactar a operacao; Relacionar o plano as orientacoes da ITIL; Adequar o texto conforme norma culta da lingua portuguesa",
+            RubricOrCriteria: null,
             TeacherInstructions: null,
             SubmissionText: "O plano de gerenciamento de eventos de TI apresenta os principais eventos " +
                             "que podem impactar a operacao da empresa, incluindo falhas de hardware, " +
@@ -376,33 +338,16 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.NotNull(result.FeedbackToStudent);
-        var feedback = result.FeedbackToStudent!;
-
-        // Regra 3: Sem frases repetitivas de palavras-chave
-        Assert.DoesNotContain("o texto aborda elementos relacionados", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("demonstrando compreensao do aspecto", feedback, StringComparison.OrdinalIgnoreCase);
-
-        // Regra 4: Sem palavras-chave soltas entre parenteses
-        Assert.DoesNotMatch(@"\([a-z]+,\s*[a-z]+\)", feedback);
-
-        // Regra 1: Saudação direta
-        Assert.StartsWith("Olá", feedback);
-
-        // Regra 12: Nota sugerida no final
-        Assert.Contains("Nota sugerida:", feedback);
-        Assert.Matches(@"Nota sugerida:\s+\d+", feedback);
-
-        // Regra 5: Sem detalhes internos
-        Assert.DoesNotContain("C1", feedback);
-        Assert.DoesNotContain("C2", feedback);
-        Assert.DoesNotContain("criterion", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Contains("Nenhum criterio", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_FeedbackHumanizado_TomAdequadoANota()
+    public async Task AnalyzeAsync_NotaBaixaOuAlta_NaoGeraFeedbackHeuristico()
     {
-        // Cenário com nota baixa — não deve ter elogios genéricos
+        // Cenário com nota baixa — verificar que não gera feedback heurístico
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 13",
             MaxGrade: 100m,
@@ -414,22 +359,13 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.NotNull(result.FeedbackToStudent);
-        var feedback = result.FeedbackToStudent!;
-
-        // Regra 15: Sem elogios genéricos para nota baixa
-        Assert.DoesNotContain("excelente trabalho", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Bom trabalho", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("bom desenvolvimento", feedback, StringComparison.OrdinalIgnoreCase);
-
-        // Regra 14: Sem tom punitivo
-        Assert.DoesNotContain("insuficiente", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("inadequado", feedback, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ruim", feedback, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
     }
 
     [Fact]
-    public async Task AnalyzeAsync_FeedbackHumanizado_ContemPontosPositivosEMelhorias()
+    public async Task AnalyzeAsync_ComCriteriosEMaxGrade_DiagnosticoCompleto()
     {
         var request = new GradingAnalysisRequest(
             AssignmentName: "SA 14",
@@ -443,16 +379,11 @@ public sealed class GradingAnalysisServiceTests
 
         var result = await _sut.AnalyzeAsync(request, CancellationToken.None);
 
-        Assert.NotNull(result.FeedbackToStudent);
-        var feedback = result.FeedbackToStudent!;
-
-        // Deve ter pontos positivos reais
-        Assert.Contains("pontos positivos", feedback, StringComparison.OrdinalIgnoreCase);
-
-        // Deve ter orientação de melhoria
-        Assert.Contains("melhorar", feedback, StringComparison.OrdinalIgnoreCase);
-
-        // Deve ter parágrafo de fechamento
-        Assert.Contains("De forma geral", feedback);
+        Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
+        Assert.Null(result.FeedbackToStudent);
+        Assert.Null(result.SuggestedGrade);
+        Assert.Empty(result.CriterionAnalysis);
+        Assert.Contains("Pre-validacao concluida", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("49", result.PrivateNotesToTeacher);
     }
 }

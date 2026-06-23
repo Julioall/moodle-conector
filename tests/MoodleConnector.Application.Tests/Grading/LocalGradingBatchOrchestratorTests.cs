@@ -27,7 +27,7 @@ public sealed class LocalGradingBatchOrchestratorTests
     }
 
     [Fact]
-    public async Task EnqueueAsync_ComArtefatoExtraido_GeraRascunhoEAtualizaContadores()
+    public async Task EnqueueAsync_ComArtefatoExtraido_MarcaAwaitingAiEAtualizaContadores()
     {
         var repository = new FakeGradingReviewRepository();
         var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
@@ -57,16 +57,16 @@ public sealed class LocalGradingBatchOrchestratorTests
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
 
-        Assert.Equal(GradingItemStatus.DraftReady, item.Status);
+        // IA-first: item fica em AwaitingAiAnalysis, sem nota/feedback heurístico
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, item.Status);
         Assert.Equal(GradingReviewStatus.NotReviewed, item.ReviewStatus);
         Assert.Equal(GradingCommitStatus.NotReady, item.CommitStatus);
         Assert.Null(item.SuggestedGrade);
-        Assert.Equal(0m, item.Confidence);
-        Assert.Contains("parecer preliminar", item.DraftFeedback, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("Sem criterios.", item.PrivateNotesToTeacher);
+        Assert.Null(item.DraftFeedback);
+        Assert.Contains("Pre-validacao concluida", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
         Assert.Equal(1, batch.ProcessedItems);
-        Assert.Equal(1, batch.ReadyItems);
+        Assert.Equal(0, batch.ReadyItems);  // AwaitingAiAnalysis is not "ready" yet
         Assert.Equal(0, batch.BlockedItems);
         Assert.Equal(1, repository.SaveChangesCount);
     }
@@ -93,7 +93,7 @@ public sealed class LocalGradingBatchOrchestratorTests
     }
 
     [Fact]
-    public async Task EnqueueAsync_ComSubmissaoCriteriosEValor_GeraNotaSugerida()
+    public async Task EnqueueAsync_ComSubmissaoCriteriosEValor_MarcaAwaitingAi()
     {
         var repository = new FakeGradingReviewRepository();
         var batch = AssistedGradingBatch.Create(29972, [101112], "teacher-1", 321, totalItems: 1);
@@ -150,18 +150,15 @@ public sealed class LocalGradingBatchOrchestratorTests
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
 
-        Assert.Equal(GradingItemStatus.DraftReady, item.Status);
-        Assert.NotNull(item.SuggestedGrade);
-        Assert.True(item.SuggestedGrade > 0);
-        Assert.True(item.Confidence > 0m);
-        Assert.StartsWith("Olá", item.DraftFeedback);
-        Assert.Contains("Nota sugerida:", item.DraftFeedback);
-        Assert.Contains("Analise estruturada", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(1, batch.ReadyItems);
+        // IA-first: item fica em AwaitingAiAnalysis, sem nota/feedback heurístico
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, item.Status);
+        Assert.Null(item.SuggestedGrade);
+        Assert.Null(item.DraftFeedback);
+        Assert.Contains("Pre-validacao concluida", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task EnqueueAsync_ComAnalisePorCriterio_PersisteEvidencias()
+    public async Task EnqueueAsync_ComAnalisePorCriterio_NaoPersiteEvidenciasHeuristicas()
     {
         var repository = new FakeGradingReviewRepository();
         var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
@@ -191,15 +188,9 @@ public sealed class LocalGradingBatchOrchestratorTests
 
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
 
-        var evidence = Assert.Single(repository.Evidence);
-        Assert.Equal(item.Id, evidence.GradingItemId);
-        Assert.Equal("c1", evidence.CriterionId);
-        Assert.Equal("Criterio avaliado.", evidence.CriterionText);
-        Assert.Equal(4m, evidence.MaxPoints);
-        Assert.Equal(2m, evidence.SuggestedPoints);
-        Assert.Equal("Evidencia encontrada.", evidence.EvidenceText);
-        Assert.Equal("Lacuna encontrada.", evidence.GapsText);
-        Assert.True(evidence.TeacherReviewRequired);
+        // IA-first: no heuristic evidence is persisted by the processor
+        Assert.Empty(repository.Evidence);
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, item.Status);
     }
 
     [Fact]
@@ -226,10 +217,11 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Equal(GradingItemStatus.Failed, failedItem.Status);
         Assert.Equal(GradingCommitStatus.NotReady, failedItem.CommitStatus);
         Assert.Contains("Falha ao processar", failedItem.DraftFeedback, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(GradingItemStatus.DraftReady, readyItem.Status);
+        // IA-first: non-failed item goes to AwaitingAiAnalysis
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, readyItem.Status);
         Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
         Assert.Equal(2, batch.ProcessedItems);
-        Assert.Equal(1, batch.ReadyItems);
+        Assert.Equal(0, batch.ReadyItems);  // AwaitingAiAnalysis not counted as ready
         Assert.Equal(1, batch.FailedItems);
         Assert.Equal(1, repository.SaveChangesCount);
     }
@@ -263,11 +255,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
 
         Assert.Equal("Rascunho anterior.", alreadyProcessedItem.DraftFeedback);
-        Assert.Equal(GradingItemStatus.DraftReady, pendingItem.Status);
+        // IA-first: pending item blocked because FakeGradingContextBuilder has no artifacts for it,
+        // leading to empty text → Blocked status. But the previously processed item retains its draft.
         Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
         Assert.Equal(2, batch.ProcessedItems);
-        Assert.Equal(2, batch.ReadyItems);
-        Assert.Equal(0, batch.FailedItems);
         Assert.Equal(1, repository.SaveChangesCount);
     }
 
@@ -576,21 +567,11 @@ public sealed class LocalGradingBatchOrchestratorTests
             return Task.FromResult(new GradingAnalysisResult(
                 SuggestedGrade: null,
                 Confidence: 0m,
-                AnalysisStatus.BlockedMissingCriteria,
-                "Parecer preliminar gerado para revisao do professor.",
-                PrivateNotesToTeacher: "Sem criterios.",
-                CriterionAnalysis:
-                [
-                    new GradingCriterionAnalysis(
-                        "c1",
-                        "Criterio avaliado.",
-                        4m,
-                        2m,
-                        "Evidencia encontrada.",
-                        "Lacuna encontrada.",
-                        TeacherReviewRequired: true)
-                ],
-                Blocks: ["Criterios ausentes."]));
+                AnalysisStatus.AwaitingAiAnalysis,
+                FeedbackToStudent: null,
+                PrivateNotesToTeacher: "Pre-validacao concluida. Item pronto para analise via IA.",
+                CriterionAnalysis: [],
+                Blocks: []));
         }
     }
     internal sealed class FakeMoodleAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway

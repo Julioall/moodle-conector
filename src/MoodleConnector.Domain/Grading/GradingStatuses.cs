@@ -18,7 +18,8 @@ public enum GradingItemStatus
     ReadyToCommit = 3,
     Committed = 4,
     Blocked = 5,
-    Failed = 6
+    Failed = 6,
+    AwaitingAiAnalysis = 7
 }
 
 public enum GradingReviewStatus

@@ -194,6 +194,7 @@ Responsabilidades:
 
 ## Stack
 
+- Moodle 5.0.1 (versão alvo validada)
 - ASP.NET Core / .NET 10
 - Solution: `MoodleConnector.slnx`
 - MCP: `ModelContextProtocol.AspNetCore 1.3.0`

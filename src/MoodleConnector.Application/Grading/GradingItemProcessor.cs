@@ -57,47 +57,35 @@ public sealed class GradingItemProcessor(
                     .ToArray()),
             cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(result.FeedbackToStudent))
-        {
-            foreach (var criterion in result.CriterionAnalysis)
-            {
-                await repository.AddEvidenceAsync(
-                    new GradingEvidence(
-                        Guid.NewGuid(),
-                        item.Id,
-                        criterion.CriterionId,
-                        criterion.CriterionText,
-                        criterion.MaxPoints,
-                        criterion.SuggestedPoints,
-                        criterion.EvidenceFound,
-                        criterion.Gaps,
-                        criterion.TeacherReviewRequired,
-                        DateTimeOffset.UtcNow),
-                    cancellationToken);
-            }
+        // --- Fluxo IA-first: o serviço de análise nunca gera nota/feedback heurístico ---
 
-            var confidence = context.Blockers.Count > 0 ? 0m : result.Confidence;
-            var suggestedGrade = context.Blockers.Count > 0 ? null : result.SuggestedGrade;
-            var teacherNotes = context.Blockers.Count > 0
-                ? BuildPreliminaryTeacherNotes(context) + " " + result.PrivateNotesToTeacher
-                : result.PrivateNotesToTeacher;
+        // Itens bloqueados (texto vazio, enunciado insuficiente)
+        if (result.Blocks.Count > 0)
+        {
+            item.BlockAnalysis(string.Join(" ", result.Blocks));
+            return;
+        }
+
+        // Itens prontos para IA (pré-validação diagnóstica aprovada)
+        if (result.AnalysisStatus == AnalysisStatus.AwaitingAiAnalysis)
+        {
+            var diagnosticNotes = result.PrivateNotesToTeacher;
 
             // Appender observações de geração de critérios (separadas de TeacherInstructions)
             if (!string.IsNullOrWhiteSpace(context.CriteriaGenerationNotes))
             {
-                teacherNotes = string.IsNullOrWhiteSpace(teacherNotes)
+                diagnosticNotes = string.IsNullOrWhiteSpace(diagnosticNotes)
                     ? context.CriteriaGenerationNotes
-                    : $"{teacherNotes} {context.CriteriaGenerationNotes}";
+                    : $"{diagnosticNotes} {context.CriteriaGenerationNotes}";
             }
 
-            item.SetDraft(suggestedGrade, confidence, result.FeedbackToStudent, teacherNotes);
+            item.MarkAwaitingAiAnalysis(diagnosticNotes);
             return;
         }
 
+        // Fallback: resultado inesperado — bloquear com motivo genérico
         item.BlockAnalysis(
-            result.Blocks.Count > 0
-                ? string.Join(" ", result.Blocks)
-                : "Analise de correcao assistida nao gerou feedback revisavel.");
+            "Analise de correcao assistida nao gerou resultado processavel. Verifique os dados da atividade.");
     }
 
     public static void UpdateBatchCounters(
@@ -108,7 +96,8 @@ public sealed class GradingItemProcessor(
             item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit);
         var blockedItems = items.Count(item => item.Status == GradingItemStatus.Blocked);
         var failedItems = items.Count(item => item.Status == GradingItemStatus.Failed);
-        var processedItems = readyItems + blockedItems + failedItems +
+        var awaitingAiItems = items.Count(item => item.Status == GradingItemStatus.AwaitingAiAnalysis);
+        var processedItems = readyItems + blockedItems + failedItems + awaitingAiItems +
             items.Count(item => item.Status == GradingItemStatus.Committed);
 
         batch.UpdateCounters(processedItems, readyItems, blockedItems, failedItems);

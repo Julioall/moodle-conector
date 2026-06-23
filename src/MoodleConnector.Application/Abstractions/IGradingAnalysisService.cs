@@ -41,6 +41,7 @@ public sealed record GradingCriterionAnalysis(
 public static class AnalysisStatus
 {
     public const string Draft = "draft";
+    public const string AwaitingAiAnalysis = "awaiting_ai_analysis";
     public const string BlockedMissingCriteria = "blocked_missing_criteria";
     public const string BlockedEmptySubmission = "blocked_empty_submission";
     public const string BlockedUnknownScale = "blocked_unknown_scale";

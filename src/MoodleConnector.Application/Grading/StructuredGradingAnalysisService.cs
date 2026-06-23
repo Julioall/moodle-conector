@@ -28,47 +28,21 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 Blocks: ["Submissao sem conteudo textual para analise."]));
         }
 
-        // --- Resolucao de criterios efetivos (cascata) ---
+        // --- Resolucao de criterios efetivos (cascata) — apenas para diagnostico ---
         var criteriaSource = ResolveCriteria(request.RubricOrCriteria, request.ActivityDescription, request.TeacherInstructions);
         var effectiveCriteria = criteriaSource.Text;
-        var hasFormalCriteria = criteriaSource.Source == CriteriaSourceKind.Formal || criteriaSource.Source == CriteriaSourceKind.TeacherOverride;
         var hasApproximateCriteria = criteriaSource.Source == CriteriaSourceKind.Approximate;
 
-        // --- Resolucao de MaxGrade efetivo (cascata) ---
+        // --- Resolucao de MaxGrade efetivo (cascata) — apenas para diagnostico ---
         var effectiveMaxGrade = request.MaxGrade > 0
             ? request.MaxGrade
             : TryExtractMaxGrade(request.RubricOrCriteria) ?? TryExtractMaxGrade(request.ActivityDescription) ?? 0m;
         var hasMaxGrade = effectiveMaxGrade > 0;
 
         var wordCount = CountWords(request.SubmissionText);
-        var submissionSnippet = request.SubmissionText.Length > 300
-            ? request.SubmissionText[..300] + "..."
-            : request.SubmissionText;
-
-        // --- Sem criterios e sem descricao: rascunho generico com baixa confianca ---
-        if (string.IsNullOrWhiteSpace(effectiveCriteria))
-        {
-            var lowConfNotes = new System.Text.StringBuilder();
-            lowConfNotes.Append("Rascunho preliminar sem criterios ou descricao disponiveis. ");
-            if (!hasMaxGrade)
-            {
-                lowConfNotes.Append("Escala de nota nao identificada. Nota sugerida indisponivel. ");
-            }
-            lowConfNotes.Append("Revisao manual obrigatoria. ");
-            lowConfNotes.Append($"Trecho da submissao: {submissionSnippet}");
-
-            return Task.FromResult(new GradingAnalysisResult(
-                SuggestedGrade: null,
-                Confidence: 0.15m,
-                AnalysisStatus.Draft,
-                FeedbackToStudent: BuildGenericHumanizedFeedback(request.AssignmentName),
-                PrivateNotesToTeacher: lowConfNotes.ToString(),
-                CriterionAnalysis: [],
-                Blocks: []));
-        }
 
         // --- Enunciado insuficiente: bloquear analise ---
-        if (hasApproximateCriteria && CountWords(effectiveCriteria) < 15)
+        if (hasApproximateCriteria && CountWords(effectiveCriteria!) < 15)
         {
             return Task.FromResult(new GradingAnalysisResult(
                 SuggestedGrade: null,
@@ -80,72 +54,19 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
                 Blocks: ["Enunciado insuficiente ou sem criterios legiveis."]));
         }
 
-        // --- Analise estruturada por criterio ---
-        // Quando temos criterios Approximate E MaxGrade disponivel, permitir
-        // parsing dos criterios para gerar nota estimada (cenario SAP/PDF).
-        var criteria = hasApproximateCriteria
-            ? (hasMaxGrade ? ParseCriteria(effectiveCriteria) : Array.Empty<string>())
-            : ParseCriteria(effectiveCriteria);
-
-        if (criteria.Count == 0 && hasFormalCriteria)
-        {
-            // Criterios parseados resultaram vazios — gera rascunho generico
-            return Task.FromResult(new GradingAnalysisResult(
-                SuggestedGrade: null,
-                Confidence: 0.2m,
-                AnalysisStatus.Draft,
-                FeedbackToStudent: BuildGenericHumanizedFeedback(request.AssignmentName),
-                PrivateNotesToTeacher: $"Criterios extraidos do contexto nao geraram itens avaliáveis. Revisao manual obrigatoria. Trecho da submissao: {submissionSnippet}",
-                CriterionAnalysis: [],
-                Blocks: []));
-        }
-
-        var criterionResults = criteria.Count > 0
-            ? (hasMaxGrade
-                ? BuildCriterionAnalysis(criteria, request.SubmissionText, effectiveMaxGrade)
-                : BuildCriterionAnalysisWithoutGrade(criteria, request.SubmissionText))
-            : [];
-
-        decimal? totalSuggested;
-        if (criterionResults.Count > 0 && hasMaxGrade)
-        {
-            totalSuggested = criterionResults.Sum(c => c.SuggestedPoints ?? 0);
-        }
-        else if (hasApproximateCriteria && hasMaxGrade && !string.IsNullOrWhiteSpace(effectiveCriteria))
-        {
-            // Cenário Approximate sem critérios parseados mas com MaxGrade:
-            // gerar nota proporcional baseada em cobertura de keywords do enunciado.
-            totalSuggested = EstimateGradeFromCoverage(effectiveCriteria, request.SubmissionText, effectiveMaxGrade);
-        }
-        else
-        {
-            totalSuggested = null;
-        }
-
-        // Confianca base depende da fonte dos criterios
-        var baseConfidence = hasFormalCriteria
-            ? CalculateConfidence(wordCount, criterionResults)
-            : hasApproximateCriteria
-                ? Math.Min(CalculateConfidence(wordCount, criterionResults), 0.5m)
-                : 0.3m;
-
-        // Reduzir confianca ainda mais se nao houver MaxGrade
-        if (!hasMaxGrade)
-        {
-            baseConfidence = Math.Min(baseConfidence, 0.35m);
-        }
-
-        var teacherNotes = BuildTeacherNotes(criterionResults, request.SubmissionText, baseConfidence,
-            criteriaSource.Source, hasMaxGrade, effectiveMaxGrade);
+        // --- Pre-validacao aprovada: item pronto para analise pela IA ---
+        // Nao gera nota sugerida, feedback para o aluno nem criterios avaliados.
+        // Essas saidas serao geradas exclusivamente pelo fluxo de IA.
+        var diagnosticNotes = BuildDiagnosticNotes(
+            wordCount, criteriaSource.Source, hasMaxGrade, effectiveMaxGrade, effectiveCriteria);
 
         return Task.FromResult(new GradingAnalysisResult(
-            SuggestedGrade: totalSuggested,
-            Confidence: baseConfidence,
-            AnalysisStatus.Draft,
-            FeedbackToStudent: GenerateStudentFriendlyFeedback(
-                request.AssignmentName, criterionResults, totalSuggested, effectiveMaxGrade, request.SubmissionText),
-            PrivateNotesToTeacher: teacherNotes,
-            criterionResults,
+            SuggestedGrade: null,
+            Confidence: 0m,
+            AnalysisStatus.AwaitingAiAnalysis,
+            FeedbackToStudent: null,
+            PrivateNotesToTeacher: diagnosticNotes,
+            CriterionAnalysis: [],
             Blocks: []));
     }
 
@@ -180,6 +101,52 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
         return new CriteriaResolution(null, CriteriaSourceKind.None);
     }
 
+    /// <summary>
+    /// Constroi notas diagnosticas sobre a viabilidade da correcao,
+    /// sem gerar nota, feedback ou criterios avaliativos.
+    /// Estas notas ficam visiveis ao professor como PrivateNotesToTeacher.
+    /// </summary>
+    private static string BuildDiagnosticNotes(
+        int wordCount,
+        CriteriaSourceKind criteriaSource,
+        bool hasMaxGrade,
+        decimal effectiveMaxGrade,
+        string? effectiveCriteria)
+    {
+        var notes = new System.Text.StringBuilder();
+
+        notes.Append($"Pre-validacao concluida. Texto da submissao: {wordCount} palavras. ");
+
+        switch (criteriaSource)
+        {
+            case CriteriaSourceKind.Formal:
+                notes.Append("Criterios formais (rubrica) identificados. ");
+                break;
+            case CriteriaSourceKind.TeacherOverride:
+                notes.Append("Instrucoes do professor identificadas. ");
+                break;
+            case CriteriaSourceKind.Approximate:
+                notes.Append("Enunciado da atividade disponivel como contexto pedagogico. ");
+                break;
+            case CriteriaSourceKind.None:
+                notes.Append("Nenhum criterio, rubrica ou enunciado identificado. ");
+                break;
+        }
+
+        if (hasMaxGrade)
+        {
+            notes.Append($"Nota maxima: {effectiveMaxGrade} pontos. ");
+        }
+        else
+        {
+            notes.Append("Nota maxima nao identificada. ");
+        }
+
+        notes.Append("Item pronto para analise via IA. Use preparar_lote_correcao_ia para gerar nota e feedback.");
+        return notes.ToString();
+    }
+
+    [Obsolete("Metodo legado. Uso exclusivo para diagnostico tecnico. A geracao de criterios avaliados e feita pela IA.")]
     private static IReadOnlyList<GradingCriterionAnalysis> BuildCriterionAnalysis(
         IReadOnlyList<string> criteria,
         string submissionText,

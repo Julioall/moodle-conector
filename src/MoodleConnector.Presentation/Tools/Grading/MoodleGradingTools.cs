@@ -1299,12 +1299,20 @@ public sealed class MoodleGradingTools(
         var suffix = response.HasMore ? " Ha mais itens para consultar." : string.Empty;
         var metrics = response.ProcessingMetrics;
         var canLaunchNote = metrics.CanLaunch ? " Pronto para lancamento." : string.Empty;
-        return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is). Prontos: {response.ReadyItems}, bloqueados: {response.BlockedItems}, falhos: {response.FailedItems}, progresso: {metrics.ProgressPercent}%.{canLaunchNote}{suffix}";
+        var awaitingAiCount = response.Items.Count(item => item.Status == "AwaitingAiAnalysis");
+        var awaitingAiNote = awaitingAiCount > 0
+            ? $" {awaitingAiCount} item(ns) aguardam analise da IA. Use preparar_lote_correcao_ia para gerar nota e feedback."
+            : string.Empty;
+        return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is). Prontos: {response.ReadyItems}, bloqueados: {response.BlockedItems}, falhos: {response.FailedItems}, progresso: {metrics.ProgressPercent}%.{awaitingAiNote}{canLaunchNote}{suffix}";
     }
 
     private static string BuildCoordinationReportNarration(AssistedGradingCoordinationReportResult response)
     {
-        return $"Relatorio consolidado do lote {response.BatchJobId}: {response.TotalItems} item(ns), {response.ReviewedItems} revisado(s), {response.PendingReviewItems} com revisao pendente, {response.AttentionItems.Count} item(ns) exigem atencao.";
+        var awaitingAi = response.StatusCounts.TryGetValue("AwaitingAiAnalysis", out var count) ? count : 0;
+        var awaitingNote = awaitingAi > 0
+            ? $" {awaitingAi} item(ns) aguardam analise da IA."
+            : string.Empty;
+        return $"Relatorio consolidado do lote {response.BatchJobId}: {response.TotalItems} item(ns), {response.ReviewedItems} revisado(s), {response.PendingReviewItems} com revisao pendente, {response.AttentionItems.Count} item(ns) exigem atencao.{awaitingNote}";
     }
 
     private static string BuildCancelBatchNarration(CancelAssistedGradingBatchResult response)

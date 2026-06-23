@@ -496,7 +496,9 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
             Assert.Contains("\"isError\":true", body, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("mcp/www_authenticate", body, StringComparison.Ordinal);
             Assert.Contains("resource_metadata=\\\"http://localhost/.well-known/oauth-protected-resource/mcp\\\"", body);
-            Assert.Contains("scope=\\\"openid profile email offline_access moodle-mcp-audience\\\"", body);
+            Assert.Contains("scope=\\\"openid", body);
+            Assert.Contains("moodle-mcp-audience", body);
+            Assert.Contains("moodle.write.assignments.grade", body);
         }
         finally
         {

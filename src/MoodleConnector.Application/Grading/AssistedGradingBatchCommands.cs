@@ -1080,12 +1080,20 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         var attentionItems = BuildAttentionItems(items, evidenceByItem);
         var criteriaNeedingReview = BuildCriterionSummaries(evidenceByItem.Values.SelectMany(evidence => evidence));
         var reviewedItems = items.Count(item => item.ReviewStatus == GradingReviewStatus.Reviewed);
+        var awaitingAiItems = items.Count(item => item.Status == GradingItemStatus.AwaitingAiAnalysis);
+        var aiDraftItems = items.Count(item =>
+            item.Status == GradingItemStatus.DraftReady && item.Confidence >= 0.8m);
         var pendingReviewItems = items.Count(item =>
             item.ReviewStatus != GradingReviewStatus.Reviewed &&
             item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit);
         var committedItems = items.Count(item =>
             item.Status == GradingItemStatus.Committed ||
             item.CommitStatus == GradingCommitStatus.Succeeded);
+        var blockedPermissionItems = items.Count(item =>
+            item.CommitStatus == GradingCommitStatus.Failed &&
+            (item.CommitError?.Contains("moodle.write", StringComparison.OrdinalIgnoreCase) == true ||
+             item.CommitError?.Contains("feature flag", StringComparison.OrdinalIgnoreCase) == true ||
+             item.CommitError?.Contains("moodle_function_unavailable", StringComparison.OrdinalIgnoreCase) == true));
         var launchPendingItems = items.Count(item => item.CommitStatus == GradingCommitStatus.Pending);
         var lowConfidenceItems = items.Count(HasLowConfidence);
         var generatedAt = DateTimeOffset.UtcNow;
@@ -1160,7 +1168,20 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
 
         if (item.CommitStatus == GradingCommitStatus.Failed)
         {
-            reasons.Add("Falha no lancamento Moodle: " + Shorten(item.CommitError ?? item.DraftFeedback));
+            var commitError = item.CommitError ?? item.DraftFeedback;
+            if (commitError?.Contains("moodle.write", StringComparison.OrdinalIgnoreCase) == true ||
+                commitError?.Contains("moodle_function_unavailable", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                reasons.Add("Bloqueado por falta de permissao: escopo moodle.write ausente no token de servico.");
+            }
+            else if (commitError?.Contains("feature flag", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                reasons.Add("Bloqueado por configuracao: feature flag de escrita de nota desabilitada.");
+            }
+            else
+            {
+                reasons.Add("Falha no lancamento Moodle: " + Shorten(commitError));
+            }
             priority = Math.Min(priority, 0);
         }
         else if (item.Status == GradingItemStatus.Failed)
@@ -1173,6 +1194,12 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         {
             reasons.Add("Bloqueado: " + Shorten(item.DraftFeedback));
             priority = Math.Min(priority, 2);
+        }
+
+        if (item.Status == GradingItemStatus.AwaitingAiAnalysis)
+        {
+            reasons.Add("Aguardando analise pela IA. Use preparar_lote_correcao_ia.");
+            priority = Math.Min(priority, 3);
         }
 
         if (HasLowConfidence(item))
@@ -1317,6 +1344,34 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         builder.AppendLine($"- Nota sugerida media: {FormatDecimal(report.AverageSuggestedGrade)}");
         builder.AppendLine($"- Nota final media: {FormatDecimal(report.AverageFinalGrade)}");
 
+        // --- Origem das correcoes ---
+        builder.AppendLine();
+        builder.AppendLine("## Origem das correcoes");
+        builder.AppendLine();
+        if (report.StatusCounts.TryGetValue("AwaitingAiAnalysis", out var awaitingAi) && awaitingAi > 0)
+        {
+            builder.AppendLine($"- Aguardando IA: {awaitingAi} — use `preparar_lote_correcao_ia` para gerar nota e feedback.");
+        }
+        var aiGenerated = report.StatusCounts
+            .Where(kv => kv.Key is "DraftReady" or "ReadyToCommit")
+            .Sum(kv => kv.Value);
+        if (aiGenerated > 0)
+        {
+            builder.AppendLine($"- Com feedback gerado (IA ou revisao): {aiGenerated}");
+        }
+        if (report.CommittedItems > 0)
+        {
+            builder.AppendLine($"- Lancados no Moodle: {report.CommittedItems}");
+        }
+        // Bloqueios por permissao
+        var permissionBlocked = report.AttentionItems
+            .Count(item => item.Reason.Contains("permissao", StringComparison.OrdinalIgnoreCase) ||
+                           item.Reason.Contains("feature flag", StringComparison.OrdinalIgnoreCase));
+        if (permissionBlocked > 0)
+        {
+            builder.AppendLine($"- Bloqueados por permissao/configuracao: {permissionBlocked}");
+        }
+
         builder.AppendLine();
         builder.AppendLine("## Itens que exigem atencao");
         builder.AppendLine();
@@ -1338,7 +1393,7 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         builder.AppendLine();
         if (report.CriteriaNeedingReview.Count == 0)
         {
-            builder.AppendLine("- Nenhum criterio com lacuna ou revisao obrigatoria foi registrado.");
+            builder.AppendLine("- Nenhum criterio estruturado disponivel. Os criterios serao gerados pela IA durante a correcao.");
         }
         else
         {
@@ -1833,9 +1888,9 @@ public sealed class SaveAiGradingBatchCommandHandler(
 
                 item.SetDraft(
                     suggestedGrade: input.Nota,
-                    confidence: 0.8m,
+                    confidence: 0.85m,
                     draftFeedback: input.Feedback,
-                    privateNotesToTeacher: "Rascunho gerado pelo ChatGPT via fluxo IA.");
+                    privateNotesToTeacher: "Feedback e nota gerados pela IA. Revisao humana obrigatoria antes do lancamento.");
 
                 savedCount++;
             }

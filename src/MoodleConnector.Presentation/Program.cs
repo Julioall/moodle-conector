@@ -1323,7 +1323,27 @@ static string[] GetMcpOauthScopes(OAuthBrokerOptions? options = null)
         audienceScope = "moodle-mcp-audience";
     }
 
-    return new[] { "openid", "profile", "email", "offline_access", audienceScope.Trim() }
+    return new[]
+        {
+            "openid", "profile", "email", "offline_access", audienceScope.Trim(),
+            // Moodle granular scopes (from MoodleScopePolicies)
+            MoodleScopePolicies.ReadCourses,
+            MoodleScopePolicies.ReadStudents,
+            MoodleScopePolicies.ReadGroups,
+            MoodleScopePolicies.ReadAccess,
+            MoodleScopePolicies.ReadContents,
+            MoodleScopePolicies.ReadResources,
+            MoodleScopePolicies.ReadActivities,
+            MoodleScopePolicies.ReadAssignments,
+            MoodleScopePolicies.ReadSubmissions,
+            MoodleScopePolicies.ReadQuizzes,
+            MoodleScopePolicies.ReadScorms,
+            MoodleScopePolicies.WriteMessages,
+            MoodleScopePolicies.WriteAssignmentsFeedback,
+            MoodleScopePolicies.WriteAssignmentsGrade,
+            MoodleScopePolicies.WriteCourseContent,
+            MoodleScopePolicies.Admin
+        }
         .Where(scope => !string.IsNullOrWhiteSpace(scope))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
