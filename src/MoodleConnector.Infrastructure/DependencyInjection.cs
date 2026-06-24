@@ -143,6 +143,10 @@ public static class DependencyInjection
             .AddHttpClient<IMoodleCompletionGateway, MoodleCompletionGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
 
+        services
+            .AddHttpClient<IMoodleMessageGateway, MoodleMessageGateway>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+
         services.AddSingleton<IDocumentExtractionService, DocumentExtractionService>();
 
         services
