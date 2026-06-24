@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -52,7 +52,7 @@ public sealed class MoodleAssignmentSubmissionsTools(
     {
         if (!TryParseFilter(status, out var filter))
         {
-            return Task.FromResult(Error<ListAssignmentSubmissionsResponse>("Filtro de status invalido. Use todos, entregues, pendentes, atrasadas ou aguardando_correcao."));
+            return Task.FromResult(ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Filtro de status invalido. Use todos, entregues, pendentes, atrasadas ou aguardando_correcao."));
         }
 
         return ListSubmissionsCoreAsync(
@@ -104,7 +104,7 @@ public sealed class MoodleAssignmentSubmissionsTools(
     {
         if (!TryParseFilter(status, out var filter))
         {
-            return Task.FromResult(Error<ListAssignmentSubmissionsResponse>("Invalid status filter. Use all, submitted, pending, late, or awaiting_grading."));
+            return Task.FromResult(ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Invalid status filter. Use all, submitted, pending, late, or awaiting_grading."));
         }
 
         return ListSubmissionsCoreAsync(
@@ -420,19 +420,19 @@ public sealed class MoodleAssignmentSubmissionsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListAssignmentSubmissionsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Informe um identificador de curso.");
         }
 
         if (string.IsNullOrWhiteSpace(assignmentId))
         {
-            return Error<ListAssignmentSubmissionsResponse>("Informe um identificador de tarefa.");
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Informe um identificador de tarefa.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListAssignmentSubmissionsResponse>("Usuario nao autenticado para consultar entregas.");
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Usuario nao autenticado para consultar entregas.");
         }
 
         AssignmentSubmissionsPage? submissionsPage;
@@ -458,12 +458,12 @@ public sealed class MoodleAssignmentSubmissionsTools(
         }
         catch
         {
-            return Error<ListAssignmentSubmissionsResponse>("Nao foi possivel listar entregas no Moodle neste momento.");
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Nao foi possivel listar entregas no Moodle neste momento.");
         }
 
         if (submissionsPage is null)
         {
-            return Error<ListAssignmentSubmissionsResponse>("Curso ou tarefa nao encontrados entre os dados autorizados do usuario.");
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Curso ou tarefa nao encontrados entre os dados autorizados do usuario.");
         }
 
         var data = ToListResponse(submissionsPage);
@@ -486,24 +486,24 @@ public sealed class MoodleAssignmentSubmissionsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<StudentSubmissionResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<StudentSubmissionResponse>("Informe um identificador de curso.");
         }
 
         if (string.IsNullOrWhiteSpace(assignmentId))
         {
-            return Error<StudentSubmissionResponse>("Informe um identificador de tarefa.");
+            return ToolResultHelper.Error<StudentSubmissionResponse>("Informe um identificador de tarefa.");
         }
 
         if (string.IsNullOrWhiteSpace(studentId))
         {
-            return Error<StudentSubmissionResponse>("Informe um identificador de estudante.");
+            return ToolResultHelper.Error<StudentSubmissionResponse>("Informe um identificador de estudante.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<StudentSubmissionResponse>("Usuario nao autenticado para consultar entrega.");
+            return ToolResultHelper.Error<StudentSubmissionResponse>("Usuario nao autenticado para consultar entrega.");
         }
 
         AssignmentSubmissionSummary? submission;
@@ -523,12 +523,12 @@ public sealed class MoodleAssignmentSubmissionsTools(
         }
         catch
         {
-            return Error<StudentSubmissionResponse>("Nao foi possivel consultar a entrega no Moodle neste momento.");
+            return ToolResultHelper.Error<StudentSubmissionResponse>("Nao foi possivel consultar a entrega no Moodle neste momento.");
         }
 
         if (submission is null)
         {
-            return Error<StudentSubmissionResponse>("Estudante, curso ou tarefa nao encontrados entre os dados autorizados do usuario.");
+            return ToolResultHelper.Error<StudentSubmissionResponse>("Estudante, curso ou tarefa nao encontrados entre os dados autorizados do usuario.");
         }
 
         var data = new StudentSubmissionResponse(courseId, assignmentId, ToSubmissionItem(submission));
@@ -656,22 +656,7 @@ public sealed class MoodleAssignmentSubmissionsTools(
         };
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            Data: default,
-            Warnings: [message],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 
     public sealed record ListAssignmentSubmissionsResponse(
         [property: JsonPropertyName("courseId")] string CourseId,

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -387,7 +387,7 @@ public sealed class MoodleGradingTools(
     {
         if (batchJobId == Guid.Empty)
         {
-            return Error<AiGradingBatchPackageResult>("Informe um identificador de lote valido.");
+            return ToolResultHelper.Error<AiGradingBatchPackageResult>("Informe um identificador de lote valido.");
         }
 
         AiGradingBatchPackageResult data;
@@ -403,15 +403,15 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<AiGradingBatchPackageResult>(ex.Message);
+            return ToolResultHelper.Error<AiGradingBatchPackageResult>(ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Error<AiGradingBatchPackageResult>(ex.Message);
+            return ToolResultHelper.Error<AiGradingBatchPackageResult>(ex.Message);
         }
         catch
         {
-            return Error<AiGradingBatchPackageResult>("Nao foi possivel preparar o pacote IA do lote neste momento.");
+            return ToolResultHelper.Error<AiGradingBatchPackageResult>("Nao foi possivel preparar o pacote IA do lote neste momento.");
         }
 
         var response = new ToolResponse<AiGradingBatchPackageResult>(
@@ -452,12 +452,12 @@ public sealed class MoodleGradingTools(
     {
         if (batchJobId == Guid.Empty)
         {
-            return Error<SaveAiGradingBatchResult>("Informe um identificador de lote valido.");
+            return ToolResultHelper.Error<SaveAiGradingBatchResult>("Informe um identificador de lote valido.");
         }
 
         if (items.Length == 0)
         {
-            return Error<SaveAiGradingBatchResult>("Informe pelo menos um item de correcao.");
+            return ToolResultHelper.Error<SaveAiGradingBatchResult>("Informe pelo menos um item de correcao.");
         }
 
         SaveAiGradingBatchResult data;
@@ -473,15 +473,15 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<SaveAiGradingBatchResult>(ex.Message);
+            return ToolResultHelper.Error<SaveAiGradingBatchResult>(ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Error<SaveAiGradingBatchResult>(ex.Message);
+            return ToolResultHelper.Error<SaveAiGradingBatchResult>(ex.Message);
         }
         catch
         {
-            return Error<SaveAiGradingBatchResult>("Nao foi possivel salvar as correcoes IA neste momento.");
+            return ToolResultHelper.Error<SaveAiGradingBatchResult>("Nao foi possivel salvar as correcoes IA neste momento.");
         }
 
         var response = new ToolResponse<SaveAiGradingBatchResult>(
@@ -507,7 +507,7 @@ public sealed class MoodleGradingTools(
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<DiscoverMoodleGradingFunctionsResponse>("Usuario nao autenticado para descobrir funcoes de correcao.");
+            return ToolResultHelper.Error<DiscoverMoodleGradingFunctionsResponse>("Usuario nao autenticado para descobrir funcoes de correcao.");
         }
 
         MoodleGradingCapabilitiesReport report;
@@ -523,7 +523,7 @@ public sealed class MoodleGradingTools(
         }
         catch
         {
-            return Error<DiscoverMoodleGradingFunctionsResponse>("Nao foi possivel consultar as funcoes Moodle de correcao neste momento.");
+            return ToolResultHelper.Error<DiscoverMoodleGradingFunctionsResponse>("Nao foi possivel consultar as funcoes Moodle de correcao neste momento.");
         }
 
         var data = ToResponse(report);
@@ -550,7 +550,7 @@ public sealed class MoodleGradingTools(
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<GradingTechnicalDiscoveryReport>("Usuario nao autenticado para executar descoberta tecnica de correcao.");
+            return ToolResultHelper.Error<GradingTechnicalDiscoveryReport>("Usuario nao autenticado para executar descoberta tecnica de correcao.");
         }
 
         GradingTechnicalDiscoveryReport report;
@@ -566,7 +566,7 @@ public sealed class MoodleGradingTools(
         }
         catch
         {
-            return Error<GradingTechnicalDiscoveryReport>("Nao foi possivel executar a descoberta tecnica de correcao neste momento.");
+            return ToolResultHelper.Error<GradingTechnicalDiscoveryReport>("Nao foi possivel executar a descoberta tecnica de correcao neste momento.");
         }
 
         var response = new ToolResponse<GradingTechnicalDiscoveryReport>(
@@ -600,19 +600,19 @@ public sealed class MoodleGradingTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CreateAssistedGradingBatchResult>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>("Informe um identificador de curso.");
         }
 
         if (assignmentIds.Count == 0 || assignmentIds.All(string.IsNullOrWhiteSpace))
         {
-            return Error<CreateAssistedGradingBatchResult>("Informe pelo menos uma tarefa.");
+            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>("Informe pelo menos uma tarefa.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CreateAssistedGradingBatchResult>("Usuario nao autenticado para criar lote de correcao.");
+            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>("Usuario nao autenticado para criar lote de correcao.");
         }
 
         CreateAssistedGradingBatchResult data;
@@ -639,7 +639,7 @@ public sealed class MoodleGradingTools(
         }
         catch
         {
-            return Error<CreateAssistedGradingBatchResult>("Nao foi possivel criar o lote de correcao assistida neste momento.");
+            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>("Nao foi possivel criar o lote de correcao assistida neste momento.");
         }
 
         var response = new ToolResponse<CreateAssistedGradingBatchResult>(
@@ -670,7 +670,7 @@ public sealed class MoodleGradingTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListarEntregasCorrigiveisResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>("Informe um identificador de curso.");
         }
 
         var normalizedAssignmentIds = assignmentIds
@@ -680,12 +680,12 @@ public sealed class MoodleGradingTools(
             .ToArray();
         if (normalizedAssignmentIds.Length == 0)
         {
-            return Error<ListarEntregasCorrigiveisResponse>("Informe pelo menos uma tarefa para listar entregas corrigiveis.");
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>("Informe pelo menos uma tarefa para listar entregas corrigiveis.");
         }
 
         if (!TryParseSubmissionFilter(status, out var parsedFilter))
         {
-            return Error<ListarEntregasCorrigiveisResponse>("Filtro de status invalido. Use all, submitted, pending, late ou awaiting_grading.");
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>("Filtro de status invalido. Use all, submitted, pending, late ou awaiting_grading.");
         }
 
         var filter = onlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : parsedFilter;
@@ -696,7 +696,7 @@ public sealed class MoodleGradingTools(
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListarEntregasCorrigiveisResponse>("Usuario nao autenticado para listar entregas corrigiveis.");
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>("Usuario nao autenticado para listar entregas corrigiveis.");
         }
 
         var items = new List<EntregaCorrigivelItem>();
@@ -823,7 +823,7 @@ public sealed class MoodleGradingTools(
     {
         if (batchJobId == Guid.Empty)
         {
-            return Error<AssistedGradingBatchStatusResult>("Informe um identificador de lote valido.");
+            return ToolResultHelper.Error<AssistedGradingBatchStatusResult>("Informe um identificador de lote valido.");
         }
 
         AssistedGradingBatchStatusResult data;
@@ -839,7 +839,7 @@ public sealed class MoodleGradingTools(
         }
         catch
         {
-            return Error<AssistedGradingBatchStatusResult>("Nao foi possivel consultar o lote de correcao assistida neste momento.");
+            return ToolResultHelper.Error<AssistedGradingBatchStatusResult>("Nao foi possivel consultar o lote de correcao assistida neste momento.");
         }
 
         var response = new ToolResponse<AssistedGradingBatchStatusResult>(
@@ -863,7 +863,7 @@ public sealed class MoodleGradingTools(
     {
         if (batchJobId == Guid.Empty)
         {
-            return Error<AssistedGradingCoordinationReportResult>("Informe um identificador de lote valido.");
+            return ToolResultHelper.Error<AssistedGradingCoordinationReportResult>("Informe um identificador de lote valido.");
         }
 
         AssistedGradingCoordinationReportResult data;
@@ -879,15 +879,15 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<AssistedGradingCoordinationReportResult>(ex.Message);
+            return ToolResultHelper.Error<AssistedGradingCoordinationReportResult>(ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Error<AssistedGradingCoordinationReportResult>(ex.Message);
+            return ToolResultHelper.Error<AssistedGradingCoordinationReportResult>(ex.Message);
         }
         catch
         {
-            return Error<AssistedGradingCoordinationReportResult>("Nao foi possivel exportar o relatorio consolidado de correcao neste momento.");
+            return ToolResultHelper.Error<AssistedGradingCoordinationReportResult>("Nao foi possivel exportar o relatorio consolidado de correcao neste momento.");
         }
 
         var response = new ToolResponse<AssistedGradingCoordinationReportResult>(
@@ -911,7 +911,7 @@ public sealed class MoodleGradingTools(
     {
         if (batchJobId == Guid.Empty)
         {
-            return Error<CancelAssistedGradingBatchResult>("Informe um identificador de lote valido.");
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>("Informe um identificador de lote valido.");
         }
 
         CancelAssistedGradingBatchResult data;
@@ -927,11 +927,11 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<CancelAssistedGradingBatchResult>(ex.Message);
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>(ex.Message);
         }
         catch
         {
-            return Error<CancelAssistedGradingBatchResult>("Nao foi possivel cancelar o lote de correcao assistida neste momento.");
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>("Nao foi possivel cancelar o lote de correcao assistida neste momento.");
         }
 
         var response = new ToolResponse<CancelAssistedGradingBatchResult>(
@@ -956,7 +956,7 @@ public sealed class MoodleGradingTools(
     {
         if (gradingItemId == Guid.Empty)
         {
-            return Error<AssistedGradingItemDetailResult>("Informe um identificador de item valido.");
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>("Informe um identificador de item valido.");
         }
 
         AssistedGradingItemDetailResult data;
@@ -972,11 +972,11 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<AssistedGradingItemDetailResult>(ex.Message);
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>(ex.Message);
         }
         catch
         {
-            return Error<AssistedGradingItemDetailResult>("Nao foi possivel consultar o item de correcao assistida neste momento.");
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>("Nao foi possivel consultar o item de correcao assistida neste momento.");
         }
 
         var response = new ToolResponse<AssistedGradingItemDetailResult>(
@@ -1005,17 +1005,17 @@ public sealed class MoodleGradingTools(
     {
         if (gradingItemId == Guid.Empty)
         {
-            return Error<AssistedGradingItemDetailResult>("Informe um identificador de item valido.");
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>("Informe um identificador de item valido.");
         }
 
         if (string.IsNullOrWhiteSpace(finalFeedback))
         {
-            return Error<AssistedGradingItemDetailResult>("Informe o feedback final revisado.");
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>("Informe o feedback final revisado.");
         }
 
         if (string.IsNullOrWhiteSpace(teacherDecision))
         {
-            return Error<AssistedGradingItemDetailResult>("Informe a decisao do professor/tutor.");
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>("Informe a decisao do professor/tutor.");
         }
 
         AssistedGradingItemDetailResult data;
@@ -1037,11 +1037,11 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<AssistedGradingItemDetailResult>(ex.Message);
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>(ex.Message);
         }
         catch
         {
-            return Error<AssistedGradingItemDetailResult>("Nao foi possivel atualizar o rascunho de correcao neste momento.");
+            return ToolResultHelper.Error<AssistedGradingItemDetailResult>("Nao foi possivel atualizar o rascunho de correcao neste momento.");
         }
 
         var response = new ToolResponse<AssistedGradingItemDetailResult>(
@@ -1067,7 +1067,7 @@ public sealed class MoodleGradingTools(
     {
         if (batchJobId == Guid.Empty)
         {
-            return Error<CreateGradingLaunchPreviewResult>("Informe um identificador de lote valido.");
+            return ToolResultHelper.Error<CreateGradingLaunchPreviewResult>("Informe um identificador de lote valido.");
         }
 
         CreateGradingLaunchPreviewResult data;
@@ -1083,7 +1083,7 @@ public sealed class MoodleGradingTools(
         }
         catch
         {
-            return Error<CreateGradingLaunchPreviewResult>("Nao foi possivel criar a previa de lancamento neste momento.");
+            return ToolResultHelper.Error<CreateGradingLaunchPreviewResult>("Nao foi possivel criar a previa de lancamento neste momento.");
         }
 
         var response = new ToolResponse<CreateGradingLaunchPreviewResult>(
@@ -1108,12 +1108,12 @@ public sealed class MoodleGradingTools(
     {
         if (pendingActionId == Guid.Empty)
         {
-            return Error<ConfirmMoodleBatchLaunchResult>("Informe uma acao pendente valida.");
+            return ToolResultHelper.Error<ConfirmMoodleBatchLaunchResult>("Informe uma acao pendente valida.");
         }
 
         if (string.IsNullOrWhiteSpace(confirmationText))
         {
-            return Error<ConfirmMoodleBatchLaunchResult>("Informe o texto literal de confirmacao.");
+            return ToolResultHelper.Error<ConfirmMoodleBatchLaunchResult>("Informe o texto literal de confirmacao.");
         }
 
         ConfirmMoodleBatchLaunchResult data;
@@ -1129,11 +1129,11 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<ConfirmMoodleBatchLaunchResult>(ex.Message);
+            return ToolResultHelper.Error<ConfirmMoodleBatchLaunchResult>(ex.Message);
         }
         catch
         {
-            return Error<ConfirmMoodleBatchLaunchResult>("Nao foi possivel confirmar o lancamento no Moodle neste momento.");
+            return ToolResultHelper.Error<ConfirmMoodleBatchLaunchResult>("Nao foi possivel confirmar o lancamento no Moodle neste momento.");
         }
 
         var response = new ToolResponse<ConfirmMoodleBatchLaunchResult>(
@@ -1159,7 +1159,7 @@ public sealed class MoodleGradingTools(
     {
         if (string.IsNullOrWhiteSpace(auditId))
         {
-            return Error<GradingAuditResult>("Informe um auditId valido.");
+            return ToolResultHelper.Error<GradingAuditResult>("Informe um auditId valido.");
         }
 
         GradingAuditResult data;
@@ -1175,7 +1175,7 @@ public sealed class MoodleGradingTools(
         }
         catch
         {
-            return Error<GradingAuditResult>("Nao foi possivel consultar a auditoria de correcao neste momento.");
+            return ToolResultHelper.Error<GradingAuditResult>("Nao foi possivel consultar a auditoria de correcao neste momento.");
         }
 
         var response = new ToolResponse<GradingAuditResult>(
@@ -1201,7 +1201,7 @@ public sealed class MoodleGradingTools(
     {
         if (batchJobId == Guid.Empty)
         {
-            return Error<GradingAuditResult>("Informe um batchJobId valido.");
+            return ToolResultHelper.Error<GradingAuditResult>("Informe um batchJobId valido.");
         }
 
         GradingAuditResult data;
@@ -1217,7 +1217,7 @@ public sealed class MoodleGradingTools(
         }
         catch
         {
-            return Error<GradingAuditResult>("Nao foi possivel consultar a auditoria de correcao por lote neste momento.");
+            return ToolResultHelper.Error<GradingAuditResult>("Nao foi possivel consultar a auditoria de correcao por lote neste momento.");
         }
 
         var response = new ToolResponse<GradingAuditResult>(
@@ -1391,22 +1391,7 @@ public sealed class MoodleGradingTools(
         return sb.ToString();
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            Data: default,
-            Warnings: [message],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 
     public sealed record DiscoverMoodleGradingFunctionsResponse(
         [property: JsonPropertyName("serviceName")] string ServiceName,
@@ -1520,7 +1505,7 @@ public sealed class MoodleGradingTools(
     {
         if (gradingItemId == Guid.Empty)
         {
-            return Error<GradingContextForChatResult>("Informe um identificador de item valido.");
+            return ToolResultHelper.Error<GradingContextForChatResult>("Informe um identificador de item valido.");
         }
 
         GradingContextForChatResult data;
@@ -1536,15 +1521,15 @@ public sealed class MoodleGradingTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<GradingContextForChatResult>(ex.Message);
+            return ToolResultHelper.Error<GradingContextForChatResult>(ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
-            return Error<GradingContextForChatResult>(ex.Message);
+            return ToolResultHelper.Error<GradingContextForChatResult>(ex.Message);
         }
         catch
         {
-            return Error<GradingContextForChatResult>("Nao foi possivel preparar o contexto de correcao neste momento.");
+            return ToolResultHelper.Error<GradingContextForChatResult>("Nao foi possivel preparar o contexto de correcao neste momento.");
         }
 
         var narration = BuildPrepareGradingNarration(data);

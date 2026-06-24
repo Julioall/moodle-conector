@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using MediatR;
 using ModelContextProtocol.Protocol;
@@ -67,19 +67,19 @@ public sealed class MoodleCompletionTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CourseCompletionStatus>("Informe um identificador de curso valido.");
+            return ToolResultHelper.Error<CourseCompletionStatus>("Informe um identificador de curso valido.");
         }
 
         if (string.IsNullOrWhiteSpace(studentId))
         {
-            return Error<CourseCompletionStatus>("Informe um identificador de estudante valido.");
+            return ToolResultHelper.Error<CourseCompletionStatus>("Informe um identificador de estudante valido.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CourseCompletionStatus>("Usuario nao autenticado para consultar o progresso.");
+            return ToolResultHelper.Error<CourseCompletionStatus>("Usuario nao autenticado para consultar o progresso.");
         }
 
         CourseCompletionStatus data;
@@ -95,7 +95,7 @@ public sealed class MoodleCompletionTools(
         }
         catch
         {
-            return Error<CourseCompletionStatus>("Nao foi possivel consultar o progresso do aluno neste momento.");
+            return ToolResultHelper.Error<CourseCompletionStatus>("Nao foi possivel consultar o progresso do aluno neste momento.");
         }
 
         var response = new ToolResponse<CourseCompletionStatus>(
@@ -121,20 +121,5 @@ public sealed class MoodleCompletionTools(
         };
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            default!,
-            [message],
-            null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 }

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -366,7 +366,7 @@ public sealed class MoodleCourseContentsTools(
     {
         if (!TryParseModuleType(moduleType, out var moduleTypes, out var error))
         {
-            return Task.FromResult(Error<ListCourseContentsResponse>(error));
+            return Task.FromResult(ToolResultHelper.Error<ListCourseContentsResponse>(error));
         }
 
         return ListContentsCoreAsync(courseId, moduleTypes, includeHidden, onlyWithFiles, moodleAlias, cancellationToken);
@@ -382,14 +382,14 @@ public sealed class MoodleCourseContentsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListCourseContentsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListCourseContentsResponse>("Informe um identificador de curso.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListCourseContentsResponse>("Usuario nao autenticado para consultar conteudos.");
+            return ToolResultHelper.Error<ListCourseContentsResponse>("Usuario nao autenticado para consultar conteudos.");
         }
 
         CourseContentsSummary? contents;
@@ -410,12 +410,12 @@ public sealed class MoodleCourseContentsTools(
         }
         catch
         {
-            return Error<ListCourseContentsResponse>("Nao foi possivel listar conteudos no Moodle neste momento.");
+            return ToolResultHelper.Error<ListCourseContentsResponse>("Nao foi possivel listar conteudos no Moodle neste momento.");
         }
 
         if (contents is null)
         {
-            return Error<ListCourseContentsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<ListCourseContentsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         return ContentsSuccess(contents);
@@ -429,19 +429,19 @@ public sealed class MoodleCourseContentsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CourseModuleDetailsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<CourseModuleDetailsResponse>("Informe um identificador de curso.");
         }
 
         if (string.IsNullOrWhiteSpace(moduleId))
         {
-            return Error<CourseModuleDetailsResponse>("Informe um identificador de modulo.");
+            return ToolResultHelper.Error<CourseModuleDetailsResponse>("Informe um identificador de modulo.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CourseModuleDetailsResponse>("Usuario nao autenticado para consultar modulo.");
+            return ToolResultHelper.Error<CourseModuleDetailsResponse>("Usuario nao autenticado para consultar modulo.");
         }
 
         CourseModuleSummary? module;
@@ -457,12 +457,12 @@ public sealed class MoodleCourseContentsTools(
         }
         catch
         {
-            return Error<CourseModuleDetailsResponse>("Nao foi possivel consultar o modulo no Moodle neste momento.");
+            return ToolResultHelper.Error<CourseModuleDetailsResponse>("Nao foi possivel consultar o modulo no Moodle neste momento.");
         }
 
         if (module is null)
         {
-            return Error<CourseModuleDetailsResponse>("Modulo nao encontrado no curso informado.");
+            return ToolResultHelper.Error<CourseModuleDetailsResponse>("Modulo nao encontrado no curso informado.");
         }
 
         var data = new CourseModuleDetailsResponse(ToModuleItem(module));
@@ -484,14 +484,14 @@ public sealed class MoodleCourseContentsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CourseStructureAuditResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<CourseStructureAuditResponse>("Informe um identificador de curso.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CourseStructureAuditResponse>("Usuario nao autenticado para auditar estrutura do curso.");
+            return ToolResultHelper.Error<CourseStructureAuditResponse>("Usuario nao autenticado para auditar estrutura do curso.");
         }
 
         CourseStructureAuditSummary? audit;
@@ -507,12 +507,12 @@ public sealed class MoodleCourseContentsTools(
         }
         catch
         {
-            return Error<CourseStructureAuditResponse>("Nao foi possivel auditar a estrutura do curso no Moodle neste momento.");
+            return ToolResultHelper.Error<CourseStructureAuditResponse>("Nao foi possivel auditar a estrutura do curso no Moodle neste momento.");
         }
 
         if (audit is null)
         {
-            return Error<CourseStructureAuditResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<CourseStructureAuditResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         var data = ToAuditResponse(audit);
@@ -641,22 +641,7 @@ public sealed class MoodleCourseContentsTools(
                 finding.ModuleType)).ToArray());
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            Data: default,
-            Warnings: [message],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 
     public sealed record ListCourseContentsResponse(
         [property: JsonPropertyName("courseId")] string CourseId,

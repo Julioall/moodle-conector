@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -372,14 +372,14 @@ public sealed class MoodleCourseActivitiesTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListCourseActivitiesResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListCourseActivitiesResponse>("Informe um identificador de curso.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListCourseActivitiesResponse>("Usuario nao autenticado para consultar atividades.");
+            return ToolResultHelper.Error<ListCourseActivitiesResponse>("Usuario nao autenticado para consultar atividades.");
         }
 
         CourseActivitiesSummary? activities;
@@ -395,12 +395,12 @@ public sealed class MoodleCourseActivitiesTools(
         }
         catch
         {
-            return Error<ListCourseActivitiesResponse>("Nao foi possivel listar atividades no Moodle neste momento.");
+            return ToolResultHelper.Error<ListCourseActivitiesResponse>("Nao foi possivel listar atividades no Moodle neste momento.");
         }
 
         if (activities is null)
         {
-            return Error<ListCourseActivitiesResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<ListCourseActivitiesResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         var data = ToActivitiesResponse(activities);
@@ -423,19 +423,19 @@ public sealed class MoodleCourseActivitiesTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CourseActivityDetailsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<CourseActivityDetailsResponse>("Informe um identificador de curso.");
         }
 
         if (string.IsNullOrWhiteSpace(activityId))
         {
-            return Error<CourseActivityDetailsResponse>("Informe um identificador de atividade.");
+            return ToolResultHelper.Error<CourseActivityDetailsResponse>("Informe um identificador de atividade.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CourseActivityDetailsResponse>("Usuario nao autenticado para consultar atividade.");
+            return ToolResultHelper.Error<CourseActivityDetailsResponse>("Usuario nao autenticado para consultar atividade.");
         }
 
         CourseActivitySummary? activity;
@@ -451,12 +451,12 @@ public sealed class MoodleCourseActivitiesTools(
         }
         catch
         {
-            return Error<CourseActivityDetailsResponse>("Nao foi possivel consultar a atividade no Moodle neste momento.");
+            return ToolResultHelper.Error<CourseActivityDetailsResponse>("Nao foi possivel consultar a atividade no Moodle neste momento.");
         }
 
         if (activity is null)
         {
-            return Error<CourseActivityDetailsResponse>("Atividade nao encontrada no curso informado.");
+            return ToolResultHelper.Error<CourseActivityDetailsResponse>("Atividade nao encontrada no curso informado.");
         }
 
         var data = new CourseActivityDetailsResponse(ToActivityItem(activity));
@@ -479,14 +479,14 @@ public sealed class MoodleCourseActivitiesTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListActivityDeadlinesResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListActivityDeadlinesResponse>("Informe um identificador de curso.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListActivityDeadlinesResponse>("Usuario nao autenticado para consultar prazos de atividades.");
+            return ToolResultHelper.Error<ListActivityDeadlinesResponse>("Usuario nao autenticado para consultar prazos de atividades.");
         }
 
         CourseActivityDeadlinesSummary? deadlines;
@@ -502,12 +502,12 @@ public sealed class MoodleCourseActivitiesTools(
         }
         catch
         {
-            return Error<ListActivityDeadlinesResponse>("Nao foi possivel consultar prazos de atividades no Moodle neste momento.");
+            return ToolResultHelper.Error<ListActivityDeadlinesResponse>("Nao foi possivel consultar prazos de atividades no Moodle neste momento.");
         }
 
         if (deadlines is null)
         {
-            return Error<ListActivityDeadlinesResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<ListActivityDeadlinesResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         var data = ToDeadlinesResponse(deadlines);
@@ -593,22 +593,7 @@ public sealed class MoodleCourseActivitiesTools(
             activity.FileCount);
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            Data: default,
-            Warnings: [message],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 
     public sealed record ListCourseActivitiesResponse(
         [property: JsonPropertyName("courseId")] string CourseId,

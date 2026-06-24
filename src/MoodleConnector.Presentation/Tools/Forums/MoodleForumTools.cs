@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -256,17 +256,17 @@ public sealed class MoodleForumTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ReadForumResponse>(language == "pt" ? "Informe um identificador de curso." : "Provide a course identifier.");
+            return ToolResultHelper.Error<ReadForumResponse>(language == "pt" ? "Informe um identificador de curso." : "Provide a course identifier.");
         }
 
         if (string.IsNullOrWhiteSpace(forumId))
         {
-            return Error<ReadForumResponse>(language == "pt" ? "Informe um identificador de forum." : "Provide a forum identifier.");
+            return ToolResultHelper.Error<ReadForumResponse>(language == "pt" ? "Informe um identificador de forum." : "Provide a forum identifier.");
         }
 
         if (!TryNormalizeSortBy(sortBy, out var normalizedSortBy))
         {
-            return Error<ReadForumResponse>(
+            return ToolResultHelper.Error<ReadForumResponse>(
                 language == "pt"
                     ? "Campo de ordenacao invalido. Use id, timemodified, timestart ou timeend."
                     : "Invalid sort field. Use id, timemodified, timestart, or timeend.");
@@ -274,7 +274,7 @@ public sealed class MoodleForumTools(
 
         if (!TryNormalizeSortDirection(sortDirection, out var normalizedSortDirection))
         {
-            return Error<ReadForumResponse>(
+            return ToolResultHelper.Error<ReadForumResponse>(
                 language == "pt"
                     ? "Direcao de ordenacao invalida. Use ASC ou DESC."
                     : "Invalid sort direction. Use ASC or DESC.");
@@ -284,7 +284,7 @@ public sealed class MoodleForumTools(
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ReadForumResponse>(
+            return ToolResultHelper.Error<ReadForumResponse>(
                 language == "pt"
                     ? "Usuario nao autenticado para ler forum."
                     : "User is not authenticated to read forum.");
@@ -312,7 +312,7 @@ public sealed class MoodleForumTools(
         }
         catch
         {
-            return Error<ReadForumResponse>(
+            return ToolResultHelper.Error<ReadForumResponse>(
                 language == "pt"
                     ? "Nao foi possivel ler o forum no Moodle neste momento."
                     : "Could not read the Moodle forum at this time.");
@@ -320,7 +320,7 @@ public sealed class MoodleForumTools(
 
         if (forumPage is null)
         {
-            return Error<ReadForumResponse>(
+            return ToolResultHelper.Error<ReadForumResponse>(
                 language == "pt"
                     ? "Curso ou forum nao encontrados entre os dados autorizados do usuario."
                     : "Course or forum was not found in the user's authorized data.");
@@ -351,29 +351,29 @@ public sealed class MoodleForumTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe um identificador de curso." : "Provide a course identifier.");
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe um identificador de curso." : "Provide a course identifier.");
         }
 
         if (string.IsNullOrWhiteSpace(forumId))
         {
-            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe um identificador de forum." : "Provide a forum identifier.");
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe um identificador de forum." : "Provide a forum identifier.");
         }
 
         if (string.IsNullOrWhiteSpace(subject))
         {
-            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe o assunto do post." : "Provide the post subject.");
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe o assunto do post." : "Provide the post subject.");
         }
 
         if (string.IsNullOrWhiteSpace(messageHtml))
         {
-            return Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe a mensagem do post." : "Provide the post message.");
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(language == "pt" ? "Informe a mensagem do post." : "Provide the post message.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CreateForumPostPreviewResult>(
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(
                 language == "pt"
                     ? "Usuario nao autenticado para publicar em forum."
                     : "User is not authenticated to publish in forum.");
@@ -400,15 +400,15 @@ public sealed class MoodleForumTools(
         }
         catch (ArgumentException ex)
         {
-            return Error<CreateForumPostPreviewResult>(ex.Message);
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            return Error<CreateForumPostPreviewResult>(ex.Message);
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(ex.Message);
         }
         catch
         {
-            return Error<CreateForumPostPreviewResult>(
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(
                 language == "pt"
                     ? "Nao foi possivel criar a previa de publicacao no forum neste momento."
                     : "Could not create the forum post preview at this time.");
@@ -416,7 +416,7 @@ public sealed class MoodleForumTools(
 
         if (data is null)
         {
-            return Error<CreateForumPostPreviewResult>(
+            return ToolResultHelper.Error<CreateForumPostPreviewResult>(
                 language == "pt"
                     ? "Curso, forum, discussao ou post nao encontrados entre os dados autorizados do usuario."
                     : "Course, forum, discussion, or post was not found in the user's authorized data.");
@@ -445,12 +445,12 @@ public sealed class MoodleForumTools(
     {
         if (pendingActionId == Guid.Empty)
         {
-            return Error<ConfirmForumPostResult>(language == "pt" ? "Informe uma acao pendente valida." : "Provide a valid pending action id.");
+            return ToolResultHelper.Error<ConfirmForumPostResult>(language == "pt" ? "Informe uma acao pendente valida." : "Provide a valid pending action id.");
         }
 
         if (string.IsNullOrWhiteSpace(confirmationText))
         {
-            return Error<ConfirmForumPostResult>(language == "pt" ? "Informe o texto literal de confirmacao." : "Provide the literal confirmation text.");
+            return ToolResultHelper.Error<ConfirmForumPostResult>(language == "pt" ? "Informe o texto literal de confirmacao." : "Provide the literal confirmation text.");
         }
 
         ConfirmForumPostResult data;
@@ -466,11 +466,11 @@ public sealed class MoodleForumTools(
         }
         catch (InvalidOperationException ex)
         {
-            return Error<ConfirmForumPostResult>(ex.Message);
+            return ToolResultHelper.Error<ConfirmForumPostResult>(ex.Message);
         }
         catch
         {
-            return Error<ConfirmForumPostResult>(
+            return ToolResultHelper.Error<ConfirmForumPostResult>(
                 language == "pt"
                     ? "Nao foi possivel confirmar a publicacao no forum neste momento."
                     : "Could not confirm the forum post at this time.");
@@ -652,22 +652,7 @@ public sealed class MoodleForumTools(
         return false;
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            Data: default,
-            Warnings: [message],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 
     public sealed record ReadForumResponse(
         [property: JsonPropertyName("courseId")] string CourseId,

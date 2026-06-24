@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using MediatR;
 using ModelContextProtocol.Protocol;
@@ -67,19 +67,19 @@ public sealed class MoodleGradebookTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CourseGradebook>("Informe um identificador de curso valido.");
+            return ToolResultHelper.Error<CourseGradebook>("Informe um identificador de curso valido.");
         }
 
         if (string.IsNullOrWhiteSpace(studentId))
         {
-            return Error<CourseGradebook>("Informe um identificador de estudante valido.");
+            return ToolResultHelper.Error<CourseGradebook>("Informe um identificador de estudante valido.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CourseGradebook>("Usuario nao autenticado para consultar o boletim.");
+            return ToolResultHelper.Error<CourseGradebook>("Usuario nao autenticado para consultar o boletim.");
         }
 
         CourseGradebook data;
@@ -95,7 +95,7 @@ public sealed class MoodleGradebookTools(
         }
         catch
         {
-            return Error<CourseGradebook>("Nao foi possivel consultar o boletim do aluno neste momento.");
+            return ToolResultHelper.Error<CourseGradebook>("Nao foi possivel consultar o boletim do aluno neste momento.");
         }
 
         var response = new ToolResponse<CourseGradebook>(
@@ -116,20 +116,5 @@ public sealed class MoodleGradebookTools(
         };
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            default!,
-            [message],
-            null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 }

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -289,19 +289,19 @@ public sealed class MoodleParticipantsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListCourseParticipantsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Informe um identificador de curso.");
         }
 
         if (!TryParseStatus(status, out var statusFilter))
         {
-            return Error<ListCourseParticipantsResponse>("Filtro de status invalido. Use ativos, suspensos ou todos.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Filtro de status invalido. Use ativos, suspensos ou todos.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListCourseParticipantsResponse>("Usuario nao autenticado para consultar participantes.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Usuario nao autenticado para consultar participantes.");
         }
 
         CourseParticipantsPage? participantsPage;
@@ -324,12 +324,12 @@ public sealed class MoodleParticipantsTools(
         }
         catch
         {
-            return Error<ListCourseParticipantsResponse>("Nao foi possivel listar participantes no Moodle neste momento.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Nao foi possivel listar participantes no Moodle neste momento.");
         }
 
         if (participantsPage is null)
         {
-            return Error<ListCourseParticipantsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         return ParticipantsSuccess(participantsPage);
@@ -347,24 +347,24 @@ public sealed class MoodleParticipantsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListCourseParticipantsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Informe um identificador de curso.");
         }
 
         if (string.IsNullOrWhiteSpace(groupId))
         {
-            return Error<ListCourseParticipantsResponse>("Informe um identificador de grupo.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Informe um identificador de grupo.");
         }
 
         if (!TryParseStatus(status, out var statusFilter))
         {
-            return Error<ListCourseParticipantsResponse>("Filtro de status invalido. Use ativos, suspensos ou todos.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Filtro de status invalido. Use ativos, suspensos ou todos.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListCourseParticipantsResponse>("Usuario nao autenticado para consultar membros do grupo.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Usuario nao autenticado para consultar membros do grupo.");
         }
 
         CourseParticipantsPage? participantsPage;
@@ -387,12 +387,12 @@ public sealed class MoodleParticipantsTools(
         }
         catch
         {
-            return Error<ListCourseParticipantsResponse>("Nao foi possivel consultar membros do grupo no Moodle neste momento.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Nao foi possivel consultar membros do grupo no Moodle neste momento.");
         }
 
         if (participantsPage is null)
         {
-            return Error<ListCourseParticipantsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         return ParticipantsSuccess(participantsPage);
@@ -405,14 +405,14 @@ public sealed class MoodleParticipantsTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<ListCourseGroupsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<ListCourseGroupsResponse>("Informe um identificador de curso.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListCourseGroupsResponse>("Usuario nao autenticado para consultar grupos.");
+            return ToolResultHelper.Error<ListCourseGroupsResponse>("Usuario nao autenticado para consultar grupos.");
         }
 
         IReadOnlyList<CourseGroupSummary>? groups;
@@ -428,12 +428,12 @@ public sealed class MoodleParticipantsTools(
         }
         catch
         {
-            return Error<ListCourseGroupsResponse>("Nao foi possivel listar grupos no Moodle neste momento.");
+            return ToolResultHelper.Error<ListCourseGroupsResponse>("Nao foi possivel listar grupos no Moodle neste momento.");
         }
 
         if (groups is null)
         {
-            return Error<ListCourseGroupsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<ListCourseGroupsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         var data = new ListCourseGroupsResponse(
@@ -547,22 +547,7 @@ public sealed class MoodleParticipantsTools(
             group.IdNumber);
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            Data: default,
-            Warnings: [message],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 
     public sealed record ListCourseParticipantsResponse(
         [property: JsonPropertyName("courseId")] string CourseId,

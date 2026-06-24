@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -40,7 +40,7 @@ public sealed class MoodleCoursesTools(
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListMyCoursesResponse>("Usuario nao autenticado para listar cursos.");
+            return ToolResultHelper.Error<ListMyCoursesResponse>("Usuario nao autenticado para listar cursos.");
         }
 
         PagedCourses paged;
@@ -54,7 +54,7 @@ public sealed class MoodleCoursesTools(
         }
         catch
         {
-            return Error<ListMyCoursesResponse>("Nao foi possivel listar os cursos no Moodle neste momento.");
+            return ToolResultHelper.Error<ListMyCoursesResponse>("Nao foi possivel listar os cursos no Moodle neste momento.");
         }
 
         var data = new ListMyCoursesResponse(
@@ -312,14 +312,14 @@ public sealed class MoodleCoursesTools(
     {
         if (string.IsNullOrWhiteSpace(query))
         {
-            return Error<ListMyCoursesResponse>("Informe um termo de busca para localizar cursos.");
+            return ToolResultHelper.Error<ListMyCoursesResponse>("Informe um termo de busca para localizar cursos.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<ListMyCoursesResponse>("Usuario nao autenticado para buscar cursos.");
+            return ToolResultHelper.Error<ListMyCoursesResponse>("Usuario nao autenticado para buscar cursos.");
         }
 
         IReadOnlyList<CourseSummary> courses;
@@ -333,7 +333,7 @@ public sealed class MoodleCoursesTools(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Error<ListMyCoursesResponse>($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
+            return ToolResultHelper.Error<ListMyCoursesResponse>($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
         }
 
         var data = new ListMyCoursesResponse(courses.Count, 1, 1, false, courses.Select(ToCourseItem).ToArray());
@@ -354,14 +354,14 @@ public sealed class MoodleCoursesTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<CourseDetailsResponse>("Informe um identificador de curso.");
+            return ToolResultHelper.Error<CourseDetailsResponse>("Informe um identificador de curso.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<CourseDetailsResponse>("Usuario nao autenticado para consultar curso.");
+            return ToolResultHelper.Error<CourseDetailsResponse>("Usuario nao autenticado para consultar curso.");
         }
 
         CourseSummary? course;
@@ -375,12 +375,12 @@ public sealed class MoodleCoursesTools(
         }
         catch
         {
-            return Error<CourseDetailsResponse>("Nao foi possivel consultar o curso no Moodle neste momento.");
+            return ToolResultHelper.Error<CourseDetailsResponse>("Nao foi possivel consultar o curso no Moodle neste momento.");
         }
 
         if (course is null)
         {
-            return Error<CourseDetailsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<CourseDetailsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
         var data = new CourseDetailsResponse(ToCourseItem(course));
@@ -516,22 +516,7 @@ public sealed class MoodleCoursesTools(
         };
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            Data: default,
-            Warnings: [message],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 
     public sealed record ListMyCoursesResponse(
         [property: JsonPropertyName("total")] int Total,

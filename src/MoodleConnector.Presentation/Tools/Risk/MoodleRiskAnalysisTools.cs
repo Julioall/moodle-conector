@@ -89,14 +89,14 @@ public sealed class MoodleRiskAnalysisTools(
     {
         if (string.IsNullOrWhiteSpace(courseId))
         {
-            return Error<IReadOnlyList<StudentRiskReport>>("Informe um identificador de curso valido.");
+            return ToolResultHelper.Error<IReadOnlyList<StudentRiskReport>>("Informe um identificador de curso valido.");
         }
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
         {
-            return Error<IReadOnlyList<StudentRiskReport>>("Usuario nao autenticado para gerar relatorio.");
+            return ToolResultHelper.Error<IReadOnlyList<StudentRiskReport>>("Usuario nao autenticado para gerar relatorio.");
         }
 
         IReadOnlyList<StudentRiskReport> data;
@@ -112,7 +112,7 @@ public sealed class MoodleRiskAnalysisTools(
         }
         catch
         {
-            return Error<IReadOnlyList<StudentRiskReport>>("Nao foi possivel gerar o relatorio neste momento.");
+            return ToolResultHelper.Error<IReadOnlyList<StudentRiskReport>>("Nao foi possivel gerar o relatorio neste momento.");
         }
 
         var response = new ToolResponse<IReadOnlyList<StudentRiskReport>>(
@@ -137,20 +137,5 @@ public sealed class MoodleRiskAnalysisTools(
         };
     }
 
-    private static CallToolResult Error<T>(string message)
-    {
-        var response = new ToolResponse<T>(
-            "error",
-            default!,
-            [message],
-            null,
-            DateTimeOffset.UtcNow);
 
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock { Text = message }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = true
-        };
-    }
 }
