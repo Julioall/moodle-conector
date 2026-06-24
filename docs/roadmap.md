@@ -1,6 +1,6 @@
 # Roadmap por Domínios do Moodle Connector MCP
 
-Este arquivo preserva o roadmap funcional de longo prazo. Ele não é uma lista de tarefas operacionais imediatas; para pendências prontas para execução, use `TODO.md`.
+Este arquivo preserva o roadmap funcional de longo prazo.
 
 ## Plano de implementação em fases
 
@@ -289,6 +289,8 @@ core_calendar_get_action_events_by_course
 
 # Fase 3 — Domínio Participantes
 
+**Status:** concuída.
+
 ## Objetivo
 
 Consultar estudantes, participantes, grupos e vínculo no curso com privacidade e paginação.
@@ -342,6 +344,7 @@ core_group_get_group_members
 - [x] Usuário consegue listar participantes do curso.
 - [x] Usuário consegue listar estudantes ativos.
 - [x] Usuário consegue consultar grupos.
+- [x] Usuário consegue consultar membros de grupo.
 - [x] Usuário consegue consultar último acesso quando a API e permissões permitirem.
 - [x] Dados pessoais são minimizados.
 - [x] Testes cobrem paginação, filtro ativo/inativo, curso sem estudantes e usuário sem permissão.
@@ -349,6 +352,8 @@ core_group_get_group_members
 ---
 
 # Fase 4 — Domínio Conteúdos e estrutura da sala
+
+**Status:** concuída.
 
 ## Objetivo
 
@@ -427,6 +432,8 @@ mod_folder_get_folders_by_courses
 
 # Fase 5 — Domínio Atividades
 
+**Status:** concuída. Tools candidatas adicionais (`listar_foruns_curso`, `consultar_linha_do_tempo_curso`, `listar_eventos_calendario_curso`) ainda não implementadas.
+
 ## Objetivo
 
 Listar atividades do curso, prazos, configurações principais e status geral sem consultar submissões e notas em massa.
@@ -495,6 +502,8 @@ core_calendar_get_action_events_by_course
 
 # Fase 6 — Domínio Entregas e submissões
 
+**Status:** concuída. Tools candidatas adicionais (`consultar_tentativas_quiz`, `consultar_tentativas_scorm`) ainda não implementadas.
+
 ## Objetivo
 
 Consultar entregas dos estudantes, pendências, atrasos, tentativas e itens aguardando correção.
@@ -561,6 +570,8 @@ mod_assign_get_grades
 
 # Fase 7 — Domínio Avaliações e notas em leitura
 
+**Status:** parcialmente implementada. `consultar_boletim_aluno` / `get_student_gradebook` estão implementadas. Tools de resumo agregado, distribuição e gradebook coletivo ainda não foram implementadas.
+
 ## Objetivo
 
 Consultar notas, itens avaliativos, distribuição de desempenho e pendências de correção sem executar escrita.
@@ -615,15 +626,17 @@ mod_assign_get_grades
 
 ## Definition of done
 
-- [ ] Usuário consegue consultar notas de um estudante.
+- [x] Usuário consegue consultar notas de um estudante (`consultar_boletim_aluno` / `get_student_gradebook`).
 - [ ] Usuário consegue consultar resumo de avaliações do curso.
-- [ ] Usuário consegue consultar itens avaliativos.
-- [ ] Usuário consegue identificar pendências de correção.
+- [ ] Usuário consegue consultar itens avaliativos agregados.
+- [ ] Usuário consegue identificar pendências de correção coletivas.
 - [ ] Testes cobrem estudante sem nota, item sem nota, curso sem gradebook e ausência de permissão.
 
 ---
 
 # Fase 8 — Domínio Progresso, conclusão e participação
+
+**Status:** parcialmente implementada. `consultar_progresso_aluno` / `get_student_completion` estão implementadas. Tools de participação em fóruns, acesso e visão agregada ainda não foram implementadas.
 
 ## Objetivo
 
@@ -681,7 +694,7 @@ mod_forum_get_discussion_posts
 
 ## Definition of done
 
-- [ ] Usuário consegue consultar conclusão individual.
+- [x] Usuário consegue consultar conclusão individual (`consultar_progresso_aluno` / `get_student_completion`).
 - [ ] Usuário consegue consultar progresso agregado do curso.
 - [ ] Usuário consegue listar estudantes sem acesso recente.
 - [ ] Usuário consegue listar estudantes com atividades incompletas.
@@ -690,6 +703,8 @@ mod_forum_get_discussion_posts
 ---
 
 # Fase 9 — Domínio Risco e acompanhamento pedagógico
+
+**Status:** parcialmente implementada. `gerar_relatorio_risco_estudantes` / `report_students_at_risk` estão implementadas. Tools de intervenção, perfil 360 e recuperação ainda não foram implementadas.
 
 ## Objetivo
 
@@ -769,16 +784,17 @@ Necessita verificação humana
 
 ## Definition of done
 
-- [ ] Usuário consegue listar estudantes em atenção.
-- [ ] Usuário consegue listar possível risco por inatividade.
-- [ ] Usuário consegue listar possível risco por desempenho.
-- [ ] Usuário consegue listar possível risco combinado.
+- [x] Usuário consegue listar estudantes em possível risco (`gerar_relatorio_risco_estudantes` / `report_students_at_risk`).
+- [ ] Usuário consegue listar possível risco por inatividade isolada.
+- [ ] Usuário consegue listar possível risco por desempenho isolado.
 - [ ] Resposta separa achados, riscos, ações e limitações.
 - [ ] Testes cobrem critérios configuráveis, dados ausentes e estudante sem nota.
 
 ---
 
 # Fase 10 — Domínio Relatórios
+
+**Status:** parcialmente implementada. `exportar_relatorio_correcao_coordenacao` está implementada como parte do fluxo de correção assistida. Relatórios genéricos de curso, participação e turma ainda não foram implementados.
 
 ## Objetivo
 
@@ -840,10 +856,11 @@ O risco depende do tipo de dado incluído.
 
 ## Definition of done
 
-- [ ] Relatório de resumo do curso funciona.
+- [x] Relatório de correção assistida para coordenação funciona (`exportar_relatorio_correcao_coordenacao`).
+- [ ] Relatório de resumo genérico do curso funciona.
 - [ ] Relatório de pendências de entrega funciona.
-- [ ] Relatório de pendências de correção funciona.
-- [ ] Relatório de risco estudantil funciona.
+- [ ] Relatório de pendências de correção genérico funciona.
+- [ ] Relatório de risco estudantil agregado funciona.
 - [ ] Auditoria de sala funciona em modo leitura.
 - [ ] Testes cobrem relatório vazio, relatório com dados sensíveis e limitações de permissão.
 
@@ -984,6 +1001,27 @@ HumanConfirmedWrite
 
 # Fase 13 — Domínio Feedback assistido
 
+**Status:** substancialmente implementada. O fluxo completo de correção assistida (criar lote, extrair contexto, preparar pacote IA, salvar correções IA, revisar, preparar prévia e confirmar lançamento) está implementado. Feedback individual fora de lote ainda não foi implementado.
+
+Tools implementadas nesta fase:
+
+```text
+listar_entregas_corrigiveis
+criar_lote_correcao_assistida
+consultar_status_lote_correcao
+consultar_item_correcao_assistida
+consultar_contexto_item_correcao_assistida
+atualizar_rascunho_correcao
+preparar_correcao_entrega
+preparar_lote_correcao_ia
+salvar_correcoes_ia_lote
+revisar_feedbacks_lote
+consultar_auditoria_correcao_lote
+cancelar_lote_correcao_assistida
+exportar_relatorio_correcao_coordenacao
+grading-review-app (MCP Resource)
+```
+
 ## Objetivo
 
 Preparar feedback textual para atividades, com base em enunciado, submissão, critérios e rubrica quando disponível, sem alterar nota automaticamente.
@@ -1048,15 +1086,18 @@ mod_assign_save_grades
 
 ## Definition of done
 
-- [ ] Pacote de correção reúne dados necessários.
-- [ ] Feedback preliminar é gerado como rascunho.
-- [ ] Feedback não é publicado sem confirmação.
-- [ ] Auditoria permite rastrear o texto aprovado.
+- [x] Pacote de correção reúne dados necessários (lote, contexto, rubrica, anexos).
+- [x] Feedback preliminar é gerado como rascunho interno (`salvar_correcoes_ia_lote`).
+- [x] Feedback não é publicado sem confirmação humana (`criar_previa_lancamento_lote` + `confirmar_lancamento_lote_moodle`).
+- [x] Auditoria permite rastrear o texto aprovado (`consultar_auditoria_correcao` / `consultar_auditoria_correcao_lote`).
+- [ ] Feedback individual fora de lote implementado.
 - [ ] Testes cobrem ausência de rubrica, submissão vazia, confirmação errada e feature flag desabilitada.
 
 ---
 
 # Fase 14 — Domínio Notas e avaliação crítica
+
+**Status:** parcialmente implementada. O lançamento de notas em lote via `confirmar_lancamento_lote_moodle` está implementado como parte do fluxo de correção assistida. Lançamento de nota individual (`preparar_lancamento_nota` / `confirmar_lancamento_nota`) ainda não foi implementado.
 
 ## Objetivo
 
@@ -1118,13 +1159,12 @@ mod_assign_submit_grading_form
 
 ## Definition of done
 
-- [ ] Nota individual pode ser preparada.
-- [ ] Nota individual só é lançada após confirmação forte.
-- [ ] Nota fora do intervalo é rejeitada.
-- [ ] Aluno incorreto é rejeitado.
-- [ ] Atividade incorreta é rejeitada.
+- [x] Nota em lote pode ser preparada e confirmada via `criar_previa_lancamento_lote` + `confirmar_lancamento_lote_moodle`.
+- [x] Nota só é lançada após confirmação com texto exato.
+- [ ] Nota individual pode ser preparada e confirmada sem lote.
+- [ ] Nota fora do intervalo é rejeitada na tool individual.
 - [ ] Auditoria registra nota anterior quando a API permitir.
-- [ ] Testes cobrem limites, permissão, idempotência, feature flag e confirmação textual.
+- [ ] Testes cobrem limites, permissão, idempotência, feature flag e confirmação textual individual.
 
 ---
 
@@ -1594,28 +1634,36 @@ decisão automática de aprovação, reprovação ou evasão
 
 # Próximo passo recomendado
 
-Implementar a Fase 2 com foco em `listar_meus_cursos`, mantendo a listagem leve e sem cálculos derivados.
+As fases 0–6 estão concluídas. O fluxo de correção assistida (fases 13–14, parcial) está substancialmente implementado. Os próximos passos em ordem de prioridade são:
 
-## Primeira entrega objetiva
-
-```text
-Tool: listar_meus_cursos
-Tipo: ReadOnly
-Escopo: moodle.read.courses
-Retorno: ToolResponse<ListCoursesResult>
-Sem notas
-Sem entregas
-Sem risco
-Com cache curto
-Com teste MCP
-```
-
-## Em seguida
+## Completar fases 7 e 8
 
 ```text
-buscar_cursos
-consultar_curso
-consultar_calendario_curso
+Fase 7 - Avaliações: resumo agregado, distribuição e gradebook coletivo
+Fase 8 - Progresso: acesso recente, participação em fóruns e visão agregada
 ```
 
-Depois avançar para Participantes, Conteúdos e Atividades.
+Entrega esperada:
+
+```text
+O usuário consegue acompanhar execução, desempenho agregado e participação.
+```
+
+## Evoluir fase 9 e adicionar fase 10
+
+```text
+Fase 9 - Risco: segmentação por inatividade e desempenho separados
+Fase 10 - Relatórios genéricos de curso, entrega e participação
+```
+
+## Comunicação (fase 11)
+
+```text
+Fase 11 - Mensagens Moodle com fluxo prepare/confirm
+```
+
+## Fase 14 individual
+
+```text
+Fase 14 - Nota individual sem lote (preparar_lancamento_nota / confirmar_lancamento_nota)
+```
