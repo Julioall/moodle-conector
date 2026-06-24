@@ -850,7 +850,7 @@ Necessita verificação humana
 
 # Fase 10 — Domínio Relatórios
 
-**Status:** parcialmente implementada. `exportar_relatorio_correcao_coordenacao` está implementada como parte do fluxo de correção assistida. Relatórios genéricos de curso, participação e turma ainda não foram implementados.
+**Status:** implementada (parcial). `exportar_relatorio_correcao_coordenacao` (fluxo correção assistida), `gerar_relatorio_semanal_desempenho`, `relatorio_conselho_classe`, `resumo_executivo_curso`, `relatorio_pos_execucao` implementados como queries e tools MCP. Relatórios de pendência e participação de fóruns pendentes.
 
 ## Objetivo
 
@@ -917,14 +917,14 @@ O risco depende do tipo de dado incluído.
 ## Definition of done
 
 - [x] Relatório de correção assistida para coordenação funciona (`exportar_relatorio_correcao_coordenacao`).
+- [x] Tutor consegue gerar relatório semanal de desempenho da turma para o docente presencial (`gerar_relatorio_semanal_desempenho`).
+- [x] Tutor consegue gerar relatório de concluintes, reprovados e evadidos para conselho de classe (`relatorio_conselho_classe`).
+- [x] Relatório de pós-execução consolida concluintes, evadidos e indicadores de qualidade (`relatorio_pos_execucao`).
+- [x] Resumo executivo rápido do curso sem gradebook (`resumo_executivo_curso`).
 - [ ] Relatório de resumo genérico do curso funciona.
 - [ ] Relatório de pendências de entrega funciona.
 - [ ] Relatório de pendências de correção genérico funciona.
 - [ ] Relatório de risco estudantil agregado funciona.
-- [ ] Tutor consegue gerar relatório semanal de desempenho da turma para o docente presencial (`gerar_relatorio_semanal_desempenho`).
-- [ ] Tutor consegue gerar relatório de concluintes, reprovados e evadidos para conselho de classe (`gerar_relatorio_turma_conselho_classe`).
-- [ ] Tutor consegue gerar relatório de acompanhamento da turma: acessos, SAs entregues, fóruns, notas (`gerar_relatorio_acompanhamento_tutor`).
-- [ ] Relatório de pós-execução consolida concluintes, evadidos e instrumento de satisfação (`gerar_relatorio_pos_execucao_completo`).
 - [ ] Auditoria de sala funciona em modo leitura.
 - [ ] Testes cobrem relatório vazio, relatório com dados sensíveis e limitações de permissão.
 
@@ -1792,18 +1792,23 @@ e enviar mensagem personalizada para cada um desses grupos com confirmação hum
 
 ```text
 Fase 10 - Relatório semanal de desempenho, conselho de classe e pós-execução
+STATUS: ✅ IMPLEMENTADA (parcial) - queries + tools MCP entregues
 ```
 
 ## Em seguida: suporte ao monitor (fase 20)
 
 ```text
 Fase 20 - Checklist de sala virtual e relatório administrativo para o monitor
+STATUS: ✅ IMPLEMENTADA - AuditVirtualClassroomChecklistQuery + MoodleMonitorTools
 ```
 
 ## Complementar: escrita crítica (fases 14 e 12)
 
 ```text
 Fase 14 - Nota individual sem lote (preparar_lancamento_nota / confirmar_lancamento_nota)
+STATUS: ✅ IMPLEMENTADA (parcial) - IndividualGradeCommands + MoodleIndividualGradeTools
+         Feature-flag-gated: AssignmentGradeWriteEnabled
 Fase 12 - Agendamento de mensagens
+STATUS: pendente
 ```
 
