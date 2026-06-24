@@ -7,14 +7,14 @@ namespace MoodleConnector.Application.Tests.Courses;
 public class ListMyCoursesQueryHandlerTests
 {
     [Fact]
-    public async Task Deve_aplicar_clamp_de_limite_entre_1_e_20()
+    public async Task Deve_aplicar_clamp_de_limite_entre_1_e_100()
     {
         var gateway = new FakeGateway();
         var sut = new ListMyCoursesQueryHandler(gateway);
 
         await sut.Handle(new ListMyCoursesQuery("me", 999), CancellationToken.None);
 
-        Assert.Equal(20, gateway.LastLimit);
+        Assert.Equal(100, gateway.LastLimit);
     }
 
     [Fact]
@@ -42,6 +42,43 @@ public class ListMyCoursesQueryHandlerTests
     }
 
     [Fact]
+    public async Task Deve_repassar_pagina_para_gateway()
+    {
+        var gateway = new FakeGateway();
+        var sut = new ListMyCoursesQueryHandler(gateway);
+
+        await sut.Handle(new ListMyCoursesQuery("me", 10, Page: 3), CancellationToken.None);
+
+        Assert.Equal(3, gateway.LastPage);
+    }
+
+    [Fact]
+    public async Task Deve_garantir_pagina_minima_de_1_quando_valor_invalido_for_informado()
+    {
+        var gateway = new FakeGateway();
+        var sut = new ListMyCoursesQueryHandler(gateway);
+
+        await sut.Handle(new ListMyCoursesQuery("me", 10, Page: -5), CancellationToken.None);
+
+        Assert.Equal(1, gateway.LastPage);
+    }
+
+    [Fact]
+    public async Task Deve_retornar_metadados_de_paginacao_corretos()
+    {
+        var gateway = new FakeGateway { SimulatedTotal = 25, SimulatedPageSize = 10 };
+        var sut = new ListMyCoursesQueryHandler(gateway);
+
+        var result = await sut.Handle(new ListMyCoursesQuery("me", 10, Page: 2), CancellationToken.None);
+
+        Assert.Equal(25, result.TotalCount);
+        Assert.Equal(2, result.Page);
+        Assert.Equal(3, result.TotalPages);
+        Assert.True(result.HasNextPage);
+        Assert.True(result.HasPreviousPage);
+    }
+
+    [Fact]
     public async Task Deve_consultar_curso_por_identificador()
     {
         var gateway = new FakeGateway();
@@ -59,24 +96,29 @@ public class ListMyCoursesQueryHandlerTests
 
         public int LastLimit { get; private set; }
 
+        public int LastPage { get; private set; }
+
         public string LastQuery { get; private set; } = string.Empty;
 
         public string LastCourseId { get; private set; } = string.Empty;
 
-        public Task<IReadOnlyList<CourseSummary>> GetMyCoursesAsync(
+        public int SimulatedTotal { get; init; } = 1;
+
+        public int SimulatedPageSize { get; init; } = 10;
+
+        public Task<PagedCourses> GetMyCoursesAsync(
             string userExternalId,
             int limit,
+            int page,
             CancellationToken cancellationToken)
         {
             LastUserExternalId = userExternalId;
             LastLimit = limit;
+            LastPage = page;
 
-            IReadOnlyList<CourseSummary> response =
-            [
-                CreateCourseSummary()
-            ];
-
-            return Task.FromResult(response);
+            var course = CreateCourseSummary();
+            var paged = new PagedCourses([course], SimulatedTotal, page, SimulatedPageSize);
+            return Task.FromResult(paged);
         }
 
         public Task<IReadOnlyList<CourseSummary>> SearchMyCoursesAsync(

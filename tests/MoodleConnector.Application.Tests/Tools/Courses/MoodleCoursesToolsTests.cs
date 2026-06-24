@@ -17,7 +17,7 @@ public class MoodleCoursesToolsTests
         var resolver = new FakeMoodleUserResolver(777);
         var sut = new MoodleCoursesTools(mediator, selection, resolver);
 
-        var result = await sut.ListarMeusCursosAsync(3, "goias");
+        var result = await sut.ListarMeusCursosAsync(3, 1, "goias");
 
         Assert.False(result.IsError ?? false);
         Assert.Equal("goias", selection.Alias);
@@ -209,6 +209,72 @@ public class MoodleCoursesToolsTests
         Assert.Equal("Curso nao encontrado entre os cursos vinculados ao usuario.", structured.GetProperty("warnings")[0].GetString());
     }
 
+    [Fact]
+    public async Task Deve_incluir_metadados_de_paginacao_na_resposta()
+    {
+        var mediator = new FakeMediator { SimulatedTotal = 30, SimulatedPageSize = 10 };
+        var sut = new MoodleCoursesTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarMeusCursosAsync(10, 2);
+
+        Assert.False(result.IsError ?? false);
+        var data = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data");
+        Assert.Equal(30, data.GetProperty("total").GetInt32());
+        Assert.Equal(2, data.GetProperty("page").GetInt32());
+        Assert.Equal(3, data.GetProperty("total_pages").GetInt32());
+        Assert.True(data.GetProperty("has_next_page").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Deve_repassar_pagina_corretamente_para_query()
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleCoursesTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        await sut.ListarMeusCursosAsync(10, 4);
+
+        Assert.Equal(4, mediator.LastListQuery?.Page);
+        Assert.Equal(10, mediator.LastListQuery?.Limit);
+    }
+
+    [Fact]
+    public async Task Deve_incluir_hint_de_proxima_pagina_na_narracao()
+    {
+        var mediator = new FakeMediator { SimulatedTotal = 30, SimulatedPageSize = 10 };
+        var sut = new MoodleCoursesTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarMeusCursosAsync(10, 1);
+
+        var text = Assert.IsType<ModelContextProtocol.Protocol.TextContentBlock>(Assert.Single(result.Content)).Text;
+        Assert.Contains("Pagina 1 de 3", text);
+        Assert.Contains("pagina=2", text);
+    }
+
+    [Fact]
+    public async Task Nao_deve_incluir_hint_na_narracao_quando_nao_houver_proxima_pagina()
+    {
+        var mediator = new FakeMediator { SimulatedTotal = 5, SimulatedPageSize = 10 };
+        var sut = new MoodleCoursesTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarMeusCursosAsync(10, 1);
+
+        var text = Assert.IsType<ModelContextProtocol.Protocol.TextContentBlock>(Assert.Single(result.Content)).Text;
+        Assert.DoesNotContain("Pagina", text);
+        Assert.DoesNotContain("pagina=", text);
+    }
+
     private sealed class FakeMoodleConnectionSelection : IMoodleConnectionSelection
     {
         public string? Alias { get; set; }
@@ -236,6 +302,10 @@ public class MoodleCoursesToolsTests
 
         public bool ReturnNullCourse { get; init; }
 
+        public int SimulatedTotal { get; init; } = 1;
+
+        public int SimulatedPageSize { get; init; } = 20;
+
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -257,9 +327,11 @@ public class MoodleCoursesToolsTests
                     throw new InvalidOperationException("Falha simulada.");
                 }
 
-                IReadOnlyList<CourseSummary> data =
-                    ReturnEmpty ? [] : [CreateCourseSummary()];
-                return Task.FromResult((TResponse)data);
+                var course = CreateCourseSummary();
+                IReadOnlyList<CourseSummary> courses = ReturnEmpty ? [] : [course];
+                var effectiveTotal = ReturnEmpty ? 0 : SimulatedTotal;
+                var paged = new PagedCourses(courses, effectiveTotal, list.Page, SimulatedPageSize);
+                return Task.FromResult((TResponse)(object)paged);
             }
 
             if (request is SearchCoursesQuery search)
@@ -290,9 +362,11 @@ public class MoodleCoursesToolsTests
                     throw new InvalidOperationException("Falha simulada.");
                 }
 
-                IReadOnlyList<CourseSummary> data =
-                    ReturnEmpty ? [] : [CreateCourseSummary()];
-                return Task.FromResult<object?>(data);
+                var course = CreateCourseSummary();
+                IReadOnlyList<CourseSummary> courses = ReturnEmpty ? [] : [course];
+                var effectiveTotal = ReturnEmpty ? 0 : SimulatedTotal;
+                var paged = new PagedCourses(courses, effectiveTotal, list.Page, SimulatedPageSize);
+                return Task.FromResult<object?>(paged);
             }
 
             if (request is SearchCoursesQuery search)

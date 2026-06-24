@@ -4,19 +4,20 @@ using MoodleConnector.Domain;
 
 namespace MoodleConnector.Application.Courses;
 
-public sealed record ListMyCoursesQuery(string UserExternalId, int Limit) : IRequest<IReadOnlyList<CourseSummary>>;
+public sealed record ListMyCoursesQuery(string UserExternalId, int Limit, int Page = 1) : IRequest<PagedCourses>;
 
 public sealed record SearchCoursesQuery(string UserExternalId, string Query, int Limit) : IRequest<IReadOnlyList<CourseSummary>>;
 
 public sealed record GetCourseQuery(string UserExternalId, string CourseId) : IRequest<CourseSummary?>;
 
 public sealed class ListMyCoursesQueryHandler(IMoodleCoursesGateway gateway)
-    : IRequestHandler<ListMyCoursesQuery, IReadOnlyList<CourseSummary>>
+    : IRequestHandler<ListMyCoursesQuery, PagedCourses>
 {
-    public Task<IReadOnlyList<CourseSummary>> Handle(ListMyCoursesQuery request, CancellationToken cancellationToken)
+    public Task<PagedCourses> Handle(ListMyCoursesQuery request, CancellationToken cancellationToken)
     {
-        var safeLimit = Math.Clamp(request.Limit, 1, 20);
-        return gateway.GetMyCoursesAsync(request.UserExternalId, safeLimit, cancellationToken);
+        var safeLimit = Math.Clamp(request.Limit, 1, 100);
+        var safePage = Math.Max(request.Page, 1);
+        return gateway.GetMyCoursesAsync(request.UserExternalId, safeLimit, safePage, cancellationToken);
     }
 }
 

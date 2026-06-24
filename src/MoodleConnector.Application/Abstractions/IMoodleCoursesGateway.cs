@@ -4,9 +4,10 @@ namespace MoodleConnector.Application.Abstractions;
 
 public interface IMoodleCoursesGateway
 {
-    Task<IReadOnlyList<CourseSummary>> GetMyCoursesAsync(
+    Task<PagedCourses> GetMyCoursesAsync(
         string userExternalId,
         int limit,
+        int page,
         CancellationToken cancellationToken);
 
     Task<IReadOnlyList<CourseSummary>> SearchMyCoursesAsync(

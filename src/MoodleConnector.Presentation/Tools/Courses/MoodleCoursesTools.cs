@@ -26,10 +26,12 @@ public sealed class MoodleCoursesTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ListMyCoursesResponse>))]
-    [Description("Lista cursos vinculados ao usuario autenticado no Moodle. Esta e uma leitura sem escrita e otimizada para retorno rapido.")]
+    [Description("Lista cursos vinculados ao usuario autenticado no Moodle com suporte a paginacao. Use o parametro pagina para navegar entre as paginas de resultados.")]
     public async Task<CallToolResult> ListarMeusCursosAsync(
-        [Description("Quantidade maxima de cursos retornados (1 a 20).")]
-        int limite = 5,
+        [Description("Quantidade maxima de cursos por pagina (1 a 100). Padrao: 20.")]
+        int limite = 20,
+        [Description("Numero da pagina a retornar (base 1). Use para paginar e listar todos os cursos. Padrao: 1.")]
+        int pagina = 1,
         [Description("Alias do Moodle a consultar. Use quando o usuario mencionar um ambiente especifico, como goias, nacional ou ctm. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
@@ -41,10 +43,10 @@ public sealed class MoodleCoursesTools(
             return Error<ListMyCoursesResponse>("Usuario nao autenticado para listar cursos.");
         }
 
-        IReadOnlyList<CourseSummary> courses;
+        PagedCourses paged;
         try
         {
-            courses = await mediator.Send(new ListMyCoursesQuery(moodleUserId.Value.ToString(), limite), cancellationToken);
+            paged = await mediator.Send(new ListMyCoursesQuery(moodleUserId.Value.ToString(), limite, pagina), cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -56,8 +58,11 @@ public sealed class MoodleCoursesTools(
         }
 
         var data = new ListMyCoursesResponse(
-            courses.Count,
-            courses.Select(ToCourseItem).ToArray());
+            paged.TotalCount,
+            pagina,
+            paged.TotalPages,
+            paged.HasNextPage,
+            paged.Items.Select(ToCourseItem).ToArray());
         var response = new ToolResponse<ListMyCoursesResponse>(
             "ok",
             data,
@@ -88,15 +93,17 @@ public sealed class MoodleCoursesTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ListMyCoursesResponse>))]
-    [Description("Lists courses linked to the authenticated Moodle user without writing anything. Optimized for fast responses.")]
+    [Description("Lists courses linked to the authenticated Moodle user with pagination support. Use the page parameter to navigate through results.")]
     public Task<CallToolResult> ListCoursesAsync(
-        [Description("Maximum number of courses to return (1 to 20).")]
-        int limit = 5,
+        [Description("Maximum number of courses per page (1 to 100). Default: 20.")]
+        int limit = 20,
+        [Description("Page number to return (1-based). Use to paginate and list all courses. Default: 1.")]
+        int page = 1,
         [Description("Moodle connection alias to query, such as goias, nacional, or ctm. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
-        return ListarMeusCursosAsync(limit, moodleAlias, cancellationToken);
+        return ListarMeusCursosAsync(limit, page, moodleAlias, cancellationToken);
     }
 
     [McpServerTool(
@@ -329,7 +336,7 @@ public sealed class MoodleCoursesTools(
             return Error<ListMyCoursesResponse>($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
         }
 
-        var data = new ListMyCoursesResponse(courses.Count, courses.Select(ToCourseItem).ToArray());
+        var data = new ListMyCoursesResponse(courses.Count, 1, 1, false, courses.Select(ToCourseItem).ToArray());
         var response = new ToolResponse<ListMyCoursesResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
 
         return new CallToolResult
@@ -396,7 +403,18 @@ public sealed class MoodleCoursesTools(
 
         var lines = response.Courses.Select(course => $"- {course.FullName} (ID: {course.CourseId})");
 
-        return $"Encontrei {response.Total} curso(s):\n" + string.Join("\n", lines);
+        string paginationInfo;
+        if (response.TotalPages > 1)
+        {
+            var nextHint = response.HasNextPage ? $", use pagina={response.Page + 1} para ver mais" : string.Empty;
+            paginationInfo = $" (Pagina {response.Page} de {response.TotalPages}{nextHint})";
+        }
+        else
+        {
+            paginationInfo = string.Empty;
+        }
+
+        return $"Encontrei {response.Total} curso(s) no total{paginationInfo}:\n" + string.Join("\n", lines);
     }
 
     private static CourseItem ToCourseItem(CourseSummary course)
@@ -517,6 +535,9 @@ public sealed class MoodleCoursesTools(
 
     public sealed record ListMyCoursesResponse(
         [property: JsonPropertyName("total")] int Total,
+        [property: JsonPropertyName("page")] int Page,
+        [property: JsonPropertyName("total_pages")] int TotalPages,
+        [property: JsonPropertyName("has_next_page")] bool HasNextPage,
         [property: JsonPropertyName("courses")] IReadOnlyList<CourseItem> Courses);
 
     public sealed record CourseDetailsResponse(

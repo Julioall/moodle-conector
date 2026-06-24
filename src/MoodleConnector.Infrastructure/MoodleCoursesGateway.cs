@@ -20,14 +20,16 @@ internal sealed class MoodleCoursesGateway(
     private readonly MoodleApiOptions _options = options.Value;
     private static readonly TimeSpan CourseListCacheDuration = TimeSpan.FromMinutes(10);
 
-    public async Task<IReadOnlyList<CourseSummary>> GetMyCoursesAsync(
+    public async Task<PagedCourses> GetMyCoursesAsync(
         string userExternalId,
         int limit,
+        int page,
         CancellationToken cancellationToken)
     {
         var courses = await GetCachedCoursesAsync(userExternalId, cancellationToken);
-
-        return courses.Take(limit).ToArray();
+        var skip = (page - 1) * limit;
+        var items = courses.Skip(skip).Take(limit).ToArray();
+        return new PagedCourses(items, courses.Count, page, limit);
     }
 
     public async Task<IReadOnlyList<CourseSummary>> SearchMyCoursesAsync(

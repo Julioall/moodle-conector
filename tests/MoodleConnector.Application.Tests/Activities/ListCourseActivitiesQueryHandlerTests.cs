@@ -105,13 +105,7 @@ public class ListCourseActivitiesQueryHandlerTests
 
         public bool ReturnNullCourse { get; init; }
 
-        public Task<IReadOnlyList<CourseSummary>> GetMyCoursesAsync(
-            string userExternalId,
-            int limit,
-            CancellationToken cancellationToken)
-        {
-            throw new NotSupportedException();
-        }
+        public Task<PagedCourses> GetMyCoursesAsync(string userExternalId, int limit, int page, CancellationToken cancellationToken) { throw new NotSupportedException(); }
 
         public Task<IReadOnlyList<CourseSummary>> SearchMyCoursesAsync(
             string userExternalId,
