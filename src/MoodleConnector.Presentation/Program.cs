@@ -28,6 +28,8 @@ using MoodleConnector.Presentation.Tools.Risk;
 using MoodleConnector.Presentation.Tools.Forums;
 using MoodleConnector.Presentation.Tools.Submissions;
 using MoodleConnector.Presentation.Tools.Messages;
+using MoodleConnector.Presentation.Tools.Reports;
+using MoodleConnector.Presentation.Tools.Monitor;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.Threading.RateLimiting;
@@ -268,12 +270,23 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleRiskAnalysisTools>()
     .WithTools<MoodleGradingContextDiagnosticsTools>()
     .WithTools<MoodleGradingReviewAppTools>()
+    .WithTools<MoodleTutorMessageTools>()
+    .WithTools<MoodleReportTools>()
+    .WithTools<MoodleMonitorTools>()
     .WithResources<MoodleGradingReviewAppResources>();
 
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();
 if (featureOptions.DemoToolsEnabled)
 {
     mcpServerBuilder.WithTools<DemoPendingActionTools>();
+}
+
+var assignmentWriteOptions = builder.Configuration
+    .GetSection(AssignmentWriteFeatureOptions.SectionName)
+    .Get<AssignmentWriteFeatureOptions>() ?? new AssignmentWriteFeatureOptions();
+if (assignmentWriteOptions.AssignmentGradeWriteEnabled)
+{
+    mcpServerBuilder.WithTools<MoodleIndividualGradeTools>();
 }
 
 var app = builder.Build();
