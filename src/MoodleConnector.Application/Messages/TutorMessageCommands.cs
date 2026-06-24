@@ -94,7 +94,6 @@ public sealed class PrepareTutorMessageCommandHandler(
     IPendingActionService pendingActions)
     : IRequestHandler<PrepareTutorMessageCommand, TutorMessagePreview>
 {
-    private const string RequiredScope = "moodle.write.messages";
     private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(10);
 
     public async Task<TutorMessagePreview> Handle(
@@ -287,7 +286,7 @@ public sealed class ConfirmTutorMessageCommandHandler(
     : IRequestHandler<ConfirmTutorMessageCommand, TutorMessageSendResult>
 {
     private const string CommitToolName = "confirmar_mensagem_tutor";
-    private const string RequiredScope = "moodle.write.messages";
+    private const string RequiredScope = "moodle.write";
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions =
         new(System.Text.Json.JsonSerializerDefaults.Web);
 
@@ -364,19 +363,18 @@ public sealed class ConfirmTutorMessageCommandHandler(
         }
 
         var userExternalId = action.CreatedByMoodleUserId?.ToString() ?? action.CreatedBySubject;
-        var payload2 = payload;
 
         // 3. Send messages via Moodle
         try
         {
             var sendResult = await messageGateway.SendMessagesToUsersAsync(
                 senderExternalId: userExternalId,
-                recipientUserIds: payload2.RecipientIds,
-                messageText: payload2.MessageText,
+                recipientUserIds: payload.RecipientIds,
+                messageText: payload.MessageText,
                 cancellationToken: cancellationToken);
 
             await RecordAuditAsync(
-                action, payload2,
+                action, payload,
                 sendResult.Success ? "message_sent" : "message_partial",
                 sendResult, null, sendResult.ErrorMessage,
                 cancellationToken);
@@ -391,8 +389,8 @@ public sealed class ConfirmTutorMessageCommandHandler(
             return new TutorMessageSendResult(
                 Status: sendResult.Success ? "sent" : "partial",
                 PendingActionId: request.PendingActionId,
-                MessageType: payload2.MessageType,
-                CourseId: payload2.CourseId,
+                MessageType: payload.MessageType,
+                CourseId: payload.CourseId,
                 SentCount: sendResult.SentCount,
                 FailedCount: sendResult.FailedCount,
                 FailedUserIds: sendResult.FailedUserIds,
@@ -402,7 +400,7 @@ public sealed class ConfirmTutorMessageCommandHandler(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await RecordAuditAsync(
-                action, payload2, "message_failed",
+                action, payload, "message_failed",
                 new { error = ex.GetType().Name },
                 ex.GetType().Name, ex.Message,
                 cancellationToken);
@@ -411,11 +409,11 @@ public sealed class ConfirmTutorMessageCommandHandler(
             return new TutorMessageSendResult(
                 Status: "failed",
                 PendingActionId: request.PendingActionId,
-                MessageType: payload2.MessageType,
-                CourseId: payload2.CourseId,
+                MessageType: payload.MessageType,
+                CourseId: payload.CourseId,
                 SentCount: 0,
-                FailedCount: payload2.RecipientIds.Count,
-                FailedUserIds: payload2.RecipientIds.ToList(),
+                FailedCount: payload.RecipientIds.Count,
+                FailedUserIds: payload.RecipientIds.ToList(),
                 AuditId: confirmation.AuditId,
                 Warnings: [ex.Message]);
         }

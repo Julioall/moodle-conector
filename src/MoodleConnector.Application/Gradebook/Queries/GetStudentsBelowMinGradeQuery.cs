@@ -62,18 +62,9 @@ public sealed class GetStudentsBelowMinGradeQueryHandler(
                     request.CourseId, student.UserId, cancellationToken);
 
                 belowMinimumItems = gradebook.Items
-                    .Where(i => i.ItemType != "course" && i.ItemType != "category")
+                    .Where(GradebookMappingHelper.IsActivityItem)
                     .Where(i => i.PercentageFormatted.HasValue && i.PercentageFormatted.Value < request.MinGradePercent)
-                    .Select(i => new StudentGradeItem(
-                        ItemId: i.Id,
-                        ItemName: i.ItemName,
-                        ItemType: i.ItemType,
-                        ItemModule: i.ItemModule,
-                        GradeRaw: i.GradeRaw,
-                        GradeMax: i.GradeMax,
-                        PercentageFormatted: i.PercentageFormatted,
-                        BelowMinimum: true,
-                        Feedback: i.Feedback))
+                    .Select(i => GradebookMappingHelper.ToStudentGradeItem(i, request.MinGradePercent))
                     .ToList();
             }
             catch

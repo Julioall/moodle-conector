@@ -45,25 +45,12 @@ public sealed class GetStudentGradeItemsQueryHandler(IMoodleGradebookGateway gra
 
         // Filter to only assignment-type items (SAs), excluding the overall course item
         var activityItems = gradebook.Items
-            .Where(i => i.ItemType != "course" && i.ItemType != "category")
+            .Where(GradebookMappingHelper.IsActivityItem)
             .ToList();
 
-        var gradeItems = activityItems.Select(i =>
-        {
-            var belowMinimum = i.PercentageFormatted.HasValue
-                && i.PercentageFormatted.Value < request.MinGradePercent;
-
-            return new StudentGradeItem(
-                ItemId: i.Id,
-                ItemName: i.ItemName,
-                ItemType: i.ItemType,
-                ItemModule: i.ItemModule,
-                GradeRaw: i.GradeRaw,
-                GradeMax: i.GradeMax,
-                PercentageFormatted: i.PercentageFormatted,
-                BelowMinimum: belowMinimum,
-                Feedback: i.Feedback);
-        }).ToList();
+        var gradeItems = activityItems
+            .Select(i => GradebookMappingHelper.ToStudentGradeItem(i, request.MinGradePercent))
+            .ToList();
 
         var belowMinimum = gradeItems.Where(i => i.BelowMinimum).ToList();
 

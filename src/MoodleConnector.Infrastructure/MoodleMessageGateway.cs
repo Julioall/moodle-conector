@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 
@@ -145,10 +144,8 @@ internal sealed class MoodleMessageGateway(
             ErrorMessage: failed.Count > 0 ? $"Falha ao entregar mensagem para {failed.Count} destinatário(s)." : null);
     }
 
-    private async Task<string> ResolveWriteTokenAsync(CancellationToken cancellationToken)
-    {
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
-    }
+    private Task<string> ResolveWriteTokenAsync(CancellationToken cancellationToken) =>
+        tokenProvider.GetAccessTokenAsync(cancellationToken);
 
     private static string BuildMoodlePostEndpoint(string baseUrl)
     {
