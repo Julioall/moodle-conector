@@ -93,9 +93,9 @@ public sealed class MoodleCompletionTools(
         {
             throw;
         }
-        catch (Exception ex)
+        catch
         {
-            return Error<CourseCompletionStatus>($"Nao foi possivel consultar o progresso do aluno neste momento: {ex.Message}");
+            return Error<CourseCompletionStatus>("Nao foi possivel consultar o progresso do aluno neste momento.");
         }
 
         var response = new ToolResponse<CourseCompletionStatus>(
@@ -105,7 +105,10 @@ public sealed class MoodleCompletionTools(
             AuditId: null,
             DateTimeOffset.UtcNow);
 
-        var completas = data.Activities.Count(a => a.State == 1 || a.State == 2);
+        // State: 1 = complete, 2 = complete_pass (Moodle completion tracking values)
+        const long StateComplete = 1;
+        const long StateCompletePass = 2;
+        var completas = data.Activities.Count(a => a.State == StateComplete || a.State == StateCompletePass);
         var narration = $"O progresso do estudante {studentId} no curso {courseId} foi recuperado com sucesso. " +
                         $"Curso {(data.Completed ? "concluido" : "em andamento")}. " +
                         $"{completas}/{data.Activities.Count} atividades concluidas.";

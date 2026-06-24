@@ -110,9 +110,9 @@ public sealed class MoodleRiskAnalysisTools(
         {
             throw;
         }
-        catch (Exception ex)
+        catch
         {
-            return Error<IReadOnlyList<StudentRiskReport>>($"Nao foi possivel gerar o relatorio neste momento: {ex.Message}");
+            return Error<IReadOnlyList<StudentRiskReport>>("Nao foi possivel gerar o relatorio neste momento.");
         }
 
         var response = new ToolResponse<IReadOnlyList<StudentRiskReport>>(

@@ -187,9 +187,9 @@ public sealed class MoodleCoursesTools(
         {
             throw;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch
         {
-            return StandardError($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
+            return StandardError("Nao foi possivel buscar cursos no Moodle neste momento.");
         }
 
         var response = new SearchResponse(courses.Select(course =>

@@ -93,9 +93,9 @@ public sealed class MoodleGradebookTools(
         {
             throw;
         }
-        catch (Exception ex)
+        catch
         {
-            return Error<CourseGradebook>($"Nao foi possivel consultar o boletim do aluno neste momento: {ex.Message}");
+            return Error<CourseGradebook>("Nao foi possivel consultar o boletim do aluno neste momento.");
         }
 
         var response = new ToolResponse<CourseGradebook>(

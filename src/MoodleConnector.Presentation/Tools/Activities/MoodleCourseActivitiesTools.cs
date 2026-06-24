@@ -116,8 +116,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
     [Description("Lista tarefas do curso sem consultar entregas, submissões ou notas.")]
     public Task<CallToolResult> ListarTarefasCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
         string courseId,
+        [Description("Quando true, inclui tarefas ocultas que o Moodle retornar para o usuario.")]
         bool incluirOcultas = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -135,8 +138,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
     [Description("Lists course assignments without fetching submissions or grades.")]
     public Task<CallToolResult> ListCourseAssignmentsAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
         string courseId,
+        [Description("When true, includes hidden assignments Moodle returns for the user.")]
         bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -154,8 +160,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<CourseActivityDetailsResponse>))]
     [Description("Consulta uma tarefa por cmid ou instance id sem consultar entregas ou notas.")]
     public Task<CallToolResult> ConsultarTarefaAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
         string courseId,
+        [Description("Identificador da tarefa. Pode ser cmid ou instance id.")]
         string assignmentId,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -173,8 +182,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<CourseActivityDetailsResponse>))]
     [Description("Gets an assignment by cmid or instance id without fetching submissions or grades.")]
     public Task<CallToolResult> GetAssignmentAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
         string courseId,
+        [Description("Assignment identifier. Can be cmid or instance id.")]
         string assignmentId,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -192,8 +204,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
     [Description("Lista quizzes do curso sem consultar tentativas ou notas.")]
     public Task<CallToolResult> ListarQuizzesCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
         string courseId,
+        [Description("Quando true, inclui quizzes ocultos que o Moodle retornar para o usuario.")]
         bool incluirOcultas = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -211,8 +226,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
     [Description("Lists course quizzes without fetching attempts or grades.")]
     public Task<CallToolResult> ListCourseQuizzesAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
         string courseId,
+        [Description("When true, includes hidden quizzes Moodle returns for the user.")]
         bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -230,8 +248,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<CourseActivityDetailsResponse>))]
     [Description("Consulta um quiz por cmid ou instance id sem consultar tentativas ou notas.")]
     public Task<CallToolResult> ConsultarQuizAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
         string courseId,
+        [Description("Identificador do quiz. Pode ser cmid ou instance id.")]
         string quizId,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -249,8 +270,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<CourseActivityDetailsResponse>))]
     [Description("Gets a quiz by cmid or instance id without fetching attempts or grades.")]
     public Task<CallToolResult> GetQuizAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
         string courseId,
+        [Description("Quiz identifier. Can be cmid or instance id.")]
         string quizId,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -268,8 +292,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
     [Description("Lista SCORMs do curso sem consultar tentativas ou notas.")]
     public Task<CallToolResult> ListarScormsCursoAsync(
+        [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
         string courseId,
+        [Description("Quando true, inclui SCORMs ocultos que o Moodle retornar para o usuario.")]
         bool incluirOcultas = false,
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -287,8 +314,11 @@ public sealed class MoodleCourseActivitiesTools(
         OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
     [Description("Lists course SCORMs without fetching attempts or grades.")]
     public Task<CallToolResult> ListCourseScormsAsync(
+        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
         string courseId,
+        [Description("When true, includes hidden SCORMs Moodle returns for the user.")]
         bool includeHidden = false,
+        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
