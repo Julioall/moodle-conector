@@ -70,18 +70,32 @@ Este catálogo reflete o estado real do repositório.
 | `list_submissions_awaiting_grading` | List Submissions Awaiting Grading | `SensitiveRead` | Sim | Não | Implementada |
 | `consultar_status_submissao` | Consultar Status Submissao | `SensitiveRead` | Sim | Não | Implementada |
 | `get_submission_status` | Get Submission Status | `SensitiveRead` | Sim | Não | Implementada |
+| `consultar_progresso_aluno` | Consultar Progresso Aluno | `SensitiveRead` | Sim | Não | Implementada |
+| `get_student_completion` | Get Student Completion | `SensitiveRead` | Sim | Não | Implementada |
+| `consultar_boletim_aluno` | Consultar Boletim Aluno | `SensitiveRead` | Sim | Não | Implementada |
+| `get_student_gradebook` | Get Student Gradebook | `SensitiveRead` | Sim | Não | Implementada |
+| `gerar_relatorio_risco_estudantes` | Gerar Relatorio Risco Estudantes | `SensitiveRead` | Sim | Não | Implementada |
+| `report_students_at_risk` | Report Students at Risk | `SensitiveRead` | Sim | Não | Implementada |
 | `descobrir_funcoes_moodle_correcao` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Implementada |
 | `executar_descoberta_tecnica_correcao` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `listar_entregas_corrigiveis` | Listar Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
 | `criar_lote_correcao_assistida` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
 | `consultar_status_lote_correcao` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `exportar_relatorio_correcao_coordenacao` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Implementada |
 | `cancelar_lote_correcao_assistida` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Implementada |
 | `consultar_item_correcao_assistida` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
+| `consultar_contexto_item_correcao_assistida` | Consultar Contexto Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
 | `atualizar_rascunho_correcao` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Implementada |
+| `preparar_correcao_entrega` | Preparar Correcao Entrega | `DraftOnly` | Não | Escrita interna | Implementada |
+| `preparar_lote_correcao_ia` | Preparar Lote Correcao IA | `ReadOnly` | Sim | Não | Implementada |
+| `salvar_correcoes_ia_lote` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Escrita interna | Implementada |
+| `revisar_feedbacks_lote` | Revisar Feedbacks Lote | `ReadOnly` | Sim | Não | Implementada |
+| `consultar_auditoria_correcao_lote` | Consultar Auditoria Correcao Lote | `ReadOnly` | Sim | Não | Implementada |
 | `criar_previa_lancamento_lote` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
 | `confirmar_lancamento_lote_moodle` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
 | `consultar_auditoria_correcao` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `grading-review-app` | Grading Review App | `ReadOnly` | Sim | Não | Implementada (MCP Resource) |
 | `preparar_acao_demo` | Preparar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
 | `confirmar_acao_demo` | Confirmar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
 
@@ -100,7 +114,8 @@ Parâmetros:
 
 | Nome | Tipo | Descrição |
 | --- | --- | --- |
-| `limite` / `limit` | `int` | Quantidade máxima de cursos, de 1 a 20. |
+| `pagina` / `page` | `int` | Página de resultados, iniciando em 1. Padrão: 1. |
+| `limite` / `limit` | `int` | Quantidade máxima de cursos por página, de 1 a 100. Padrão: 20. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
 
 Metadados MCP:
@@ -120,7 +135,10 @@ Resposta estruturada:
 {
   "status": "ok",
   "data": {
-    "total": 1,
+    "total": 42,
+    "page": 1,
+    "total_pages": 3,
+    "has_next_page": true,
     "courses": [
       {
         "courseId": "123",
@@ -909,6 +927,247 @@ Parâmetros:
 | --- | --- | --- |
 | `pendingActionId` | `Guid` | Identificador da ação pendente. |
 | `confirmationText` | `string` | Texto exato retornado na preparação. |
+
+## `consultar_progresso_aluno` / `get_student_completion`
+
+Descricao:
+
+- Consulta o progresso e conclusao de um estudante em um curso usando `core_completion_get_activities_completion_status`.
+- Retorna `completed`, `timecompleted` e lista de atividades com `state`, `timecompleted` e `tracking`.
+- O campo `state` segue os valores do Moodle: 0 = incompleto, 1 = completo, 2 = aprovado, 3 = reprovado.
+- Nao consulta notas, submissoes ou risco.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso Moodle. |
+| `studentId` | `string` | Identificador do estudante (ID do Moodle). |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `consultar_boletim_aluno` / `get_student_gradebook`
+
+Descricao:
+
+- Consulta o boletim (gradebook) de um estudante em um curso usando `gradereport_user_get_grade_items`.
+- Retorna itens avaliativos com `itemName`, `itemType`, `itemModule`, `gradeRaw`, `gradeFormatted`, `gradeMin`, `gradeMax`, `percentageFormatted`, `feedback`, `graderId` e datas de submissao/correcao.
+- Nao consulta progresso, submissoes ou risco.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso Moodle. |
+| `studentId` | `string` | Identificador do estudante (ID do Moodle). |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `gerar_relatorio_risco_estudantes` / `report_students_at_risk`
+
+Descricao:
+
+- Gera um relatorio cruzando inatividade, notas baixas e progresso pendente para identificar estudantes em risco.
+- Analisa ate `maxStudentsToAnalyze` estudantes ativos do curso.
+- Classifica cada estudante como risco `Alto`, `Medio` ou `Baixo` com base nos fatores detectados.
+- Retorna lista de `StudentRiskReport` com `studentId`, `studentName`, `riskLevel` e `riskFactors`.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso Moodle. |
+| `maxStudentsToAnalyze` | `int` | Maximo de estudantes a analisar. Padrao: 50. |
+| `inactivityThresholdDays` | `int` | Limite de dias de inatividade para risco. Padrao: 7. |
+| `minGradePercentage` | `decimal` | Nota minima em % (0-100) para risco. Padrao: 60. |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `listar_entregas_corrigiveis`
+
+Descricao:
+
+- Lista entregas corrigiveis de uma ou mais tarefas com contadores e paginacao agregada.
+- Usada como passo de preparo antes de `criar_lote_correcao_assistida`.
+- Aceita filtro por status e flag `onlyAwaitingGrading`.
+- Nao baixa anexos nem retorna conteudo integral de submissoes.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso Moodle. |
+| `assignmentIds` | `string[]` | Identificadores das tarefas Moodle. |
+| `status` | `string` | Filtro: `all`, `submitted`, `pending`, `late`, `awaiting_grading`. Padrao: `awaiting_grading`. |
+| `onlyAwaitingGrading` | `bool` | Quando true, forca filtro apenas para aguardando correcao. |
+| `includeLate` | `bool` | Quando false, remove entregas atrasadas da lista. |
+| `page` | `int` | Pagina de resultados, iniciando em 1. |
+| `perPage` | `int` | Tamanho da pagina, de 1 a 100. Padrao: 25. |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `preparar_correcao_entrega`
+
+Descricao:
+
+- Prepara o contexto de correcao de uma entrega individual fora de um lote.
+- Baixa anexos se disponíveis e extrai texto para o pacote de correcao.
+- Nao escreve nota ou feedback no Moodle.
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `false` |
+| `Destructive` | `false` |
+| `Idempotent` | `false` |
+| `OpenWorld` | `false` |
+
+## `preparar_lote_correcao_ia`
+
+Descricao:
+
+- Prepara o pacote de dados de um lote para consumo por IA externa.
+- Retorna itens pendentes com texto extraido, rubrica e instrucoes do professor em formato otimizado para prompt.
+- Nao executa analise de IA nem escreve no Moodle.
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `salvar_correcoes_ia_lote`
+
+Descricao:
+
+- Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote.
+- Nao escreve no Moodle.
+- Apos salvar, o fluxo obrigatorio e chamar `revisar_feedbacks_lote` para exibir a interface de revisao humana. Nunca pular a revisao.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `batchJobId` | `Guid` | Identificador do lote retornado por `criar_lote_correcao_assistida`. |
+| `items` | `AiGradingItemInput[]` | Array de correcoes. Cada item deve conter `gradingItemId`, nota e feedback. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `false` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `revisar_feedbacks_lote`
+
+Descricao:
+
+- Retorna a interface de revisao humana dos feedbacks gerados por IA para um lote.
+- Deve ser chamada apos `salvar_correcoes_ia_lote` e antes de `criar_previa_lancamento_lote`.
+- Nao escreve no Moodle.
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `consultar_contexto_item_correcao_assistida`
+
+Descricao:
+
+- Consulta o contexto de correcao de um item individual, incluindo artefatos de assignment_context e selecao heuristica do enunciado.
+- Nao retorna anexos completos nem escreve no Moodle.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `gradingItemId` | `Guid` | Identificador do item retornado pelo status do lote. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `consultar_auditoria_correcao_lote`
+
+Descricao:
+
+- Consulta eventos de auditoria de um lote completo de correcao por `batchJobId`.
+- Complementa `consultar_auditoria_correcao` que busca por `auditId` individual.
+- Retorna eventos paginados vinculados ao lote.
+- Nao escreve no Moodle.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `batchJobId` | `Guid` | Identificador do lote de correcao assistida. |
+| `pagina` | `int` | Pagina de eventos, iniciando em 1. |
+| `tamanhoPagina` | `int` | Tamanho da pagina, de 1 a 100. |
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `grading-review-app`
+
+Descricao:
+
+- MCP Resource (nao tool): expoe a interface SPA de revisao de correcao assistida como HTML servido pelo servidor.
+- Acessivel via URI `ui://grading-review/app.html`.
+- Nao executa escrita no Moodle e nao requer autenticacao adicional alem do token MCP.
 
 ## Planejado
 
