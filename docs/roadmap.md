@@ -123,6 +123,50 @@ AdminCourseWriteEnabled = false
 
 ---
 
+## Contexto pedagógico
+
+O conector deve suportar o ciclo pedagógico operado por tutores, monitores e coordenadores de acordo com a **Metodologia SENAI de Educação Profissional (MSEP)** e o **Guia do Tutor CTM (Central de Tutoria e Monitoria)**.
+
+### Papéis
+
+| Papel | Responsabilidade principal no conector |
+|---|---|
+| **Tutor** | Mediação pedagógica: acompanhar acesso, entregas, fóruns, notas, feedback, recuperação e comunicação individual com estudantes. |
+| **Monitor** | Suporte técnico/administrativo: identificar problemas de acesso ao AVA e dúvidas administrativas. |
+| **Coordenador pedagógico/técnico** | Visão gerencial: relatórios de turma, conselho de classe, análise de resultados e desempenho do tutor. |
+
+### Ciclo do tutor
+
+```text
+Planejamento
+  → Consultar estrutura do curso (plano, cronograma, SAs)
+  → Validar sala de aula virtual (checklist de AVA)
+
+Execução semanal
+  → Verificar quem não acessou o AVA nos últimos N dias
+  → Verificar quem não entregou SAs com prazo vencido/próximo
+  → Verificar participação em fóruns e chats abertos
+  → Acompanhar desempenho individual por atividade
+  → Enviar mensagens personalizadas de incentivo ou cobrança
+  → Corrigir SAs e publicar feedback
+  → Identificar estudantes com conceito abaixo do mínimo
+  → Aplicar recuperação paralela quando necessário
+
+Pós-execução
+  → Gerar relatório de desempenho da turma
+  → Gerar relatório de concluintes, evadidos e reprovados
+  → Participar do conselho de classe
+  → Analisar instrumento de satisfação
+```
+
+### Restrição de escopo
+
+- O conector opera exclusivamente sobre o Moodle como AVA.
+- Dados de sistemas externos ao Moodle (ex.: SGE — Sistema de Gestão Escolar) ficam fora do escopo.
+- Tools de acesso e participação dependem de rastreamento de conclusão habilitado no Moodle da instituição.
+
+---
+
 # Fase 0 — Base de segurança e contrato MCP
 
 **Status:** concluída.
@@ -289,7 +333,7 @@ core_calendar_get_action_events_by_course
 
 # Fase 3 — Domínio Participantes
 
-**Status:** concuída.
+**Status:** concluída.
 
 ## Objetivo
 
@@ -353,7 +397,7 @@ core_group_get_group_members
 
 # Fase 4 — Domínio Conteúdos e estrutura da sala
 
-**Status:** concuída.
+**Status:** concluída.
 
 ## Objetivo
 
@@ -565,6 +609,8 @@ mod_assign_get_grades
 - [x] Usuário consegue ver entregas aguardando correção.
 - [x] Respostas grandes são paginadas.
 - [x] Testes cobrem tarefa inexistente, estudante sem entrega, entrega enviada e entrega atrasada.
+- [ ] Tutor consegue ver visão consolidada de entregas pendentes por estudante (todas as SAs do curso).
+- [ ] Tutor consegue filtrar estudantes que não entregaram nenhuma atividade (possivel evasao).
 
 ---
 
@@ -627,6 +673,8 @@ mod_assign_get_grades
 ## Definition of done
 
 - [x] Usuário consegue consultar notas de um estudante (`consultar_boletim_aluno` / `get_student_gradebook`).
+- [ ] Tutor consegue consultar desempenho individual de um estudante por atividade/SA (não apenas nota final).
+- [ ] Tutor consegue identificar estudantes com conceito abaixo do mínimo configurável em qualquer SA.
 - [ ] Usuário consegue consultar resumo de avaliações do curso.
 - [ ] Usuário consegue consultar itens avaliativos agregados.
 - [ ] Usuário consegue identificar pendências de correção coletivas.
@@ -654,6 +702,10 @@ consultar_participacao_foruns
 consultar_progresso_aluno
 consultar_acessos_aluno
 consultar_discussao_forum
+listar_alunos_sem_participacao_forum
+listar_alunos_pendentes_atividade
+consultar_participacao_forum_curso
+consultar_acessos_recentes_curso
 ```
 
 ## Escopos
@@ -695,9 +747,11 @@ mod_forum_get_discussion_posts
 ## Definition of done
 
 - [x] Usuário consegue consultar conclusão individual (`consultar_progresso_aluno` / `get_student_completion`).
+- [ ] Tutor consegue listar estudantes que não acessaram o AVA nos últimos N dias (`listar_alunos_sem_acesso`).
+- [ ] Tutor consegue listar estudantes que não participaram de um fórum específico aberto (`listar_alunos_sem_participacao_forum`).
+- [ ] Tutor consegue listar estudantes com SAs pendentes com prazo vencido ou próximo (`listar_alunos_pendentes_atividade`).
+- [ ] Tutor consegue consultar visão de acessos recentes da turma (`consultar_acessos_recentes_curso`).
 - [ ] Usuário consegue consultar progresso agregado do curso.
-- [ ] Usuário consegue listar estudantes sem acesso recente.
-- [ ] Usuário consegue listar estudantes com atividades incompletas.
 - [ ] Testes cobrem conclusão desabilitada, ausência de acesso e dados incompletos.
 
 ---
@@ -785,9 +839,11 @@ Necessita verificação humana
 ## Definition of done
 
 - [x] Usuário consegue listar estudantes em possível risco (`gerar_relatorio_risco_estudantes` / `report_students_at_risk`).
-- [ ] Usuário consegue listar possível risco por inatividade isolada.
-- [ ] Usuário consegue listar possível risco por desempenho isolado.
-- [ ] Resposta separa achados, riscos, ações e limitações.
+- [ ] Tutor consegue identificar estudantes com conceito abaixo do mínimo em alguma SA (critério de recuperação paralela).
+- [ ] Tutor consegue listar possível risco por inatividade isolada (não acessou em N dias).
+- [ ] Tutor consegue listar possível risco por desempenho isolado (nota abaixo do mínimo).
+- [ ] Resposta separa achados, riscos, ações recomendadas e limitações.
+- [ ] Output inclui público-alvo sugerido para mensagem de acompanhamento.
 - [ ] Testes cobrem critérios configuráveis, dados ausentes e estudante sem nota.
 
 ---
@@ -821,6 +877,10 @@ relatorio_conselho_classe
 relatorio_pos_execucao
 consultar_pesquisas_curso
 exportar_painel_operacional
+gerar_relatorio_semanal_desempenho
+gerar_relatorio_turma_conselho_classe
+gerar_relatorio_acompanhamento_tutor
+gerar_relatorio_pos_execucao_completo
 ```
 
 ## Escopos
@@ -861,6 +921,10 @@ O risco depende do tipo de dado incluído.
 - [ ] Relatório de pendências de entrega funciona.
 - [ ] Relatório de pendências de correção genérico funciona.
 - [ ] Relatório de risco estudantil agregado funciona.
+- [ ] Tutor consegue gerar relatório semanal de desempenho da turma para o docente presencial (`gerar_relatorio_semanal_desempenho`).
+- [ ] Tutor consegue gerar relatório de concluintes, reprovados e evadidos para conselho de classe (`gerar_relatorio_turma_conselho_classe`).
+- [ ] Tutor consegue gerar relatório de acompanhamento da turma: acessos, SAs entregues, fóruns, notas (`gerar_relatorio_acompanhamento_tutor`).
+- [ ] Relatório de pós-execução consolida concluintes, evadidos e instrumento de satisfação (`gerar_relatorio_pos_execucao_completo`).
 - [ ] Auditoria de sala funciona em modo leitura.
 - [ ] Testes cobrem relatório vazio, relatório com dados sensíveis e limitações de permissão.
 
@@ -883,6 +947,18 @@ preparar_mensagem_alunos_pendentes
 confirmar_mensagem_alunos_pendentes
 preparar_mensagem_alunos_em_atencao
 confirmar_mensagem_alunos_em_atencao
+preparar_mensagem_boas_vindas
+confirmar_mensagem_boas_vindas
+preparar_mensagem_cobranca_acesso
+confirmar_mensagem_cobranca_acesso
+preparar_mensagem_cobranca_sa
+confirmar_mensagem_cobranca_sa
+preparar_mensagem_encerramento_forum
+confirmar_mensagem_encerramento_forum
+preparar_mensagem_encerramento_sa
+confirmar_mensagem_encerramento_sa
+preparar_mensagem_recuperacao
+confirmar_mensagem_recuperacao
 ```
 
 ## Escopos
@@ -935,6 +1011,12 @@ core_message_send_messages_to_conversation
 - [ ] Confirmação envia mensagem.
 - [ ] Segunda confirmação não reenvia.
 - [ ] Auditoria registra preparação, confirmação e resultado.
+- [ ] Tutor consegue preparar mensagem de boas-vindas para a turma (ambientação).
+- [ ] Tutor consegue preparar mensagem de cobrança para estudantes sem acesso nos últimos N dias.
+- [ ] Tutor consegue preparar mensagem de cobrança para estudantes com SA pendente.
+- [ ] Tutor consegue preparar mensagem de encerramento de fórum ou SA.
+- [ ] Tutor consegue preparar mensagem de recuperação para estudantes com conceito abaixo do mínimo.
+- [ ] Prévia de qualquer mensagem exibe: curso, público-alvo, critérios de seleção, quantidade de destinatários e corpo sanitizado.
 - [ ] Testes cobrem escopo ausente, texto divergente, ação expirada e idempotência.
 
 ---
@@ -1408,6 +1490,62 @@ Deixar o projeto fácil de operar, evoluir, revisar e transferir para novos dese
 
 ---
 
+# Fase 20 — Domínio Monitor
+
+## Objetivo
+
+Fornecer tools de suporte técnico e administrativo para monitores, que são responsáveis pela montagem e validação do AVA, diarização administrativa e apoio operacional aos estudantes.
+
+O monitor não realiza mediação pedagógica. Sua atuação no conector é de suporte à operação do ambiente virtual.
+
+## Tools candidatas
+
+```text
+auditar_checklist_sala_virtual
+listar_estudantes_sem_acesso_ava
+gerar_relatorio_monitor_turma
+consultar_status_atividades_sala
+listar_estudantes_sem_matricula_confirmada
+```
+
+## Escopos
+
+```text
+moodle.read.students
+moodle.read.access
+moodle.read.contents
+```
+
+## Risco
+
+```text
+ReadOnly
+SensitiveRead
+```
+
+## Regras
+
+- Monitor visualiza dados de acesso e status de sala, mas não consulta notas nem submissões.
+- `auditar_checklist_sala_virtual` verifica se os itens do checklist padrão do Guia do Tutor CTM estão presentes no AVA:
+  - guia do estudante;
+  - critérios de certificação;
+  - plano de estudo;
+  - fórum de apresentação;
+  - fórum de dúvidas;
+  - SCORM ou conteúdo interativo;
+  - espaço de avaliação.
+- Resultado do checklist deve ser `[ ]` / `[x]` por item com observação quando aplicar.
+- Não alterar nada na sala — apenas leitura e diagnóstico.
+
+## Definition of done
+
+- [ ] Monitor consegue auditar o checklist padrão de sala virtual (`auditar_checklist_sala_virtual`).
+- [ ] Monitor consegue listar estudantes que nunca acessaram o AVA.
+- [ ] Monitor consegue gerar relatório administrativo da turma para uso interno.
+- [ ] Testes cobrem sala completa, sala incompleta, sala vazia e ausência de permissão.
+
+---
+
 # Matriz resumida de domínios
 
 | Fase | Domínio | Tipo principal | Risco principal | Escrita? |
@@ -1432,80 +1570,78 @@ Deixar o projeto fácil de operar, evoluir, revisar e transferir para novos dese
 | 17 | Observabilidade | Operação | — | Não |
 | 18 | Hardening | Operação | — | Não |
 | 19 | Documentação e handoff | Operação | — | Não |
+| 20 | Monitor | Leitura administrativa | `ReadOnly` / `SensitiveRead` | Não |
 
 ---
 
 # Ordem recomendada de implementação prática
 
-## Primeiro ciclo funcional
+## Primeiro ciclo funcional (concluído)
 
 ```text
 Fase 2 - Cursos
 Fase 3 - Participantes
 Fase 4 - Conteúdos e estrutura
 Fase 5 - Atividades
-```
-
-Entrega esperada:
-
-```text
-O usuário consegue saber onde está, quem está no curso e o que existe na sala.
-```
-
-## Segundo ciclo funcional
-
-```text
 Fase 6 - Entregas e submissões
-Fase 7 - Avaliações e notas em leitura
-Fase 8 - Progresso e participação
+```
+
+Entrega: o usuário consegue saber onde está, quem está no curso, o que existe na sala e quem entregou.
+
+## Segundo ciclo funcional — ciclo semanal do tutor (prioridade atual)
+
+```text
+Fase 7 - Avaliações: desempenho por SA e critério de mínimo
+Fase 8 - Progresso: acesso ao AVA, participação em fóruns e SAs pendentes
+Fase 9 - Risco: segmentação por inatividade e desempenho + output para mensagem
+Fase 11 - Comunicação: mensagens do ciclo do tutor (boas-vindas, cobrança, encerramento, recuperação)
 ```
 
 Entrega esperada:
 
 ```text
-O usuário consegue acompanhar execução, desempenho e pendências.
+O tutor consegue executar o ciclo semanal completo: identificar quem precisa de atenção e enviar mensagem personalizada.
 ```
 
-## Terceiro ciclo funcional
+## Terceiro ciclo funcional — relatórios pedagógicos
 
 ```text
-Fase 9 - Risco e acompanhamento
-Fase 10 - Relatórios
+Fase 10 - Relatórios: semanal de desempenho, conselho de classe e pós-execução
 ```
 
 Entrega esperada:
 
 ```text
-O usuário consegue priorizar ações e gerar relatórios.
+O tutor consegue gerar relatórios para o docente presencial e para o conselho de classe.
 ```
 
-## Quarto ciclo funcional
+## Quarto ciclo funcional — suporte ao monitor
 
 ```text
-Fase 11 - Comunicação
+Fase 20 - Monitor: checklist de sala virtual e relatório administrativo
+```
+
+Entrega esperada:
+
+```text
+O monitor consegue auditar a sala virtual antes do início do curso.
+```
+
+## Quinto ciclo funcional — escrita crítica
+
+```text
 Fase 12 - Agendamento
+Fase 13 - Feedback assistido (complementar individual)
+Fase 14 - Nota individual sem lote
 ```
 
 Entrega esperada:
 
 ```text
-O usuário consegue agir com mensagem confirmada e auditável.
+O tutor consegue apoiar correção individual e, se autorizado, lançar nota com controle forte.
 ```
 
-## Quinto ciclo funcional
-
-```text
-Fase 13 - Feedback assistido
-Fase 14 - Notas
-```
-
-Entrega esperada:
-
-```text
-O usuário consegue apoiar correção e, se autorizado, lançar nota com controle forte.
-```
-
-## Sexto ciclo funcional
+## Sexto ciclo funcional — escrita estrutural
 
 ```text
 Fase 15 - Conteúdo com escrita
@@ -1634,36 +1770,40 @@ decisão automática de aprovação, reprovação ou evasão
 
 # Próximo passo recomendado
 
-As fases 0–6 estão concluídas. O fluxo de correção assistida (fases 13–14, parcial) está substancialmente implementado. Os próximos passos em ordem de prioridade são:
+As fases 0–6 estão concluídas. O fluxo de correção assistida (fases 13–14, parcial) está substancialmente implementado. A inclusão do Guia do Tutor SENAI CTM definiu as seguintes prioridades:
 
-## Completar fases 7 e 8
+## Prioridade imediata: fechar o ciclo semanal do tutor (fases 7, 8, 9 e 11)
 
 ```text
-Fase 7 - Avaliações: resumo agregado, distribuição e gradebook coletivo
-Fase 8 - Progresso: acesso recente, participação em fóruns e visão agregada
+Fase 7 - Desempenho por SA e critério de mínimo
+Fase 8 - Acesso ao AVA, participação em fóruns e SAs pendentes
+Fase 9 - Segmentação de risco + output para mensagem de acompanhamento
+Fase 11 - Mensagens: boas-vindas, cobrança de acesso/SA, encerramento, recuperação
 ```
 
 Entrega esperada:
 
 ```text
-O usuário consegue acompanhar execução, desempenho agregado e participação.
+O tutor consegue identificar quem não acessou, quem não entregou, quem está em risco
+e enviar mensagem personalizada para cada um desses grupos com confirmação humana.
 ```
 
-## Evoluir fase 9 e adicionar fase 10
+## Em seguida: relatórios pedagógicos (fase 10)
 
 ```text
-Fase 9 - Risco: segmentação por inatividade e desempenho separados
-Fase 10 - Relatórios genéricos de curso, entrega e participação
+Fase 10 - Relatório semanal de desempenho, conselho de classe e pós-execução
 ```
 
-## Comunicação (fase 11)
+## Em seguida: suporte ao monitor (fase 20)
 
 ```text
-Fase 11 - Mensagens Moodle com fluxo prepare/confirm
+Fase 20 - Checklist de sala virtual e relatório administrativo para o monitor
 ```
 
-## Fase 14 individual
+## Complementar: escrita crítica (fases 14 e 12)
 
 ```text
 Fase 14 - Nota individual sem lote (preparar_lancamento_nota / confirmar_lancamento_nota)
+Fase 12 - Agendamento de mensagens
 ```
+
