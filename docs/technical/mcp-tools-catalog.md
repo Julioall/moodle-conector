@@ -240,6 +240,12 @@ Resposta estruturada:
 
 ## `listar_participantes_curso` / `list_course_participants`
 
+Notas de diagnostico:
+
+- A consulta solicita explicitamente `roles` e `groups` ao Moodle.
+- Campos ausentes ou vazios nao invalidam a resposta; geram `warnings` quando a classificacao ou a separacao por grupos pode estar incompleta.
+- Respostas vazias diferenciam ausencia de participantes de pagina possivelmente fora do intervalo.
+
 Descrição:
 
 - Lista participantes de um curso vinculado ao usuário autenticado.
@@ -306,6 +312,12 @@ Resposta estruturada:
 ```
 
 ## `listar_alunos_curso` / `list_course_students`
+
+Fallback de classificacao:
+
+- Participantes sem papel ou com papel desconhecido sao incluidos para nao omitir possiveis alunos, com warning explicito.
+- Apenas perfis cujos papeis sejam todos reconhecidos como equipe (professor, instrutor, tutor ou coordenador) sao excluidos.
+- Quando roles estiverem preenchidas, o papel de estudante/aluno continua sendo a fonte primaria.
 
 Descrição:
 
@@ -980,6 +992,11 @@ Metadados MCP:
 | `OpenWorld` | `false` |
 
 ## `gerar_relatorio_risco_estudantes` / `report_students_at_risk`
+
+Diagnostico do relatorio:
+
+- Reutiliza o fallback inclusivo de alunos quando o Moodle nao retorna roles, evitando relatorio falsamente vazio.
+- Emite warnings quando nenhum participante foi encontrado, nenhum fator de risco foi detectado apos a analise ou notas/conclusao ficaram parcialmente indisponiveis.
 
 Descricao:
 

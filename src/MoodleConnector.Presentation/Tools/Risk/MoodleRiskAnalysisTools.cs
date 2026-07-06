@@ -125,7 +125,7 @@ public sealed class MoodleRiskAnalysisTools(
 
         var altos = data.Count(d => d.RiskLevel == RiskLevel.Alto);
         var medios = data.Count(d => d.RiskLevel == RiskLevel.Medio);
-        
+
         var narration = $"O relatorio de risco do curso {courseId} analisou {result.ParticipantsAnalyzedCount} participante(s). " +
                         $"Foram identificados {data.Count} estudante(s) com algum nivel de risco, " +
                         $"sendo {altos} com risco Alto e {medios} com risco Medio.";

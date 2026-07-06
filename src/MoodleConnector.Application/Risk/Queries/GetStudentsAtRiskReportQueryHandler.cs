@@ -58,7 +58,7 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
             {
                 var gradebook = await gradebookGateway.GetStudentGradebookAsync(request.CourseId, student.UserId, cancellationToken);
                 var courseGradeItem = gradebook.Items.FirstOrDefault(i => i.ItemType == "course");
-                
+
                 if (courseGradeItem != null)
                 {
                     currentGrade = courseGradeItem.PercentageFormatted;

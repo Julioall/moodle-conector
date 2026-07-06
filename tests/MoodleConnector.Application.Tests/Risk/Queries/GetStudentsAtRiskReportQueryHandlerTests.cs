@@ -13,7 +13,7 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
         var gradebook = new FakeGradebookGateway();
         var completion = new FakeCompletionGateway();
         var currentUserId = new FakeCurrentUserIdGateway();
-        
+
         var sut = new GetStudentsAtRiskReportQueryHandler(participants, gradebook, completion, currentUserId);
 
         var result = await sut.Handle(new GetStudentsAtRiskReportQuery("10", 50, InactivityThresholdDays: 7, MinGradePercentage: 60m), CancellationToken.None);
