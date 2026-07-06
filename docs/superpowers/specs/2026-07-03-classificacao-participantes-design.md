@@ -29,12 +29,12 @@ A classificação centralizada aplicara estas regras quando `studentsOnly` for `
 1. Participante com papel reconhecido como aluno e incluido.
 2. Participante sem qualquer papel retornado e incluido por fallback incerto.
 3. Participante com ao menos um papel conhecido exclusivamente como perfil de equipe e excluido.
-4. Participante com papel não reconhecido e incluido por fallback incerto.
+4. Participante com papel não reconhecido e excluido, pois fallback somente se aplica quando `roles` estiver vazio.
 5. Participante com papeis mistos, incluindo papel de aluno, e incluido.
 
 Os nomes reconhecidos devem ser comparados sem diferenciar maiusculas, minusculas ou acentos quando aplicavel. Papeis de aluno incluem inicialmente `student`, `estudante` e `aluno`. Papeis conhecidos de equipe incluem inicialmente `teacher`, `editingteacher`, `instructor`, `tutor`, `coordinator`, `professor`, `instrutor` e `coordenador`.
 
-A exclusão de equipe deve ser conservadora: somente participantes cujos papeis retornados sejam todos reconhecidos como equipe podem ser descartados. Qualquer papel desconhecido preserva o participante.
+A exclusão deve ser orientada pela presença de papel estudantil: se `roles` vier preenchido e nenhum papel for reconhecido como aluno, o participante e descartado dos fluxos `studentsOnly`. Isso abrange papeis customizados como `monitor_go` e `editingteacher-go` sem depender de uma lista exaustiva de equipe.
 
 ### Diagnostico
 

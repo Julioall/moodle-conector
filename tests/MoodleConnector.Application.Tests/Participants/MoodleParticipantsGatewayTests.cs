@@ -44,21 +44,22 @@ public sealed class MoodleParticipantsGatewayTests
     }
 
     [Fact]
-    public async Task Exclui_somente_perfil_conhecido_de_equipe()
+    public async Task Exclui_toda_role_preenchida_que_nao_seja_student()
     {
         var sut = CreateGateway(new JsonHandler("""
             [
-              {"id":1,"fullname":"Professor","suspended":false,"roles":[{"roleid":3,"shortname":"editingteacher","name":"Professor"}],"groups":[]},
-              {"id":2,"fullname":"Papel local","suspended":false,"roles":[{"roleid":8,"shortname":"local","name":"Papel local"}],"groups":[]}
+              {"id":1,"fullname":"Professor","suspended":false,"roles":[{"roleid":3,"shortname":"editingteacher-go","name":"Professor - GO"}],"groups":[]},
+              {"id":2,"fullname":"Monitora","suspended":false,"roles":[{"roleid":8,"shortname":"monitor_go","name":"Monitor - GO"}],"groups":[]},
+              {"id":3,"fullname":"Aluna","suspended":false,"roles":[{"roleid":5,"shortname":"student","name":"Estudante"}],"groups":[]}
             ]
             """));
 
         var result = await sut.GetCourseParticipantsAsync(
             "42", "10", ParticipantStatusFilter.All, 1, 20, true, false, null, CancellationToken.None);
 
-        Assert.Equal("Papel local", Assert.Single(result.Participants).FullName);
-        Assert.Equal(1, result.ClassificationDiagnostics!.ExcludedKnownStaffCount);
-        Assert.Equal(1, result.ClassificationDiagnostics.IncludedByFallbackCount);
+        Assert.Equal("Aluna", Assert.Single(result.Participants).FullName);
+        Assert.Equal(2, result.ClassificationDiagnostics!.ExcludedKnownStaffCount);
+        Assert.Equal(0, result.ClassificationDiagnostics.IncludedByFallbackCount);
     }
 
     private static MoodleParticipantsGateway CreateGateway(JsonHandler handler)

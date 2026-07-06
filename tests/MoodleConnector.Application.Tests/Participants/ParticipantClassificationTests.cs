@@ -23,12 +23,29 @@ public sealed class ParticipantClassificationTests
     }
 
     [Fact]
-    public void Inclui_papel_desconhecido_por_fallback()
+    public void Exclui_papel_preenchido_que_nao_e_student()
     {
         var result = ParticipantClassification.Classify(CreateParticipant(
             new CourseParticipantRole("9", "customrole", "Papel local")));
 
-        Assert.Equal(ParticipantClassificationKind.UncertainFallback, result);
+        Assert.Equal(ParticipantClassificationKind.KnownStaff, result);
+    }
+
+    [Theory]
+    [InlineData("monitor_go", "Monitor - GO")]
+    [InlineData("editingteacher-go", "Professor - GO")]
+    [InlineData("teacher", "Professor")]
+    [InlineData("professor", "Professor")]
+    [InlineData("monitor", "Monitor")]
+    [InlineData("tutor", "Tutor")]
+    [InlineData("manager", "Gestor")]
+    [InlineData("coordinator", "Coordenador")]
+    public void Exclui_roles_nao_estudantis_confirmadas(string shortName, string name)
+    {
+        var result = ParticipantClassification.Classify(CreateParticipant(
+            new CourseParticipantRole("9", shortName, name)));
+
+        Assert.Equal(ParticipantClassificationKind.KnownStaff, result);
     }
 
     [Fact]

@@ -315,8 +315,8 @@ Resposta estruturada:
 
 Fallback de classificacao:
 
-- Participantes sem papel ou com papel desconhecido sao incluidos para nao omitir possiveis alunos, com warning explicito.
-- Apenas perfis cujos papeis sejam todos reconhecidos como equipe (professor, instrutor, tutor ou coordenador) sao excluidos.
+- Participantes sem qualquer papel (`roles: []`) sao incluidos por fallback, com warning explicito.
+- Quando `roles` vier preenchido, somente participantes com papel de estudante/aluno sao incluidos; qualquer conjunto sem `student` e excluido.
 - Quando roles estiverem preenchidas, o papel de estudante/aluno continua sendo a fonte primaria.
 
 Descrição:

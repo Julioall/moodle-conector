@@ -16,13 +16,6 @@ internal static class ParticipantClassification
     private static readonly HashSet<string> StudentRoles =
         new(StringComparer.OrdinalIgnoreCase) { "student", "estudante", "aluno" };
 
-    private static readonly HashSet<string> StaffRoles =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "teacher", "editingteacher", "instructor", "tutor", "coordinator",
-            "professor", "instrutor", "coordenador"
-        };
-
     internal static ParticipantClassificationKind Classify(CourseParticipantSummary participant)
     {
         if (participant.Roles.Count == 0)
@@ -41,9 +34,7 @@ internal static class ParticipantClassification
             return ParticipantClassificationKind.Student;
         }
 
-        return normalizedRoles.Length > 0 && normalizedRoles.All(StaffRoles.Contains)
-            ? ParticipantClassificationKind.KnownStaff
-            : ParticipantClassificationKind.UncertainFallback;
+        return ParticipantClassificationKind.KnownStaff;
     }
 
     private static string Normalize(string value)
