@@ -99,10 +99,10 @@ public sealed class MoodleRiskAnalysisTools(
             return ToolResultHelper.Error<IReadOnlyList<StudentRiskReport>>("Usuario nao autenticado para gerar relatorio.");
         }
 
-        IReadOnlyList<StudentRiskReport> data;
+        StudentsAtRiskReportResult result;
         try
         {
-            data = await mediator.Send(
+            result = await mediator.Send(
                 new GetStudentsAtRiskReportQuery(courseId, maxStudents, inactivityThresholdDays, minGradePercentage),
                 cancellationToken);
         }
@@ -115,18 +115,19 @@ public sealed class MoodleRiskAnalysisTools(
             return ToolResultHelper.Error<IReadOnlyList<StudentRiskReport>>("Nao foi possivel gerar o relatorio neste momento.");
         }
 
+        var data = result.Reports;
         var response = new ToolResponse<IReadOnlyList<StudentRiskReport>>(
             "ok",
             data,
-            [],
+            BuildWarnings(result),
             AuditId: null,
             DateTimeOffset.UtcNow);
 
         var altos = data.Count(d => d.RiskLevel == RiskLevel.Alto);
         var medios = data.Count(d => d.RiskLevel == RiskLevel.Medio);
         
-        var narration = $"O relatorio de risco do curso {courseId} foi gerado com sucesso. " +
-                        $"Foram identificados {data.Count} estudantes com algum nivel de risco, " +
+        var narration = $"O relatorio de risco do curso {courseId} analisou {result.ParticipantsAnalyzedCount} participante(s). " +
+                        $"Foram identificados {data.Count} estudante(s) com algum nivel de risco, " +
                         $"sendo {altos} com risco Alto e {medios} com risco Medio.";
 
         return new CallToolResult
@@ -135,6 +136,45 @@ public sealed class MoodleRiskAnalysisTools(
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
+    }
+
+    private static IReadOnlyList<string> BuildWarnings(StudentsAtRiskReportResult result)
+    {
+        var warnings = new List<string>();
+
+        if (result.ClassificationDiagnostics.IncludedByFallbackCount > 0)
+        {
+            warnings.Add(
+                "Nao foi possivel identificar todos os alunos por role. " +
+                $"{result.ClassificationDiagnostics.IncludedByFallbackCount} participante(s) foram incluidos por fallback no relatorio.");
+        }
+
+        if (result.ParticipantsAnalyzedCount == 0)
+        {
+            warnings.Add("O curso nao retornou participantes para analise de risco.");
+        }
+        else if (result.Reports.Count == 0)
+        {
+            warnings.Add(
+                $"Foram analisados {result.ParticipantsAnalyzedCount} participante(s), " +
+                "mas nenhum fator de risco configurado foi detectado.");
+        }
+
+        if (result.GradebookFailureCount > 0)
+        {
+            warnings.Add(
+                $"Nao foi possivel consultar notas de {result.GradebookFailureCount} participante(s); " +
+                "o relatorio pode estar parcial.");
+        }
+
+        if (result.CompletionFailureCount > 0)
+        {
+            warnings.Add(
+                $"Nao foi possivel consultar a conclusao de {result.CompletionFailureCount} participante(s); " +
+                "o relatorio pode estar parcial.");
+        }
+
+        return warnings;
     }
 
 

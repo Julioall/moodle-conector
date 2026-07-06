@@ -1,4 +1,5 @@
 using MediatR;
+using MoodleConnector.Domain;
 
 namespace MoodleConnector.Application.Risk.Queries;
 
@@ -18,8 +19,15 @@ public sealed record StudentRiskReport(
     decimal? CurrentGrade,
     decimal? CompletionRate);
 
+public sealed record StudentsAtRiskReportResult(
+    IReadOnlyList<StudentRiskReport> Reports,
+    int ParticipantsAnalyzedCount,
+    ParticipantClassificationDiagnostics ClassificationDiagnostics,
+    int GradebookFailureCount,
+    int CompletionFailureCount);
+
 public sealed record GetStudentsAtRiskReportQuery(
     string CourseId,
     int MaxStudentsToAnalyze,
     int InactivityThresholdDays = 7,
-    decimal MinGradePercentage = 60m) : IRequest<IReadOnlyList<StudentRiskReport>>;
+    decimal MinGradePercentage = 60m) : IRequest<StudentsAtRiskReportResult>;

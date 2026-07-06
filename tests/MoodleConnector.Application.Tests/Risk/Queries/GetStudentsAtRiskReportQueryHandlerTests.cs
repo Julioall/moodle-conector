@@ -19,24 +19,54 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
         var result = await sut.Handle(new GetStudentsAtRiskReportQuery("10", 50, InactivityThresholdDays: 7, MinGradePercentage: 60m), CancellationToken.None);
 
         Assert.NotNull(result);
-        Assert.Single(result);
-        Assert.Equal("123", result[0].StudentId);
-        Assert.Equal(RiskLevel.Alto, result[0].RiskLevel); // Multiple factors: inactive, low grade, low completion
+        Assert.Single(result.Reports);
+        Assert.Equal("123", result.Reports[0].StudentId);
+        Assert.Equal(RiskLevel.Alto, result.Reports[0].RiskLevel); // Multiple factors: inactive, low grade, low completion
+        Assert.Equal(1, result.ParticipantsAnalyzedCount);
+        Assert.Equal(1, result.ClassificationDiagnostics.IncludedByFallbackCount);
+    }
+
+    [Fact]
+    public async Task Handle_DiagnosticaAusenciaDeParticipantes()
+    {
+        var sut = new GetStudentsAtRiskReportQueryHandler(
+            new FakeParticipantsGateway { ReturnEmpty = true },
+            new FakeGradebookGateway(),
+            new FakeCompletionGateway(),
+            new FakeCurrentUserIdGateway());
+
+        var result = await sut.Handle(
+            new GetStudentsAtRiskReportQuery("10", 50), CancellationToken.None);
+
+        Assert.Empty(result.Reports);
+        Assert.Equal(0, result.ParticipantsAnalyzedCount);
+    }
+
+    [Fact]
+    public async Task Handle_AgregaFalhasParciaisSemAbortarRelatorio()
+    {
+        var sut = new GetStudentsAtRiskReportQueryHandler(
+            new FakeParticipantsGateway(),
+            new ThrowingGradebookGateway(),
+            new ThrowingCompletionGateway(),
+            new FakeCurrentUserIdGateway());
+
+        var result = await sut.Handle(
+            new GetStudentsAtRiskReportQuery("10", 50), CancellationToken.None);
+
+        Assert.Equal(1, result.GradebookFailureCount);
+        Assert.Equal(1, result.CompletionFailureCount);
     }
 
     private sealed class FakeParticipantsGateway : IMoodleParticipantsGateway
     {
+        public bool ReturnEmpty { get; init; }
+
         public Task<CourseParticipantsPage> GetCourseParticipantsAsync(string userExternalId, string courseId, ParticipantStatusFilter statusFilter, int page, int pageSize, bool studentsOnly, bool includeEmail, string? groupId, CancellationToken cancellationToken)
         {
-            return Task.FromResult(new CourseParticipantsPage(
-                CourseId: courseId,
-                Page: page,
-                PageSize: pageSize,
-                StatusFilter: statusFilter,
-                StudentsOnly: studentsOnly,
-                IncludeEmail: includeEmail,
-                HasMore: false,
-                Participants: [
+            IReadOnlyList<CourseParticipantSummary> participants = ReturnEmpty
+                ? Array.Empty<CourseParticipantSummary>()
+                : [
                     new CourseParticipantSummary(
                         UserId: "123",
                         FullName: "Aluno Teste",
@@ -47,13 +77,39 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
                         LastCourseAccessAt: DateTimeOffset.UtcNow.AddDays(-10),
                         Roles: [],
                         Groups: [])
-                ]));
+                ];
+
+            return Task.FromResult(new CourseParticipantsPage(
+                CourseId: courseId,
+                Page: page,
+                PageSize: pageSize,
+                StatusFilter: statusFilter,
+                StudentsOnly: studentsOnly,
+                IncludeEmail: includeEmail,
+                HasMore: false,
+                Participants: participants,
+                ClassificationDiagnostics: ReturnEmpty
+                    ? ParticipantClassificationDiagnostics.Empty
+                    : new ParticipantClassificationDiagnostics(
+                        1, 0, 1, 0, true, true, ParticipantClassificationMode.Fallback)));
         }
 
         public Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(string userExternalId, string courseId, CancellationToken cancellationToken)
         {
             return Task.FromResult<IReadOnlyList<CourseGroupSummary>>([]);
         }
+    }
+
+    private sealed class ThrowingGradebookGateway : IMoodleGradebookGateway
+    {
+        public Task<CourseGradebook> GetStudentGradebookAsync(string courseId, string studentId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Falha simulada.");
+    }
+
+    private sealed class ThrowingCompletionGateway : IMoodleCompletionGateway
+    {
+        public Task<CourseCompletionStatus> GetStudentCompletionAsync(string courseId, string studentId, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Falha simulada.");
     }
 
     private sealed class FakeGradebookGateway : IMoodleGradebookGateway

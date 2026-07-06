@@ -9,9 +9,9 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
     IMoodleGradebookGateway gradebookGateway,
     IMoodleCompletionGateway completionGateway,
     IMoodleCurrentUserIdGateway currentUserIdGateway)
-    : IRequestHandler<GetStudentsAtRiskReportQuery, IReadOnlyList<StudentRiskReport>>
+    : IRequestHandler<GetStudentsAtRiskReportQuery, StudentsAtRiskReportResult>
 {
-    public async Task<IReadOnlyList<StudentRiskReport>> Handle(GetStudentsAtRiskReportQuery request, CancellationToken cancellationToken)
+    public async Task<StudentsAtRiskReportResult> Handle(GetStudentsAtRiskReportQuery request, CancellationToken cancellationToken)
     {
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
 
@@ -28,6 +28,8 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
             cancellationToken: cancellationToken);
 
         var reports = new List<StudentRiskReport>();
+        var gradebookFailureCount = 0;
+        var completionFailureCount = 0;
 
         foreach (var student in participantsPage.Participants)
         {
@@ -74,6 +76,7 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
             catch (Exception)
             {
                 // Gradebook might be disabled or unreachable for this student
+                gradebookFailureCount++;
             }
 
             // Fetch Completion
@@ -98,6 +101,7 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
             catch (Exception)
             {
                 // Completion tracking might be disabled
+                completionFailureCount++;
             }
 
             // Calculate overall risk
@@ -120,9 +124,16 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
         }
 
         // Return ordered by RiskLevel descending, then by inactivity
-        return reports
+        var orderedReports = reports
             .OrderByDescending(r => r.RiskLevel)
             .ThenBy(r => r.LastCourseAccessAt ?? DateTimeOffset.MinValue)
             .ToList();
+
+        return new StudentsAtRiskReportResult(
+            orderedReports,
+            participantsPage.Participants.Count,
+            participantsPage.ClassificationDiagnostics ?? ParticipantClassificationDiagnostics.Empty,
+            gradebookFailureCount,
+            completionFailureCount);
     }
 }
