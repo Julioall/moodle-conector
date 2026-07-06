@@ -462,7 +462,12 @@ public sealed class MoodleParticipantsTools(
             participantsPage.HasMore,
             participantsPage.Participants.Count,
             participantsPage.Participants.Select(ToParticipantItem).ToArray());
-        var response = new ToolResponse<ListCourseParticipantsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<ListCourseParticipantsResponse>(
+            "ok",
+            data,
+            BuildParticipantWarnings(participantsPage),
+            AuditId: null,
+            DateTimeOffset.UtcNow);
 
         return new CallToolResult
         {
@@ -470,6 +475,38 @@ public sealed class MoodleParticipantsTools(
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
+    }
+
+    private static IReadOnlyList<string> BuildParticipantWarnings(CourseParticipantsPage page)
+    {
+        var warnings = new List<string>();
+        var diagnostics = page.ClassificationDiagnostics ?? ParticipantClassificationDiagnostics.Empty;
+
+        if (page.Participants.Count == 0)
+        {
+            warnings.Add(page.Page > 1
+                ? "A pagina solicitada nao retornou participantes. Ela pode estar fora do intervalo disponivel."
+                : "Nenhum participante foi encontrado para os filtros informados.");
+        }
+
+        if (diagnostics.IncludedByFallbackCount > 0)
+        {
+            warnings.Add(
+                $"Nao foi possivel identificar todos os alunos por role. " +
+                $"{diagnostics.IncludedByFallbackCount} participante(s) foram incluidos por fallback.");
+        }
+
+        if (diagnostics.HasEmptyRoles)
+        {
+            warnings.Add("O Moodle retornou participantes sem roles; a classificacao pode estar incompleta.");
+        }
+
+        if (diagnostics.HasEmptyGroups)
+        {
+            warnings.Add("O Moodle retornou participantes sem grupos; o curso pode nao usar grupos ou a informacao pode estar indisponivel.");
+        }
+
+        return warnings;
     }
 
     private static string BuildParticipantsNarration(ListCourseParticipantsResponse response)

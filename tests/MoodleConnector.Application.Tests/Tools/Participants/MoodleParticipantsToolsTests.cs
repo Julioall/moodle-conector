@@ -129,6 +129,45 @@ public class MoodleParticipantsToolsTests
         var data = structured.GetProperty("data");
         Assert.Equal(0, data.GetProperty("count").GetInt32());
         Assert.Equal(0, data.GetProperty("participants").GetArrayLength());
+        Assert.NotEqual(0, structured.GetProperty("warnings").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Deve_alertar_quando_alunos_forem_incluidos_por_fallback()
+    {
+        var mediator = new FakeMediator { ReturnFallbackDiagnostics = true };
+        var sut = new MoodleParticipantsTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarAlunosCursoAsync("CURSO");
+
+        Assert.False(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var warnings = structured.GetProperty("warnings");
+        Assert.Contains(warnings.EnumerateArray(), warning =>
+            warning.GetString()!.Contains("fallback", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings.EnumerateArray(), warning =>
+            warning.GetString()!.Contains("roles", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings.EnumerateArray(), warning =>
+            warning.GetString()!.Contains("grupos", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Deve_distinguir_pagina_vazia_fora_do_intervalo()
+    {
+        var mediator = new FakeMediator { ReturnEmptyParticipants = true };
+        var sut = new MoodleParticipantsTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarAlunosCursoAsync("CURSO", pagina: 3);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Contains(structured.GetProperty("warnings").EnumerateArray(), warning =>
+            warning.GetString()!.Contains("pagina", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -225,6 +264,8 @@ public class MoodleParticipantsToolsTests
 
         public bool ReturnEmptyParticipants { get; init; }
 
+        public bool ReturnFallbackDiagnostics { get; init; }
+
         public bool ThrowOnParticipants { get; init; }
 
         public Task Publish(object notification, CancellationToken cancellationToken = default)
@@ -251,10 +292,12 @@ public class MoodleParticipantsToolsTests
                 return ReturnNullParticipants
                     ? Task.FromResult<TResponse>(default!)
                     : Task.FromResult((TResponse)(object)CreateParticipantsPage(
+                        participants.Page,
                         participants.IncludeEmail,
                         participants.StudentsOnly,
                         participants.StatusFilter,
-                        ReturnEmptyParticipants));
+                        ReturnEmptyParticipants,
+                        ReturnFallbackDiagnostics));
             }
 
             if (request is ListCourseGroupsQuery groups)
@@ -268,6 +311,7 @@ public class MoodleParticipantsToolsTests
             {
                 LastGroupMembersQuery = members;
                 return Task.FromResult((TResponse)(object)CreateParticipantsPage(
+                    members.Page,
                     members.IncludeEmail,
                     studentsOnly: false,
                     members.StatusFilter));
@@ -290,10 +334,12 @@ public class MoodleParticipantsToolsTests
                     ReturnNullParticipants
                         ? null
                         : CreateParticipantsPage(
+                            participants.Page,
                             participants.IncludeEmail,
                             participants.StudentsOnly,
                             participants.StatusFilter,
-                            ReturnEmptyParticipants));
+                            ReturnEmptyParticipants,
+                            ReturnFallbackDiagnostics));
             }
 
             if (request is ListCourseGroupsQuery groups)
@@ -307,6 +353,7 @@ public class MoodleParticipantsToolsTests
             {
                 LastGroupMembersQuery = members;
                 return Task.FromResult<object?>(CreateParticipantsPage(
+                    members.Page,
                     members.IncludeEmail,
                     studentsOnly: false,
                     members.StatusFilter));
@@ -322,20 +369,27 @@ public class MoodleParticipantsToolsTests
             => AsyncEnumerable.Empty<object?>();
 
         private static CourseParticipantsPage CreateParticipantsPage(
+            int page,
             bool includeEmail,
             bool studentsOnly,
             ParticipantStatusFilter statusFilter,
-            bool empty = false)
+            bool empty = false,
+            bool fallbackDiagnostics = false)
         {
             return new CourseParticipantsPage(
                 "123",
-                Page: 1,
+                Page: page,
                 PageSize: 20,
                 statusFilter,
                 studentsOnly,
                 includeEmail,
                 HasMore: false,
-                empty ? [] : [CreateParticipant(includeEmail)]);
+                empty ? [] : [CreateParticipant(includeEmail)],
+                fallbackDiagnostics
+                    ? new ParticipantClassificationDiagnostics(
+                        1, 0, 1, 0, HasEmptyRoles: true, HasEmptyGroups: true,
+                        ParticipantClassificationMode.Fallback)
+                    : null);
         }
 
         private static CourseParticipantSummary CreateParticipant(bool includeEmail)
