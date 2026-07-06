@@ -7,6 +7,27 @@ public enum ParticipantStatusFilter
     All = 2
 }
 
+public enum ParticipantClassificationMode
+{
+    NotRequested = 0,
+    RoleBased = 1,
+    Mixed = 2,
+    Fallback = 3
+}
+
+public sealed record ParticipantClassificationDiagnostics(
+    int EvaluatedCount,
+    int IncludedByStudentRoleCount,
+    int IncludedByFallbackCount,
+    int ExcludedKnownStaffCount,
+    bool HasEmptyRoles,
+    bool HasEmptyGroups,
+    ParticipantClassificationMode Mode)
+{
+    public static ParticipantClassificationDiagnostics Empty { get; } =
+        new(0, 0, 0, 0, false, false, ParticipantClassificationMode.NotRequested);
+}
+
 public sealed record CourseParticipantsPage(
     string CourseId,
     int Page,
@@ -15,7 +36,8 @@ public sealed record CourseParticipantsPage(
     bool StudentsOnly,
     bool IncludeEmail,
     bool HasMore,
-    IReadOnlyList<CourseParticipantSummary> Participants);
+    IReadOnlyList<CourseParticipantSummary> Participants,
+    ParticipantClassificationDiagnostics? ClassificationDiagnostics = null);
 
 public sealed record CourseParticipantSummary(
     string UserId,
