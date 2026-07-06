@@ -45,6 +45,12 @@ internal sealed class MoodleParticipantsGateway(
         var skipped = 0;
         var fetchOffset = 0;
         var participants = new List<CourseParticipantSummary>(pageSize + 1);
+        var evaluatedCount = 0;
+        var includedByStudentRoleCount = 0;
+        var includedByFallbackCount = 0;
+        var excludedKnownStaffCount = 0;
+        var hasEmptyRoles = false;
+        var hasEmptyGroups = false;
 
         while (participants.Count < pageSize + 1)
         {
@@ -66,9 +72,29 @@ internal sealed class MoodleParticipantsGateway(
 
             foreach (var participant in moodleParticipants.Select(dto => ToParticipant(dto, includeEmail)))
             {
-                if (!MatchesStatus(participant, statusFilter) || (studentsOnly && !IsStudent(participant)))
+                if (!MatchesStatus(participant, statusFilter))
                 {
                     continue;
+                }
+
+                evaluatedCount++;
+                hasEmptyRoles |= participant.Roles.Count == 0;
+                hasEmptyGroups |= participant.Groups.Count == 0;
+
+                var classification = ParticipantClassification.Classify(participant);
+                if (studentsOnly && classification == ParticipantClassificationKind.KnownStaff)
+                {
+                    excludedKnownStaffCount++;
+                    continue;
+                }
+
+                if (classification == ParticipantClassificationKind.Student)
+                {
+                    includedByStudentRoleCount++;
+                }
+                else if (classification == ParticipantClassificationKind.UncertainFallback)
+                {
+                    includedByFallbackCount++;
                 }
 
                 if (skipped < targetSkip)
@@ -100,7 +126,18 @@ internal sealed class MoodleParticipantsGateway(
             studentsOnly,
             includeEmail,
             hasMore,
-            participants.Take(pageSize).ToArray());
+            participants.Take(pageSize).ToArray(),
+            new ParticipantClassificationDiagnostics(
+                evaluatedCount,
+                includedByStudentRoleCount,
+                includedByFallbackCount,
+                excludedKnownStaffCount,
+                hasEmptyRoles,
+                hasEmptyGroups,
+                ResolveClassificationMode(
+                    evaluatedCount,
+                    includedByStudentRoleCount,
+                    includedByFallbackCount)));
     }
 
     public async Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(
@@ -220,13 +257,24 @@ internal sealed class MoodleParticipantsGateway(
         };
     }
 
-    private static bool IsStudent(CourseParticipantSummary participant)
+    private static ParticipantClassificationMode ResolveClassificationMode(
+        int evaluatedCount,
+        int includedByStudentRoleCount,
+        int includedByFallbackCount)
     {
-        return participant.Roles.Any(role =>
-            string.Equals(role.ShortName, "student", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role.Name, "student", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role.Name, "estudante", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(role.Name, "aluno", StringComparison.OrdinalIgnoreCase));
+        if (evaluatedCount == 0)
+        {
+            return ParticipantClassificationMode.NotRequested;
+        }
+
+        if (includedByFallbackCount > 0 && includedByStudentRoleCount > 0)
+        {
+            return ParticipantClassificationMode.Mixed;
+        }
+
+        return includedByFallbackCount > 0
+            ? ParticipantClassificationMode.Fallback
+            : ParticipantClassificationMode.RoleBased;
     }
 
     private static string BuildUserFields(bool includeEmail)
@@ -238,7 +286,9 @@ internal sealed class MoodleParticipantsGateway(
             "suspended",
             "firstaccess",
             "lastaccess",
-            "lastcourseaccess"
+            "lastcourseaccess",
+            "roles",
+            "groups"
         };
 
         if (includeEmail)
