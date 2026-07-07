@@ -12,6 +12,7 @@ COPY src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj src/Mo
 RUN dotnet restore src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj
 
 COPY src/ src/
+COPY public/ public/
 
 RUN dotnet publish src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj \
     --configuration Release \

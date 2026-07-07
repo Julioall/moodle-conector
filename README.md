@@ -152,6 +152,24 @@ Busque os cursos do Moodle nacional com o termo desenvolvimento de sistemas.
 
 Quando houver mais de um Moodle cadastrado, informe o alias no pedido para evitar ambiguidade.
 
+O conector também pode consultar o acervo pedagógico e manter preferências duráveis:
+
+```text
+Consulte as orientações pedagógicas sobre avaliação formativa antes de sugerir o feedback desta atividade.
+```
+
+```text
+Lembre que prefiro feedbacks objetivos, com evidência e próximo passo. Não inclua dados de alunos nessa memória.
+```
+
+```text
+Liste minhas memórias sobre correção e remova a que eu indicar pelo identificador.
+```
+
+Memórias não são lugar para senhas, tokens, chaves, segredos, notas ou dados pessoais
+de estudantes. A consulta pedagógica usa somente os guias locais publicados com a
+aplicação; ela não pesquisa a internet e deve apoiar, não substituir, a revisão humana.
+
 ### 5. Sobre escrita e ações sensíveis
 
 As ferramentas de escrita ainda estão em desenvolvimento e devem seguir um fluxo seguro:
@@ -362,6 +380,13 @@ Leitura:
 | `search_courses` | Alias em ingles de `buscar_cursos`. | Implementada |
 | `consultar_curso` | Consulta metadados básicos de um curso vinculado. | Implementada |
 | `get_course` | Alias em ingles de `consultar_curso`. | Implementada |
+| `consultar_orientacoes_pedagogicas` | Pesquisa os guias pedagógicos locais antes de tarefas educacionais. | Implementada |
+
+Estado interno (não altera o Moodle):
+
+| Tool | Descrição | Status |
+| --- | --- | --- |
+| `gerenciar_memoria_usuario` | Salva, lista ou remove memórias privadas e duráveis do usuário. A remoção é destrutiva para esse estado interno. | Implementada |
 
 Demo de pending action:
 

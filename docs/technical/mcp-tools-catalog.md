@@ -2,10 +2,52 @@
 
 Este catálogo reflete o estado real do repositório.
 
+## Memória e orientações pedagógicas
+
+### `gerenciar_memoria_usuario`
+
+Mantém memórias duráveis privadas do usuário autenticado. Aceita `action=salvar`,
+`listar` ou `remover`; não altera o Moodle. Por remover estado interno, a tool anuncia
+`ReadOnly=false`, `Destructive=true`, `Idempotent=true` e `OpenWorld=false`.
+
+| Argumento | Uso |
+| --- | --- |
+| `action` | Obrigatório: `salvar`, `listar` ou `remover`. |
+| `category` | Em `salvar`: `preferencia`, `caminho`, `correcao` ou `decisao`; também filtra `listar`. |
+| `key`, `content`, `origin` | Obrigatórios em `salvar`; `origin` é `explicit` ou `inferred`. |
+| `query`, `moodleAlias`, `courseId`, `limit` | Filtros opcionais de `listar`; `limit` padrão é 20. |
+| `memoryId` | UUID obrigatório em `remover`. |
+
+A resposta estruturada segue `ToolResponse<MemoryToolResponse>`. `data.action` repete a
+ação; `data.memory` aparece ao salvar, `data.memories` ao listar e `data.removed` ao
+remover. Erros de argumentos retornam resposta MCP controlada. Nunca envie senhas,
+tokens, chaves, segredos ou dados pessoais/acadêmicos de alunos para esta tool.
+
+Hints de uso: liste antes de remover para obter o `memoryId`; salve apenas fatos
+duráveis e reutilizáveis; automatizações podem consultar preferências antes de agir,
+mas não devem salvar inferências sensíveis nem remover memórias sem intenção explícita.
+
+### `consultar_orientacoes_pedagogicas`
+
+Pesquisa os sete guias Markdown publicados junto da aplicação. Deve ser consultada
+antes de avaliação, feedback, planejamento, fóruns, acompanhamento de estudantes e
+relatórios pedagógicos. Aceita `query` obrigatória e `limit` opcional (padrão 5).
+Retorna `ToolResponse<PedagogicGuidanceResponse>` com `data.results`; cada resultado
+contém `relativePath`, `title`, `section`, `excerpt` e `score`.
+
+Se `query` estiver vazia, retorna erro controlado. Os metadados são `ReadOnly=true`,
+`Destructive=false`, `Idempotent=true` e `OpenWorld=false`. A busca é lexical e limitada
+ao acervo local: não consulta a internet, não substitui julgamento profissional e não
+garante orientação para assuntos ausentes dos guias. Em automações, consulte com os
+conceitos centrais da tarefa e trate resultados como referência, preservando revisão
+humana e minimização de dados.
+
 ## Tools implementadas
 
 | Tool | Título | Risco | Leitura | Escrita | Status |
 | --- | --- | --- | --- | --- | --- |
+| `consultar_orientacoes_pedagogicas` | Consultar orientações pedagógicas | `ReadOnly` | Sim | Não | Implementada |
+| `gerenciar_memoria_usuario` | Gerenciar memória do usuário | `InternalStateWrite` | Lista memórias | Salva/remove memória interna | Implementada |
 | `listar_meus_cursos` | Listar Meus Cursos | `ReadOnly` | Sim | Não | Implementada |
 | `list_courses` | List Courses | `ReadOnly` | Sim | Não | Implementada |
 | `search` | Search Moodle courses | `ReadOnly` | Sim | Não | Implementada |

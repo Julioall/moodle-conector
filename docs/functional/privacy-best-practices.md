@@ -24,6 +24,14 @@ Nunca registrar em logs, issues, prints ou documentação:
 - connection string com senha;
 - dados pessoais de alunos sem necessidade operacional.
 
+## Memória do usuário
+
+- Nunca salve senhas, tokens, API keys, client secrets, connection strings ou qualquer outro segredo em `gerenciar_memoria_usuario`.
+- Não salve nomes, identificadores, notas, entregas, diagnósticos ou outros dados pessoais e acadêmicos de alunos.
+- Use `listar` para revisar o conteúdo armazenado e obter o `memoryId`; use `remover` quando a memória estiver incorreta, obsoleta ou quando o usuário pedir sua exclusão.
+- Trate `remover` como ação destrutiva sobre estado interno, embora ela não altere o Moodle.
+- Automatizações só devem salvar preferências, caminhos, correções e decisões duráveis, com escopo mínimo e origem (`explicit` ou `inferred`) fiel.
+
 ## Uso por professores e tutores
 
 - Consulte apenas cursos sob sua responsabilidade.
