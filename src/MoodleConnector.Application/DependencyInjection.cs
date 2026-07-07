@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.Memory;
 using MoodleConnector.Application.PendingActions;
 using Microsoft.Extensions.Options;
 
@@ -17,6 +18,8 @@ public static class DependencyInjection
         services.AddOptions<GradingLimitsOptions>();
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();
+        services.AddScoped<IUserMemoryService, UserMemoryService>();
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IGradingAnalysisService, StructuredGradingAnalysisService>();
         services.AddSingleton<ICriteriaGenerationService, HeuristicCriteriaGenerationService>();
         services.AddSingleton<IAssignmentContextSelectionService, HeuristicAssignmentContextSelectionService>();
