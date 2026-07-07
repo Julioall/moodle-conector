@@ -21,6 +21,21 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchAsync_IncludesPartialMatchesAndAwardsExactScoreAndAllTermsBonus()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "all.md"), "# Avaliação\n## Formativa\navaliacao avaliacao formativa");
+        await File.WriteAllTextAsync(Path.Combine(_root, "partial.md"), "# Avaliação\n## Diagnóstica\navaliacao");
+
+        var results = await Search().SearchAsync("avaliacao formativa", 10, CancellationToken.None);
+
+        Assert.Equal(2, results.Count);
+        Assert.Equal(14, results[0].Score);
+        Assert.Equal("all.md", results[0].RelativePath);
+        Assert.Equal(5, results[1].Score);
+        Assert.Equal("partial.md", results[1].RelativePath);
+    }
+
+    [Fact]
     public async Task SearchAsync_PreservesDocumentAndSectionMetadataAndReturnsRelevantExcerpt()
     {
         await File.WriteAllTextAsync(Path.Combine(_root, "guia.md"), "# Guia do Tutor\nIntrodução geral.\n## Avaliação contínua\nObserve evidências formativas e ofereça feedback.");
@@ -37,13 +52,22 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
     public async Task SearchAsync_IndexesOnlyMarkdownFilesAtRoot()
     {
         Directory.CreateDirectory(Path.Combine(_root, "subdir"));
+        var outsidePath = Path.Combine(Path.GetDirectoryName(_root)!, $"outside-{Guid.NewGuid():N}.md");
         await File.WriteAllTextAsync(Path.Combine(_root, "valid.md"), "# Válido\n## Tema\ntermo procurado");
         await File.WriteAllTextAsync(Path.Combine(_root, "ignored.txt"), "# Ignorado\ntermo procurado");
         await File.WriteAllTextAsync(Path.Combine(_root, "subdir", "nested.md"), "# Aninhado\ntermo procurado");
+        await File.WriteAllTextAsync(outsidePath, "# Fora\ntermo procurado");
 
-        var result = Assert.Single(await Search().SearchAsync("termo procurado", 10, CancellationToken.None));
+        try
+        {
+            var result = Assert.Single(await Search().SearchAsync("termo procurado", 10, CancellationToken.None));
 
-        Assert.Equal("valid.md", result.RelativePath);
+            Assert.Equal("valid.md", result.RelativePath);
+        }
+        finally
+        {
+            File.Delete(outsidePath);
+        }
     }
 
     [Fact]
@@ -55,7 +79,7 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
     }
 
     [Fact]
-    public async Task SearchAsync_IsDeterministicAndClampsQueryAndLimit()
+    public async Task SearchAsync_IsDeterministicAndClampsLimitToTen()
     {
         for (var index = 0; index < 12; index++)
         {
@@ -63,12 +87,24 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
         }
 
         var search = Search();
-        var first = await search.SearchAsync(new string('x', 300) + " termo", 99, CancellationToken.None);
-        var second = await search.SearchAsync("termo", 0, CancellationToken.None);
+        var first = await search.SearchAsync("termo", 99, CancellationToken.None);
+        var repeated = await search.SearchAsync("termo", 99, CancellationToken.None);
+        var minimum = await search.SearchAsync("termo", 0, CancellationToken.None);
 
-        Assert.Empty(first);
-        Assert.Single(second);
-        Assert.Equal("00.md", second[0].RelativePath);
+        Assert.Equal(10, first.Count);
+        Assert.Equal(first, repeated);
+        Assert.Single(minimum);
+        Assert.Equal("00.md", minimum[0].RelativePath);
+    }
+
+    [Fact]
+    public async Task SearchAsync_TruncatesQueryToThreeHundredCharacters()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "guide.md"), $"# Guia\n{new string('x', 300)} termo-fora-do-limite");
+
+        var result = await Search().SearchAsync(new string('x', 300) + " termo-fora-do-limite", 10, CancellationToken.None);
+
+        Assert.Single(result);
     }
 
     [Fact]

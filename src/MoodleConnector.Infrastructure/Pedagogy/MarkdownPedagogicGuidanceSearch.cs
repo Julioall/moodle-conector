@@ -49,12 +49,13 @@ public sealed partial class MarkdownPedagogicGuidanceSearch(string rootPath) : I
                     var normalizedSection = Normalize(block.Section);
                     var normalizedBody = Normalize(bodyChunk);
                     var combined = $"{normalizedTitle} {normalizedSection} {normalizedBody}";
-                    if (!terms.All(term => combined.Contains(term, StringComparison.Ordinal)))
+                    var matchingTermCount = terms.Count(term => combined.Contains(term, StringComparison.Ordinal));
+                    if (matchingTermCount == 0)
                     {
                         continue;
                     }
 
-                    var score = 3;
+                    var score = matchingTermCount == terms.Length ? 3 : 0;
                     foreach (var term in terms)
                     {
                         if (normalizedTitle.Contains(term, StringComparison.Ordinal)
