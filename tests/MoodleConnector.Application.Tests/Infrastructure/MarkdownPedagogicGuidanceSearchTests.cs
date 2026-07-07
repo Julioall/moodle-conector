@@ -119,6 +119,78 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
         Assert.Contains("palavra-final", result.Excerpt);
     }
 
+    [Fact]
+    public async Task SearchAsync_UsesImmutableIndexBuiltAtConstruction()
+    {
+        var path = Path.Combine(_root, "guide.md");
+        await File.WriteAllTextAsync(path, "# Guia\n## Seção\nconteúdo original");
+        var search = Search();
+        await File.WriteAllTextAsync(path, "# Alterado\nconteúdo substituído");
+
+        var result = Assert.Single(await search.SearchAsync("original", 10, CancellationToken.None));
+
+        Assert.Equal("Guia", result.Title);
+    }
+
+    [Fact]
+    public async Task SearchAsync_IsSafeForConcurrentCalls()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "guide.md"), "# Guia\n## Seção\nconteúdo concorrente");
+        var search = Search();
+
+        var searches = Enumerable.Range(0, 20)
+            .Select(_ => search.SearchAsync("concorrente", 10, CancellationToken.None));
+        var results = await Task.WhenAll(searches);
+
+        Assert.All(results, result => Assert.Equal(results[0], result));
+    }
+
+    [Fact]
+    public async Task SearchAsync_ScoresWholeSectionWhenTermsAreSeparatedByChunkBoundary()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_root, "boundary.md"),
+            $"# Guia\n## Seção longa\nprimeiro {new string('x', 1700)} segundo");
+
+        var result = Assert.Single(await Search().SearchAsync("primeiro segundo", 10, CancellationToken.None));
+
+        Assert.Equal(5, result.Score);
+    }
+
+    [Fact]
+    public async Task SearchAsync_MapsNormalizedWhitespaceOffsetBackToRelevantExcerpt()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_root, "whitespace.md"),
+            $"# Guia\n## Seção\ninício{new string(' ', 1000)}evidência relevante ao docente");
+
+        var result = Assert.Single(await Search().SearchAsync("evidencia relevante", 10, CancellationToken.None));
+
+        Assert.Contains("evidência relevante", result.Excerpt, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SearchAsync_ObservesPreCancelledToken()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_root, "guide.md"), "# Guia\nconteúdo");
+        var search = Search();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => search.SearchAsync("conteúdo", 10, cancellation.Token));
+    }
+
+    [Fact]
+    public void Constructor_ObservesCancellationWhileBuildingIndex()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(
+            () => new MarkdownPedagogicGuidanceSearch(_root, cancellation.Token));
+    }
+
     private MarkdownPedagogicGuidanceSearch Search() => new(_root);
 
     public void Dispose()
