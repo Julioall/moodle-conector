@@ -4,6 +4,10 @@ Este catálogo reflete o estado real do repositório.
 
 ## Memória e orientações pedagógicas
 
+O servidor MCP não vê a conversa por conta própria: memórias e orientações só são
+consultadas ou registradas quando a IA ou o cliente chama as tools correspondentes e
+envia o contexto necessário nos argumentos.
+
 ### `gerenciar_memoria_usuario`
 
 Mantém memórias duráveis privadas do usuário autenticado. Aceita `action=salvar`,

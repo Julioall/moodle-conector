@@ -169,6 +169,9 @@ Liste minhas memórias sobre correção e remova a que eu indicar pelo identific
 Memórias não são lugar para senhas, tokens, chaves, segredos, notas ou dados pessoais
 de estudantes. A consulta pedagógica usa somente os guias locais publicados com a
 aplicação; ela não pesquisa a internet e deve apoiar, não substituir, a revisão humana.
+O servidor MCP não vê a conversa por conta própria: memórias e orientações só são
+consultadas ou registradas quando a IA ou o cliente chama as tools correspondentes e
+envia o contexto necessário nos argumentos.
 
 ### 5. Sobre escrita e ações sensíveis
 
