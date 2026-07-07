@@ -75,17 +75,8 @@ public sealed partial class UserMemoryService(
         if (normalizedKey.Length == 0) throw new ArgumentException("A chave deve conter caracteres alfanuméricos.", nameof(request));
 
         var now = timeProvider.GetUtcNow();
-        var memory = await repository.FindEquivalentAsync(owner, category, alias, courseId, normalizedKey, cancellationToken);
-        if (memory is null)
-        {
-            memory = new UserMemory(owner, category, normalizedKey, content, origin, alias, courseId, now);
-            await repository.AddAsync(memory, cancellationToken);
-        }
-        else
-        {
-            memory.Update(content, origin, now);
-        }
-
+        var candidate = new UserMemory(owner, category, normalizedKey, content, origin, alias, courseId, now);
+        var memory = await repository.UpsertAsync(candidate, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Map(memory);
     }

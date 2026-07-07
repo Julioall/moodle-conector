@@ -6,6 +6,18 @@ namespace MoodleConnector.Infrastructure;
 
 public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMemoryRepository
 {
+    internal const string UpsertSql = """
+        INSERT INTO user_memories
+            ("Id", "OwnerSubject", "Category", "NormalizedKey", "Content", "Origin", "MoodleAlias", "CourseId", "CreatedAtUtc", "UpdatedAtUtc")
+        VALUES
+            ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})
+        ON CONFLICT ("OwnerSubject", "Category", "MoodleAlias", "CourseId", "NormalizedKey")
+        DO UPDATE SET
+            "Content" = EXCLUDED."Content",
+            "Origin" = EXCLUDED."Origin",
+            "UpdatedAtUtc" = EXCLUDED."UpdatedAtUtc";
+        """;
+
     public Task<UserMemory?> FindEquivalentAsync(
         string ownerSubject,
         string category,
@@ -26,6 +38,56 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
     public async Task AddAsync(UserMemory memory, CancellationToken cancellationToken = default)
     {
         await dbContext.UserMemories.AddAsync(memory, cancellationToken);
+    }
+
+    public async Task<UserMemory> UpsertAsync(
+        UserMemory candidate,
+        CancellationToken cancellationToken = default)
+    {
+        if (!dbContext.Database.IsNpgsql())
+        {
+            var existing = await FindEquivalentAsync(
+                candidate.OwnerSubject,
+                candidate.Category,
+                candidate.MoodleAlias,
+                candidate.CourseId,
+                candidate.NormalizedKey,
+                cancellationToken);
+            if (existing is null)
+            {
+                await AddAsync(candidate, cancellationToken);
+                return candidate;
+            }
+
+            existing.Update(candidate.Content, candidate.Origin, candidate.UpdatedAtUtc);
+            return existing;
+        }
+
+        await dbContext.Database.ExecuteSqlRawAsync(
+            UpsertSql,
+            [
+                candidate.Id,
+                candidate.OwnerSubject,
+                candidate.Category,
+                candidate.NormalizedKey,
+                candidate.Content,
+                candidate.Origin,
+                candidate.MoodleAlias ?? (object)DBNull.Value,
+                candidate.CourseId ?? (object)DBNull.Value,
+                candidate.CreatedAtUtc,
+                candidate.UpdatedAtUtc
+            ],
+            cancellationToken);
+
+        return await dbContext.UserMemories
+            .AsNoTracking()
+            .SingleAsync(memory =>
+                memory.OwnerSubject == candidate.OwnerSubject &&
+                memory.Category == candidate.Category &&
+                memory.MoodleAlias == candidate.MoodleAlias &&
+                memory.CourseId == candidate.CourseId &&
+                memory.NormalizedKey == candidate.NormalizedKey,
+                cancellationToken);
     }
 
     public async Task<IReadOnlyList<UserMemory>> ListAsync(

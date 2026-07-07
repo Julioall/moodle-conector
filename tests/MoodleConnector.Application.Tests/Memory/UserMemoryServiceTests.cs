@@ -20,6 +20,9 @@ public sealed class UserMemoryServiceTests
         Assert.Equal("inferred", second.Origin);
         Assert.Single(fixture.Repository.Items);
         Assert.True(second.UpdatedAtUtc > second.CreatedAtUtc);
+        Assert.Equal(2, fixture.Repository.UpsertCalls);
+        Assert.Equal(0, fixture.Repository.FindEquivalentCalls);
+        Assert.Equal(0, fixture.Repository.AddCalls);
     }
 
     [Theory]
@@ -198,14 +201,35 @@ public sealed class UserMemoryServiceTests
         public int LastListLimit { get; private set; }
         public string? LastListCategory { get; private set; }
         public string? LastListQuery { get; private set; }
+        public int UpsertCalls { get; private set; }
+        public int FindEquivalentCalls { get; private set; }
+        public int AddCalls { get; private set; }
 
-        public Task<UserMemory?> FindEquivalentAsync(string ownerSubject, string category, string? moodleAlias, string? courseId, string normalizedKey, CancellationToken cancellationToken = default) =>
-            Task.FromResult(Items.SingleOrDefault(x => x.OwnerSubject == ownerSubject && x.Category == category && x.MoodleAlias == moodleAlias && x.CourseId == courseId && x.NormalizedKey == normalizedKey));
+        public Task<UserMemory?> FindEquivalentAsync(string ownerSubject, string category, string? moodleAlias, string? courseId, string normalizedKey, CancellationToken cancellationToken = default)
+        {
+            FindEquivalentCalls++;
+            return Task.FromResult(Items.SingleOrDefault(x => x.OwnerSubject == ownerSubject && x.Category == category && x.MoodleAlias == moodleAlias && x.CourseId == courseId && x.NormalizedKey == normalizedKey));
+        }
 
         public Task AddAsync(UserMemory memory, CancellationToken cancellationToken = default)
         {
+            AddCalls++;
             Items.Add(memory);
             return Task.CompletedTask;
+        }
+
+        public Task<UserMemory> UpsertAsync(UserMemory candidate, CancellationToken cancellationToken = default)
+        {
+            UpsertCalls++;
+            var existing = Items.SingleOrDefault(x => x.OwnerSubject == candidate.OwnerSubject && x.Category == candidate.Category && x.MoodleAlias == candidate.MoodleAlias && x.CourseId == candidate.CourseId && x.NormalizedKey == candidate.NormalizedKey);
+            if (existing is null)
+            {
+                Items.Add(candidate);
+                return Task.FromResult(candidate);
+            }
+
+            existing.Update(candidate.Content, candidate.Origin, candidate.UpdatedAtUtc);
+            return Task.FromResult(existing);
         }
 
         public Task<IReadOnlyList<UserMemory>> ListAsync(string ownerSubject, string? moodleAlias, string? courseId, string? category, string? query, int limit, CancellationToken cancellationToken = default)

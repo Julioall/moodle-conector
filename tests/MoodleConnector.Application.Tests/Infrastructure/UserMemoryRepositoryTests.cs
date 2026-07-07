@@ -7,6 +7,33 @@ namespace MoodleConnector.Application.Tests.Infrastructure;
 public sealed class UserMemoryRepositoryTests
 {
     [Fact]
+    public void UpsertSql_UsaConflitoNaChaveNaturalEAtualizaCamposMutaveis()
+    {
+        Assert.Contains("ON CONFLICT (\"OwnerSubject\", \"Category\", \"MoodleAlias\", \"CourseId\", \"NormalizedKey\")", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
+        Assert.Contains("\"Content\" = EXCLUDED.\"Content\"", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
+        Assert.Contains("\"Origin\" = EXCLUDED.\"Origin\"", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
+        Assert.Contains("\"UpdatedAtUtc\" = EXCLUDED.\"UpdatedAtUtc\"", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UpsertAsync_InMemory_AtualizaRegistroEquivalenteSemDuplicar()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new UserMemoryRepository(dbContext);
+        var first = Memory("alice", "tom", null, null, DateTimeOffset.UtcNow, content: "formal");
+        var second = Memory("alice", "tom", null, null, DateTimeOffset.UtcNow.AddMinutes(1), content: "direto");
+
+        await repository.UpsertAsync(first);
+        await repository.SaveChangesAsync();
+        var result = await repository.UpsertAsync(second);
+        await repository.SaveChangesAsync();
+
+        Assert.Equal(first.Id, result.Id);
+        Assert.Equal("direto", result.Content);
+        Assert.Single(dbContext.UserMemories);
+    }
+
+    [Fact]
     public async Task ListAsync_IncluiEscoposAplicaveisOrdenadosPorEspecificidadeESomenteDoOwner()
     {
         await using var dbContext = CreateDbContext();
