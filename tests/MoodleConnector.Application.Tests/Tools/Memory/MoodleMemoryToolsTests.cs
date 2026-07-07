@@ -1,6 +1,9 @@
 using System.Text.Json;
 using MoodleConnector.Application.Memory;
 using MoodleConnector.Presentation.Tools.Memory;
+using ModelContextProtocol.Server;
+using MoodleConnector.Application.Tools;
+using System.Reflection;
 
 namespace MoodleConnector.Application.Tests.Tools.Memory;
 
@@ -17,8 +20,11 @@ public sealed class MoodleMemoryToolsTests
         Assert.False(result.IsError ?? false);
         Assert.Equal(new SaveUserMemoryRequest("preferencia", "formato", "resposta curta", "explicit", "goias", "42"), service.SaveRequest);
         var data = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data");
-        Assert.Equal(service.Memory.Id, data.GetProperty("id").GetGuid());
-        Assert.Equal("preferencia", data.GetProperty("category").GetString());
+        Assert.Equal("salvar", data.GetProperty("action").GetString());
+        Assert.Equal(service.Memory.Id, data.GetProperty("memory").GetProperty("id").GetGuid());
+        Assert.Equal("preferencia", data.GetProperty("memory").GetProperty("category").GetString());
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("memories").ValueKind);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("removed").ValueKind);
     }
 
     [Fact]
@@ -31,7 +37,11 @@ public sealed class MoodleMemoryToolsTests
 
         Assert.False(result.IsError ?? false);
         Assert.Equal(new ListUserMemoriesRequest("goias", "42", 7, "decisao", "rubrica"), service.ListRequest);
-        Assert.Equal(1, Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data").GetArrayLength());
+        var data = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data");
+        Assert.Equal("listar", data.GetProperty("action").GetString());
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("memory").ValueKind);
+        Assert.Equal(1, data.GetProperty("memories").GetArrayLength());
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("removed").ValueKind);
     }
 
     [Fact]
@@ -44,7 +54,22 @@ public sealed class MoodleMemoryToolsTests
 
         Assert.False(result.IsError ?? false);
         Assert.Equal(service.Memory.Id, service.RemovedId);
-        Assert.True(Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data").GetProperty("removed").GetBoolean());
+        var data = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data");
+        Assert.Equal("remover", data.GetProperty("action").GetString());
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("memory").ValueKind);
+        Assert.Equal(JsonValueKind.Null, data.GetProperty("memories").ValueKind);
+        Assert.True(data.GetProperty("removed").GetBoolean());
+    }
+
+    [Fact]
+    public void Metadata_declara_schema_estavel_e_remocao_destrutiva()
+    {
+        var method = typeof(MoodleMemoryTools).GetMethod(nameof(MoodleMemoryTools.ManageAsync))!;
+        var attribute = method.GetCustomAttribute<McpServerToolAttribute>()!;
+
+        Assert.True(attribute.Destructive);
+        Assert.Equal(typeof(ToolResponse<MemoryToolResponse>), attribute.OutputSchemaType);
+        Assert.Contains("remove", method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()!.Description, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

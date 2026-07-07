@@ -4,6 +4,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Memory;
 using MoodleConnector.Application.Tools;
+using System.Text.Json.Serialization;
 
 namespace MoodleConnector.Presentation.Tools.Memory;
 
@@ -16,12 +17,12 @@ public sealed class MoodleMemoryTools(IUserMemoryService memoryService)
         Name = "gerenciar_memoria_usuario",
         Title = "Gerenciar memória do usuário",
         ReadOnly = false,
-        Destructive = false,
+        Destructive = true,
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<object>))]
-    [Description("Salva, lista ou remove memórias duráveis do usuário autenticado. Use action=salvar, listar ou remover; nunca envie segredos nem dados pessoais de alunos.")]
+        OutputSchemaType = typeof(ToolResponse<MemoryToolResponse>))]
+    [Description("Salva, lista ou remove memórias duráveis do usuário autenticado. A ação remover exclui estado interno; use action=salvar, listar ou remover. Nunca envie segredos nem dados pessoais de alunos.")]
     public async Task<CallToolResult> ManageAsync(
         [Description("Ação: salvar, listar ou remover.")] string action,
         [Description("Categoria: preferencia, caminho, correcao ou decisao.")] string? category = null,
@@ -37,15 +38,15 @@ public sealed class MoodleMemoryTools(IUserMemoryService memoryService)
     {
         try
         {
-            object data = (action ?? string.Empty).Trim().ToLowerInvariant() switch
+            var data = (action ?? string.Empty).Trim().ToLowerInvariant() switch
             {
-                "salvar" => await SaveAsync(category, key, content, origin, moodleAlias, courseId, cancellationToken),
-                "listar" => await memoryService.ListAsync(new ListUserMemoriesRequest(moodleAlias, courseId, limit, category, query), cancellationToken),
-                "remover" => await RemoveAsync(memoryId, cancellationToken),
+                "salvar" => new MemoryToolResponse("salvar", await SaveAsync(category, key, content, origin, moodleAlias, courseId, cancellationToken), null, null),
+                "listar" => new MemoryToolResponse("listar", null, await memoryService.ListAsync(new ListUserMemoriesRequest(moodleAlias, courseId, limit, category, query), cancellationToken), null),
+                "remover" => new MemoryToolResponse("remover", null, null, (await RemoveAsync(memoryId, cancellationToken)).Removed),
                 _ => throw new ArgumentException("Ação inválida. Use salvar, listar ou remover.", nameof(action))
             };
 
-            var response = new ToolResponse<object>("ok", data, [], null, DateTimeOffset.UtcNow);
+            var response = new ToolResponse<MemoryToolResponse>("ok", data, [], null, DateTimeOffset.UtcNow);
             return new CallToolResult
             {
                 Content = [new TextContentBlock { Text = JsonSerializer.Serialize(data, JsonOptions) }],
@@ -55,7 +56,7 @@ public sealed class MoodleMemoryTools(IUserMemoryService memoryService)
         }
         catch (ArgumentException exception)
         {
-            return ToolResultHelper.Error<object>(exception.Message);
+            return ToolResultHelper.Error<MemoryToolResponse>(exception.Message);
         }
     }
 
@@ -82,3 +83,9 @@ public sealed class MoodleMemoryTools(IUserMemoryService memoryService)
             throw new ArgumentException($"Informe {parameterName} para salvar.", parameterName);
     }
 }
+
+public sealed record MemoryToolResponse(
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("memory")] UserMemoryDto? Memory,
+    [property: JsonPropertyName("memories")] IReadOnlyList<UserMemoryDto>? Memories,
+    [property: JsonPropertyName("removed")] bool? Removed);
