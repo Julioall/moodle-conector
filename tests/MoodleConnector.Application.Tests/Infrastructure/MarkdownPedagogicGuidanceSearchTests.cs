@@ -1,4 +1,5 @@
 using MoodleConnector.Infrastructure.Pedagogy;
+using System.Reflection;
 
 namespace MoodleConnector.Application.Tests.Infrastructure;
 
@@ -158,6 +159,18 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
     }
 
     [Fact]
+    public async Task SearchAsync_FindsSingleTermSplitAcrossBlockBoundary()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_root, "split.md"),
+            $"# Guia\n## Seção\n{new string('x', 1596)}boundary");
+
+        var result = Assert.Single(await Search().SearchAsync("boundary", 10, CancellationToken.None));
+
+        Assert.Equal(4, result.Score);
+    }
+
+    [Fact]
     public async Task SearchAsync_MapsNormalizedWhitespaceOffsetBackToRelevantExcerpt()
     {
         await File.WriteAllTextAsync(
@@ -189,6 +202,37 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
 
         Assert.ThrowsAny<OperationCanceledException>(
             () => new MarkdownPedagogicGuidanceSearch(_root, cancellation.Token));
+    }
+
+    [Fact]
+    public async Task SearchAsync_NormalizesSupplementaryRunesWithoutBreakingEmoji()
+    {
+        const string deseretUppercase = "𐐀";
+        const string deseretLowercase = "𐐨";
+        await File.WriteAllTextAsync(Path.Combine(_root, "emoji.md"), $"# 🚀 {deseretUppercase}\n## 😀\nConteúdo 🧑‍🏫 especial");
+
+        var results = await Search().SearchAsync($"🚀 {deseretLowercase} 🧑‍🏫", 10, CancellationToken.None);
+
+        Assert.Single(results);
+    }
+
+    [Fact]
+    public async Task Constructor_RetainsOnlyBoundedBodyBlocks()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_root, "large.md"),
+            $"# Guia\n## Extensa\n{new string('a', 10_000)}");
+
+        var search = Search();
+        var indexField = typeof(MarkdownPedagogicGuidanceSearch)
+            .GetField("_index", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        var blocks = Assert.IsAssignableFrom<System.Collections.IEnumerable>(indexField.GetValue(search));
+
+        foreach (var block in blocks)
+        {
+            var body = Assert.IsType<string>(block!.GetType().GetProperty("Body")!.GetValue(block));
+            Assert.InRange(body.Length, 0, 1600);
+        }
     }
 
     private MarkdownPedagogicGuidanceSearch Search() => new(_root);

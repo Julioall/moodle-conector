@@ -8,10 +8,9 @@ namespace MoodleConnector.Infrastructure.Pedagogy;
 public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidanceSearch
 {
     private const int MaximumBlockLength = 1600;
-    private const int BlockOverlap = 100;
     private const int MaximumExcerptLength = 400;
     private const int MaximumQueryLength = 300;
-    private readonly IndexedSection[] _index;
+    private readonly IndexedBlock[] _index;
 
     public MarkdownPedagogicGuidanceSearch(string rootPath, CancellationToken cancellationToken = default)
     {
@@ -26,14 +25,7 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        var boundedQuery = (query ?? string.Empty).Trim();
-        if (boundedQuery.Length > MaximumQueryLength)
-        {
-            boundedQuery = boundedQuery[..MaximumQueryLength];
-        }
-
-        var terms = Normalize(boundedQuery).Text
+        var terms = Normalize(TruncateQuery((query ?? string.Empty).Trim()))
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -42,98 +34,115 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
             return Task.FromResult<IReadOnlyList<PedagogicGuidanceSearchResult>>([]);
         }
 
-        var results = new List<PedagogicGuidanceSearchResult>();
-        foreach (var section in _index)
+        var sections = new Dictionary<SectionKey, SectionMatch>();
+        foreach (var block in _index)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var combined = $"{section.NormalizedTitle} {section.NormalizedSection} {section.NormalizedBody.Text}";
-            var matchingTermCount = terms.Count(term => combined.Contains(term, StringComparison.Ordinal));
-            if (matchingTermCount == 0)
+            var key = new SectionKey(block.RelativePath, block.SectionOrdinal);
+            if (!sections.TryGetValue(key, out var match))
             {
-                continue;
+                match = new SectionMatch(block, terms);
+                sections.Add(key, match);
             }
 
-            var score = matchingTermCount == terms.Length ? 3 : 0;
-            foreach (var term in terms)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (section.NormalizedTitle.Contains(term, StringComparison.Ordinal)
-                    || section.NormalizedSection.Contains(term, StringComparison.Ordinal))
-                {
-                    score += 4;
-                }
-
-                score += CountOccurrences(section.NormalizedBody.Text, term);
-            }
-
-            results.Add(new PedagogicGuidanceSearchResult(
-                section.Title,
-                section.Section,
-                section.RelativePath,
-                CreateExcerpt(section, terms),
-                score));
+            match.Add(block, terms, cancellationToken);
         }
 
-        IReadOnlyList<PedagogicGuidanceSearchResult> ordered = results
+        IReadOnlyList<PedagogicGuidanceSearchResult> results = sections.Values
+            .Where(match => match.MatchedTerms.Any(found => found))
+            .Select(match => match.ToResult(terms))
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.RelativePath, StringComparer.Ordinal)
             .ThenBy(result => result.Section, StringComparer.Ordinal)
             .Take(Math.Clamp(limit, 1, 10))
             .ToArray();
-        return Task.FromResult(ordered);
+        return Task.FromResult(results);
     }
 
-    private static IndexedSection[] BuildIndex(string rootPath, CancellationToken cancellationToken)
+    private static IndexedBlock[] BuildIndex(string rootPath, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(rootPath))
         {
             return [];
         }
 
-        var sections = new List<IndexedSection>();
+        var index = new List<IndexedBlock>();
         foreach (var path in Directory.EnumerateFiles(rootPath, "*.md", SearchOption.TopDirectoryOnly))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var relativePath = Path.GetRelativePath(rootPath, path).Replace('\\', '/');
-            foreach (var block in ParseBlocks(File.ReadAllText(path)))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                sections.Add(new IndexedSection(
-                    block.Title,
-                    block.Section,
-                    relativePath,
-                    block.Body,
-                    Normalize(block.Title).Text,
-                    Normalize(block.Section).Text,
-                    Normalize(block.Body),
-                    CreateChunks(block.Body)));
-            }
+            IndexFile(path, Path.GetRelativePath(rootPath, path).Replace('\\', '/'), index, cancellationToken);
         }
 
-        return sections.ToArray();
+        return index.ToArray();
     }
 
-    private static IEnumerable<Block> ParseBlocks(string markdown)
+    private static void IndexFile(
+        string path,
+        string relativePath,
+        List<IndexedBlock> index,
+        CancellationToken cancellationToken)
     {
         var title = string.Empty;
         var section = string.Empty;
-        var body = new StringBuilder();
+        var sectionOrdinal = 0;
+        var buffer = new StringBuilder(MaximumBlockLength);
+        var sectionHasBlock = false;
 
-        foreach (var line in markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        void AddBlock(bool includeEmpty)
         {
+            if (buffer.Length == 0 && !includeEmpty)
+            {
+                return;
+            }
+
+            var body = buffer.ToString().TrimEnd();
+            buffer.Clear();
+            index.Add(new IndexedBlock(
+                title,
+                section.Length > 0 ? section : title,
+                relativePath,
+                sectionOrdinal,
+                body,
+                Normalize(title),
+                Normalize(section.Length > 0 ? section : title),
+                Normalize(body)));
+            sectionHasBlock = true;
+        }
+
+        void Append(string value)
+        {
+            var offset = 0;
+            while (offset < value.Length)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var available = MaximumBlockLength - buffer.Length;
+                var length = Math.Min(available, value.Length - offset);
+                if (length > 0 && offset + length < value.Length && char.IsHighSurrogate(value[offset + length - 1]))
+                {
+                    length--;
+                }
+
+                buffer.Append(value, offset, length);
+                offset += length;
+                if (buffer.Length == MaximumBlockLength || length == 0)
+                {
+                    AddBlock(includeEmpty: false);
+                }
+            }
+        }
+
+        foreach (var line in File.ReadLines(path))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             var heading = HeadingRegex().Match(line);
             if (!heading.Success)
             {
-                body.AppendLine(line);
+                Append(line);
+                Append("\n");
                 continue;
             }
 
-            if (body.Length > 0)
-            {
-                yield return new Block(title, section.Length > 0 ? section : title, body.ToString().Trim());
-                body.Clear();
-            }
-
+            AddBlock(includeEmpty: false);
             var headingText = heading.Groups[2].Value.Trim();
             if (title.Length == 0)
             {
@@ -141,61 +150,47 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
             }
 
             section = headingText;
+            sectionOrdinal++;
+            sectionHasBlock = false;
         }
 
-        if (body.Length > 0 || section.Length > 0)
-        {
-            yield return new Block(title, section.Length > 0 ? section : title, body.ToString().Trim());
-        }
+        AddBlock(includeEmpty: section.Length > 0 && !sectionHasBlock);
     }
 
-    private static IndexedChunk[] CreateChunks(string body)
+    private static string TruncateQuery(string query)
     {
-        if (body.Length <= MaximumBlockLength)
+        if (query.Length <= MaximumQueryLength)
         {
-            return [new IndexedChunk(0, body.Length)];
+            return query;
         }
 
-        var chunks = new List<IndexedChunk>();
-        var start = 0;
-        while (start < body.Length)
+        var length = MaximumQueryLength;
+        if (char.IsHighSurrogate(query[length - 1]))
         {
-            var length = Math.Min(MaximumBlockLength, body.Length - start);
-            chunks.Add(new IndexedChunk(start, length));
-            if (start + length == body.Length)
-            {
-                break;
-            }
-
-            start += MaximumBlockLength - BlockOverlap;
+            length--;
         }
 
-        return chunks.ToArray();
+        return query[..length];
     }
 
-    private static string CreateExcerpt(IndexedSection section, IReadOnlyList<string> terms)
+    private static string CreateExcerpt(IndexedBlock block, IReadOnlyList<string> terms)
     {
-        if (section.Body.Length <= MaximumExcerptLength)
+        if (block.Body.Length <= MaximumExcerptLength)
         {
-            return section.Body;
+            return block.Body;
         }
 
+        var normalizedBody = NormalizeWithOffsets(block.Body);
         var normalizedMatch = terms
-            .Select(term => section.NormalizedBody.Text.IndexOf(term, StringComparison.Ordinal))
-            .Where(index => index >= 0)
+            .Select(term => normalizedBody.Text.IndexOf(term, StringComparison.Ordinal))
+            .Where(position => position >= 0)
             .DefaultIfEmpty(0)
             .Min();
-        var originalMatch = section.NormalizedBody.OriginalOffsets.Length == 0
+        var originalMatch = normalizedBody.OriginalOffsets.Length == 0
             ? 0
-            : section.NormalizedBody.OriginalOffsets[Math.Min(normalizedMatch, section.NormalizedBody.OriginalOffsets.Length - 1)];
-        var chunk = section.Chunks.FirstOrDefault(candidate =>
-            originalMatch >= candidate.Start && originalMatch < candidate.Start + candidate.Length) ?? section.Chunks[0];
-        var excerptStart = Math.Clamp(
-            originalMatch - 100,
-            chunk.Start,
-            Math.Max(chunk.Start, chunk.Start + chunk.Length - MaximumExcerptLength));
-        var excerptLength = Math.Min(MaximumExcerptLength, chunk.Start + chunk.Length - excerptStart);
-        return section.Body.Substring(excerptStart, excerptLength).Trim();
+            : normalizedBody.OriginalOffsets[Math.Min(normalizedMatch, normalizedBody.OriginalOffsets.Length - 1)];
+        var start = Math.Clamp(originalMatch - 100, 0, block.Body.Length - MaximumExcerptLength);
+        return block.Body.Substring(start, MaximumExcerptLength).Trim();
     }
 
     private static int CountOccurrences(string text, string term)
@@ -211,20 +206,22 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
         return count;
     }
 
-    private static NormalizedText Normalize(string value)
+    private static string Normalize(string value)
     {
         var text = new StringBuilder(value.Length);
-        var offsets = new List<int>(value.Length);
         var previousWasWhitespace = false;
-        for (var index = 0; index < value.Length; index++)
+        foreach (var rune in value.Normalize(NormalizationForm.FormD).EnumerateRunes())
         {
-            var character = value[index];
-            if (char.IsWhiteSpace(character))
+            if (Rune.GetUnicodeCategory(rune) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (Rune.IsWhiteSpace(rune))
             {
                 if (!previousWasWhitespace)
                 {
                     text.Append(' ');
-                    offsets.Add(index);
                     previousWasWhitespace = true;
                 }
 
@@ -232,31 +229,135 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
             }
 
             previousWasWhitespace = false;
-            foreach (var decomposed in character.ToString().Normalize(NormalizationForm.FormD))
+            text.Append(Rune.ToLowerInvariant(rune));
+        }
+
+        return text.ToString();
+    }
+
+    private static NormalizedText NormalizeWithOffsets(string value) => NormalizeCore(value);
+
+    private static NormalizedText NormalizeCore(string value)
+    {
+        var text = new StringBuilder(value.Length);
+        var offsets = new List<int>(Math.Min(value.Length, MaximumBlockLength));
+        var elements = StringInfo.GetTextElementEnumerator(value);
+        var previousWasWhitespace = false;
+        while (elements.MoveNext())
+        {
+            var originalOffset = elements.ElementIndex;
+            var element = elements.GetTextElement().Normalize(NormalizationForm.FormD);
+            foreach (var rune in element.EnumerateRunes())
             {
-                if (CharUnicodeInfo.GetUnicodeCategory(decomposed) != UnicodeCategory.NonSpacingMark)
+                if (Rune.GetUnicodeCategory(rune) == UnicodeCategory.NonSpacingMark)
                 {
-                    text.Append(char.ToLowerInvariant(decomposed));
-                    offsets.Add(index);
+                    continue;
+                }
+
+                if (Rune.IsWhiteSpace(rune))
+                {
+                    if (!previousWasWhitespace)
+                    {
+                        text.Append(' ');
+                        offsets.Add(originalOffset);
+                        previousWasWhitespace = true;
+                    }
+
+                    continue;
+                }
+
+                previousWasWhitespace = false;
+                var lowered = Rune.ToLowerInvariant(rune).ToString();
+                text.Append(lowered);
+                for (var index = 0; index < lowered.Length; index++)
+                {
+                    offsets.Add(originalOffset);
                 }
             }
         }
 
-        return new NormalizedText(text.ToString().Normalize(NormalizationForm.FormC), offsets.ToArray());
+        return new NormalizedText(text.ToString(), offsets.ToArray());
     }
 
-    private sealed record Block(string Title, string Section, string Body);
-    private sealed record IndexedChunk(int Start, int Length);
-    private sealed record NormalizedText(string Text, int[] OriginalOffsets);
-    private sealed record IndexedSection(
+    private sealed class SectionMatch
+    {
+        private readonly string[] _tails;
+        private string? _excerpt;
+
+        public SectionMatch(IndexedBlock block, IReadOnlyList<string> terms)
+        {
+            Title = block.Title;
+            Section = block.Section;
+            RelativePath = block.RelativePath;
+            NormalizedTitle = block.NormalizedTitle;
+            NormalizedSection = block.NormalizedSection;
+            MatchedTerms = new bool[terms.Count];
+            BodyOccurrences = new int[terms.Count];
+            _tails = new string[terms.Count];
+        }
+
+        public string Title { get; }
+        public string Section { get; }
+        public string RelativePath { get; }
+        public string NormalizedTitle { get; }
+        public string NormalizedSection { get; }
+        public bool[] MatchedTerms { get; }
+        public int[] BodyOccurrences { get; }
+
+        public void Add(IndexedBlock block, IReadOnlyList<string> terms, CancellationToken cancellationToken)
+        {
+            _excerpt ??= block.Body.Length <= MaximumExcerptLength
+                ? block.Body
+                : block.Body[..MaximumExcerptLength].Trim();
+            for (var index = 0; index < terms.Count; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var term = terms[index];
+                var bodyWithBoundary = (_tails[index] ?? string.Empty) + block.NormalizedBody;
+                var occurrences = CountOccurrences(bodyWithBoundary, term);
+                BodyOccurrences[index] += occurrences;
+                var headingMatch = NormalizedTitle.Contains(term, StringComparison.Ordinal)
+                    || NormalizedSection.Contains(term, StringComparison.Ordinal);
+                MatchedTerms[index] |= headingMatch || occurrences > 0;
+                if (block.NormalizedBody.Contains(term, StringComparison.Ordinal))
+                {
+                    _excerpt = CreateExcerpt(block, terms);
+                }
+
+                var tailLength = Math.Min(Math.Max(0, term.Length - 1), bodyWithBoundary.Length);
+                _tails[index] = bodyWithBoundary[^tailLength..];
+            }
+        }
+
+        public PedagogicGuidanceSearchResult ToResult(IReadOnlyList<string> terms)
+        {
+            var score = MatchedTerms.All(found => found) ? 3 : 0;
+            for (var index = 0; index < terms.Count; index++)
+            {
+                if (NormalizedTitle.Contains(terms[index], StringComparison.Ordinal)
+                    || NormalizedSection.Contains(terms[index], StringComparison.Ordinal))
+                {
+                    score += 4;
+                }
+
+                score += BodyOccurrences[index];
+            }
+
+            return new PedagogicGuidanceSearchResult(Title, Section, RelativePath, _excerpt ?? string.Empty, score);
+        }
+    }
+
+    private sealed record IndexedBlock(
         string Title,
         string Section,
         string RelativePath,
+        int SectionOrdinal,
         string Body,
         string NormalizedTitle,
         string NormalizedSection,
-        NormalizedText NormalizedBody,
-        IndexedChunk[] Chunks);
+        string NormalizedBody);
+    private sealed record NormalizedText(string Text, int[] OriginalOffsets);
+    private readonly record struct SectionKey(string RelativePath, int SectionOrdinal);
 
     [GeneratedRegex(@"^(#{1,6})\s+(.+?)\s*#*\s*$")]
     private static partial Regex HeadingRegex();
