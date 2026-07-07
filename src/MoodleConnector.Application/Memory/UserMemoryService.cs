@@ -180,6 +180,6 @@ public sealed partial class UserMemoryService(
     [GeneratedRegex(@"(?ix)(password|senha|token|api\s*[-_]?\s*key|secret|cookie|bearer\s+|sk-)")]
     private static partial Regex SecretPattern();
 
-    [GeneratedRegex(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)(?![A-Za-z0-9_-])")]
+    [GeneratedRegex(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]*)(?![A-Za-z0-9_-])")]
     private static partial Regex JwtCandidatePattern();
 }

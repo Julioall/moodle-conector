@@ -112,6 +112,16 @@ public sealed class UserMemoryServiceTests
     }
 
     [Fact]
+    public async Task Save_rejects_unsigned_alg_none_jwt_with_empty_signature()
+    {
+        var fixture = new Fixture();
+        const string unsignedJwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.";
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            fixture.Service.SaveAsync(new("correcao", "chave", unsignedJwt, "explicit")));
+    }
+
+    [Fact]
     public async Task Save_does_not_reject_arbitrary_three_segment_text_as_jwt()
     {
         var fixture = new Fixture();
