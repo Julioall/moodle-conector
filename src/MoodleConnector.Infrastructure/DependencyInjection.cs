@@ -4,8 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.Pedagogy;
 using MoodleConnector.Infrastructure.Configuration;
 using MoodleConnector.Infrastructure.DocumentExtraction;
+using MoodleConnector.Infrastructure.Pedagogy;
 using Polly;
 using Polly.Extensions.Http;
 
@@ -75,6 +77,8 @@ public static class DependencyInjection
         });
 
         services.AddMemoryCache();
+        services.AddSingleton<IPedagogicGuidanceSearch>(_ =>
+            new MarkdownPedagogicGuidanceSearch(Path.Combine(AppContext.BaseDirectory, "public", "pedagogic")));
         services.AddScoped<IPendingMoodleActionRepository, PendingMoodleActionRepository>();
         services.AddScoped<IGradingReviewRepository, GradingReviewRepository>();
         services.AddScoped<IMoodleAuditLogRepository, MoodleAuditLogRepository>();
