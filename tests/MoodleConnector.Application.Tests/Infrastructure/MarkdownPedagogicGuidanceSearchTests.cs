@@ -168,6 +168,7 @@ public sealed class MarkdownPedagogicGuidanceSearchTests : IDisposable
         var result = Assert.Single(await Search().SearchAsync("boundary", 10, CancellationToken.None));
 
         Assert.Equal(4, result.Score);
+        Assert.Contains("boundary", result.Excerpt);
     }
 
     [Fact]

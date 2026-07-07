@@ -174,13 +174,16 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
     }
 
     private static string CreateExcerpt(IndexedBlock block, IReadOnlyList<string> terms)
+        => CreateExcerpt(block.Body, terms);
+
+    private static string CreateExcerpt(string body, IReadOnlyList<string> terms)
     {
-        if (block.Body.Length <= MaximumExcerptLength)
+        if (body.Length <= MaximumExcerptLength)
         {
-            return block.Body;
+            return body;
         }
 
-        var normalizedBody = NormalizeWithOffsets(block.Body);
+        var normalizedBody = NormalizeWithOffsets(body);
         var normalizedMatch = terms
             .Select(term => normalizedBody.Text.IndexOf(term, StringComparison.Ordinal))
             .Where(position => position >= 0)
@@ -189,8 +192,8 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
         var originalMatch = normalizedBody.OriginalOffsets.Length == 0
             ? 0
             : normalizedBody.OriginalOffsets[Math.Min(normalizedMatch, normalizedBody.OriginalOffsets.Length - 1)];
-        var start = Math.Clamp(originalMatch - 100, 0, block.Body.Length - MaximumExcerptLength);
-        return block.Body.Substring(start, MaximumExcerptLength).Trim();
+        var start = Math.Clamp(originalMatch - 100, 0, body.Length - MaximumExcerptLength);
+        return body.Substring(start, MaximumExcerptLength).Trim();
     }
 
     private static int CountOccurrences(string text, string term)
@@ -283,6 +286,7 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
     {
         private readonly string[] _tails;
         private string? _excerpt;
+        private string _rawTail = string.Empty;
 
         public SectionMatch(IndexedBlock block, IReadOnlyList<string> terms)
         {
@@ -309,6 +313,9 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
             _excerpt ??= block.Body.Length <= MaximumExcerptLength
                 ? block.Body
                 : block.Body[..MaximumExcerptLength].Trim();
+            var rawBoundary = _rawTail + block.Body;
+            var normalizedRawTail = Normalize(_rawTail);
+            var normalizedBoundary = Normalize(rawBoundary);
             for (var index = 0; index < terms.Count; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -323,10 +330,24 @@ public sealed partial class MarkdownPedagogicGuidanceSearch : IPedagogicGuidance
                 {
                     _excerpt = CreateExcerpt(block, terms);
                 }
+                else if (!normalizedRawTail.Contains(term, StringComparison.Ordinal)
+                    && normalizedBoundary.Contains(term, StringComparison.Ordinal))
+                {
+                    _excerpt = CreateExcerpt(rawBoundary, terms);
+                }
 
                 var tailLength = Math.Min(Math.Max(0, term.Length - 1), bodyWithBoundary.Length);
                 _tails[index] = bodyWithBoundary[^tailLength..];
             }
+
+            var rawTailLength = Math.Min(MaximumQueryLength, rawBoundary.Length);
+            var rawTailStart = rawBoundary.Length - rawTailLength;
+            if (rawTailStart < rawBoundary.Length && char.IsLowSurrogate(rawBoundary[rawTailStart]))
+            {
+                rawTailStart++;
+            }
+
+            _rawTail = rawBoundary[rawTailStart..];
         }
 
         public PedagogicGuidanceSearchResult ToResult(IReadOnlyList<string> terms)
