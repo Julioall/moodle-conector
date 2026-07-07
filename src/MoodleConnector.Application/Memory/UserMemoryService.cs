@@ -24,7 +24,6 @@ public sealed record ListUserMemoriesRequest(
 
 public sealed record UserMemoryDto(
     Guid Id,
-    string OwnerSubject,
     string Category,
     string NormalizedKey,
     string Content,
@@ -89,13 +88,14 @@ public sealed partial class UserMemoryService(
         var courseId = Optional(request.CourseId);
         var category = Optional(request.Category)?.ToLowerInvariant();
         var query = Optional(request.Query);
+        var normalizedQuery = query is null ? null : Optional(NormalizeKey(query));
         EnsureLength(alias, 64, nameof(request.MoodleAlias));
         EnsureLength(courseId, 64, nameof(request.CourseId));
         EnsureLength(query, 1000, nameof(request.Query));
         if (courseId is not null && alias is null) throw new ArgumentException("CourseId exige MoodleAlias.", nameof(request));
         if (category is not null && !Categories.Contains(category)) throw new ArgumentException("Categoria de memÃ³ria invÃ¡lida.", nameof(request));
         var limit = Math.Clamp(request.Limit ?? 20, 1, 50);
-        var memories = await repository.ListAsync(owner, alias, courseId, category, query, limit, cancellationToken);
+        var memories = await repository.ListAsync(owner, alias, courseId, category, query, normalizedQuery, limit, cancellationToken);
         return memories.Select(Map).ToList();
     }
 
@@ -143,7 +143,7 @@ public sealed partial class UserMemoryService(
     }
 
     private static UserMemoryDto Map(UserMemory memory) => new(
-        memory.Id, memory.OwnerSubject, memory.Category, memory.NormalizedKey, memory.Content, memory.Origin,
+        memory.Id, memory.Category, memory.NormalizedKey, memory.Content, memory.Origin,
         memory.MoodleAlias, memory.CourseId, memory.CreatedAtUtc, memory.UpdatedAtUtc);
 
     private static bool ContainsSecret(string value) => SecretPattern().IsMatch(value) || ContainsJwt(value);
@@ -177,7 +177,7 @@ public sealed partial class UserMemoryService(
         return false;
     }
 
-    [GeneratedRegex(@"(?ix)(password|senha|token|api\s*[-_]?\s*key|secret|cookie|bearer\s+|sk-)")]
+    [GeneratedRegex(@"(?ix)(\b(?:password|senha|token|secret|cookie)\b\s*(?:[:=]\s*)?[A-Za-z0-9_./+:-]+|api\s*[-_]?\s*key\b|\bbearer\s+\S+|(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]+)")]
     private static partial Regex SecretPattern();
 
     [GeneratedRegex(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]*)(?![A-Za-z0-9_-])")]

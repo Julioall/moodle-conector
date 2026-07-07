@@ -47,7 +47,7 @@ public sealed class UserMemoryRepositoryTests
             Memory("bob", "bob", "principal", "42", now.AddMinutes(5)));
         await dbContext.SaveChangesAsync();
 
-        var result = await repository.ListAsync("alice", "principal", "42", null, null, 10);
+        var result = await repository.ListAsync("alice", "principal", "42", null, null, null, 10);
 
         Assert.Equal(["curso", "alias", "global"], result.Select(memory => memory.NormalizedKey));
     }
@@ -64,7 +64,7 @@ public sealed class UserMemoryRepositoryTests
             Memory("alice", "outro", null, null, now, "correcao", "sem correspondencia"));
         await dbContext.SaveChangesAsync();
 
-        var result = await repository.ListAsync("alice", null, null, "correcao", "rubrica", 10);
+        var result = await repository.ListAsync("alice", null, null, "correcao", "rubrica", "rubrica", 10);
 
         Assert.Equal(["feedback-claro"], result.Select(memory => memory.NormalizedKey));
     }

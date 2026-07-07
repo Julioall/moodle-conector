@@ -23,6 +23,7 @@ public sealed class MoodleMemoryToolsTests
         Assert.Equal("salvar", data.GetProperty("action").GetString());
         Assert.Equal(service.Memory.Id, data.GetProperty("memory").GetProperty("id").GetGuid());
         Assert.Equal("preferencia", data.GetProperty("memory").GetProperty("category").GetString());
+        Assert.False(data.GetProperty("memory").TryGetProperty("ownerSubject", out _));
         Assert.Equal(JsonValueKind.Null, data.GetProperty("memories").ValueKind);
         Assert.Equal(JsonValueKind.Null, data.GetProperty("removed").ValueKind);
     }
@@ -90,7 +91,7 @@ public sealed class MoodleMemoryToolsTests
 
     private sealed class FakeMemoryService : IUserMemoryService
     {
-        public UserMemoryDto Memory { get; } = new(Guid.NewGuid(), "user", "preferencia", "formato", "resposta curta", "explicit", "goias", "42", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        public UserMemoryDto Memory { get; } = new(Guid.NewGuid(), "preferencia", "formato", "resposta curta", "explicit", "goias", "42", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         public SaveUserMemoryRequest? SaveRequest { get; private set; }
         public ListUserMemoriesRequest? ListRequest { get; private set; }
         public Guid? RemovedId { get; private set; }

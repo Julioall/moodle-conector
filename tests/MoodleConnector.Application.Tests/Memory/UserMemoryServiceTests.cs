@@ -53,7 +53,7 @@ public sealed class UserMemoryServiceTests
         var aliceItems = await alice.ListAsync(new(Limit: 500));
 
         Assert.Single(aliceItems);
-        Assert.Equal("alice", aliceItems[0].OwnerSubject);
+        Assert.Equal("chave-a", aliceItems[0].NormalizedKey);
         Assert.Equal(50, repository.LastListLimit);
     }
 
@@ -74,6 +74,19 @@ public sealed class UserMemoryServiceTests
 
         Assert.Equal("correcao", fixture.Repository.LastListCategory);
         Assert.Equal("rubrica", fixture.Repository.LastListQuery);
+        Assert.Equal("rubrica", fixture.Repository.LastListNormalizedQuery);
+    }
+
+    [Fact]
+    public async Task List_normalizes_query_for_matching_normalized_key()
+    {
+        var fixture = new Fixture();
+        await fixture.Service.SaveAsync(new("preferencia", "Formato relatório", "Resposta objetiva", "explicit"));
+
+        var result = await fixture.Service.ListAsync(new(Query: "relatório"));
+
+        Assert.Single(result);
+        Assert.Equal("formato-relatorio", result[0].NormalizedKey);
     }
 
     [Theory]
@@ -146,6 +159,25 @@ public sealed class UserMemoryServiceTests
     }
 
     [Fact]
+    public async Task Save_allows_words_that_only_contain_secret_pattern_as_substring()
+    {
+        var fixture = new Fixture();
+
+        var saved = await fixture.Service.SaveAsync(new("caminho", "processo", "Aplicar tokenização ao texto", "explicit"));
+
+        Assert.Equal("Aplicar tokenização ao texto", saved.Content);
+    }
+
+    [Fact]
+    public async Task Save_rejects_token_followed_by_secret_value()
+    {
+        var fixture = new Fixture();
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            fixture.Service.SaveAsync(new("correcao", "chave", "token abc", "explicit")));
+    }
+
+    [Fact]
     public async Task Save_enforces_length_limits()
     {
         var fixture = new Fixture();
@@ -201,6 +233,7 @@ public sealed class UserMemoryServiceTests
         public int LastListLimit { get; private set; }
         public string? LastListCategory { get; private set; }
         public string? LastListQuery { get; private set; }
+        public string? LastListNormalizedQuery { get; private set; }
         public int UpsertCalls { get; private set; }
         public int FindEquivalentCalls { get; private set; }
         public int AddCalls { get; private set; }
@@ -232,15 +265,18 @@ public sealed class UserMemoryServiceTests
             return Task.FromResult(existing);
         }
 
-        public Task<IReadOnlyList<UserMemory>> ListAsync(string ownerSubject, string? moodleAlias, string? courseId, string? category, string? query, int limit, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<UserMemory>> ListAsync(string ownerSubject, string? moodleAlias, string? courseId, string? category, string? contentQuery, string? normalizedKeyQuery, int limit, CancellationToken cancellationToken = default)
         {
             LastListLimit = limit;
             LastListCategory = category;
-            LastListQuery = query;
+            LastListQuery = contentQuery;
+            LastListNormalizedQuery = normalizedKeyQuery;
             return Task.FromResult<IReadOnlyList<UserMemory>>(Items
                 .Where(x => x.OwnerSubject == ownerSubject && x.MoodleAlias == moodleAlias && x.CourseId == courseId)
                 .Where(x => category is null || x.Category == category)
-                .Where(x => query is null || x.NormalizedKey.Contains(query, StringComparison.OrdinalIgnoreCase) || x.Content.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Where(x => (contentQuery is null && normalizedKeyQuery is null) ||
+                    (normalizedKeyQuery is not null && x.NormalizedKey.Contains(normalizedKeyQuery, StringComparison.OrdinalIgnoreCase)) ||
+                    (contentQuery is not null && x.Content.Contains(contentQuery, StringComparison.OrdinalIgnoreCase)))
                 .Take(limit).ToList());
         }
 

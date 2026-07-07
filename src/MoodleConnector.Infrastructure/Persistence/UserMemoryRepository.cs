@@ -95,7 +95,8 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
         string? moodleAlias,
         string? courseId,
         string? category,
-        string? query,
+        string? contentQuery,
+        string? normalizedKeyQuery,
         int limit,
         CancellationToken cancellationToken = default)
     {
@@ -111,21 +112,22 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
             memories = memories.Where(memory => memory.Category == category);
         }
 
-        if (query is not null)
+        if (contentQuery is not null || normalizedKeyQuery is not null)
         {
             if (dbContext.Database.IsNpgsql())
             {
-                var pattern = $"%{EscapeLikePattern(query)}%";
+                var contentPattern = contentQuery is null ? null : $"%{EscapeLikePattern(contentQuery)}%";
+                var normalizedKeyPattern = normalizedKeyQuery is null ? null : $"%{EscapeLikePattern(normalizedKeyQuery)}%";
                 memories = memories.Where(memory =>
-                    EF.Functions.ILike(memory.NormalizedKey, pattern, "\\") ||
-                    EF.Functions.ILike(memory.Content, pattern, "\\"));
+                    (normalizedKeyPattern != null && EF.Functions.ILike(memory.NormalizedKey, normalizedKeyPattern, "\\")) ||
+                    (contentPattern != null && EF.Functions.ILike(memory.Content, contentPattern, "\\")));
             }
             else
             {
-                var normalizedQuery = query.ToLower();
+                var loweredContentQuery = contentQuery?.ToLowerInvariant();
                 memories = memories.Where(memory =>
-                    memory.NormalizedKey.ToLower().Contains(normalizedQuery) ||
-                    memory.Content.ToLower().Contains(normalizedQuery));
+                    (normalizedKeyQuery != null && memory.NormalizedKey.ToLower().Contains(normalizedKeyQuery)) ||
+                    (loweredContentQuery != null && memory.Content.ToLower().Contains(loweredContentQuery)));
             }
         }
 
