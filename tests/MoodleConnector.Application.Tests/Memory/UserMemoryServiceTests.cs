@@ -102,6 +102,26 @@ public sealed class UserMemoryServiceTests
     }
 
     [Fact]
+    public async Task Save_rejects_structural_jwt_whose_header_does_not_start_with_eyJ()
+    {
+        var fixture = new Fixture();
+        const string jwtWithLeadingWhitespaceInHeader = "IHsiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiIxIn0.signature";
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            fixture.Service.SaveAsync(new("correcao", "chave", jwtWithLeadingWhitespaceInHeader, "explicit")));
+    }
+
+    [Fact]
+    public async Task Save_does_not_reject_arbitrary_three_segment_text_as_jwt()
+    {
+        var fixture = new Fixture();
+
+        var saved = await fixture.Service.SaveAsync(new("correcao", "chave", "abc.def.ghi", "explicit"));
+
+        Assert.Equal("abc.def.ghi", saved.Content);
+    }
+
+    [Fact]
     public async Task Save_enforces_length_limits()
     {
         var fixture = new Fixture();

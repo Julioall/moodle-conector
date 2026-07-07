@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
@@ -63,7 +64,7 @@ public sealed partial class UserMemoryService(
         EnsureLength(alias, 64, nameof(request.MoodleAlias));
         EnsureLength(courseId, 64, nameof(request.CourseId));
         if (courseId is not null && alias is null) throw new ArgumentException("CourseId exige MoodleAlias.", nameof(request));
-        if (SecretPattern().IsMatch(content) || SecretPattern().IsMatch(key)) throw new ArgumentException("Memórias não podem conter segredos.", nameof(request));
+        if (ContainsSecret(content) || ContainsSecret(key)) throw new ArgumentException("Memórias não podem conter segredos.", nameof(request));
 
         var normalizedKey = NormalizeKey(key);
         if (normalizedKey.Length == 0) throw new ArgumentException("A chave deve conter caracteres alfanuméricos.", nameof(request));
@@ -145,6 +146,40 @@ public sealed partial class UserMemoryService(
         memory.Id, memory.OwnerSubject, memory.Category, memory.NormalizedKey, memory.Content, memory.Origin,
         memory.MoodleAlias, memory.CourseId, memory.CreatedAtUtc, memory.UpdatedAtUtc);
 
-    [GeneratedRegex(@"(?ix)(password|senha|token|api\s*[-_]?\s*key|secret|cookie|bearer\s+|sk-|eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)")]
+    private static bool ContainsSecret(string value) => SecretPattern().IsMatch(value) || ContainsJwt(value);
+
+    private static bool ContainsJwt(string value)
+    {
+        foreach (Match match in JwtCandidatePattern().Matches(value))
+        {
+            try
+            {
+                var segment = match.Groups[1].Value.Replace('-', '+').Replace('_', '/');
+                if (segment.Length % 4 == 1) continue;
+                segment = segment.PadRight(segment.Length + ((4 - segment.Length % 4) % 4), '=');
+                using var document = JsonDocument.Parse(Convert.FromBase64String(segment));
+                if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                    (document.RootElement.TryGetProperty("alg", out _) || document.RootElement.TryGetProperty("typ", out _)))
+                {
+                    return true;
+                }
+            }
+            catch (FormatException)
+            {
+                // Not Base64URL.
+            }
+            catch (JsonException)
+            {
+                // Not a JSON JWT header.
+            }
+        }
+
+        return false;
+    }
+
+    [GeneratedRegex(@"(?ix)(password|senha|token|api\s*[-_]?\s*key|secret|cookie|bearer\s+|sk-)")]
     private static partial Regex SecretPattern();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)(?![A-Za-z0-9_-])")]
+    private static partial Regex JwtCandidatePattern();
 }
