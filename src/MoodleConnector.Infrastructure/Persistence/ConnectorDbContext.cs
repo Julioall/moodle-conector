@@ -19,6 +19,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<AssistedGradingItem> GradingItems => Set<AssistedGradingItem>();
     public DbSet<GradingArtifact> GradingArtifacts => Set<GradingArtifact>();
     public DbSet<GradingEvidence> GradingEvidence => Set<GradingEvidence>();
+    public DbSet<UserMemory> UserMemories => Set<UserMemory>();
     public DbSet<OpenIddictEntityFrameworkCoreApplication> OAuthApplications => Set<OpenIddictEntityFrameworkCoreApplication>();
     public DbSet<OpenIddictEntityFrameworkCoreAuthorization> OAuthAuthorizations => Set<OpenIddictEntityFrameworkCoreAuthorization>();
     public DbSet<OpenIddictEntityFrameworkCoreScope> OAuthScopes => Set<OpenIddictEntityFrameworkCoreScope>();
@@ -111,6 +112,28 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleUserLink.HasIndex(x => new { x.Subject, x.MoodleAlias }).IsUnique();
 
         ConfigureGrading(modelBuilder);
+        ConfigureUserMemories(modelBuilder);
+    }
+
+    private static void ConfigureUserMemories(ModelBuilder modelBuilder)
+    {
+        var memory = modelBuilder.Entity<UserMemory>();
+        memory.ToTable("user_memories");
+        memory.HasKey(x => x.Id);
+        memory.Property(x => x.OwnerSubject).HasMaxLength(200).IsRequired();
+        memory.Property(x => x.Category).HasMaxLength(32).IsRequired();
+        memory.Property(x => x.NormalizedKey).HasMaxLength(120).IsRequired();
+        memory.Property(x => x.Content).HasMaxLength(1000).IsRequired();
+        memory.Property(x => x.Origin).HasMaxLength(32).IsRequired();
+        memory.Property(x => x.MoodleAlias).HasMaxLength(64);
+        memory.Property(x => x.CourseId).HasMaxLength(64);
+        memory.Property(x => x.CreatedAtUtc).IsRequired();
+        memory.Property(x => x.UpdatedAtUtc).IsRequired();
+        memory.HasIndex(x => new { x.OwnerSubject, x.MoodleAlias, x.CourseId, x.UpdatedAtUtc })
+            .IsDescending(false, false, false, true);
+        memory.HasIndex(x => new { x.OwnerSubject, x.Category, x.MoodleAlias, x.CourseId, x.NormalizedKey })
+            .IsUnique()
+            .AreNullsDistinct(false);
     }
 
     private static void ConfigureGrading(ModelBuilder modelBuilder)

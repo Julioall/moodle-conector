@@ -78,6 +78,7 @@ public static class DependencyInjection
         services.AddScoped<IPendingMoodleActionRepository, PendingMoodleActionRepository>();
         services.AddScoped<IGradingReviewRepository, GradingReviewRepository>();
         services.AddScoped<IMoodleAuditLogRepository, MoodleAuditLogRepository>();
+        services.AddScoped<IUserMemoryRepository, UserMemoryRepository>();
         services.AddScoped<IAuthorizationAuditService, AuthorizationAuditService>();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
         services.AddScoped<IMoodleUserResolver, MoodleUserResolver>();
