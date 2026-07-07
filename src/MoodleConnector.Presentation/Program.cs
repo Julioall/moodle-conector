@@ -30,11 +30,14 @@ using MoodleConnector.Presentation.Tools.Submissions;
 using MoodleConnector.Presentation.Tools.Messages;
 using MoodleConnector.Presentation.Tools.Reports;
 using MoodleConnector.Presentation.Tools.Monitor;
+using MoodleConnector.Presentation.Tools.Memory;
+using MoodleConnector.Presentation.Tools.Pedagogy;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.Threading.RateLimiting;
 using MediatR;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Presentation;
 
 var builder = WebApplication.CreateBuilder(args);
 const string PortalAuthRateLimitPolicy = "portal-auth";
@@ -232,7 +235,7 @@ builder.Services.AddOpenIddict()
 var mcpServerBuilder = builder.Services
     .AddApplication()
     .AddInfrastructure(builder.Configuration)
-    .AddMcpServer()
+    .AddMcpServer(options => options.ServerInstructions = MoodleConnectorInstructions.Text)
     .WithHttpTransport()
     .WithRequestFilters(filters =>
     {
@@ -273,6 +276,8 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleTutorMessageTools>()
     .WithTools<MoodleReportTools>()
     .WithTools<MoodleMonitorTools>()
+    .WithTools<MoodleMemoryTools>()
+    .WithTools<MoodlePedagogyTools>()
     .WithResources<MoodleGradingReviewAppResources>();
 
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();

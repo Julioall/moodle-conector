@@ -6,6 +6,8 @@ using MoodleConnector.Presentation.Tools.Completion;
 using MoodleConnector.Presentation.Tools.Grading;
 using MoodleConnector.Presentation.Tools.Gradebook;
 using MoodleConnector.Presentation.Tools.Risk;
+using MoodleConnector.Presentation.Tools.Memory;
+using MoodleConnector.Presentation.Tools.Pedagogy;
 
 namespace MoodleConnector.Application.Tests.Tools;
 
@@ -27,7 +29,12 @@ public sealed class McpToolMetadataTests
             {
                 Assert.False(attribute.Destructive, $"{toolName} deve declarar Destructive=false.");
             }
-            if (toolName == "criar_lote_correcao_assistida")
+            if (toolName == "gerenciar_memoria_usuario")
+            {
+                Assert.False(attribute.ReadOnly, $"{toolName} grava estado interno e deve declarar ReadOnly=false.");
+                Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente.");
+            }
+            else if (toolName == "criar_lote_correcao_assistida")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} cria job interno e deve declarar ReadOnly=false.");
                 Assert.False(attribute.Idempotent, $"{toolName} nao deve ser idempotente sem chave de idempotencia.");
@@ -122,6 +129,8 @@ public sealed class McpToolMetadataTests
             typeof(MoodleRiskAnalysisTools),
             typeof(MoodleGradingContextDiagnosticsTools),
             typeof(MoodleGradingReviewAppTools),
+            typeof(MoodleMemoryTools),
+            typeof(MoodlePedagogyTools),
             typeof(DemoPendingActionTools)
         };
 
