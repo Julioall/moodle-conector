@@ -32,20 +32,52 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
         string ownerSubject,
         string? moodleAlias,
         string? courseId,
+        string? category,
+        string? query,
         int limit,
         CancellationToken cancellationToken = default)
     {
-        return await dbContext.UserMemories
+        var memories = dbContext.UserMemories
             .Where(memory => memory.OwnerSubject == ownerSubject &&
                 ((memory.MoodleAlias == null && memory.CourseId == null) ||
                  (moodleAlias != null && memory.MoodleAlias == moodleAlias && memory.CourseId == null) ||
                  (moodleAlias != null && courseId != null &&
-                  memory.MoodleAlias == moodleAlias && memory.CourseId == courseId)))
+                  memory.MoodleAlias == moodleAlias && memory.CourseId == courseId)));
+
+        if (category is not null)
+        {
+            memories = memories.Where(memory => memory.Category == category);
+        }
+
+        if (query is not null)
+        {
+            if (dbContext.Database.IsNpgsql())
+            {
+                var pattern = $"%{EscapeLikePattern(query)}%";
+                memories = memories.Where(memory =>
+                    EF.Functions.ILike(memory.NormalizedKey, pattern, "\\") ||
+                    EF.Functions.ILike(memory.Content, pattern, "\\"));
+            }
+            else
+            {
+                var normalizedQuery = query.ToLower();
+                memories = memories.Where(memory =>
+                    memory.NormalizedKey.ToLower().Contains(normalizedQuery) ||
+                    memory.Content.ToLower().Contains(normalizedQuery));
+            }
+        }
+
+        return await memories
             .OrderByDescending(memory => memory.CourseId != null ? 2 : memory.MoodleAlias != null ? 1 : 0)
             .ThenByDescending(memory => memory.UpdatedAtUtc)
             .Take(limit)
             .ToListAsync(cancellationToken);
     }
+
+    private static string EscapeLikePattern(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     public async Task<bool> RemoveAsync(
         Guid id,
@@ -67,10 +99,10 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
         return dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private Task<UserMemory?> FindOwnedAsync(
+    public Task<UserMemory?> FindOwnedAsync(
         Guid id,
         string ownerSubject,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken = default)
     {
         return dbContext.UserMemories.SingleOrDefaultAsync(
             memory => memory.OwnerSubject == ownerSubject && memory.Id == id,

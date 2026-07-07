@@ -62,6 +62,17 @@ public sealed class UserMemoryServiceTests
         Assert.Equal(20, fixture.Repository.LastListLimit);
     }
 
+    [Fact]
+    public async Task List_forwards_normalized_optional_category_and_query()
+    {
+        var fixture = new Fixture();
+
+        await fixture.Service.ListAsync(new(Category: " CORRECAO ", Query: " rubrica "));
+
+        Assert.Equal("correcao", fixture.Repository.LastListCategory);
+        Assert.Equal("rubrica", fixture.Repository.LastListQuery);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -185,6 +196,8 @@ public sealed class UserMemoryServiceTests
     {
         public List<UserMemory> Items { get; } = [];
         public int LastListLimit { get; private set; }
+        public string? LastListCategory { get; private set; }
+        public string? LastListQuery { get; private set; }
 
         public Task<UserMemory?> FindEquivalentAsync(string ownerSubject, string category, string? moodleAlias, string? courseId, string normalizedKey, CancellationToken cancellationToken = default) =>
             Task.FromResult(Items.SingleOrDefault(x => x.OwnerSubject == ownerSubject && x.Category == category && x.MoodleAlias == moodleAlias && x.CourseId == courseId && x.NormalizedKey == normalizedKey));
@@ -195,11 +208,20 @@ public sealed class UserMemoryServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<IReadOnlyList<UserMemory>> ListAsync(string ownerSubject, string? moodleAlias, string? courseId, int limit, CancellationToken cancellationToken = default)
+        public Task<IReadOnlyList<UserMemory>> ListAsync(string ownerSubject, string? moodleAlias, string? courseId, string? category, string? query, int limit, CancellationToken cancellationToken = default)
         {
             LastListLimit = limit;
-            return Task.FromResult<IReadOnlyList<UserMemory>>(Items.Where(x => x.OwnerSubject == ownerSubject && x.MoodleAlias == moodleAlias && x.CourseId == courseId).Take(limit).ToList());
+            LastListCategory = category;
+            LastListQuery = query;
+            return Task.FromResult<IReadOnlyList<UserMemory>>(Items
+                .Where(x => x.OwnerSubject == ownerSubject && x.MoodleAlias == moodleAlias && x.CourseId == courseId)
+                .Where(x => category is null || x.Category == category)
+                .Where(x => query is null || x.NormalizedKey.Contains(query, StringComparison.OrdinalIgnoreCase) || x.Content.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .Take(limit).ToList());
         }
+
+        public Task<UserMemory?> FindOwnedAsync(Guid id, string ownerSubject, CancellationToken cancellationToken = default) =>
+            Task.FromResult(Items.SingleOrDefault(x => x.Id == id && x.OwnerSubject == ownerSubject));
 
         public Task<bool> RemoveAsync(Guid id, string ownerSubject, CancellationToken cancellationToken = default)
         {

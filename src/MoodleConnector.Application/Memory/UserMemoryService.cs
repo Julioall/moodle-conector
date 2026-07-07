@@ -15,7 +15,12 @@ public sealed record SaveUserMemoryRequest(
     string? MoodleAlias = null,
     string? CourseId = null);
 
-public sealed record ListUserMemoriesRequest(string? MoodleAlias = null, string? CourseId = null, int? Limit = null);
+public sealed record ListUserMemoriesRequest(
+    string? MoodleAlias = null,
+    string? CourseId = null,
+    int? Limit = null,
+    string? Category = null,
+    string? Query = null);
 
 public sealed record UserMemoryDto(
     Guid Id,
@@ -91,11 +96,15 @@ public sealed partial class UserMemoryService(
         ArgumentNullException.ThrowIfNull(request);
         var alias = Optional(request.MoodleAlias);
         var courseId = Optional(request.CourseId);
+        var category = Optional(request.Category)?.ToLowerInvariant();
+        var query = Optional(request.Query);
         EnsureLength(alias, 64, nameof(request.MoodleAlias));
         EnsureLength(courseId, 64, nameof(request.CourseId));
+        EnsureLength(query, 1000, nameof(request.Query));
         if (courseId is not null && alias is null) throw new ArgumentException("CourseId exige MoodleAlias.", nameof(request));
+        if (category is not null && !Categories.Contains(category)) throw new ArgumentException("Categoria de memÃ³ria invÃ¡lida.", nameof(request));
         var limit = Math.Clamp(request.Limit ?? 20, 1, 50);
-        var memories = await repository.ListAsync(owner, alias, courseId, limit, cancellationToken);
+        var memories = await repository.ListAsync(owner, alias, courseId, category, query, limit, cancellationToken);
         return memories.Select(Map).ToList();
     }
 

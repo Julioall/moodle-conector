@@ -20,9 +20,39 @@ public sealed class UserMemoryRepositoryTests
             Memory("bob", "bob", "principal", "42", now.AddMinutes(5)));
         await dbContext.SaveChangesAsync();
 
-        var result = await repository.ListAsync("alice", "principal", "42", 10);
+        var result = await repository.ListAsync("alice", "principal", "42", null, null, 10);
 
         Assert.Equal(["curso", "alias", "global"], result.Select(memory => memory.NormalizedKey));
+    }
+
+    [Fact]
+    public async Task ListAsync_FiltraCategoriaETermoEmChaveOuConteudo()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new UserMemoryRepository(dbContext);
+        var now = DateTimeOffset.UtcNow;
+        dbContext.UserMemories.AddRange(
+            Memory("alice", "feedback-claro", null, null, now, "correcao", "Usar RUBRICA objetiva"),
+            Memory("alice", "rubrica-antiga", null, null, now, "preferencia", "ignorar"),
+            Memory("alice", "outro", null, null, now, "correcao", "sem correspondencia"));
+        await dbContext.SaveChangesAsync();
+
+        var result = await repository.ListAsync("alice", null, null, "correcao", "rubrica", 10);
+
+        Assert.Equal(["feedback-claro"], result.Select(memory => memory.NormalizedKey));
+    }
+
+    [Fact]
+    public async Task FindOwnedAsync_RetornaSomenteQuandoOwnerCorresponde()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new UserMemoryRepository(dbContext);
+        var memory = Memory("alice", "tom", null, null, DateTimeOffset.UtcNow);
+        dbContext.UserMemories.Add(memory);
+        await dbContext.SaveChangesAsync();
+
+        Assert.Same(memory, await repository.FindOwnedAsync(memory.Id, "alice"));
+        Assert.Null(await repository.FindOwnedAsync(memory.Id, "bob"));
     }
 
     [Fact]
@@ -67,10 +97,12 @@ public sealed class UserMemoryRepositoryTests
         string key,
         string? alias,
         string? courseId,
-        DateTimeOffset updatedAt)
+        DateTimeOffset updatedAt,
+        string category = "preferencia",
+        string? content = null)
     {
-        var memory = new UserMemory(owner, "preferencia", key, key, "explicit", alias, courseId, updatedAt.AddHours(-1));
-        memory.Update(key, "explicit", updatedAt);
+        var memory = new UserMemory(owner, category, key, content ?? key, "explicit", alias, courseId, updatedAt.AddHours(-1));
+        memory.Update(content ?? key, "explicit", updatedAt);
         return memory;
     }
 }
