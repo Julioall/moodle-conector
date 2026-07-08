@@ -162,3 +162,127 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Limitações:** mensagens privadas, canais externos e classificação semântica de dúvida não são fontes contratadas.
 - **Gate humano:** tutor/monitor lê, classifica e decide a resposta ou o encaminhamento.
 - **Status / evidência de conclusão:** **parcial**; leitura de fórum implementada; fila integrada de atendimento é planejada.
+
+## Jornada 3 — Avaliação e feedback
+
+### Consultar gradebook individual
+
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, avaliação da aprendizagem; `public/pedagogic/Guia de Desenvolvimento de Situação de Aprendizagem.md`, “Funções da avaliação” e “Resultados da avaliação”.
+- **Resultado humano:** examinar os itens e registros de nota de um estudante como parte da avaliação.
+- **Evidências necessárias / disponíveis:** critérios, instrumentos, capacidades e histórico; disponíveis itens, faixas, nota, percentual e feedback retornados por estudante.
+- **Funções Moodle / tool MCP:** `gradereport_user_get_grade_items`; `consultar_boletim_aluno`.
+- **Nível / cobertura e limites:** **Nível A** para leitura individual; um estudante por chamada.
+- **Limitações:** item/nota ausente não comprova pendência; o gradebook não contém necessariamente o vínculo SA-capacidade-critério.
+- **Gate humano:** tutor interpreta no contexto dos instrumentos; CTM valida regras de conversão.
+- **Status / evidência de conclusão:** **implementado**; `GetStudentGradeItemsQuery.cs`, `GetStudentGradebookQuery.cs` e testes dedicados.
+
+### Produzir visão coletiva de desempenho
+
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** mesmas seções de avaliação e resultados da atividade anterior.
+- **Resultado humano:** comparar fatos observáveis da turma e identificar itens que pedem análise.
+- **Evidências necessárias / disponíveis:** gradebook coletivo, critérios e população completa; disponível agregação local de leituras individuais.
+- **Funções Moodle / tool MCP:** `core_enrol_get_enrolled_users`, `gradereport_user_get_grade_items`; `listar_alunos_abaixo_minimo`, reports da Jornada 6.
+- **Nível / cobertura e limites:** **Nível B**; padrão de até 60–100 estudantes conforme a tool e uma ou mais chamadas por estudante.
+- **Limitações:** não é snapshot atômico; custo, falhas parciais e truncamento podem alterar denominadores.
+- **Gate humano:** revisar cobertura e critérios antes de comunicar ou intervir.
+- **Status / evidência de conclusão:** **parcial**; agregações existem, contrato uniforme de cobertura é P0.
+
+### Relacionar SA, capacidade, critério e instrumento
+
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** `public/pedagogic/Guia de Desenvolvimento de Situação de Aprendizagem.md`, “Funções da avaliação”, “Estratégias de avaliação”, “Instrumentos de avaliação” e modelo de capacidade/critério crítico.
+- **Resultado humano:** avaliar desempenho observável contra critérios aprovados.
+- **Evidências necessárias / disponíveis:** mapeamento explícito SA-capacidade-critério-rubrica-conversão; o Moodle fornece somente metadados e rubricas/configurações que estejam acessíveis.
+- **Funções Moodle / tool MCP:** `mod_assign_get_assignments`, `gradereport_user_get_grade_items`; `consultar_contexto_item_correcao_assistida`.
+- **Nível / cobertura e limites:** **Nível C**; depende de configuração/mapeamento institucional íntegro.
+- **Limitações:** heurística de contexto não substitui mapeamento aprovado; nota não comprova competência.
+- **Gate humano:** tutor e CTM aprovam critérios, vínculos e conversão.
+- **Status / evidência de conclusão:** **planejado/parcial**; contexto assistido existe, mapeamento institucional explícito não.
+
+### Corrigir e elaborar feedback assistido
+
+- **Público:** tutor.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, avaliação formativa; `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, correção e feedback.
+- **Resultado humano:** revisar evidências e transformar um rascunho em feedback pedagógico próprio.
+- **Evidências necessárias / disponíveis:** enunciado, entrega, anexos, rubrica, critérios e histórico; disponíveis tarefas, submissões, arquivos permitidos, contexto e rascunhos internos.
+- **Funções Moodle / tool MCP:** funções `mod_assign_*`; `listar_entregas_corrigiveis`, `criar_lote_correcao_assistida`, `preparar_lote_correcao_ia`, `salvar_correcoes_ia_lote`, `revisar_feedbacks_lote`.
+- **Nível / cobertura e limites:** **Nível B**; lote até 400 itens por configuração, arquivos/tamanho/texto limitados por `GradingLimits`.
+- **Limitações:** extração e contexto podem ser incompletos; IA não decide nota nem publica automaticamente.
+- **Gate humano:** revisão item a item antes da prévia; texto aprovado fica auditável.
+- **Status / evidência de conclusão:** **implementado com limitações**; fluxo de grading e testes em `Tools/Grading` e `Grading`.
+
+### Lançar nota e feedback individual
+
+- **Público:** tutor.
+- **Referência pedagógica:** referências de avaliação acima.
+- **Resultado humano:** publicar o resultado revisado para uma tarefa autorizada.
+- **Evidências necessárias / disponíveis:** nota atual, faixa, justificativa, feedback e autorização; dados da tarefa/grade e ação pendente.
+- **Funções Moodle / tool MCP:** `mod_assign_get_grades`, `mod_assign_save_grade`; `preparar_lancamento_nota`, `confirmar_lancamento_nota` e fluxo em lote.
+- **Nível / cobertura e limites:** **Nível A** para o fluxo individual quando todos os gates estão ativos; uma escrita por estudante/tarefa.
+- **Limitações:** `AssignmentGradeWriteEnabled=true` no `appsettings.json` atual viola o default seguro requerido; disponibilidade da função não prova permissão contextual.
+- **Gate humano:** justificativa, prévia, texto literal, escopo, `CanWrite`, flag, idempotência e auditoria.
+- **Status / evidência de conclusão:** **implementado, configuração insegura pendente**; `IndividualGradeCommands.cs`, `MoodleIndividualGradeTools.cs` e testes; correção do default é P0.
+
+## Jornada 4 — Recuperação e intervenção pedagógica
+
+### Observar sinais configuráveis de atenção
+
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, recuperação e avaliação formativa; `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, acompanhamento.
+- **Resultado humano:** priorizar casos para análise, sem diagnóstico automático.
+- **Evidências necessárias / disponíveis:** trajetória, critérios, contexto pessoal e fontes EaD/presenciais; disponíveis último acesso, notas e completion visíveis.
+- **Funções Moodle / tool MCP:** enrolment, completion e gradebook; `gerar_relatorio_risco_estudantes`, `listar_alunos_sem_acesso`, `listar_alunos_abaixo_minimo`.
+- **Nível / cobertura e limites:** **Nível B**; risco usa padrão de 50 estudantes, limiares configuráveis e chamadas por estudante.
+- **Limitações:** dados ausentes e completion não configurado devem reduzir confiança; labels Alto/Médio/Baixo são sinais técnicos, não diagnósticos.
+- **Gate humano:** tutor/CTM confronta outras fontes e decide se há necessidade de contato.
+- **Status / evidência de conclusão:** **implementado com limitações**; queries/tools de Risk e testes dedicados.
+
+### Produzir relatório de atenção acionável
+
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** referências de recuperação acima.
+- **Resultado humano:** separar fatos, hipóteses, próximos passos e limitações para revisão.
+- **Evidências necessárias / disponíveis:** fontes e cobertura completas; resposta de risco atual com estudantes/fatores e warnings.
+- **Funções Moodle / tool MCP:** mesmas da atividade anterior; `gerar_relatorio_risco_estudantes`.
+- **Nível / cobertura e limites:** **Nível B**; o contrato-alvo é:
+
+```json
+{
+  "findings": [],
+  "possibleRisks": [],
+  "recommendedActions": [],
+  "limitations": [],
+  "suggestedAudience": [],
+  "requiresHumanReview": true
+}
+```
+
+- **Limitações:** o contrato implementado ainda não expõe uniformemente todos esses campos, cobertura e estados de ausência.
+- **Gate humano:** `requiresHumanReview` permanece verdadeiro.
+- **Status / evidência de conclusão:** **parcial**; relatório atual testado; contrato-alvo completo é backlog P0/P1.
+
+### Recomendar e preparar contato de acompanhamento
+
+- **Público:** tutor.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, comunicação e acompanhamento; MSEP, recuperação.
+- **Resultado humano:** revisar uma mensagem individual contextualizada e não estigmatizante.
+- **Evidências necessárias / disponíveis:** motivo observável, exclusões, consentimento/canal e histórico; sinais e participantes visíveis.
+- **Funções Moodle / tool MCP:** `core_message_send_instant_messages`; pares `preparar_mensagem_*` / `confirmar_mensagem_*` de acesso, pendência e recuperação.
+- **Nível / cobertura e limites:** **Nível B**; mensagens individuais, sem broadcast/scheduler.
+- **Limitações:** não expor nota ou “risco” a terceiros; flag de mensagens ainda não efetiva.
+- **Gate humano:** revisar linguagem epistêmica, destinatários e confirmação literal.
+- **Status / evidência de conclusão:** **parcial**; seis pares prepare/confirm existem; flag efetiva é P0.
+
+### Planejar e acompanhar recuperação
+
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, recuperação; `public/pedagogic/Guia de Desenvolvimento de Situação de Aprendizagem.md`, resultados e instrumentos de avaliação.
+- **Resultado humano:** definir orientação, período, nova oportunidade, evidências e acompanhamento.
+- **Evidências necessárias / disponíveis:** diagnóstico pedagógico, capacidades/critérios, plano e fontes presenciais/EaD; o conector só oferece registros Moodle visíveis.
+- **Funções Moodle / tool MCP:** composição das leituras existentes; não há tool que delibere recuperação.
+- **Nível / cobertura e limites:** apoio documental **Nível B/C**; decisão de recuperação, competência, aprovação, reprovação e evasão são **Nível H**.
+- **Limitações:** fontes presenciais, SGE e decisão oficial não estão contratadas.
+- **Gate humano:** tutor propõe; corpo pedagógico/CTM valida e acompanha.
+- **Status / evidência de conclusão:** **planejado** para acompanhamento estruturado; deliberação permanece fora de automação.
