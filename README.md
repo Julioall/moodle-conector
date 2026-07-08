@@ -8,13 +8,13 @@ Conector MCP não oficial para Moodle, criado para conectar o ChatGPT diretament
 
 Este projeto ainda está em construção e aceita contribuições. Sugestões, melhorias, correções, novas tools, testes e revisões de segurança são bem-vindos.
 
-O conector já possui escritas confirmadas e limitadas, como publicação em fórum, mensagens individuais e nota/feedback de tarefa. Elas dependem de permissão explícita, confirmação humana, auditoria, controle de escopo, rastreabilidade e bloqueios por capability/feature flag. Escrita geral de conteúdo, broadcast e agendamento não estão implementados.
+O conector já possui escritas confirmadas e limitadas, como publicação em fórum, mensagens individuais e nota/feedback de tarefa. Esses fluxos usam `PendingAction`, confirmação literal, escopo de escrita, conexão `CanWrite` e auditoria; a permissão Moodle contextual continua obrigatória. Os gates de feature flag ainda têm lacunas: `MessagesWriteEnabled` não bloqueia efetivamente as mensagens e `AssignmentGradeWriteEnabled=true` é o default versionado atual, um risco P0. Escrita geral de conteúdo, broadcast e agendamento não estão implementados.
 
 > Este projeto não é oficial do Moodle HQ. Ele é uma integração independente baseada em MCP, ASP.NET Core, OAuth e APIs WebService do Moodle.
 
 ## Objetivo
 
-O Moodle Connector MCP permite que usuários autorizados consultem dados do Moodle por tools MCP e, em fases futuras, preparem ações sensíveis como mensagens, feedbacks, notas e alterações acadêmicas sempre com prévia, auditoria e confirmação humana.
+O Moodle Connector MCP permite que usuários autorizados consultem dados do Moodle e usem fluxos existentes de prévia/confirmação para mensagens individuais, publicação em fórum e nota/feedback individual. Outras alterações acadêmicas permanecem planejadas e não devem ser inferidas dessas capabilities.
 
 Diretriz central:
 
@@ -182,7 +182,7 @@ As ferramentas de escrita ainda estão em desenvolvimento e devem seguir um flux
 3. o sistema pede uma confirmação explícita;
 4. somente depois disso a ação pode ser executada.
 
-Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. `MessagesWriteEnabled` ainda não bloqueia efetivamente todo o fluxo de mensagens, e a flag de nota precisa adotar default seguro; por isso essas escritas devem permanecer desabilitadas na operação até que os bloqueadores P0 do roadmap sejam concluídos.
+Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write` e conexão `CanWrite`, mas `MessagesWriteEnabled` ainda não é um gate efetivo. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`; o default versionado atual é `true` e precisa ser corrigido para `false`. Até a conclusão desses P0, a operação deve manter as escritas desabilitadas por configuração externa e menor privilégio.
 
 ## Arquitetura
 

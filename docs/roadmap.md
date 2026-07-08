@@ -63,7 +63,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Nível / cobertura e limites:** **Nível A** para presença técnica dos itens visíveis; um curso por chamada, limitado ao conteúdo retornado ao token.
 - **Limitações:** não verifica qualidade, finalidade pedagógica, acessibilidade material nem aderência ao plano fora do Moodle.
 - **Gate humano:** monitor/tutor interpreta cada `[ ]`/`[x]`, registra observação e confirma a adequação.
-- **Status / evidência de conclusão:** **implementado**; `AuditVirtualClassroomChecklistQuery.cs` e `AuditVirtualClassroomChecklistQueryHandlerTests.cs`.
+- **Status / evidência de conclusão:** **implementado**; `src/MoodleConnector.Application/Monitor/Queries/AuditVirtualClassroomChecklistQuery.cs` e `tests/MoodleConnector.Application.Tests/Monitor/AuditVirtualClassroomChecklistQueryHandlerTests.cs`.
 
 ### Verificar materiais, fóruns, atividades e datas
 
@@ -99,7 +99,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Nível / cobertura e limites:** **Nível B**; envio é composto por mensagens individuais, sem broadcast nativo ou agendamento.
 - **Limitações:** `MessagesWriteEnabled=false` é o padrão, mas a flag ainda não controla efetivamente o registro/execução das tools; ver backlog P0.
 - **Gate humano:** prévia com critérios, exclusões, destinatários e corpo sanitizado; confirmação literal antes do envio.
-- **Status / evidência de conclusão:** **parcial**; par prepare/confirm e testes de preparação existem, porém o gate da flag está incompleto.
+- **Status / evidência de conclusão:** **parcial**; pares em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs` e testes de preparação em `tests/MoodleConnector.Application.Tests/Messages/PrepareTutorMessageCommandHandlerTests.cs`; o gate da flag está incompleto.
 
 ## Jornada 2 — Acompanhamento semanal
 
@@ -220,10 +220,10 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Resultado humano:** publicar o resultado revisado para uma tarefa autorizada.
 - **Evidências necessárias / disponíveis:** nota atual, faixa, justificativa, feedback e autorização; dados da tarefa/grade e ação pendente.
 - **Funções Moodle / tool MCP:** `mod_assign_get_grades`, `mod_assign_save_grade`; `preparar_lancamento_nota`, `confirmar_lancamento_nota` e fluxo em lote.
-- **Nível / cobertura e limites:** **Nível A** para o fluxo individual quando todos os gates estão ativos; uma escrita por estudante/tarefa.
+- **Nível / cobertura e limites:** **Nível B** para o fluxo individual enquanto não houver teste dedicado ponta a ponta; uma escrita por estudante/tarefa.
 - **Limitações:** `AssignmentGradeWriteEnabled=true` no `appsettings.json` atual viola o default seguro requerido; disponibilidade da função não prova permissão contextual.
 - **Gate humano:** justificativa, prévia, texto literal, escopo, `CanWrite`, flag, idempotência e auditoria.
-- **Status / evidência de conclusão:** **implementado, configuração insegura pendente**; `IndividualGradeCommands.cs`, `MoodleIndividualGradeTools.cs` e testes; correção do default é P0.
+- **Status / evidência de conclusão:** **parcial, configuração insegura pendente**; implementação em `src/MoodleConnector.Application/Grading/IndividualGradeCommands.cs` e `src/MoodleConnector.Presentation/Tools/Grading/MoodleIndividualGradeTools.cs`, sem teste dedicado do fluxo individual; correção do default e cobertura de teste são P0.
 
 ## Jornada 4 — Recuperação e intervenção pedagógica
 
@@ -299,7 +299,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Nível / cobertura e limites:** **Nível B**; cada destinatário recebe mensagem instantânea individual e o lote depende da seleção local.
 - **Limitações:** não há broadcast nativo, preferências completas de contato, agendamento ou garantia de leitura; `MessagesWriteEnabled` ainda não bloqueia efetivamente o fluxo.
 - **Gate humano:** prévia mostra curso, critérios, evidências, exclusões, quantidade/lista de destinatários e corpo sanitizado; confirmação literal, escopo, `CanWrite`, idempotência e auditoria.
-- **Status / evidência de conclusão:** **parcial**; prepare/confirm e testes existem, mas flag efetiva e cobertura explícita são P0.
+- **Status / evidência de conclusão:** **parcial**; tools em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs` e preparação testada em `tests/MoodleConnector.Application.Tests/Messages/PrepareTutorMessageCommandHandlerTests.cs`; flag efetiva, teste dedicado da confirmação e cobertura explícita são P0.
 
 ### Publicar em fórum com confirmação
 
@@ -311,7 +311,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Nível / cobertura e limites:** **Nível A** quando função/permissão/gates existem; uma publicação por confirmação.
 - **Limitações:** visibilidade/grupos dependem da configuração Moodle; não substitui mediação posterior.
 - **Gate humano:** prévia e confirmação literal, conexão com escrita, escopo e auditoria.
-- **Status / evidência de conclusão:** **implementado**; queries/commands/tools de Forums e testes correspondentes.
+- **Status / evidência de conclusão:** **implementado**; `src/MoodleConnector.Application/Forums/PostForumCommands.cs`, `src/MoodleConnector.Presentation/Tools/Forums/MoodleForumTools.cs` e `tests/MoodleConnector.Application.Tests/Forums/PostForumCommandHandlerTests.cs`.
 
 ### Broadcast e agendamento
 
@@ -339,7 +339,7 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 - **Nível / cobertura e limites:** **Nível B**; padrão de até 60 estudantes, chamadas por estudante.
 - **Limitações:** não é censo sem `eligibleCount/coveredCount`; fontes presenciais e interpretação pedagógica ficam fora.
 - **Gate humano:** tutor revisa cobertura, dados sensíveis e narrativa antes de compartilhar.
-- **Status / evidência de conclusão:** **implementado com contrato parcial**; `GenerateWeeklyPerformanceReportQuery.cs` e testes; metadados uniformes são backlog.
+- **Status / evidência de conclusão:** **implementado com contrato parcial**; `src/MoodleConnector.Application/Reports/Queries/GenerateWeeklyPerformanceReportQuery.cs` e `tests/MoodleConnector.Application.Tests/Reports/GenerateWeeklyPerformanceReportQueryHandlerTests.cs`; metadados uniformes são backlog.
 
 ### Gerar resumo executivo e relatório do monitor
 
