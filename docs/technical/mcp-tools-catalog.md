@@ -678,7 +678,7 @@ Metadados MCP:
 
 Descricao:
 
-- Consolida a Fase 0 de descoberta tecnica para correcao assistida.
+- Consolida a descoberta técnica para correção assistida; a rastreabilidade da antiga Fase 0 está na tabela de migração de `docs/roadmap.md`.
 - Consulta o catalogo de funcoes Moodle e classifica disponibilidade de leitura de entregas, leitura de notas, anexos, `mod_assign_save_grade`, `mod_assign_save_grades`, rubricas/escalas e modo de token de escrita.
 - Relata `CanWrite`, feature flags de escrita e que a escrita sempre usa o token do usuario do tenant correspondente, sem retornar o valor do token.
 - Nao baixa anexos, nao lista estudantes e nao executa escrita no Moodle.
@@ -1234,8 +1234,4 @@ Descricao:
 
 ## Planejado
 
-Tools planejadas no roadmap:
-
-- Domínio Cursos: contexto estendido e calendário do curso.
-- Domínio Participantes: consulta individual de aluno e acessos dedicados.
-- Domínios Avaliações, Progresso, Risco, Relatórios e Escritas confirmadas.
+O planejamento canônico está organizado pelas sete jornadas em `docs/roadmap.md`. Este catálogo descreve as tools existentes e não deve ser usado para inferir que um domínio inteiro está ausente ou concluído. As lacunas prioritárias atuais incluem flags efetivas e defaults seguros de escrita, paginação 1-based uniforme, cobertura/truncamento, estados vazios não ambíguos e testes de todos os fluxos Nível A.
