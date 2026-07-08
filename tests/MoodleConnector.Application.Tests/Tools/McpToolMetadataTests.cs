@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json.Nodes;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Presentation.Tools;
 using MoodleConnector.Presentation.Tools.Completion;
@@ -111,6 +112,15 @@ public sealed class McpToolMetadataTests
 
         Assert.Equal(MoodleGradingReviewAppMetadata.ResourceUri, ui["resourceUri"]?.GetValue<string>());
         Assert.Equal(MoodleGradingReviewAppMetadata.ResourceUri, meta["openai/outputTemplate"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void ReviewAppDeveFecharFuncaoCallToolAntesDosUtilitarios()
+    {
+        var resource = Assert.IsType<TextResourceContents>(
+            Assert.Single(new MoodleGradingReviewAppResources().GetReviewApp()));
+
+        Assert.Contains("  });\n}\n\n// ", resource.Text.Replace("\r\n", "\n"));
     }
 
     private static IEnumerable<(Type ToolType, MethodInfo Method, McpServerToolAttribute Attribute)> EnumerateToolAttributes()

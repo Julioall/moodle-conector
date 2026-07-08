@@ -341,6 +341,7 @@ function callTool(name, args) {
     // Guard: clean up pendingRpc entry if host dies without responding
     setTimeout(() => { if (pendingRpc[id]) { delete pendingRpc[id]; reject(new Error("Host nao respondeu.")); } }, RPC_GUARD_MS);
   });
+}
 
 // ─── Utils ───
 function getFirstName(fullName) {
