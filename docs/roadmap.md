@@ -286,3 +286,93 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Limitações:** fontes presenciais, SGE e decisão oficial não estão contratadas.
 - **Gate humano:** tutor propõe; corpo pedagógico/CTM valida e acompanha.
 - **Status / evidência de conclusão:** **planejado** para acompanhamento estruturado; deliberação permanece fora de automação.
+
+## Jornada 5 — Comunicação
+
+### Preparar e enviar mensagens do ciclo do tutor
+
+- **Público:** tutor; monitor somente nos encaminhamentos autorizados.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, acolhimento, acompanhamento, orientação e encerramento.
+- **Resultado humano:** revisar e enviar mensagens de boas-vindas, acesso, pendência, recuperação, acompanhamento ou encerramento.
+- **Evidências necessárias / disponíveis:** finalidade, critério de seleção, exclusões, destinatários, corpo e canal; participantes e sinais observáveis das Jornadas 1–4.
+- **Funções Moodle / tool MCP:** `core_message_send_instant_messages`; seis pares específicos `preparar_mensagem_*` / `confirmar_mensagem_*` em `MoodleTutorMessageTools.cs`.
+- **Nível / cobertura e limites:** **Nível B**; cada destinatário recebe mensagem instantânea individual e o lote depende da seleção local.
+- **Limitações:** não há broadcast nativo, preferências completas de contato, agendamento ou garantia de leitura; `MessagesWriteEnabled` ainda não bloqueia efetivamente o fluxo.
+- **Gate humano:** prévia mostra curso, critérios, evidências, exclusões, quantidade/lista de destinatários e corpo sanitizado; confirmação literal, escopo, `CanWrite`, idempotência e auditoria.
+- **Status / evidência de conclusão:** **parcial**; prepare/confirm e testes existem, mas flag efetiva e cobertura explícita são P0.
+
+### Publicar em fórum com confirmação
+
+- **Público:** tutor.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, mediação de fóruns.
+- **Resultado humano:** publicar discussão ou resposta após revisar contexto e texto.
+- **Evidências necessárias / disponíveis:** fórum/discussão autorizados, texto e público; metadados visíveis do fórum.
+- **Funções Moodle / tool MCP:** `mod_forum_add_discussion`, `mod_forum_add_discussion_post`; `criar_previa_post_forum`, `confirmar_post_forum_moodle`.
+- **Nível / cobertura e limites:** **Nível A** quando função/permissão/gates existem; uma publicação por confirmação.
+- **Limitações:** visibilidade/grupos dependem da configuração Moodle; não substitui mediação posterior.
+- **Gate humano:** prévia e confirmação literal, conexão com escrita, escopo e auditoria.
+- **Status / evidência de conclusão:** **implementado**; queries/commands/tools de Forums e testes correspondentes.
+
+### Broadcast e agendamento
+
+- **Público:** tutor; corpo pedagógico/CTM como governança.
+- **Referência pedagógica:** Guia do Tutor, comunicação planejada.
+- **Resultado humano:** alcançar grupo/curso ou programar comunicação com governança.
+- **Evidências necessárias / disponíveis:** grupo, consentimento, janela, cancelamento e execução; não há infraestrutura contratada suficiente.
+- **Funções Moodle / tool MCP:** sem função de broadcast nativo; scheduler/worker e tools de agendamento não implementados.
+- **Nível / cobertura e limites:** **Nível D**.
+- **Limitações:** composição de mensagens individuais não deve ser descrita como broadcast atômico; não existe execução futura confiável.
+- **Gate humano:** eventual desenho exigirá confirmação, cancelamento, idempotência, auditoria e aprovação institucional.
+- **Status / evidência de conclusão:** **não suportado/planejado**, sem evidência de conclusão.
+
+## Jornada 6 — Relatórios e coordenação
+
+Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `period`, `coveredCount`, `eligibleCount`, `isTruncated`, `missingCapabilities` e `limitations`. A presença desses campos no contrato-alvo não significa que já estejam implementados.
+
+### Gerar relatório semanal de desempenho
+
+- **Público:** tutor; docente presencial; corpo pedagógico/CTM.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, acompanhamento e articulação; MSEP, avaliação formativa.
+- **Resultado humano:** compartilhar um retrato descritivo para planejar apoio.
+- **Evidências necessárias / disponíveis:** período, população, acesso, notas, completion e contexto; agregações Moodle visíveis.
+- **Funções Moodle / tool MCP:** enrolment, gradebook e completion; `gerar_relatorio_semanal_desempenho`.
+- **Nível / cobertura e limites:** **Nível B**; padrão de até 60 estudantes, chamadas por estudante.
+- **Limitações:** não é censo sem `eligibleCount/coveredCount`; fontes presenciais e interpretação pedagógica ficam fora.
+- **Gate humano:** tutor revisa cobertura, dados sensíveis e narrativa antes de compartilhar.
+- **Status / evidência de conclusão:** **implementado com contrato parcial**; `GenerateWeeklyPerformanceReportQuery.cs` e testes; metadados uniformes são backlog.
+
+### Gerar resumo executivo e relatório do monitor
+
+- **Público:** monitor; tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** Guia do Tutor, atribuições de monitoramento e acompanhamento.
+- **Resultado humano:** comunicar situação operacional da turma e pendências que exigem encaminhamento.
+- **Evidências necessárias / disponíveis:** participantes, estrutura, último acesso e fontes administrativas; disponíveis registros Moodle visíveis.
+- **Funções Moodle / tool MCP:** `core_course_get_contents`, `core_enrol_get_enrolled_users`; `resumo_executivo_curso`, `gerar_relatorio_monitor_turma`.
+- **Nível / cobertura e limites:** **Nível B**; resumo/monitor usam até 100 estudantes por padrão.
+- **Limitações:** não inclui chamados externos, presença física, SGE ou causas de acesso.
+- **Gate humano:** monitor valida ocorrências e encaminha; coordenação interpreta.
+- **Status / evidência de conclusão:** **implementado com limitações**; queries de Reports/Monitor e testes, inclusive checklist.
+
+### Apoiar conselho de classe
+
+- **Público:** corpo pedagógico/CTM; tutor como fornecedor de evidências.
+- **Referência pedagógica:** MSEP, avaliação e recuperação; Guia do Tutor, registros e articulação.
+- **Resultado humano:** preparar evidências descritivas para deliberação colegiada.
+- **Evidências necessárias / disponíveis:** EaD, presencial, SGE, critérios, recuperação e decisões oficiais; disponíveis apenas dados Moodle autorizados.
+- **Funções Moodle / tool MCP:** agregações de enrolment/gradebook/completion; `relatorio_conselho_classe`.
+- **Nível / cobertura e limites:** relatório técnico **Nível B**, padrão de até 60 estudantes; decisão é **Nível H**.
+- **Limitações:** nomes de campos atuais como “concluintes”, “reprovados” ou “evadidos” não constituem decisão oficial e precisam ser tratados como categorias técnicas/hipóteses com limitações.
+- **Gate humano:** CTM/conselho reconcilia todas as fontes e delibera.
+- **Status / evidência de conclusão:** **parcial**; tool/query e testes existem, mas sem fontes externas nem autoridade decisória.
+
+### Gerar relatório pós-execução e de coordenação
+
+- **Público:** corpo pedagógico/CTM; coordenação; tutor.
+- **Referência pedagógica:** Guia do Tutor, registro e avaliação da oferta; MSEP, resultados da avaliação.
+- **Resultado humano:** analisar evidências da execução e orientar melhoria.
+- **Evidências necessárias / disponíveis:** resultados oficiais, satisfação, qualidade, presencial e EaD; disponíveis gradebook/completion e auditoria de correção.
+- **Funções Moodle / tool MCP:** funções de leitura e `mod_assign_*`; `relatorio_pos_execucao`, `exportar_relatorio_correcao_coordenacao`.
+- **Nível / cobertura e limites:** **Nível B**; pós-execução usa até 60 estudantes; relatório de correção cobre o lote persistido.
+- **Limitações:** satisfação, qualidade pedagógica e resultados oficiais não estão no Moodle contratado; ausência de snapshots impede tendências confiáveis.
+- **Gate humano:** coordenação valida fontes, período, denominador e conclusões.
+- **Status / evidência de conclusão:** **implementado com limitações**; queries/tools e testes existentes, contrato uniforme pendente.
