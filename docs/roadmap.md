@@ -376,3 +376,137 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 - **Limitações:** satisfação, qualidade pedagógica e resultados oficiais não estão no Moodle contratado; ausência de snapshots impede tendências confiáveis.
 - **Gate humano:** coordenação valida fontes, período, denominador e conclusões.
 - **Status / evidência de conclusão:** **implementado com limitações**; queries/tools e testes existentes, contrato uniforme pendente.
+
+## Jornada 7 — Operação e governança
+
+### Descobrir capabilities, identidade e permissões efetivas
+
+- **Público:** operação; administrador Moodle; responsável pelo conector.
+- **Referência pedagógica:** transversal; protege todas as atividades das Jornadas 1–6.
+- **Resultado humano:** saber qual conexão, usuário, curso, função e escopo autorizam cada leitura ou escrita.
+- **Evidências necessárias / disponíveis:** catálogo do serviço, identidade do token, vínculo ao curso, `CanWrite`, escopos e flags; o conector descobre funções e resolve a identidade, mas a permissão contextual só é provada pela chamada no recurso.
+- **Funções Moodle / tool MCP:** `core_webservice_get_site_info`, `core_enrol_get_users_courses`; descoberta técnica de grading e tools de cursos/conexões.
+- **Nível / cobertura e limites:** **Nível A** para descoberta do catálogo e identidade implementadas; **Nível C** para permissão/capability administrada no Moodle.
+- **Limitações:** função listada não garante capability no contexto; função ausente deve resultar em `funcao_indisponivel`, sem fallback silencioso.
+- **Gate humano:** administrador concede menor privilégio e valida o serviço; operação confere ambiente e alias antes do uso.
+- **Status / evidência de conclusão:** **implementado com limitações**; gateways de site info/cursos, auth e testes de integração existem.
+
+### Governar escritas e dados sensíveis
+
+- **Público:** operação; segurança; tutor/CTM como aprovadores da ação.
+- **Referência pedagógica:** transversal; preserva autoridade humana, confidencialidade e rastreabilidade.
+- **Resultado humano:** manter escritas desligadas por padrão e executar somente a ação revisada e autorizada.
+- **Evidências necessárias / disponíveis:** conexão `CanWrite`, escopo, flag por domínio, `PendingAction`, prévia sanitizada, confirmação literal, expiração, idempotência e auditoria.
+- **Funções Moodle / tool MCP:** escritas de mensagens, fórum e nota; pares `preparar_*` / `confirmar_*`.
+- **Nível / cobertura e limites:** **Nível B** enquanto os defaults e flags não forem uniformes; uma confirmação cobre apenas a prévia persistida.
+- **Limitações:** `MessagesWriteEnabled` não controla hoje o registro/execução real; `AssignmentGradeWriteEnabled=true` no arquivo padrão é inseguro.
+- **Gate humano:** revisão e confirmação literal obrigatórias; segurança aprova flags e escopos de produção.
+- **Status / evidência de conclusão:** **parcial**; gates de conexão, escopo, pending action e testes existem; correções de flags são P0.
+
+### Operar, observar, endurecer e entregar
+
+- **Público:** operação; desenvolvimento; segurança.
+- **Referência pedagógica:** transversal; disponibilidade e privacidade condicionam o apoio pedagógico.
+- **Resultado humano:** implantar, diagnosticar e transferir a operação sem expor segredos ou dados acadêmicos.
+- **Evidências necessárias / disponíveis:** healthcheck, logs sanitizados, métricas, correlação, alertas, backup/restauração, checklist de release, runbooks e registro de mudanças.
+- **Funções Moodle / tool MCP:** não depende de função Moodle específica; `GET /health`, auditoria e documentação operacional sustentam as tools.
+- **Nível / cobertura e limites:** base de deploy e documentação **Nível A**; observabilidade, alertas, hardening e handoff completos permanecem **Nível B/C** conforme ambiente.
+- **Limitações:** sucesso do healthcheck não prova disponibilidade de cada capability Moodle; logs não podem conter tokens, senhas, links privados ou payload acadêmico desnecessário.
+- **Gate humano:** checklist de release, aprovação de segurança, validação de restore e aceite do handoff.
+- **Status / evidência de conclusão:** **parcial**; Docker/Caddy/CI, runbooks, modelo de auditoria e checklist existem; alertas e validação operacional integral não estão comprovados.
+
+## Matriz de capabilities atuais
+
+`Implementada` abaixo significa gateway/caso de uso e teste localizáveis. Em execução, catálogo, permissão, contexto e configuração continuam obrigatórios.
+
+| Função Moodle | Finalidade atual | Nível | Dependência / permissão | Comportamento requerido quando ausente |
+| --- | --- | --- | --- | --- |
+| `core_webservice_get_site_info` | Resolver usuário do token e descobrir funções do serviço. | A | Serviço habilitado e token válido. | `funcao_indisponivel`; bloquear descoberta/fluxo dependente. |
+| `core_enrol_get_users_courses` | Listar cursos vinculados ao usuário atual. | A | Capability de ver cursos do próprio usuário. | `sem_permissao` ou `funcao_indisponivel`; não interpretar como zero cursos. |
+| `core_enrol_get_enrolled_users` | Listar participantes, grupos e último acesso quando retornado. | A/B | Capability de ver participantes no curso; campos variam. | Distinguir `dado_indisponivel` de `zero_observado`; declarar truncamento. |
+| `core_course_get_contents` | Ler seções, módulos, recursos, atividades e datas visíveis. | A | Acesso ao curso e conteúdo. | `sem_permissao`/`funcao_indisponivel`; checklist fica inconclusivo. |
+| `core_completion_get_activities_completion_status` | Ler completion das atividades por estudante. | A/C | Completion habilitado e permissão contextual. | `nao_configurado`, `sem_permissao` ou `funcao_indisponivel`; nunca lista vazia ambígua. |
+| `core_completion_get_course_completion_status` | Ler completion geral por estudante. | A/C | Completion do curso configurado. | Mesmo tratamento explícito de completion; não inferir conclusão. |
+| `mod_forum_get_forums_by_courses` | Listar fóruns visíveis. | A | Acesso aos fóruns do curso. | `funcao_indisponivel`/`sem_permissao`; não afirmar que não há fórum. |
+| `mod_forum_get_forum_discussions` | Ler discussões paginadas. | A/B | Acesso ao fórum, grupos e paginação. | Declarar falha, página e `truncado`; não concluir ausência de participação. |
+| `mod_forum_get_discussion_posts` | Ler posts de discussões visíveis. | A/B | Acesso à discussão/grupo. | `falha_parcial` quando apenas parte das discussões falhar; informar cobertura. |
+| `mod_assign_get_assignments` | Ler configuração, identificação e nota máxima de tarefas. | A | Acesso ao curso/tarefa. | `funcao_indisponivel`/`sem_permissao`; não inferir que não há tarefa. |
+| `mod_assign_get_submissions` | Ler submissões visíveis e compor pendências/correção. | A/B | Capability de ver submissões. | Distinguir `zero_observado`, `sem_permissao` e `falha_parcial`. |
+| `mod_assign_get_submission_status` | Ler tentativa, entrega e feedback de um estudante. | A | Capability para o estudante/tarefa. | `dado_indisponivel` ou erro explícito; não declarar não entrega. |
+| `mod_assign_get_grades` | Ler notas existentes de uma tarefa. | A | Capability de ver notas. | `sem_permissao`/`dado_indisponivel`; não tratar como sem nota. |
+| `gradereport_user_get_grade_items` | Ler gradebook individual por estudante. | A/B | Capability de grade report no curso. | Marcar indisponibilidade/falha por estudante; agregação declara cobertura. |
+| `core_message_send_instant_messages` | Enviar mensagens instantâneas individuais confirmadas. | B | `CanWrite`, escopo, permissão Moodle e flag efetiva. | Bloquear confirmação com `funcao_indisponivel`; nunca simular envio/broadcast. |
+| `mod_assign_save_grade` | Gravar nota e feedback individual confirmados. | A | `CanWrite`, escopo, flag desligada por padrão e capability da tarefa. | Bloquear preparação/confirmação; preservar pending action/auditoria como falha. |
+
+As escritas de fórum usam ainda `mod_forum_add_discussion` e `mod_forum_add_discussion_post`, ambas condicionadas a `CanWrite`, escopo, permissão contextual, prévia, confirmação e auditoria.
+
+### Capabilities não contratadas
+
+| Capability / fonte | Nível | Consequência atual |
+| --- | --- | --- |
+| Logs detalhados de login, sessão e navegação | D | Não diagnosticar acesso, tempo de estudo ou engajamento. |
+| Gradebook coletivo eficiente/atômico | D | Agregação local por estudante, com custo, truncamento e falha parcial. |
+| Calendário completo e coerência com plano institucional | D/C | Somente datas retornadas por conteúdos/tarefas; validação humana. |
+| Quiz/SCORM: tentativas e desempenho detalhado | D | Não produzir diagnóstico desses instrumentos. |
+| Pesquisas e satisfação | D | Relatórios pós-execução não medem satisfação. |
+| Broadcast nativo por grupo/curso | D | Mensagens atuais são envios individuais compostos. |
+| Scheduler/worker/cancelamento de comunicações | D | Não prometer agendamento nem execução futura. |
+| Fontes presenciais, SGE e decisões oficiais | D/H | Conselho, competência, recuperação e resultado acadêmico permanecem humanos. |
+| Snapshots históricos confiáveis | D | Não afirmar tendência com leituras pontuais. |
+
+## Migração das fases técnicas 0–20
+
+Esta tabela preserva rastreabilidade histórica; as jornadas são a organização canônica. Status foi revisto contra código e testes em 7 de julho de 2026.
+
+| Fase antiga | Jornada(s) | Status comprovado | Evidência / lacuna principal |
+| --- | --- | --- | --- |
+| 0 — Base de segurança e contrato MCP | 7 | concluído | Contratos, pending actions e testes de segurança existentes. |
+| 1 — Autenticação, escopos e identidade | 7 | concluído | OAuth/JWT/API key, resolução de conexão e testes de integração. |
+| 2 — Cursos | 1, 7 | concluído | Queries/tools e testes de cursos. |
+| 3 — Participantes | 1, 2 | concluído | Participantes/estudantes/grupos implementados e testados. |
+| 4 — Conteúdos e estrutura | 1 | concluído | Conteúdos, estrutura e checklist com testes. |
+| 5 — Atividades | 1, 2 | parcial | Inventário/tarefas/prazos existem; quiz/SCORM detalhados não contratados. |
+| 6 — Entregas e submissões | 2, 3 | concluído | `listar_alunos_pendentes_atividade` e fluxos de submissão possuem implementação/testes; status antigo estava desatualizado. |
+| 7 — Avaliações e notas em leitura | 3 | parcial | Gradebook individual testado; coletivo segue agregação Nível B. |
+| 8 — Progresso, conclusão e participação | 2 | parcial | Completion, acesso, fórum e submissões existem; semântica uniforme de vazio/cobertura falta. |
+| 9 — Risco e acompanhamento | 4 | parcial | Relatório de risco testado; contrato pedagógico e recuperação estruturada faltam. |
+| 10 — Relatórios | 6 | parcial | Cinco famílias de relatório existem; fontes externas e cobertura uniforme faltam. |
+| 11 — Comunicação confirmada | 5 | parcial | Seis pares prepare/confirm existem; `MessagesWriteEnabled` ainda não é efetiva. |
+| 12 — Agendamento | 5 | planejado | Sem scheduler/worker/cancelamento; Nível D no contrato atual. |
+| 13 — Feedback assistido | 3 | parcial | Fluxo em lote substancialmente testado; qualidade/contexto dependem de revisão. |
+| 14 — Notas e avaliação crítica | 3, 7 | parcial | Nota individual prepare/confirm existe; default seguro da flag e decisão pedagógica permanecem pendentes. |
+| 15 — Conteúdo com escrita | 1, 5 | planejado | Escrita geral de conteúdo não implementada; publicação de fórum é capability separada. |
+| 16 — Administração de sala | 1, 7 | planejado | Leitura/checklist existem; mutação administrativa não. |
+| 17 — Auditoria, observabilidade e suporte | 7 | parcial | Auditoria e healthcheck existem; métricas/alertas completos não comprovados. |
+| 18 — Hardening de produção | 7 | parcial | Controles e checklist existem; validação integral depende do ambiente. |
+| 19 — Documentação e handoff | 7 | parcial | Runbooks/documentação existem; aceite operacional de handoff não é comprovado pelo repositório. |
+| 20 — Monitor | 1, 2, 6 | parcial | Checklist e relatório do monitor testados; fontes administrativas externas e diagnóstico de acesso faltam. |
+
+## Backlog priorizado por jornada
+
+### P0 — bloqueadores transversais
+
+| Jornada(s) | Melhoria local comprovadamente pendente | Critério de conclusão |
+| --- | --- | --- |
+| 5, 7 | Tornar `MessagesWriteEnabled` efetiva no registro e/ou na execução de todas as tools reais de mensagem. | `false` impede preparo/confirmação e envio; testes cobrem ambos os estados sem registrar segredo. |
+| 3, 7 | Alterar o default de `AssignmentGradeWriteEnabled` para `false` e verificar overrides de deploy. | Configuração versionada segura; teste prova bloqueio por default e liberação explícita. |
+| 1, 2, 5, 6 | Uniformizar paginação pública **1-based** e rejeitar página menor que 1. | Contratos/tools/testes não expõem página zero. |
+| 2, 3, 4, 6 | Expor elegíveis, analisados, excluídos, limites, falhas e `isTruncated` em agregações. | Cada resposta coletiva declara denominador e cobertura, inclusive falha parcial. |
+| 1, 2, 3, 4, 6 | Implementar estados vazios não ambíguos (`zero_observado`, indisponibilidade, permissão, configuração, truncamento e falha). | Testes distinguem todos os estados; lista vazia isolada não sustenta conclusão. |
+| 1, 3, 5, 7 | Completar testes dedicados dos fluxos classificados como Nível A, inclusive função ausente, permissão e todos os gates de escrita. | Cada ficha Nível A aponta para teste de sucesso e degradação/bloqueio. |
+
+### Dependências do administrador Moodle e institucionais
+
+- **Jornadas 1–7:** publicar um perfil de menor privilégio por função/contexto e validar capabilities em ambiente alvo; catálogo não substitui o teste contextual.
+- **Jornadas 2, 4 e 6:** decidir e configurar completion; quando ausente, retornar `nao_configurado`.
+- **Jornada 3:** aprovar o mapeamento SA-capacidade-critério-rubrica-conversão e as regras de nota.
+- **Jornadas 5 e 7:** autorizar canal, escopos e política de retenção/auditoria para mensagens e demais escritas.
+- **Jornadas 4 e 6:** integrar fontes presenciais/SGE somente após contrato, base legal, autoridade e reconciliação de identidade definidos.
+
+### P1/P2 — evolução após os bloqueadores
+
+- **P1, Jornadas 4 e 6:** adotar o contrato pedagógico com `findings`, `possibleRisks`, `recommendedActions`, `limitations`, `suggestedAudience` e `requiresHumanReview=true`.
+- **P1, Jornada 3:** estruturar acompanhamento de recuperação sem automatizar deliberação.
+- **P1, Jornada 7:** completar métricas, correlação, alertas, restore testado e evidência de handoff.
+- **P2, Jornada 5:** estudar scheduler e cancelamento somente com infraestrutura persistente, idempotência e governança aprovadas.
+- **P2, Jornadas 2, 3 e 6:** avaliar APIs/armazenamento para gradebook coletivo e snapshots; até lá manter Nível B/D explícito.
