@@ -8,13 +8,13 @@ Conector MCP não oficial para Moodle, criado para conectar o ChatGPT diretament
 
 Este projeto ainda está em construção e aceita contribuições. Sugestões, melhorias, correções, novas tools, testes e revisões de segurança são bem-vindos.
 
-No futuro, a ideia é dar mais poder para a IA dentro do Moodle: ler, criar, atualizar e deletar informações de forma automática. Mas isso deve acontecer com toda segurança possível: permissão explícita, confirmação humana, auditoria, controle de escopo, rastreabilidade e bloqueios para qualquer ação sensível.
+O conector já possui escritas confirmadas e limitadas, como publicação em fórum, mensagens individuais e nota/feedback de tarefa. Esses fluxos usam `PendingAction`, confirmação literal, escopo de escrita, conexão `CanWrite` e auditoria; a permissão Moodle contextual continua obrigatória. Os gates de feature flag ainda têm lacunas: `MessagesWriteEnabled` não bloqueia efetivamente as mensagens e `AssignmentGradeWriteEnabled=true` é o default versionado atual, um risco P0. Escrita geral de conteúdo, broadcast e agendamento não estão implementados.
 
 > Este projeto não é oficial do Moodle HQ. Ele é uma integração independente baseada em MCP, ASP.NET Core, OAuth e APIs WebService do Moodle.
 
 ## Objetivo
 
-O Moodle Connector MCP permite que usuários autorizados consultem dados do Moodle por tools MCP e, em fases futuras, preparem ações sensíveis como mensagens, feedbacks, notas e alterações acadêmicas sempre com prévia, auditoria e confirmação humana.
+O Moodle Connector MCP permite que usuários autorizados consultem dados do Moodle e usem fluxos existentes de prévia/confirmação para mensagens individuais, publicação em fórum e nota/feedback individual. Outras alterações acadêmicas permanecem planejadas e não devem ser inferidas dessas capabilities.
 
 Diretriz central:
 
@@ -182,7 +182,7 @@ As ferramentas de escrita ainda estão em desenvolvimento e devem seguir um flux
 3. o sistema pede uma confirmação explícita;
 4. somente depois disso a ação pode ser executada.
 
-A meta é permitir, no futuro, ações como criar mensagens, atualizar feedbacks, registrar notas, organizar atividades e automatizar rotinas acadêmicas, sempre com confirmação, auditoria e controle de permissão.
+Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write` e conexão `CanWrite`, mas `MessagesWriteEnabled` ainda não é um gate efetivo. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`; o default versionado atual é `true` e precisa ser corrigido para `false`. Até a conclusão desses P0, a operação deve manter as escritas desabilitadas por configuração externa e menor privilégio.
 
 ## Arquitetura
 
@@ -367,7 +367,7 @@ Contrato de ação pendente:
 }
 ```
 
-No estado atual, o projeto possui tools demo para validar esse fluxo. Escritas reais no Moodle permanecem desabilitadas por padrão.
+O projeto mantém tools demo e também possui escritas reais confirmadas para fórum, mensagens individuais e nota/feedback. A conexão `CanWrite`, o escopo aplicável, a capability Moodle, a prévia, a confirmação e a auditoria continuam obrigatórios. Os defaults e gates ainda não são uniformemente seguros; consulte o backlog P0 em `docs/roadmap.md` antes de habilitar escrita.
 
 ## Tools Existentes
 
@@ -410,7 +410,7 @@ Demo de pending action:
 ## Documentação Detalhada
 
 - TODO operacional: `TODO.md`
-- Roadmap funcional: `docs/roadmap.md`
+- Roadmap funcional canônico, organizado pelas jornadas de tutor, monitor, corpo pedagógico e operação: `docs/roadmap.md`
 - Setup local: `docs/technical/local-setup.md`
 - Setup Moodle Webservice: `docs/technical/moodle-webservice-setup.md`
 - Catálogo MCP: `docs/technical/mcp-tools-catalog.md`

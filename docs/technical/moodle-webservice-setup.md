@@ -36,7 +36,7 @@ MoodleApi__LoginService=moodle_mobile_app
 | `core_completion_get_activities_completion_status` | Ler status de conclusão das atividades de um aluno em um curso. | Implementado |
 | `core_completion_get_course_completion_status` | Ler status de conclusão geral de um aluno em um curso. | Implementado |
 
-> **Nota sobre conclusão:** A API de conclusão de atividades (`core_completion_get_activities_completion_status`) foi reformulada no Moodle 5.0 com a nova página "Activity Overview". A função ainda funciona no Moodle 5.0.1, mas pode ser deprecada em versões futuras. O conector trata erros dessa função graciosamente, retornando dados vazios em vez de falhar.
+> **Nota sobre conclusão:** A API de conclusão de atividades (`core_completion_get_activities_completion_status`) foi reformulada no Moodle 5.0 com a nova página "Activity Overview". A função ainda funciona no Moodle 5.0.1, mas pode ser deprecada em versões futuras. O comportamento atual pode degradar alguns erros para dados vazios; isso é ambíguo e está no backlog P0 para distinguir `nao_configurado`, `sem_permissao`, `funcao_indisponivel` e `falha_parcial` de `zero_observado`.
 
 ### Leitura — Fóruns
 
@@ -69,11 +69,12 @@ MoodleApi__LoginService=moodle_mobile_app
 | --- | --- | --- |
 | `mod_forum_add_discussion` | Criar nova discussão em fórum autorizado após confirmação humana. | Implementado |
 | `mod_forum_add_discussion_post` | Responder a um post de discussão em fórum autorizado após confirmação humana. | Implementado |
+| `core_message_send_instant_messages` | Enviar mensagens instantâneas individuais após prévia e confirmação humana. Não oferece broadcast nativo nem agendamento. | Implementado com gate de feature flag pendente |
 | `mod_assign_save_grade` | Lançar nota e feedback individual em tarefa autorizada após confirmação humana. | Implementado |
 
 ## Permissões necessárias
 
-O usuário Moodle usado pela conexão precisa ter permissão suficiente para executar as funções implementadas no contexto dos cursos relevantes.
+O usuário Moodle usado pela conexão precisa ter permissão suficiente para executar as funções implementadas no contexto dos cursos relevantes. A presença de uma função no catálogo retornado por `core_webservice_get_site_info` não prova permissão contextual sobre um curso, grupo, fórum, tarefa ou estudante; a chamada no recurso autorizado ainda precisa ser validada e pode retornar `sem_permissao`.
 
 Para as próximas tools de leitura acadêmica, será necessário validar permissões por função Moodle, sem depender do nome do papel institucional.
 
@@ -83,6 +84,7 @@ As tools reais de escrita implementadas hoje são:
 
 - publicação em fórum por `mod_forum_add_discussion`;
 - resposta em fórum por `mod_forum_add_discussion_post`;
+- mensagens instantâneas individuais por `core_message_send_instant_messages`;
 - lançamento individual de nota/feedback por `mod_assign_save_grade`.
 
 Qualquer escrita deve seguir o fluxo:
@@ -92,7 +94,7 @@ Qualquer escrita deve seguir o fluxo:
 3. exigir confirmação humana;
 4. executar somente após confirmação válida.
 
-Além das permissões Moodle da função, a conexão cadastrada precisa estar com `CanWrite=true` e o chamador precisa ter escopo `moodle.write` para confirmar ações pendentes.
+Além das permissões Moodle da função, a conexão cadastrada precisa estar com `CanWrite=true`, o chamador precisa ter o escopo aplicável e a feature flag do domínio precisa estar ativa. No estado atual, `MessagesWriteEnabled=false` é o default, mas ainda não bloqueia efetivamente todo o fluxo real de mensagens; `AssignmentGradeWriteEnabled` também deve ser alterada para `false` por padrão. Ambos são bloqueadores P0 documentados no roadmap.
 
 ## Cadastro de conexão Moodle
 
