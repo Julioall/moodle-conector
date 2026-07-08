@@ -180,7 +180,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 ### Produzir visão coletiva de desempenho
 
 - **Público:** tutor; corpo pedagógico/CTM.
-- **Referência pedagógica:** mesmas seções de avaliação e resultados da atividade anterior.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, tema avaliação da aprendizagem; `public/pedagogic/Guia de Desenvolvimento de Situação de Aprendizagem.md`, seções “Funções da avaliação” e “Resultados da avaliação”.
 - **Resultado humano:** comparar fatos observáveis da turma e identificar itens que pedem análise.
 - **Evidências necessárias / disponíveis:** gradebook coletivo, critérios e população completa; disponível agregação local de leituras individuais.
 - **Funções Moodle / tool MCP:** `core_enrol_get_enrolled_users`, `gradereport_user_get_grade_items`; `listar_alunos_abaixo_minimo`, reports da Jornada 6.
@@ -216,7 +216,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 ### Lançar nota e feedback individual
 
 - **Público:** tutor.
-- **Referência pedagógica:** referências de avaliação acima.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, temas avaliação formativa e avaliação da aprendizagem; `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas correção e feedback.
 - **Resultado humano:** publicar o resultado revisado para uma tarefa autorizada.
 - **Evidências necessárias / disponíveis:** nota atual, faixa, justificativa, feedback e autorização; dados da tarefa/grade e ação pendente.
 - **Funções Moodle / tool MCP:** `mod_assign_get_grades`, `mod_assign_save_grade`; `preparar_lancamento_nota`, `confirmar_lancamento_nota` e fluxo em lote.
@@ -242,7 +242,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 ### Produzir relatório de atenção acionável
 
 - **Público:** tutor; corpo pedagógico/CTM.
-- **Referência pedagógica:** referências de recuperação acima.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, temas recuperação e avaliação formativa; `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, tema acompanhamento contínuo.
 - **Resultado humano:** separar fatos, hipóteses, próximos passos e limitações para revisão.
 - **Evidências necessárias / disponíveis:** fontes e cobertura completas; resposta de risco atual com estudantes/fatores e warnings.
 - **Funções Moodle / tool MCP:** mesmas da atividade anterior; `gerar_relatorio_risco_estudantes`.
@@ -266,7 +266,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 ### Recomendar e preparar contato de acompanhamento
 
 - **Público:** tutor.
-- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, comunicação e acompanhamento; MSEP, recuperação.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas comunicação e acompanhamento; `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, tema recuperação.
 - **Resultado humano:** revisar uma mensagem individual contextualizada e não estigmatizante.
 - **Evidências necessárias / disponíveis:** motivo observável, exclusões, consentimento/canal e histórico; sinais e participantes visíveis.
 - **Funções Moodle / tool MCP:** `core_message_send_instant_messages`; pares `preparar_mensagem_*` / `confirmar_mensagem_*` de acesso, pendência e recuperação.
@@ -316,7 +316,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 ### Broadcast e agendamento
 
 - **Público:** tutor; corpo pedagógico/CTM como governança.
-- **Referência pedagógica:** Guia do Tutor, comunicação planejada.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, tema planejamento da comunicação com estudantes.
 - **Resultado humano:** alcançar grupo/curso ou programar comunicação com governança.
 - **Evidências necessárias / disponíveis:** grupo, consentimento, janela, cancelamento e execução; não há infraestrutura contratada suficiente.
 - **Funções Moodle / tool MCP:** sem função de broadcast nativo; scheduler/worker e tools de agendamento não implementados.
@@ -331,8 +331,8 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 
 ### Gerar relatório semanal de desempenho
 
-- **Público:** tutor; docente presencial; corpo pedagógico/CTM.
-- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, acompanhamento e articulação; MSEP, avaliação formativa.
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas acompanhamento e articulação com equipe pedagógica; `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, tema avaliação formativa.
 - **Resultado humano:** compartilhar um retrato descritivo para planejar apoio.
 - **Evidências necessárias / disponíveis:** período, população, acesso, notas, completion e contexto; agregações Moodle visíveis.
 - **Funções Moodle / tool MCP:** enrolment, gradebook e completion; `gerar_relatorio_semanal_desempenho`.
@@ -344,45 +344,46 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 ### Gerar resumo executivo e relatório do monitor
 
 - **Público:** monitor; tutor; corpo pedagógico/CTM.
-- **Referência pedagógica:** Guia do Tutor, atribuições de monitoramento e acompanhamento.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas atribuições do monitor e acompanhamento da turma.
 - **Resultado humano:** comunicar situação operacional da turma e pendências que exigem encaminhamento.
 - **Evidências necessárias / disponíveis:** participantes, estrutura, último acesso e fontes administrativas; disponíveis registros Moodle visíveis.
-- **Funções Moodle / tool MCP:** `core_course_get_contents`, `core_enrol_get_enrolled_users`; `resumo_executivo_curso`, `gerar_relatorio_monitor_turma`.
+- **Funções Moodle / tool MCP:** `core_course_get_contents`, `core_enrol_get_enrolled_users`; `gerar_resumo_curso`, `gerar_relatorio_monitor_turma`.
 - **Nível / cobertura e limites:** **Nível B**; resumo/monitor usam até 100 estudantes por padrão.
 - **Limitações:** não inclui chamados externos, presença física, SGE ou causas de acesso.
 - **Gate humano:** monitor valida ocorrências e encaminha; coordenação interpreta.
-- **Status / evidência de conclusão:** **implementado com limitações**; queries de Reports/Monitor e testes, inclusive checklist.
+- **Status / evidência de conclusão:** **parcial**; queries/tools de resumo e monitor existem, mas não há testes dedicados desses dois relatórios; o checklist do monitor possui teste separado.
 
 ### Apoiar conselho de classe
 
 - **Público:** corpo pedagógico/CTM; tutor como fornecedor de evidências.
-- **Referência pedagógica:** MSEP, avaliação e recuperação; Guia do Tutor, registros e articulação.
+- **Referência pedagógica:** `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, temas avaliação e recuperação; `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas registros e articulação com o corpo pedagógico.
 - **Resultado humano:** preparar evidências descritivas para deliberação colegiada.
 - **Evidências necessárias / disponíveis:** EaD, presencial, SGE, critérios, recuperação e decisões oficiais; disponíveis apenas dados Moodle autorizados.
-- **Funções Moodle / tool MCP:** agregações de enrolment/gradebook/completion; `relatorio_conselho_classe`.
+- **Funções Moodle / tool MCP:** agregações de enrolment/gradebook/completion; `gerar_relatorio_turma_conselho_classe`.
 - **Nível / cobertura e limites:** relatório técnico **Nível B**, padrão de até 60 estudantes; decisão é **Nível H**.
 - **Limitações:** nomes de campos atuais como “concluintes”, “reprovados” ou “evadidos” não constituem decisão oficial e precisam ser tratados como categorias técnicas/hipóteses com limitações.
 - **Gate humano:** CTM/conselho reconcilia todas as fontes e delibera.
-- **Status / evidência de conclusão:** **parcial**; tool/query e testes existem, mas sem fontes externas nem autoridade decisória.
+- **Status / evidência de conclusão:** **parcial**; tool/query existem, sem teste dedicado, fontes externas ou autoridade decisória.
 
 ### Gerar relatório pós-execução e de coordenação
 
-- **Público:** corpo pedagógico/CTM; coordenação; tutor.
-- **Referência pedagógica:** Guia do Tutor, registro e avaliação da oferta; MSEP, resultados da avaliação.
+- **Público:** corpo pedagógico/CTM; tutor.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas registro e avaliação da oferta; `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, tema resultados da avaliação.
 - **Resultado humano:** analisar evidências da execução e orientar melhoria.
 - **Evidências necessárias / disponíveis:** resultados oficiais, satisfação, qualidade, presencial e EaD; disponíveis gradebook/completion e auditoria de correção.
-- **Funções Moodle / tool MCP:** funções de leitura e `mod_assign_*`; `relatorio_pos_execucao`, `exportar_relatorio_correcao_coordenacao`.
+- **Funções Moodle / tool MCP:** funções de leitura e `mod_assign_*`; `gerar_relatorio_pos_execucao_completo`, `exportar_relatorio_correcao_coordenacao`.
 - **Nível / cobertura e limites:** **Nível B**; pós-execução usa até 60 estudantes; relatório de correção cobre o lote persistido.
 - **Limitações:** satisfação, qualidade pedagógica e resultados oficiais não estão no Moodle contratado; ausência de snapshots impede tendências confiáveis.
 - **Gate humano:** coordenação valida fontes, período, denominador e conclusões.
-- **Status / evidência de conclusão:** **implementado com limitações**; queries/tools e testes existentes, contrato uniforme pendente.
+- **Status / evidência de conclusão:** **parcial**; queries/tools existem, mas o relatório pós-execução não possui teste dedicado e o contrato uniforme está pendente; o export de correção tem cobertura de testes própria.
 
 ## Jornada 7 — Operação e governança
 
 ### Descobrir capabilities, identidade e permissões efetivas
 
-- **Público:** operação; administrador Moodle; responsável pelo conector.
-- **Referência pedagógica:** transversal; protege todas as atividades das Jornadas 1–6.
+- **Público:** tutor; monitor; corpo pedagógico/CTM.
+- **Responsável técnico:** operação; administrador Moodle; responsável pelo conector.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas responsabilidades do tutor e monitor, acesso ao AVA e articulação com o corpo pedagógico.
 - **Resultado humano:** saber qual conexão, usuário, curso, função e escopo autorizam cada leitura ou escrita.
 - **Evidências necessárias / disponíveis:** catálogo do serviço, identidade do token, vínculo ao curso, `CanWrite`, escopos e flags; o conector descobre funções e resolve a identidade, mas a permissão contextual só é provada pela chamada no recurso.
 - **Funções Moodle / tool MCP:** `core_webservice_get_site_info`, `core_enrol_get_users_courses`; descoberta técnica de grading e tools de cursos/conexões.
@@ -393,8 +394,9 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 
 ### Governar escritas e dados sensíveis
 
-- **Público:** operação; segurança; tutor/CTM como aprovadores da ação.
-- **Referência pedagógica:** transversal; preserva autoridade humana, confidencialidade e rastreabilidade.
+- **Público:** tutor; corpo pedagógico/CTM.
+- **Responsável técnico:** operação; segurança; responsável pelo conector.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas comunicação, correção, feedback e registros; `public/pedagogic/METODOLOGIA SENAI DE EDUCACAO PROFISSIONAL.md`, tema autoridade humana na avaliação da aprendizagem.
 - **Resultado humano:** manter escritas desligadas por padrão e executar somente a ação revisada e autorizada.
 - **Evidências necessárias / disponíveis:** conexão `CanWrite`, escopo, flag por domínio, `PendingAction`, prévia sanitizada, confirmação literal, expiração, idempotência e auditoria.
 - **Funções Moodle / tool MCP:** escritas de mensagens, fórum e nota; pares `preparar_*` / `confirmar_*`.
@@ -405,12 +407,13 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 
 ### Operar, observar, endurecer e entregar
 
-- **Público:** operação; desenvolvimento; segurança.
-- **Referência pedagógica:** transversal; disponibilidade e privacidade condicionam o apoio pedagógico.
+- **Público:** tutor; monitor; corpo pedagógico/CTM.
+- **Responsável técnico:** operação; desenvolvimento; segurança.
+- **Referência pedagógica:** `public/pedagogic/Guia do Tutor - Com ISBN 1 (6).md`, temas organização do AVA, acompanhamento, registros e articulação com o corpo pedagógico.
 - **Resultado humano:** implantar, diagnosticar e transferir a operação sem expor segredos ou dados acadêmicos.
 - **Evidências necessárias / disponíveis:** healthcheck, logs sanitizados, métricas, correlação, alertas, backup/restauração, checklist de release, runbooks e registro de mudanças.
 - **Funções Moodle / tool MCP:** não depende de função Moodle específica; `GET /health`, auditoria e documentação operacional sustentam as tools.
-- **Nível / cobertura e limites:** base de deploy e documentação **Nível A**; observabilidade, alertas, hardening e handoff completos permanecem **Nível B/C** conforme ambiente.
+- **Nível / cobertura e limites:** base de deploy e documentação **Nível B** por não haver teste operacional dedicado; observabilidade, alertas, hardening e handoff completos permanecem **Nível B/C** conforme ambiente.
 - **Limitações:** sucesso do healthcheck não prova disponibilidade de cada capability Moodle; logs não podem conter tokens, senhas, links privados ou payload acadêmico desnecessário.
 - **Gate humano:** checklist de release, aprovação de segurança, validação de restore e aceite do handoff.
 - **Status / evidência de conclusão:** **parcial**; Docker/Caddy/CI, runbooks, modelo de auditoria e checklist existem; alertas e validação operacional integral não estão comprovados.
@@ -424,6 +427,7 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 | `core_webservice_get_site_info` | Resolver usuário do token e descobrir funções do serviço. | A | Serviço habilitado e token válido. | `funcao_indisponivel`; bloquear descoberta/fluxo dependente. |
 | `core_enrol_get_users_courses` | Listar cursos vinculados ao usuário atual. | A | Capability de ver cursos do próprio usuário. | `sem_permissao` ou `funcao_indisponivel`; não interpretar como zero cursos. |
 | `core_enrol_get_enrolled_users` | Listar participantes, grupos e último acesso quando retornado. | A/B | Capability de ver participantes no curso; campos variam. | Distinguir `dado_indisponivel` de `zero_observado`; declarar truncamento. |
+| `core_group_get_course_groups` | Listar grupos visíveis de um curso para filtrar participantes e contexto. | A | Capability de ver grupos no curso. | `sem_permissao` ou `funcao_indisponivel`; não tratar como curso sem grupos. |
 | `core_course_get_contents` | Ler seções, módulos, recursos, atividades e datas visíveis. | A | Acesso ao curso e conteúdo. | `sem_permissao`/`funcao_indisponivel`; checklist fica inconclusivo. |
 | `core_completion_get_activities_completion_status` | Ler completion das atividades por estudante. | A/C | Completion habilitado e permissão contextual. | `nao_configurado`, `sem_permissao` ou `funcao_indisponivel`; nunca lista vazia ambígua. |
 | `core_completion_get_course_completion_status` | Ler completion geral por estudante. | A/C | Completion do curso configurado. | Mesmo tratamento explícito de completion; não inferir conclusão. |
@@ -436,9 +440,9 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 | `mod_assign_get_grades` | Ler notas existentes de uma tarefa. | A | Capability de ver notas. | `sem_permissao`/`dado_indisponivel`; não tratar como sem nota. |
 | `gradereport_user_get_grade_items` | Ler gradebook individual por estudante. | A/B | Capability de grade report no curso. | Marcar indisponibilidade/falha por estudante; agregação declara cobertura. |
 | `core_message_send_instant_messages` | Enviar mensagens instantâneas individuais confirmadas. | B | `CanWrite`, escopo, permissão Moodle e flag efetiva. | Bloquear confirmação com `funcao_indisponivel`; nunca simular envio/broadcast. |
+| `mod_forum_add_discussion` | Criar discussão após prévia e confirmação. | A | `CanWrite`, escopo de escrita e capability no fórum/grupo. | Bloquear preparo/confirmação com `funcao_indisponivel` ou `sem_permissao`; auditar falha. |
+| `mod_forum_add_discussion_post` | Responder a discussão após prévia e confirmação. | A | `CanWrite`, escopo de escrita e capability na discussão/grupo. | Bloquear confirmação; não marcar a pending action como executada; auditar falha. |
 | `mod_assign_save_grade` | Gravar nota e feedback individual confirmados. | A | `CanWrite`, escopo, flag desligada por padrão e capability da tarefa. | Bloquear preparação/confirmação; preservar pending action/auditoria como falha. |
-
-As escritas de fórum usam ainda `mod_forum_add_discussion` e `mod_forum_add_discussion_post`, ambas condicionadas a `CanWrite`, escopo, permissão contextual, prévia, confirmação e auditoria.
 
 ### Capabilities não contratadas
 
@@ -470,7 +474,7 @@ Esta tabela preserva rastreabilidade histórica; as jornadas são a organizaçã
 | 7 — Avaliações e notas em leitura | 3 | parcial | Gradebook individual testado; coletivo segue agregação Nível B. |
 | 8 — Progresso, conclusão e participação | 2 | parcial | Completion, acesso, fórum e submissões existem; semântica uniforme de vazio/cobertura falta. |
 | 9 — Risco e acompanhamento | 4 | parcial | Relatório de risco testado; contrato pedagógico e recuperação estruturada faltam. |
-| 10 — Relatórios | 6 | parcial | Cinco famílias de relatório existem; fontes externas e cobertura uniforme faltam. |
+| 10 — Relatórios | 6 | parcial | Cinco famílias de relatório existem, mas somente o semanal possui teste dedicado; fontes externas e cobertura uniforme faltam. |
 | 11 — Comunicação confirmada | 5 | parcial | Seis pares prepare/confirm existem; `MessagesWriteEnabled` ainda não é efetiva. |
 | 12 — Agendamento | 5 | planejado | Sem scheduler/worker/cancelamento; Nível D no contrato atual. |
 | 13 — Feedback assistido | 3 | parcial | Fluxo em lote substancialmente testado; qualidade/contexto dependem de revisão. |
@@ -480,7 +484,7 @@ Esta tabela preserva rastreabilidade histórica; as jornadas são a organizaçã
 | 17 — Auditoria, observabilidade e suporte | 7 | parcial | Auditoria e healthcheck existem; métricas/alertas completos não comprovados. |
 | 18 — Hardening de produção | 7 | parcial | Controles e checklist existem; validação integral depende do ambiente. |
 | 19 — Documentação e handoff | 7 | parcial | Runbooks/documentação existem; aceite operacional de handoff não é comprovado pelo repositório. |
-| 20 — Monitor | 1, 2, 6 | parcial | Checklist e relatório do monitor testados; fontes administrativas externas e diagnóstico de acesso faltam. |
+| 20 — Monitor | 1, 2, 6 | parcial | Checklist do monitor testado; relatório do monitor implementado sem teste dedicado; fontes administrativas externas e diagnóstico de acesso faltam. |
 
 ## Backlog priorizado por jornada
 
