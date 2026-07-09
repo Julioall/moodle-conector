@@ -3,93 +3,144 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Moodle Connector — Entrar</title>
+  <title>Moodle Connector — Portal</title>
   <meta name="description" content="Acesse sua conta no Moodle Connector para gerenciar conexões Moodle e integrações com IA." />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Open+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg-primary: #09090b;
-      --bg-surface: #18181b;
-      --bg-elevated: #27272a;
-      --bg-input: #1e1e21;
-      --border-subtle: rgba(63,63,70,0.6);
-      --border-focus: rgba(249,115,22,0.5);
-      --text-primary: #fafafa;
-      --text-secondary: #a1a1aa;
-      --text-muted: #71717a;
-      --accent: #f97316;
-      --accent-hover: #ea580c;
-      --accent-glow: rgba(249,115,22,0.15);
+      --bg-primary: #fffaf4;
+      --bg-surface: #ffffff;
+      --bg-soft: #fff3e8;
+      --bg-blue: #f0f8fb;
+      --border-subtle: #e6ded5;
+      --border-focus: rgba(249,128,18,0.45);
+      --text-primary: #143a52;
+      --text-secondary: #54545a;
+      --text-muted: #77716d;
+      --accent: #f98012;
+      --accent-hover: #df6f0c;
+      --blue: #194866;
+      --blue-deep: #143a52;
       --danger: #ef4444;
-      --danger-bg: rgba(239,68,68,0.08);
-      --danger-border: rgba(239,68,68,0.2);
+      --danger-bg: #fff1f2;
+      --danger-border: #fecdd3;
+      --shadow-soft: 0 24px 60px rgba(25,72,102,0.12);
     }
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: var(--bg-primary);
+      font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background:
+        radial-gradient(circle at 8% 18%, rgba(249,128,18,0.16) 0 16%, transparent 36%),
+        linear-gradient(135deg, #fff8f1 0%, #fff 48%, #eef8fb 100%);
       color: var(--text-primary);
       min-height: 100vh;
-      display: flex; align-items: center; justify-content: center;
-      padding: 24px;
       -webkit-font-smoothing: antialiased;
       position: relative;
+      line-height: 1.6;
     }
     body::before {
-      content: ''; position: fixed; top: 0; left: 50%; transform: translateX(-50%);
-      width: 600px; height: 600px; border-radius: 50%;
-      background: radial-gradient(circle, rgba(249,115,22,0.06) 0%, transparent 70%);
+      content: ''; position: fixed; left: 0; right: 0; bottom: 0; height: 180px;
+      background: linear-gradient(180deg, transparent, rgba(255,250,244,0.9));
       pointer-events: none;
     }
     a { text-decoration: none; color: inherit; }
 
-    /* ── Container ─────────────────────────────────── */
-    .auth-container { width: 100%; max-width: 420px; position: relative; z-index: 1; }
+    /* ── Header ────────────────────────────────────── */
+    .auth-topbar {
+      position: relative; z-index: 2; max-width: 1180px; margin: 0 auto;
+      height: 78px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between;
+    }
 
     /* ── Logo ──────────────────────────────────────── */
-    .auth-header { text-align: center; margin-bottom: 32px; cursor: pointer; }
-    .auth-header img { width: 56px; height: 56px; object-fit: contain; margin-bottom: 16px; }
+    .auth-header { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+    .auth-header img { width: 40px; height: 40px; object-fit: contain; }
     .auth-header-brand {
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-      font-size: 22px; font-weight: 800; letter-spacing: -0.02em;
+      display: flex; align-items: center; gap: 4px;
+      color: var(--blue); font-size: 18px; font-weight: 800; letter-spacing: 0;
     }
     .auth-header-brand span { color: var(--accent); }
+    .topbar-link {
+      color: var(--blue); font-size: 14px; font-weight: 800;
+      padding: 9px 17px; border: 1px solid var(--blue); border-radius: 999px;
+      background: #fff; transition: all 0.2s ease;
+    }
+    .topbar-link:hover { background: var(--blue); color: #fff; }
+
+    /* ── Container ─────────────────────────────────── */
+    .auth-shell {
+      width: 100%; max-width: 1180px; min-height: calc(100vh - 78px);
+      margin: 0 auto; padding: 48px 24px 72px; position: relative; z-index: 1;
+      display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 440px);
+      gap: 64px; align-items: center;
+    }
+    .auth-intro { max-width: 650px; }
+    .auth-kicker {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 16px; border-radius: 999px;
+      background: #fff; border: 1px solid rgba(249,128,18,0.32);
+      color: var(--blue); font-size: 12px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 24px;
+      box-shadow: 0 10px 24px rgba(25,72,102,0.08);
+    }
+    .auth-kicker::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .auth-intro h1 {
+      font-family: 'DM Serif Display', Georgia, serif; font-size: 64px; font-weight: 400;
+      line-height: 1; color: var(--blue-deep); margin-bottom: 22px;
+    }
+    .auth-intro h1 span { color: var(--accent); }
+    .auth-intro p {
+      color: var(--text-secondary); font-size: 18px; line-height: 1.75; max-width: 590px;
+      margin-bottom: 30px;
+    }
+    .trust-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-width: 640px; }
+    .trust-item {
+      min-height: 104px; padding: 18px; border-radius: 18px; background: #fff;
+      border: 1px solid var(--border-subtle); box-shadow: 0 14px 34px rgba(25,72,102,0.08);
+    }
+    .trust-item strong { display: block; color: var(--blue); font-size: 15px; margin-bottom: 6px; }
+    .trust-item span { color: var(--text-secondary); font-size: 12px; font-weight: 700; line-height: 1.45; }
 
     /* ── Card ──────────────────────────────────────── */
+    .auth-container { width: 100%; position: relative; z-index: 1; }
     .auth-card {
       background: var(--bg-surface);
       border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      box-shadow: 0 24px 48px rgba(0,0,0,0.3);
+      border-radius: 28px;
+      box-shadow: var(--shadow-soft);
       overflow: hidden;
     }
+    .auth-card-title { padding: 28px 32px 18px; }
+    .auth-card-title h2 {
+      color: var(--blue); font-size: 26px; line-height: 1.2; margin-bottom: 8px;
+    }
+    .auth-card-title p { color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
 
     /* ── Tabs ──────────────────────────────────────── */
     .auth-tabs {
       display: flex; border-bottom: 1px solid var(--border-subtle);
-      background: rgba(9,9,11,0.5);
+      background: var(--bg-soft); padding: 6px; margin: 0 32px; border-radius: 999px;
+      border: 1px solid rgba(249,128,18,0.18);
     }
     .auth-tab {
-      flex: 1; padding: 16px; border: none; background: none; cursor: pointer;
-      font-family: inherit; font-size: 14px; font-weight: 500;
+      flex: 1; padding: 11px 14px; border: none; background: transparent; cursor: pointer;
+      font-family: inherit; font-size: 14px; font-weight: 800; border-radius: 999px;
       color: var(--text-muted); transition: all 0.2s;
-      border-bottom: 2px solid transparent; margin-bottom: -1px;
     }
-    .auth-tab:hover { color: var(--text-secondary); }
+    .auth-tab:hover { color: var(--blue); }
     .auth-tab.active {
-      color: var(--accent); border-bottom-color: var(--accent); font-weight: 600;
+      color: #fff; background: var(--blue); box-shadow: 0 10px 24px rgba(25,72,102,0.16);
     }
 
     /* ── Form ──────────────────────────────────────── */
-    .auth-body { padding: 32px; }
+    .auth-body { padding: 28px 32px 32px; }
     .form-group { margin-bottom: 20px; }
     .form-label {
-      display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+      display: block; font-size: 12px; font-weight: 800; color: var(--blue);
       text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px;
     }
     .form-input {
-      width: 100%; padding: 12px 16px; border-radius: 10px;
-      background: var(--bg-input); border: 1px solid var(--border-subtle);
+      width: 100%; padding: 13px 16px; border-radius: 12px;
+      background: #fff; border: 1px solid var(--border-subtle);
       color: var(--text-primary); font-family: inherit; font-size: 14px;
       transition: all 0.2s; outline: none;
     }
@@ -101,15 +152,15 @@
 
     /* ── Buttons ───────────────────────────────────── */
     .btn-submit {
-      width: 100%; padding: 14px; border: none; border-radius: 10px;
-      background: var(--accent); color: #000; font-family: inherit;
-      font-size: 14px; font-weight: 700; cursor: pointer;
+      width: 100%; padding: 15px; border: none; border-radius: 999px;
+      background: var(--accent); color: #fff; font-family: inherit;
+      font-size: 14px; font-weight: 800; cursor: pointer;
       transition: all 0.2s;
-      box-shadow: 0 0 20px var(--accent-glow);
+      box-shadow: 0 10px 24px rgba(249,128,18,0.24);
     }
     .btn-submit:hover {
       background: var(--accent-hover); transform: translateY(-1px);
-      box-shadow: 0 0 30px rgba(249,115,22,0.3);
+      box-shadow: 0 14px 28px rgba(249,128,18,0.28);
     }
     .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
@@ -117,7 +168,7 @@
     .form-error {
       padding: 12px 16px; border-radius: 10px; font-size: 13px;
       background: var(--danger-bg); border: 1px solid var(--danger-border);
-      color: #fca5a5; margin-bottom: 20px; display: none;
+      color: #be123c; margin-bottom: 20px; display: none;
     }
     .form-error.visible { display: block; }
 
@@ -133,64 +184,108 @@
       border: 2px solid currentColor; border-top-color: transparent;
       border-radius: 50%; animation: spin 0.6s linear infinite;
     }
+    @media (max-width: 900px) {
+      .auth-topbar { height: auto; min-height: 72px; padding-block: 12px; }
+      .auth-shell {
+        min-height: auto; grid-template-columns: 1fr; gap: 34px; padding-top: 28px;
+      }
+      .auth-intro h1 { font-size: 44px; line-height: 1.04; }
+      .auth-intro p { font-size: 16px; }
+      .trust-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .auth-topbar { padding-inline: 18px; }
+      .topbar-link { display: none; }
+      .auth-shell { padding-inline: 18px; }
+      .auth-card-title, .auth-body { padding-inline: 22px; }
+      .auth-tabs { margin-inline: 22px; }
+    }
   </style>
 </head>
 <body>
 
-  <div class="auth-container fade-up">
-
-    <!-- Header -->
+  <header class="auth-topbar">
     <div class="auth-header" onclick="window.location.href='/'">
       <img src="/logo.png" alt="Moodle Connector" />
       <div class="auth-header-brand"><span>Moodle</span>Connector</div>
     </div>
+    <a href="/" class="topbar-link">Voltar ao site</a>
+  </header>
 
-    <!-- Card -->
-    <div class="auth-card">
-
-      <!-- Tabs -->
-      <div class="auth-tabs">
-        <button id="tab-login-btn" class="auth-tab active" onclick="switchTab('login')">Entrar</button>
-        <button id="tab-register-btn" class="auth-tab" onclick="switchTab('register')">Criar conta</button>
+  <main class="auth-shell">
+    <section class="auth-intro fade-up">
+      <div class="auth-kicker">Portal institucional para Moodle</div>
+      <h1>Entre para conectar o <span>Moodle</span> ao ChatGPT</h1>
+      <p>
+        Gerencie ambientes Moodle, autorize o app no ChatGPT e mantenha suas conexões acadêmicas organizadas em um único portal.
+      </p>
+      <div class="trust-grid">
+        <div class="trust-item">
+          <strong>OAuth e sessão segura</strong>
+          <span>Conta do portal conectada ao fluxo de autorização do ChatGPT.</span>
+        </div>
+        <div class="trust-item">
+          <strong>Ambientes por alias</strong>
+          <span>Cadastre unidades, polos ou AVAs diferentes na mesma conta.</span>
+        </div>
+        <div class="trust-item">
+          <strong>Controle de escrita</strong>
+          <span>Permissões separadas para leitura e ações sensíveis.</span>
+        </div>
       </div>
+    </section>
 
-      <div class="auth-body">
+    <div class="auth-container fade-up">
+      <div class="auth-card">
+        <div class="auth-card-title">
+          <h2>Acesse sua conta</h2>
+          <p>Use seu cadastro do Moodle Connector para entrar no portal ou criar uma conta institucional.</p>
+        </div>
 
-        <!-- Login Form -->
-        <form id="form-login" onsubmit="handleLogin(event)">
-          <div class="form-group">
-            <label class="form-label">E-mail</label>
-            <input id="login-email" type="email" placeholder="seu@email.com" required class="form-input" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Senha</label>
-            <input id="login-password" type="password" placeholder="Sua senha" required class="form-input" />
-          </div>
-          <div id="login-error" class="form-error"></div>
-          <button type="submit" id="login-submit" class="btn-submit">Entrar</button>
-        </form>
+        <!-- Tabs -->
+        <div class="auth-tabs">
+          <button id="tab-login-btn" class="auth-tab active" onclick="switchTab('login')">Entrar</button>
+          <button id="tab-register-btn" class="auth-tab" onclick="switchTab('register')">Criar conta</button>
+        </div>
 
-        <!-- Register Form -->
-        <form id="form-register" style="display:none" onsubmit="handleRegister(event)">
-          <div class="form-group">
-            <label class="form-label">Nome completo</label>
-            <input id="reg-name" type="text" placeholder="Seu nome" required class="form-input" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">E-mail</label>
-            <input id="reg-email" type="email" placeholder="seu@email.com" required class="form-input" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Senha</label>
-            <input id="reg-password" type="password" placeholder="Mínimo 12 caracteres" required class="form-input" />
-          </div>
-          <div id="reg-error" class="form-error"></div>
-          <button type="submit" id="reg-submit" class="btn-submit">Criar conta</button>
-        </form>
+        <div class="auth-body">
 
+          <!-- Login Form -->
+          <form id="form-login" onsubmit="handleLogin(event)">
+            <div class="form-group">
+              <label class="form-label">E-mail</label>
+              <input id="login-email" type="email" placeholder="seu@email.com" required class="form-input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Senha</label>
+              <input id="login-password" type="password" placeholder="Sua senha" required class="form-input" />
+            </div>
+            <div id="login-error" class="form-error"></div>
+            <button type="submit" id="login-submit" class="btn-submit">Entrar</button>
+          </form>
+
+          <!-- Register Form -->
+          <form id="form-register" style="display:none" onsubmit="handleRegister(event)">
+            <div class="form-group">
+              <label class="form-label">Nome completo</label>
+              <input id="reg-name" type="text" placeholder="Seu nome" required class="form-input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">E-mail</label>
+              <input id="reg-email" type="email" placeholder="seu@email.com" required class="form-input" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Senha</label>
+              <input id="reg-password" type="password" placeholder="Mínimo 12 caracteres" required class="form-input" />
+            </div>
+            <div id="reg-error" class="form-error"></div>
+            <button type="submit" id="reg-submit" class="btn-submit">Criar conta</button>
+          </form>
+
+        </div>
       </div>
     </div>
-  </div>
+  </main>
 
   <script>
     const urlParams = new URLSearchParams(window.location.search);
