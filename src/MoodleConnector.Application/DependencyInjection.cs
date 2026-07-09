@@ -19,6 +19,7 @@ public static class DependencyInjection
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();
         services.AddScoped<IUserMemoryService, UserMemoryService>();
+        services.AddScoped<IUserMemoryDocumentService, UserMemoryDocumentService>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IGradingAnalysisService, StructuredGradingAnalysisService>();
         services.AddSingleton<ICriteriaGenerationService, HeuristicCriteriaGenerationService>();

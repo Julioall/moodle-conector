@@ -91,7 +91,7 @@ public sealed class MoodleMemoryToolsTests
 
     private sealed class FakeMemoryService : IUserMemoryService
     {
-        public UserMemoryDto Memory { get; } = new(Guid.NewGuid(), "preferencia", "formato", "resposta curta", "explicit", "goias", "42", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        public UserMemoryDto Memory { get; } = new(Guid.NewGuid(), "preferencia", "formato", "resposta curta", "explicit", "goias", "42", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         public SaveUserMemoryRequest? SaveRequest { get; private set; }
         public ListUserMemoriesRequest? ListRequest { get; private set; }
         public Guid? RemovedId { get; private set; }

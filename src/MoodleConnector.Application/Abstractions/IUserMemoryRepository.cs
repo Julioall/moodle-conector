@@ -12,3 +12,12 @@ public interface IUserMemoryRepository
     Task<bool> RemoveAsync(Guid id, string ownerSubject, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }
+
+public interface IUserMemoryDocumentRepository
+{
+    Task<UserMemoryDocument> UpsertAsync(UserMemoryDocument candidate, CancellationToken cancellationToken = default);
+    Task<UserMemoryDocument?> FindOwnedAsync(Guid id, string ownerSubject, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<UserMemoryDocument>> ListAsync(string ownerSubject, string? moodleAlias, string? courseId, string? query, string? normalizedKeyQuery, int limit, CancellationToken cancellationToken = default);
+    Task<bool> RemoveAsync(Guid id, string ownerSubject, CancellationToken cancellationToken = default);
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
+}

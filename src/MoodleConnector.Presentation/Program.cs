@@ -277,6 +277,7 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleReportTools>()
     .WithTools<MoodleMonitorTools>()
     .WithTools<MoodleMemoryTools>()
+    .WithTools<MoodleMemoryDocumentTools>()
     .WithTools<MoodlePedagogyTools>()
     .WithResources<MoodleGradingReviewAppResources>();
 
