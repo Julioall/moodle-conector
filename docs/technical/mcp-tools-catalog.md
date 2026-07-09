@@ -32,27 +32,33 @@ duráveis e reutilizáveis; automatizações podem consultar preferências antes
 mas não devem salvar inferências sensíveis nem remover memórias sem intenção explícita.
 
 Para conteudos extensos como modelos de HTML/Markdown, use
-`gerenciar_documento_memoria_usuario` e deixe a memoria `category=modelo` apenas como
-link semantico para o documento completo.
+`salvar_documento_memoria_usuario` e deixe a memoria `category=modelo` apenas como link
+semantico para o documento completo.
 
-### `gerenciar_documento_memoria_usuario`
+### Documentos de memoria do usuario
 
 Mantem documentos duraveis privados do usuario autenticado para modelos e referencias
-extensas da IA. Aceita `action=salvar`, `listar`, `ler` ou `remover`; nao altera o
-Moodle. Ao salvar, cria ou atualiza tambem uma memoria curta `category=modelo` apontando
-para o documento completo.
+extensas da IA; nao altera o Moodle. A superficie recomendada usa tools dedicadas:
+`salvar_documento_memoria_usuario`, `listar_documentos_memoria_usuario`,
+`ler_documento_memoria_usuario` e `remover_documento_memoria_usuario`. Ao salvar, cria
+ou atualiza tambem uma memoria curta `category=modelo` apontando para o documento
+completo.
 
 | Argumento | Uso |
 | --- | --- |
-| `action` | Obrigatorio: `salvar`, `listar`, `ler` ou `remover`. |
-| `key`, `title`, `content`, `format`, `origin` | Obrigatorios em `salvar`; `format` e `markdown`, `html` ou `text`; `origin` e `explicit` ou `inferred`. |
-| `query`, `moodleAlias`, `courseId`, `limit` | Filtros opcionais de `listar`; `limit` padrao e 20. |
-| `documentId` | UUID obrigatorio em `ler` e `remover`. |
+| `key`, `title`, `content`, `format`, `origin` | Obrigatorios em `salvar_documento_memoria_usuario`; `format` e `markdown`, `html` ou `text`; `origin` e `explicit` ou `inferred`. |
+| `query`, `moodleAlias`, `courseId`, `limit` | Filtros opcionais de `listar_documentos_memoria_usuario`; `limit` padrao e 20. |
+| `documentId` | UUID obrigatorio em `ler_documento_memoria_usuario` e `remover_documento_memoria_usuario`. |
 
 A resposta estruturada segue `ToolResponse<MemoryDocumentToolResponse>`. `data.document`
 aparece em `salvar` e `ler`, `data.documents` em `listar`, e `data.removed` em
 `remover`. Use Markdown quando estiver criando um modelo novo para a IA; use HTML quando
 for preservar um modelo Moodle existente, como cronogramas com tabela inline.
+
+`gerenciar_documento_memoria_usuario` permanece como compatibilidade para `action=salvar`,
+`listar` e `ler`, mas nao remove documentos. A remocao destrutiva fica isolada em
+`remover_documento_memoria_usuario` para que hosts MCP/ChatGPT apliquem confirmacao e
+safety ao caminho correto sem bloquear salvamentos internos.
 
 ### `consultar_orientacoes_pedagogicas`
 
@@ -73,7 +79,11 @@ humana e minimização de dados.
 
 | Tool | Título | Risco | Leitura | Escrita | Status |
 | --- | --- | --- | --- | --- | --- |
-| `gerenciar_documento_memoria_usuario` | Gerenciar documento de memoria do usuario | `InternalStateWrite` | Lista/le documentos | Salva/remove documento interno e link de memoria | Implementada |
+| `salvar_documento_memoria_usuario` | Salvar documento de memoria do usuario | `InternalStateWrite` | Nao | Salva documento interno e link de memoria | Implementada |
+| `listar_documentos_memoria_usuario` | Listar documentos de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
+| `ler_documento_memoria_usuario` | Ler documento de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
+| `remover_documento_memoria_usuario` | Remover documento de memoria do usuario | `InternalStateWrite` | Nao | Remove documento interno e link de memoria | Implementada |
+| `gerenciar_documento_memoria_usuario` | Gerenciar documento de memoria do usuario | `InternalStateWrite` | Lista/le documentos | Compatibilidade para salvar; remocao desabilitada | Implementada |
 | `consultar_orientacoes_pedagogicas` | Consultar orientações pedagógicas | `ReadOnly` | Sim | Não | Implementada |
 | `gerenciar_memoria_usuario` | Gerenciar memória do usuário | `InternalStateWrite` | Lista memórias | Salva/remove memória interna | Implementada |
 | `listar_meus_cursos` | Listar Meus Cursos | `ReadOnly` | Sim | Não | Implementada |

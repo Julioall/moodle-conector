@@ -17,14 +17,14 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
         Name = "gerenciar_documento_memoria_usuario",
         Title = "Gerenciar documento de memoria do usuario",
         ReadOnly = false,
-        Destructive = true,
+        Destructive = false,
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<MemoryDocumentToolResponse>))]
-    [Description("Salva, lista, le ou remove documentos duraveis privados do usuario autenticado para uso como modelos ou referencias extensas da IA. Nunca envie segredos nem dados pessoais de alunos.")]
+    [Description("Compatibilidade: salva, lista ou le documentos duraveis privados do usuario autenticado. Para remover, use remover_documento_memoria_usuario. Nunca envie segredos nem dados pessoais de alunos.")]
     public async Task<CallToolResult> ManageAsync(
-        [Description("Acao: salvar, listar, ler ou remover.")] string action,
+        [Description("Acao de compatibilidade: salvar, listar ou ler. Para remover, use remover_documento_memoria_usuario.")] string action,
         [Description("Chave curta e estavel do documento. Obrigatoria em salvar.")] string? key = null,
         [Description("Titulo humano do documento. Obrigatorio em salvar.")] string? title = null,
         [Description("Conteudo completo do documento. Use markdown quando possivel; html e aceito para modelos Moodle existentes.")] string? content = null,
@@ -44,17 +44,124 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
                 "salvar" => new MemoryDocumentToolResponse("salvar", await SaveAsync(key, title, content, format, origin, moodleAlias, courseId, cancellationToken), null, null),
                 "listar" => new MemoryDocumentToolResponse("listar", null, await documentService.ListAsync(new ListUserMemoryDocumentsRequest(moodleAlias, courseId, limit, query), cancellationToken), null),
                 "ler" => new MemoryDocumentToolResponse("ler", await ReadAsync(documentId, cancellationToken), null, null),
-                "remover" => new MemoryDocumentToolResponse("remover", null, null, (await RemoveAsync(documentId, cancellationToken)).Removed),
-                _ => throw new ArgumentException("Acao invalida. Use salvar, listar, ler ou remover.", nameof(action))
+                "remover" => throw new ArgumentException("Use remover_documento_memoria_usuario para remover documentos de memoria.", nameof(action)),
+                _ => throw new ArgumentException("Acao invalida. Use salvar, listar ou ler. Para remover, use remover_documento_memoria_usuario.", nameof(action))
             };
 
-            var response = new ToolResponse<MemoryDocumentToolResponse>("ok", data, [], null, DateTimeOffset.UtcNow);
-            return new CallToolResult
-            {
-                Content = [new TextContentBlock { Text = JsonSerializer.Serialize(data, JsonOptions) }],
-                StructuredContent = JsonSerializer.SerializeToElement(response, JsonOptions),
-                IsError = false
-            };
+            return Ok(data);
+        }
+        catch (ArgumentException exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
+        }
+    }
+
+    [McpServerTool(
+        Name = "salvar_documento_memoria_usuario",
+        Title = "Salvar documento de memoria do usuario",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<MemoryDocumentToolResponse>))]
+    [Description("Salva ou atualiza um documento duravel privado do usuario autenticado para modelos ou referencias extensas da IA. Aceita format markdown, html ou text. Nunca envie segredos nem dados pessoais de alunos.")]
+    public async Task<CallToolResult> SalvarAsync(
+        [Description("Chave curta e estavel do documento.")] string key,
+        [Description("Titulo humano do documento.")] string title,
+        [Description("Conteudo completo do documento. Use markdown quando possivel; html e aceito para modelos Moodle existentes.")] string content,
+        [Description("Formato do conteudo: markdown, html ou text.")] string format,
+        [Description("Origem: explicit ou inferred.")] string origin,
+        [Description("Alias Moodle opcional para escopo.")] string? moodleAlias = null,
+        [Description("Curso opcional dentro do alias Moodle.")] string? courseId = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(new MemoryDocumentToolResponse(
+                "salvar",
+                await SaveAsync(key, title, content, format, origin, moodleAlias, courseId, cancellationToken),
+                null,
+                null));
+        }
+        catch (ArgumentException exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
+        }
+    }
+
+    [McpServerTool(
+        Name = "listar_documentos_memoria_usuario",
+        Title = "Listar documentos de memoria do usuario",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<MemoryDocumentToolResponse>))]
+    [Description("Lista documentos duraveis privados do usuario autenticado, com filtros opcionais de texto e escopo.")]
+    public async Task<CallToolResult> ListarAsync(
+        [Description("Texto para filtrar documentos na listagem.")] string? query = null,
+        [Description("Alias Moodle opcional para filtro.")] string? moodleAlias = null,
+        [Description("Curso opcional dentro do alias Moodle.")] string? courseId = null,
+        [Description("Maximo de documentos na listagem. Padrao: 20.")] int limit = 20,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(new MemoryDocumentToolResponse(
+                "listar",
+                null,
+                await documentService.ListAsync(new ListUserMemoryDocumentsRequest(moodleAlias, courseId, limit, query), cancellationToken),
+                null));
+        }
+        catch (ArgumentException exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
+        }
+    }
+
+    [McpServerTool(
+        Name = "ler_documento_memoria_usuario",
+        Title = "Ler documento de memoria do usuario",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<MemoryDocumentToolResponse>))]
+    [Description("Le o conteudo completo de um documento duravel privado do usuario autenticado.")]
+    public async Task<CallToolResult> LerAsync(
+        [Description("UUID do documento.")] Guid documentId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(new MemoryDocumentToolResponse("ler", await ReadAsync(documentId, cancellationToken), null, null));
+        }
+        catch (ArgumentException exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
+        }
+    }
+
+    [McpServerTool(
+        Name = "remover_documento_memoria_usuario",
+        Title = "Remover documento de memoria do usuario",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<MemoryDocumentToolResponse>))]
+    [Description("Remove um documento duravel privado do usuario autenticado e o link curto de memoria associado.")]
+    public async Task<CallToolResult> RemoverAsync(
+        [Description("UUID do documento.")] Guid documentId,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return Ok(new MemoryDocumentToolResponse("remover", null, null, (await RemoveAsync(documentId, cancellationToken)).Removed));
         }
         catch (ArgumentException exception)
         {
@@ -90,6 +197,17 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
     private Task<RemoveUserMemoryDocumentResult> RemoveAsync(Guid? documentId, CancellationToken cancellationToken)
     {
         return documentService.RemoveAsync(RequireDocumentId(documentId), cancellationToken);
+    }
+
+    private static CallToolResult Ok(MemoryDocumentToolResponse data)
+    {
+        var response = new ToolResponse<MemoryDocumentToolResponse>("ok", data, [], null, DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = JsonSerializer.Serialize(data, JsonOptions) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response, JsonOptions),
+            IsError = false
+        };
     }
 
     private static Guid RequireDocumentId(Guid? documentId)

@@ -60,7 +60,7 @@ public sealed class MoodleMemoryDocumentToolsTests
         var service = new FakeDocumentService();
         var sut = new MoodleMemoryDocumentTools(service);
 
-        var result = await sut.ManageAsync("remover", documentId: service.Document.Id);
+        var result = await sut.RemoverAsync(service.Document.Id);
 
         Assert.False(result.IsError ?? false);
         Assert.Equal(service.Document.Id, service.RemovedId);
@@ -75,10 +75,52 @@ public sealed class MoodleMemoryDocumentToolsTests
         var attribute = method.GetCustomAttribute<McpServerToolAttribute>()!;
 
         Assert.False(attribute.ReadOnly);
-        Assert.True(attribute.Destructive);
+        Assert.False(attribute.Destructive);
         Assert.True(attribute.Idempotent);
         Assert.False(attribute.OpenWorld);
         Assert.Equal(typeof(ToolResponse<MemoryDocumentToolResponse>), attribute.OutputSchemaType);
+    }
+
+    [Fact]
+    public void Metadata_declara_tools_dedicadas_com_risco_por_operacao()
+    {
+        var salvar = typeof(MoodleMemoryDocumentTools).GetMethod(nameof(MoodleMemoryDocumentTools.SalvarAsync))!
+            .GetCustomAttribute<McpServerToolAttribute>()!;
+        var listar = typeof(MoodleMemoryDocumentTools).GetMethod(nameof(MoodleMemoryDocumentTools.ListarAsync))!
+            .GetCustomAttribute<McpServerToolAttribute>()!;
+        var ler = typeof(MoodleMemoryDocumentTools).GetMethod(nameof(MoodleMemoryDocumentTools.LerAsync))!
+            .GetCustomAttribute<McpServerToolAttribute>()!;
+        var remover = typeof(MoodleMemoryDocumentTools).GetMethod(nameof(MoodleMemoryDocumentTools.RemoverAsync))!
+            .GetCustomAttribute<McpServerToolAttribute>()!;
+
+        Assert.Equal("salvar_documento_memoria_usuario", salvar.Name);
+        Assert.False(salvar.ReadOnly);
+        Assert.False(salvar.Destructive);
+        Assert.True(salvar.Idempotent);
+
+        Assert.Equal("listar_documentos_memoria_usuario", listar.Name);
+        Assert.True(listar.ReadOnly);
+        Assert.False(listar.Destructive);
+
+        Assert.Equal("ler_documento_memoria_usuario", ler.Name);
+        Assert.True(ler.ReadOnly);
+        Assert.False(ler.Destructive);
+
+        Assert.Equal("remover_documento_memoria_usuario", remover.Name);
+        Assert.False(remover.ReadOnly);
+        Assert.True(remover.Destructive);
+        Assert.True(remover.Idempotent);
+    }
+
+    [Fact]
+    public async Task Remover_na_tool_legada_retorna_erro_controlado_para_evitar_hint_destrutivo()
+    {
+        var sut = new MoodleMemoryDocumentTools(new FakeDocumentService());
+
+        var result = await sut.ManageAsync("remover", documentId: Guid.NewGuid());
+
+        Assert.True(result.IsError ?? false);
+        Assert.Contains("remover_documento_memoria_usuario", Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("warnings")[0].GetString(), StringComparison.Ordinal);
     }
 
     [Theory]
