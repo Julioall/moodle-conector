@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MoodleConnector.Application.Abstractions;
@@ -13,7 +11,8 @@ public sealed record SaveUserMemoryRequest(
     string Content,
     string Origin,
     string? MoodleAlias = null,
-    string? CourseId = null);
+    string? CourseId = null,
+    Guid? LinkedDocumentId = null);
 
 public sealed record ListUserMemoriesRequest(
     string? MoodleAlias = null,
@@ -30,6 +29,7 @@ public sealed record UserMemoryDto(
     string Origin,
     string? MoodleAlias,
     string? CourseId,
+    Guid? LinkedDocumentId,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
 
@@ -47,7 +47,7 @@ public sealed partial class UserMemoryService(
     ICurrentUserContext currentUser,
     TimeProvider timeProvider) : IUserMemoryService
 {
-    private static readonly HashSet<string> Categories = ["preferencia", "caminho", "correcao", "decisao"];
+    private static readonly HashSet<string> Categories = ["preferencia", "caminho", "correcao", "decisao", "modelo"];
     private static readonly HashSet<string> Origins = ["explicit", "inferred"];
 
     public async Task<UserMemoryDto> SaveAsync(SaveUserMemoryRequest request, CancellationToken cancellationToken = default)
@@ -70,11 +70,11 @@ public sealed partial class UserMemoryService(
         if (courseId is not null && alias is null) throw new ArgumentException("CourseId exige MoodleAlias.", nameof(request));
         if (ContainsSecret(content) || ContainsSecret(key)) throw new ArgumentException("Memórias não podem conter segredos.", nameof(request));
 
-        var normalizedKey = NormalizeKey(key);
+        var normalizedKey = MemoryText.NormalizeKey(key);
         if (normalizedKey.Length == 0) throw new ArgumentException("A chave deve conter caracteres alfanuméricos.", nameof(request));
 
         var now = timeProvider.GetUtcNow();
-        var candidate = new UserMemory(owner, category, normalizedKey, content, origin, alias, courseId, now);
+        var candidate = new UserMemory(owner, category, normalizedKey, content, origin, alias, courseId, now, request.LinkedDocumentId);
         var memory = await repository.UpsertAsync(candidate, cancellationToken);
         await repository.SaveChangesAsync(cancellationToken);
         return Map(memory);
@@ -88,7 +88,7 @@ public sealed partial class UserMemoryService(
         var courseId = Optional(request.CourseId);
         var category = Optional(request.Category)?.ToLowerInvariant();
         var query = Optional(request.Query);
-        var normalizedQuery = query is null ? null : Optional(NormalizeKey(query));
+        var normalizedQuery = query is null ? null : Optional(MemoryText.NormalizeKey(query));
         EnsureLength(alias, 64, nameof(request.MoodleAlias));
         EnsureLength(courseId, 64, nameof(request.CourseId));
         EnsureLength(query, 1000, nameof(request.Query));
@@ -120,31 +120,9 @@ public sealed partial class UserMemoryService(
         if (value?.Length > maximum) throw new ArgumentException($"O valor excede {maximum} caracteres.", parameterName);
     }
 
-    private static string NormalizeKey(string value)
-    {
-        var decomposed = value.Normalize(NormalizationForm.FormD);
-        var result = new StringBuilder(decomposed.Length);
-        var separatorPending = false;
-        foreach (var character in decomposed)
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark) continue;
-            if (char.IsLetterOrDigit(character))
-            {
-                if (separatorPending && result.Length > 0) result.Append('-');
-                result.Append(char.ToLowerInvariant(character));
-                separatorPending = false;
-            }
-            else
-            {
-                separatorPending = true;
-            }
-        }
-        return result.ToString();
-    }
-
     private static UserMemoryDto Map(UserMemory memory) => new(
         memory.Id, memory.Category, memory.NormalizedKey, memory.Content, memory.Origin,
-        memory.MoodleAlias, memory.CourseId, memory.CreatedAtUtc, memory.UpdatedAtUtc);
+        memory.MoodleAlias, memory.CourseId, memory.LinkedDocumentId, memory.CreatedAtUtc, memory.UpdatedAtUtc);
 
     private static bool ContainsSecret(string value) => SecretPattern().IsMatch(value) || ContainsJwt(value);
 

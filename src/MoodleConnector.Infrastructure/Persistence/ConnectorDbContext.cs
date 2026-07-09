@@ -20,6 +20,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<GradingArtifact> GradingArtifacts => Set<GradingArtifact>();
     public DbSet<GradingEvidence> GradingEvidence => Set<GradingEvidence>();
     public DbSet<UserMemory> UserMemories => Set<UserMemory>();
+    public DbSet<UserMemoryDocument> UserMemoryDocuments => Set<UserMemoryDocument>();
     public DbSet<OpenIddictEntityFrameworkCoreApplication> OAuthApplications => Set<OpenIddictEntityFrameworkCoreApplication>();
     public DbSet<OpenIddictEntityFrameworkCoreAuthorization> OAuthAuthorizations => Set<OpenIddictEntityFrameworkCoreAuthorization>();
     public DbSet<OpenIddictEntityFrameworkCoreScope> OAuthScopes => Set<OpenIddictEntityFrameworkCoreScope>();
@@ -127,11 +128,31 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         memory.Property(x => x.Origin).HasMaxLength(32).IsRequired();
         memory.Property(x => x.MoodleAlias).HasMaxLength(64);
         memory.Property(x => x.CourseId).HasMaxLength(64);
+        memory.Property(x => x.LinkedDocumentId);
         memory.Property(x => x.CreatedAtUtc).IsRequired();
         memory.Property(x => x.UpdatedAtUtc).IsRequired();
         memory.HasIndex(x => new { x.OwnerSubject, x.MoodleAlias, x.CourseId, x.UpdatedAtUtc })
             .IsDescending(false, false, false, true);
         memory.HasIndex(x => new { x.OwnerSubject, x.Category, x.MoodleAlias, x.CourseId, x.NormalizedKey })
+            .IsUnique()
+            .AreNullsDistinct(false);
+
+        var document = modelBuilder.Entity<UserMemoryDocument>();
+        document.ToTable("user_memory_documents");
+        document.HasKey(x => x.Id);
+        document.Property(x => x.OwnerSubject).HasMaxLength(200).IsRequired();
+        document.Property(x => x.NormalizedKey).HasMaxLength(120).IsRequired();
+        document.Property(x => x.Title).HasMaxLength(200).IsRequired();
+        document.Property(x => x.Content).HasMaxLength(200000).IsRequired();
+        document.Property(x => x.Format).HasMaxLength(32).IsRequired();
+        document.Property(x => x.Origin).HasMaxLength(32).IsRequired();
+        document.Property(x => x.MoodleAlias).HasMaxLength(64);
+        document.Property(x => x.CourseId).HasMaxLength(64);
+        document.Property(x => x.CreatedAtUtc).IsRequired();
+        document.Property(x => x.UpdatedAtUtc).IsRequired();
+        document.HasIndex(x => new { x.OwnerSubject, x.MoodleAlias, x.CourseId, x.UpdatedAtUtc })
+            .IsDescending(false, false, false, true);
+        document.HasIndex(x => new { x.OwnerSubject, x.MoodleAlias, x.CourseId, x.NormalizedKey })
             .IsUnique()
             .AreNullsDistinct(false);
     }

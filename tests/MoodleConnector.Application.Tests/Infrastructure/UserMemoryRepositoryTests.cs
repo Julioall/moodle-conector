@@ -12,6 +12,7 @@ public sealed class UserMemoryRepositoryTests
         Assert.Contains("ON CONFLICT (\"OwnerSubject\", \"Category\", \"MoodleAlias\", \"CourseId\", \"NormalizedKey\")", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
         Assert.Contains("\"Content\" = EXCLUDED.\"Content\"", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
         Assert.Contains("\"Origin\" = EXCLUDED.\"Origin\"", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
+        Assert.Contains("\"LinkedDocumentId\" = EXCLUDED.\"LinkedDocumentId\"", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
         Assert.Contains("\"UpdatedAtUtc\" = EXCLUDED.\"UpdatedAtUtc\"", UserMemoryRepository.UpsertSql, StringComparison.Ordinal);
     }
 

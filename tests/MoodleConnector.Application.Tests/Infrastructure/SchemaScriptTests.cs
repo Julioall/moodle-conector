@@ -76,7 +76,8 @@ public sealed class SchemaScriptTests
         var sql = await File.ReadAllTextAsync(scriptPath);
 
         Assert.Contains("user_memories", sql, StringComparison.Ordinal);
-        Assert.Contains("CHECK (\"Category\" IN ('preferencia', 'caminho', 'correcao', 'decisao'))", sql, StringComparison.Ordinal);
+        Assert.Contains("CHECK (\"Category\" IN ('preferencia', 'caminho', 'correcao', 'decisao', 'modelo'))", sql, StringComparison.Ordinal);
+        Assert.Contains("\"LinkedDocumentId\" uuid NULL", sql, StringComparison.Ordinal);
         Assert.Contains("CHECK (\"Origin\" IN ('explicit', 'inferred'))", sql, StringComparison.Ordinal);
         Assert.Contains("IX_user_memories_OwnerSubject_MoodleAlias_CourseId_UpdatedAtUtc", sql, StringComparison.Ordinal);
         Assert.Contains("DESC", sql, StringComparison.OrdinalIgnoreCase);
@@ -84,6 +85,27 @@ public sealed class SchemaScriptTests
         Assert.Contains("\"NormalizedKey\") NULLS NOT DISTINCT;", sql, StringComparison.Ordinal);
         Assert.Contains("(\"Version\", \"Description\", \"AppliedAt\")", sql, StringComparison.Ordinal);
         Assert.Contains("VALUES (5, 'user memories'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UserMemoryDocumentsSchemaScript_DeveSerCopiadoParaOutputEConterTabelaRestricoesEIndices()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio do assembly de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "006_user_memory_documents.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de documentos de memoria nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("user_memory_documents", sql, StringComparison.Ordinal);
+        Assert.Contains("\"Content\" varchar(200000) NOT NULL", sql, StringComparison.Ordinal);
+        Assert.Contains("CHECK (\"Format\" IN ('markdown', 'html', 'text'))", sql, StringComparison.Ordinal);
+        Assert.Contains("CHECK (\"Origin\" IN ('explicit', 'inferred'))", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_user_memory_documents_OwnerSubject_MoodleAlias_CourseId_UpdatedAtUtc", sql, StringComparison.Ordinal);
+        Assert.Contains("NULLS NOT DISTINCT", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("VALUES (6, 'user memory documents'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
 }

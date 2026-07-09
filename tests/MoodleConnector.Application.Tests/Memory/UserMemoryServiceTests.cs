@@ -66,6 +66,24 @@ public sealed class UserMemoryServiceTests
     }
 
     [Fact]
+    public async Task Save_accepts_modelo_with_linked_document_id()
+    {
+        var fixture = new Fixture();
+        var documentId = Guid.NewGuid();
+
+        var saved = await fixture.Service.SaveAsync(new SaveUserMemoryRequest(
+            "modelo",
+            "Cronograma de atividades",
+            "Modelo completo salvo como documento da memoria.",
+            "explicit",
+            LinkedDocumentId: documentId));
+
+        Assert.Equal("modelo", saved.Category);
+        Assert.Equal("cronograma-de-atividades", saved.NormalizedKey);
+        Assert.Equal(documentId, saved.LinkedDocumentId);
+    }
+
+    [Fact]
     public async Task List_forwards_normalized_optional_category_and_query()
     {
         var fixture = new Fixture();
@@ -261,7 +279,7 @@ public sealed class UserMemoryServiceTests
                 return Task.FromResult(candidate);
             }
 
-            existing.Update(candidate.Content, candidate.Origin, candidate.UpdatedAtUtc);
+            existing.Update(candidate.Content, candidate.Origin, candidate.UpdatedAtUtc, candidate.LinkedDocumentId);
             return Task.FromResult(existing);
         }
 

@@ -8,13 +8,14 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
 {
     internal const string UpsertSql = """
         INSERT INTO user_memories
-            ("Id", "OwnerSubject", "Category", "NormalizedKey", "Content", "Origin", "MoodleAlias", "CourseId", "CreatedAtUtc", "UpdatedAtUtc")
+            ("Id", "OwnerSubject", "Category", "NormalizedKey", "Content", "Origin", "MoodleAlias", "CourseId", "LinkedDocumentId", "CreatedAtUtc", "UpdatedAtUtc")
         VALUES
-            ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})
+            ({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})
         ON CONFLICT ("OwnerSubject", "Category", "MoodleAlias", "CourseId", "NormalizedKey")
         DO UPDATE SET
             "Content" = EXCLUDED."Content",
             "Origin" = EXCLUDED."Origin",
+            "LinkedDocumentId" = EXCLUDED."LinkedDocumentId",
             "UpdatedAtUtc" = EXCLUDED."UpdatedAtUtc";
         """;
 
@@ -59,7 +60,7 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
                 return candidate;
             }
 
-            existing.Update(candidate.Content, candidate.Origin, candidate.UpdatedAtUtc);
+            existing.Update(candidate.Content, candidate.Origin, candidate.UpdatedAtUtc, candidate.LinkedDocumentId);
             return existing;
         }
 
@@ -74,6 +75,7 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
                 candidate.Origin,
                 candidate.MoodleAlias ?? (object)DBNull.Value,
                 candidate.CourseId ?? (object)DBNull.Value,
+                candidate.LinkedDocumentId ?? (object)DBNull.Value,
                 candidate.CreatedAtUtc,
                 candidate.UpdatedAtUtc
             ],
