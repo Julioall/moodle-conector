@@ -142,7 +142,7 @@ public sealed class UserMemoryDocumentService(
         : currentUser.Subject.Trim();
 
     private static string BuildMemoryLinkContent(UserMemoryDocument document) =>
-        $"Modelo salvo em documento de memoria {document.Id}. Titulo: {document.Title}. Formato: {document.Format}. Use gerenciar_documento_memoria_usuario action=ler com documentId={document.Id} para recuperar o conteudo completo.";
+        $"Modelo salvo em documento de memoria {document.Id}. Titulo: {document.Title}. Formato: {document.Format}. Use ler_documento_memoria_usuario com documentId={document.Id} para recuperar o conteudo completo.";
 
     private static UserMemoryDocumentDto Map(UserMemoryDocument document) => new(
         document.Id,

@@ -22,7 +22,7 @@ public sealed class McpToolMetadataTests
             var toolName = attribute.Name ?? method.Name;
 
             Assert.False(attribute.OpenWorld, $"{toolName} deve declarar OpenWorld=false.");
-            if (toolName is "confirmar_lancamento_lote_moodle" or "confirmar_post_forum_moodle" or "confirm_forum_post" or "gerenciar_memoria_usuario" or "gerenciar_documento_memoria_usuario")
+            if (toolName is "confirmar_lancamento_lote_moodle" or "confirmar_post_forum_moodle" or "confirm_forum_post" or "gerenciar_memoria_usuario" or "remover_documento_memoria_usuario")
             {
                 Assert.True(attribute.Destructive, $"{toolName} deve declarar Destructive=true.");
             }
@@ -30,10 +30,15 @@ public sealed class McpToolMetadataTests
             {
                 Assert.False(attribute.Destructive, $"{toolName} deve declarar Destructive=false.");
             }
-            if (toolName is "gerenciar_memoria_usuario" or "gerenciar_documento_memoria_usuario")
+            if (toolName is "gerenciar_memoria_usuario" or "gerenciar_documento_memoria_usuario" or "salvar_documento_memoria_usuario")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} grava estado interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente.");
+            }
+            else if (toolName == "remover_documento_memoria_usuario")
+            {
+                Assert.False(attribute.ReadOnly, $"{toolName} remove estado interno e deve declarar ReadOnly=false.");
+                Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe pelo documentId.");
             }
             else if (toolName == "criar_lote_correcao_assistida")
             {

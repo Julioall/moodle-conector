@@ -32,7 +32,7 @@ Nunca registrar em logs, issues, prints ou documentação:
 - Trate `remover` como ação destrutiva sobre estado interno, embora ela não altere o Moodle.
 - Automatizações só devem salvar preferências, caminhos, correções e decisões duráveis, com escopo mínimo e origem (`explicit` ou `inferred`) fiel.
 
-- Para conteudos extensos, use `gerenciar_documento_memoria_usuario`; as mesmas proibicoes de segredos e dados pessoais de alunos se aplicam aos documentos.
+- Para conteudos extensos, use `salvar_documento_memoria_usuario`; as mesmas proibicoes de segredos e dados pessoais de alunos se aplicam aos documentos.
 - Modelos reutilizaveis devem ficar como documento de memoria, com a memoria curta `category=modelo` apenas apontando para o conteudo completo.
 
 ## Uso por professores e tutores
