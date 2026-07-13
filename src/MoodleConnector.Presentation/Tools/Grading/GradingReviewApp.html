@@ -80,6 +80,11 @@ body{
   font-size:.65rem;font-weight:600;color:var(--danger);
   background:var(--danger-light);padding:2px 8px;border-radius:10px;
 }
+.send-error-message{
+  display:none;margin-bottom:10px;padding:8px 10px;border-radius:var(--radius-sm);
+  background:var(--danger-light);color:var(--danger);font-size:.72rem;font-weight:500;
+}
+.student-card.send-error .send-error-message{display:block}
 
 /* ─── Card checkbox ─── */
 .card-checkbox{
@@ -203,6 +208,7 @@ body{
   position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-60px);
   padding:9px 18px;border-radius:var(--radius-sm);
   font-size:.78rem;font-weight:500;z-index:300;
+  max-width:min(560px,92vw);text-align:center;
   transition:transform .3s ease;box-shadow:0 2px 8px rgba(0,0,0,.12);
 }
 .toast.show{transform:translateX(-50%) translateY(0)}
@@ -578,6 +584,10 @@ function renderAll() {
     const body = document.createElement("div");
     body.className = "card-body";
 
+    const sendError = document.createElement("div");
+    sendError.className = "send-error-message";
+    sendError.id = "send-error-" + gid;
+
     const fbLabel = document.createElement("div");
     fbLabel.className = "field-label";
     fbLabel.textContent = "Feedback para o aluno";
@@ -624,6 +634,7 @@ function renderAll() {
     gradeRow.appendChild(gradeFieldWrap);
     gradeRow.appendChild(gradeMaxSpan);
 
+    body.appendChild(sendError);
     body.appendChild(fbLabel);
     body.appendChild(textarea);
     body.appendChild(charCount);
@@ -781,28 +792,44 @@ async function doSend() {
       const ok = data.sentItems || 0;
       const fail = data.failedItems || 0;
 
-      // Build a set of failed gradingItemIds for per-card marking
-      const failedIds = new Set(
-        (data.failures || []).map(f => f.gradingItemId)
+      const failures = Array.isArray(data.failures) ? data.failures : [];
+      const failuresById = new Map(
+        failures.map(f => [f.gradingItemId, f])
       );
 
       // Mark cards individually: sent = green, failed = red
       state.items.forEach(i => {
         const c = document.getElementById("card-"+i.gradingItemId);
         if (!c) return;
-        if (failedIds.has(i.gradingItemId)) {
+        const wasSending = state.selectedIds.size === 0 || state.selectedIds.has(i.gradingItemId);
+        if (!wasSending) return;
+
+        c.classList.remove("sent", "send-error");
+        const errorDetail = document.getElementById("send-error-"+i.gradingItemId);
+        const failure = failuresById.get(i.gradingItemId);
+        if (failure) {
           c.classList.add("send-error");
+          c.classList.add("open");
+          if (errorDetail) {
+            errorDetail.textContent = failure.message || "O Moodle recusou o envio deste item.";
+          }
         } else {
-          // Only mark as sent if we were trying to send this item
-          const wasSending = state.selectedIds.size === 0 || state.selectedIds.has(i.gradingItemId);
-          if (wasSending) c.classList.add("sent");
+          if (errorDetail) errorDetail.textContent = "";
+          c.classList.add("sent");
         }
       });
 
+      const distinctReasons = [...new Set(
+        failures.map(f => f.message).filter(Boolean)
+      )];
+      const reason = distinctReasons.length > 0
+        ? " Motivo: "+distinctReasons[0]+(distinctReasons.length > 1 ? " (há outros motivos nos cards)." : "")
+        : "";
+
       if (fail > 0 && ok === 0) {
-        toast("Falha no envio: "+fail+" item(ns) não foram enviados.", "error");
+        toast("Falha no envio: "+fail+" item(ns) não foram enviados."+reason, "error");
       } else if (fail > 0) {
-        toast(ok+" enviado(s) com sucesso, "+fail+" com falha. Verifique os cards marcados.", "error");
+        toast(ok+" enviado(s) com sucesso, "+fail+" com falha."+reason, "error");
         document.getElementById("btn-send").textContent = "Retentar falhas";
       } else {
         toast("Correções enviadas com sucesso! ("+ok+" aluno"+(ok!==1?"s":"")+")", "success");

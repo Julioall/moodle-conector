@@ -1147,7 +1147,9 @@ public sealed class MoodleGradingTools(
         {
             Content = [new TextContentBlock { Text = BuildConfirmLaunchNarration(data) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = data.SentItems == 0 && data.FailedItems > 0
+            // Falhas por item sao um resultado de negocio concluido e precisam chegar
+            // ao cliente no StructuredContent. IsError fica reservado a falhas da tool.
+            IsError = false
         };
     }
 
@@ -1342,7 +1344,26 @@ public sealed class MoodleGradingTools(
 
     private static string BuildConfirmLaunchNarration(ConfirmMoodleBatchLaunchResult response)
     {
-        return $"Lancamento Moodle confirmado: {response.SentItems} enviado(s), {response.FailedItems} falha(s).";
+        var outcome = response.FailedItems == 0
+            ? "concluido"
+            : response.SentItems == 0
+                ? "nao realizado"
+                : "concluido parcialmente";
+        var summary = $"Lancamento Moodle {outcome}: {response.SentItems} enviado(s), {response.FailedItems} falha(s).";
+        var reasons = response.Failures
+            .Select(failure => failure.Message)
+            .Where(message => !string.IsNullOrWhiteSpace(message))
+            .Select(message => message.Trim().TrimEnd('.'))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        if (reasons.Length == 0)
+        {
+            return summary;
+        }
+
+        var suffix = reasons.Length > 2 ? " Ha outros motivos no resultado estruturado." : string.Empty;
+        return $"{summary} Motivo(s): {string.Join("; ", reasons.Take(2))}.{suffix}";
     }
 
     private static string BuildAuditNarration(GradingAuditResult response)

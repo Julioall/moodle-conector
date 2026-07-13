@@ -307,6 +307,45 @@ public sealed class MoodleGradingToolsTests
     }
 
     [Fact]
+    public async Task Deve_preservar_falhas_de_lancamento_como_resultado_estruturado()
+    {
+        var pendingActionId = Guid.Parse("00000000-0000-0000-0000-000000000999");
+        var failures = Enumerable.Range(1, 7)
+            .Select(index => new GradingLaunchFailure(
+                Guid.Parse($"00000000-0000-0000-0000-{index:D12}"),
+                "A funcao Moodle mod_assign_save_grade nao esta disponivel no servico autorizado."))
+            .ToArray();
+        var mediator = new FakeMediator
+        {
+            ConfirmLaunchResult = new ConfirmMoodleBatchLaunchResult(
+                "confirmed",
+                pendingActionId,
+                SentItems: 0,
+                FailedItems: failures.Length,
+                failures,
+                AuditId: "audit-1")
+        };
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321));
+
+        var result = await sut.ConfirmarLancamentoLoteMoodleAsync(
+            pendingActionId,
+            "CONFIRMO O LANCAMENTO DE 7 CORRECOES NO MOODLE");
+
+        Assert.False(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("partial_failure", structured.GetProperty("status").GetString());
+        Assert.Equal(7, structured.GetProperty("warnings").GetArrayLength());
+
+        var data = structured.GetProperty("data");
+        Assert.Equal(0, data.GetProperty("sentItems").GetInt32());
+        Assert.Equal(7, data.GetProperty("failedItems").GetInt32());
+        Assert.Equal(7, data.GetProperty("failures").GetArrayLength());
+    }
+
+    [Fact]
     public async Task Deve_consultar_auditoria_correcao()
     {
         var mediator = new FakeMediator();
@@ -383,6 +422,8 @@ public sealed class MoodleGradingToolsTests
         public CreateGradingLaunchPreviewCommand? LastCreatePreview { get; private set; }
 
         public ConfirmMoodleBatchLaunchCommand? LastConfirmLaunch { get; private set; }
+
+        public ConfirmMoodleBatchLaunchResult? ConfirmLaunchResult { get; init; }
 
         public GetGradingAuditQuery? LastAuditQuery { get; private set; }
 
@@ -590,13 +631,8 @@ public sealed class MoodleGradingToolsTests
             if (request is ConfirmMoodleBatchLaunchCommand confirmLaunch)
             {
                 LastConfirmLaunch = confirmLaunch;
-                return Task.FromResult((TResponse)(object)new ConfirmMoodleBatchLaunchResult(
-                    "confirmed",
-                    Guid.Parse("00000000-0000-0000-0000-000000000999"),
-                    SentItems: 1,
-                    FailedItems: 0,
-                    Failures: [],
-                    AuditId: "audit-1"));
+                return Task.FromResult((TResponse)(object)(
+                    ConfirmLaunchResult ?? CreateSuccessfulConfirmLaunchResult()));
             }
 
             if (request is GetGradingAuditQuery auditQuery)
@@ -805,13 +841,8 @@ public sealed class MoodleGradingToolsTests
             if (request is ConfirmMoodleBatchLaunchCommand confirmLaunch)
             {
                 LastConfirmLaunch = confirmLaunch;
-                return Task.FromResult<object?>(new ConfirmMoodleBatchLaunchResult(
-                    "confirmed",
-                    Guid.Parse("00000000-0000-0000-0000-000000000999"),
-                    SentItems: 1,
-                    FailedItems: 0,
-                    Failures: [],
-                    AuditId: "audit-1"));
+                return Task.FromResult<object?>(
+                    ConfirmLaunchResult ?? CreateSuccessfulConfirmLaunchResult());
             }
 
             if (request is GetGradingAuditQuery auditQuery)
@@ -854,6 +885,17 @@ public sealed class MoodleGradingToolsTests
                 CanWriteIndividualGrades: true,
                 CanWriteBatchGrades: false,
                 MissingFunctions: ["mod_assign_save_grades"]);
+        }
+
+        private static ConfirmMoodleBatchLaunchResult CreateSuccessfulConfirmLaunchResult()
+        {
+            return new ConfirmMoodleBatchLaunchResult(
+                "confirmed",
+                Guid.Parse("00000000-0000-0000-0000-000000000999"),
+                SentItems: 1,
+                FailedItems: 0,
+                Failures: [],
+                AuditId: "audit-1");
         }
 
         private static GradingTechnicalDiscoveryReport CreateTechnicalDiscoveryReport()
