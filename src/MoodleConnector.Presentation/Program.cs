@@ -70,6 +70,10 @@ builder.Services
     .Bind(builder.Configuration.GetSection(AssignmentWriteFeatureOptions.SectionName));
 
 builder.Services
+    .AddOptions<MessageWriteFeatureOptions>()
+    .Bind(builder.Configuration.GetSection(MessageWriteFeatureOptions.SectionName));
+
+builder.Services
     .AddOptions<GradingLimitsOptions>()
     .Bind(builder.Configuration.GetSection(GradingLimitsOptions.SectionName));
 

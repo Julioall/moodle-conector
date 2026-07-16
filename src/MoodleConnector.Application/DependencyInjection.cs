@@ -15,6 +15,7 @@ public static class DependencyInjection
         services.AddMediatR(cfg =>
             cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
         services.AddOptions<AssignmentWriteFeatureOptions>();
+        services.AddOptions<MessageWriteFeatureOptions>();
         services.AddOptions<GradingLimitsOptions>();
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();

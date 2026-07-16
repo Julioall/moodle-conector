@@ -1,9 +1,11 @@
 using System.Text.Json.Serialization;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
+using Microsoft.Extensions.Options;
 
 namespace MoodleConnector.Application.Messages;
 
@@ -91,7 +93,8 @@ public sealed record TutorMessageSendResult(
 public sealed class PrepareTutorMessageCommandHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
-    IPendingActionService pendingActions)
+    IPendingActionService pendingActions,
+    IOptions<MessageWriteFeatureOptions> features)
     : IRequestHandler<PrepareTutorMessageCommand, TutorMessagePreview>
 {
     private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(10);
@@ -100,6 +103,11 @@ public sealed class PrepareTutorMessageCommandHandler(
         PrepareTutorMessageCommand request,
         CancellationToken cancellationToken)
     {
+        if (!features.Value.MessagesWriteEnabled)
+        {
+            throw new InvalidOperationException("O envio de mensagens está desabilitado. Habilite MessagesWriteEnabled na configuração.");
+        }
+
         var senderExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
 
         // Validate recipient list
@@ -282,7 +290,8 @@ public sealed class ConfirmTutorMessageCommandHandler(
     IMoodleMessageGateway messageGateway,
     IActionConfirmationService confirmationService,
     IPendingMoodleActionRepository pendingActionRepository,
-    IMoodleAuditLogRepository auditLogRepository)
+    IMoodleAuditLogRepository auditLogRepository,
+    IOptions<MessageWriteFeatureOptions> features)
     : IRequestHandler<ConfirmTutorMessageCommand, TutorMessageSendResult>
 {
     private const string CommitToolName = "confirmar_mensagem_tutor";
@@ -294,6 +303,11 @@ public sealed class ConfirmTutorMessageCommandHandler(
         ConfirmTutorMessageCommand request,
         CancellationToken cancellationToken)
     {
+        if (!features.Value.MessagesWriteEnabled)
+        {
+            throw new InvalidOperationException("O envio de mensagens está desabilitado. Habilite MessagesWriteEnabled na configuração.");
+        }
+
         // 1. Load pending action first
         var action = await pendingActionRepository.GetByIdAsync(request.PendingActionId, cancellationToken);
         if (action is null)

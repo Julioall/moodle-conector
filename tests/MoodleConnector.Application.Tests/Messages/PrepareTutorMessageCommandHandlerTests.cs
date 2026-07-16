@@ -1,8 +1,10 @@
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Messages;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
+using Microsoft.Extensions.Options;
 
 namespace MoodleConnector.Application.Tests.Messages;
 
@@ -16,12 +18,15 @@ public sealed class PrepareTutorMessageCommandHandlerTests
             Roles: [], Groups: []);
 
     private static PrepareTutorMessageCommandHandler CreateHandler(
-        IReadOnlyList<CourseParticipantSummary>? participants = null)
+        IReadOnlyList<CourseParticipantSummary>? participants = null,
+        bool messagesWriteEnabled = true)
     {
+        var options = Options.Create(new MessageWriteFeatureOptions { MessagesWriteEnabled = messagesWriteEnabled });
         return new PrepareTutorMessageCommandHandler(
             new FakeParticipantsGateway(participants ?? []),
             new FakeCurrentUserGateway(),
-            new FakePendingActionService());
+            new FakePendingActionService(),
+            options);
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -103,13 +108,28 @@ public sealed class PrepareTutorMessageCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ThrowsInvalidOperationException_WhenFeatureDisabled()
+    {
+        var sut = CreateHandler(messagesWriteEnabled: false);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sut.Handle(
+                new PrepareTutorMessageCommand("10", TutorMessageType.BoasVindas, ["1"]),
+                CancellationToken.None));
+
+        Assert.Contains("desabilitado", exception.Message);
+    }
+
+    [Fact]
     public async Task Handle_WhenParticipantsGatewayFails_FallsBackToIdOnlyRecipients()
     {
         // Arrange: gateway throws
+        var options = Options.Create(new MessageWriteFeatureOptions { MessagesWriteEnabled = true });
         var sut = new PrepareTutorMessageCommandHandler(
             new ThrowingParticipantsGateway(),
             new FakeCurrentUserGateway(),
-            new FakePendingActionService());
+            new FakePendingActionService(),
+            options);
 
         var result = await sut.Handle(
             new PrepareTutorMessageCommand("10", TutorMessageType.BoasVindas, ["999"]),
