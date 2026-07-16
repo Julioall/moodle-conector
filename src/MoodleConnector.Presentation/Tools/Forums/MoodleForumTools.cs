@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -309,6 +309,10 @@ public sealed class MoodleForumTools(
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return ToolResultHelper.Error<ReadForumResponse>(ex.Message);
         }
         catch
         {

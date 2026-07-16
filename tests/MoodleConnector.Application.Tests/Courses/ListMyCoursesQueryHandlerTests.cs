@@ -53,14 +53,12 @@ public class ListMyCoursesQueryHandlerTests
     }
 
     [Fact]
-    public async Task Deve_garantir_pagina_minima_de_1_quando_valor_invalido_for_informado()
+    public async Task Deve_lancar_ArgumentOutOfRangeException_quando_pagina_for_menor_que_1()
     {
         var gateway = new FakeGateway();
         var sut = new ListMyCoursesQueryHandler(gateway);
 
-        await sut.Handle(new ListMyCoursesQuery("me", 10, Page: -5), CancellationToken.None);
-
-        Assert.Equal(1, gateway.LastPage);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => sut.Handle(new ListMyCoursesQuery("me", 10, Page: -5), CancellationToken.None));
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -51,6 +51,10 @@ public sealed class MoodleCoursesTools(
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return ToolResultHelper.Error<ListMyCoursesResponse>(ex.Message);
         }
         catch
         {
@@ -398,7 +402,12 @@ public sealed class MoodleCoursesTools(
     {
         if (response.Total == 0)
         {
-            return "Nao encontrei cursos no momento para este usuario.";
+            return "O usuario autenticado nao possui cursos vinculados no Moodle no momento.";
+        }
+
+        if (response.Courses.Count == 0 && response.Page > 1)
+        {
+            return $"A pagina {response.Page} nao retornou cursos. O usuario possui apenas {response.TotalPages} pagina(s) de cursos.";
         }
 
         var lines = response.Courses.Select(course => $"- {course.FullName} (ID: {course.CourseId})");

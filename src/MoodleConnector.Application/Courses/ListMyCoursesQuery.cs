@@ -15,9 +15,9 @@ public sealed class ListMyCoursesQueryHandler(IMoodleCoursesGateway gateway)
 {
     public Task<PagedCourses> Handle(ListMyCoursesQuery request, CancellationToken cancellationToken)
     {
+        if (request.Page < 1) throw new ArgumentOutOfRangeException(nameof(request.Page), "A página deve ser maior ou igual a 1. A paginação começa em 1.");
         var safeLimit = Math.Clamp(request.Limit, 1, 100);
-        var safePage = Math.Max(request.Page, 1);
-        return gateway.GetMyCoursesAsync(request.UserExternalId, safeLimit, safePage, cancellationToken);
+        return gateway.GetMyCoursesAsync(request.UserExternalId, safeLimit, request.Page, cancellationToken);
     }
 }
 

@@ -56,7 +56,11 @@ public sealed class ListCourseParticipantsQueryHandler(
             cancellationToken);
     }
 
-    internal static int NormalizePage(int page) => Math.Max(1, page);
+    internal static int NormalizePage(int page)
+    {
+        if (page < 1) throw new ArgumentOutOfRangeException(nameof(page), "A página deve ser maior ou igual a 1. A paginação começa em 1.");
+        return page;
+    }
 
     internal static int NormalizePageSize(int pageSize) => Math.Clamp(pageSize, 1, 50);
 }

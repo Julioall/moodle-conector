@@ -7,7 +7,7 @@ namespace MoodleConnector.Application.Tests.Participants;
 public class ListCourseParticipantsQueryHandlerTests
 {
     [Fact]
-    public async Task Deve_resolver_curso_e_normalizar_paginacao_antes_de_listar_participantes()
+    public async Task Deve_resolver_curso_e_listar_participantes_quando_paginacao_valida()
     {
         var coursesGateway = new FakeCoursesGateway();
         var participantsGateway = new FakeParticipantsGateway();
@@ -18,7 +18,7 @@ public class ListCourseParticipantsQueryHandlerTests
                 "usuario-42",
                 "CURSO-1",
                 ParticipantStatusFilter.Active,
-                Page: 0,
+                Page: 1,
                 PageSize: 999,
                 StudentsOnly: true,
                 IncludeEmail: false),
@@ -54,6 +54,25 @@ public class ListCourseParticipantsQueryHandlerTests
 
         Assert.Null(result);
         Assert.False(participantsGateway.WasCalled);
+    }
+
+    [Fact]
+    public async Task Deve_lancar_ArgumentOutOfRangeException_quando_pagina_for_menor_que_1()
+    {
+        var coursesGateway = new FakeCoursesGateway();
+        var participantsGateway = new FakeParticipantsGateway();
+        var sut = new ListCourseParticipantsQueryHandler(coursesGateway, participantsGateway);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => sut.Handle(
+            new ListCourseParticipantsQuery(
+                "usuario-42",
+                "CURSO-1",
+                ParticipantStatusFilter.Active,
+                Page: 0,
+                PageSize: 20,
+                StudentsOnly: true,
+                IncludeEmail: false),
+            CancellationToken.None));
     }
 
     [Fact]

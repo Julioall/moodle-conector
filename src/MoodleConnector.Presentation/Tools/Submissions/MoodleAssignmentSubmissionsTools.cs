@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -456,6 +456,10 @@ public sealed class MoodleAssignmentSubmissionsTools(
         {
             throw;
         }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(ex.Message);
+        }
         catch
         {
             return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Nao foi possivel listar entregas no Moodle neste momento.");
@@ -584,7 +588,22 @@ public sealed class MoodleAssignmentSubmissionsTools(
     {
         if (response.Count == 0)
         {
-            return "Nao encontrei entregas para os filtros informados.";
+            if (response.Page > 1)
+            {
+                return $"A pagina {response.Page} nao retornou entregas. O numero maximo de paginas pode ter sido ultrapassado.";
+            }
+
+            if (response.Filter != "all")
+            {
+                return $"Nenhuma entrega corresponde ao filtro '{response.Filter}' na tarefa '{response.AssignmentName}'.";
+            }
+
+            if (response.Total == 0)
+            {
+                return $"Nenhum aluno elegivel encontrado para a tarefa '{response.AssignmentName}'. Nao ha entregas possiveis.";
+            }
+
+            return $"Nenhuma entrega encontrada para a tarefa '{response.AssignmentName}'.";
         }
 
         var lines = response.Submissions.Select(submission =>

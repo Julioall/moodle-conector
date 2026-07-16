@@ -50,7 +50,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         }
 
         var rows = rowsContext.Rows;
-        var page = Math.Max(1, request.Page);
+        if (request.Page < 1) throw new ArgumentOutOfRangeException(nameof(request.Page), "A página deve ser maior ou igual a 1. A paginação começa em 1.");
+        var page = request.Page;
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
         var pagedRows = rows
             .Skip((page - 1) * pageSize)

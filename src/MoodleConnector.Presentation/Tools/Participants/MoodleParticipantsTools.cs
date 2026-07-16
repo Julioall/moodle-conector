@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -322,6 +322,10 @@ public sealed class MoodleParticipantsTools(
         {
             throw;
         }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(ex.Message);
+        }
         catch
         {
             return ToolResultHelper.Error<ListCourseParticipantsResponse>("Nao foi possivel listar participantes no Moodle neste momento.");
@@ -384,6 +388,10 @@ public sealed class MoodleParticipantsTools(
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(ex.Message);
         }
         catch
         {
@@ -513,7 +521,18 @@ public sealed class MoodleParticipantsTools(
     {
         if (response.Count == 0)
         {
-            return "Nao encontrei participantes para os filtros informados.";
+            if (response.Page > 1)
+            {
+                return $"A pagina {response.Page} nao retornou resultados. O numero maximo de paginas pode ter sido ultrapassado.";
+            }
+
+            var labelEmpty = response.StudentsOnly ? "aluno(s)" : "participante(s)";
+            if (response.Status != "all")
+            {
+                return $"Nenhum {labelEmpty} com o status '{response.Status}' foi encontrado no curso.";
+            }
+
+            return $"Nao ha {labelEmpty} cadastrados ou elegiveis neste curso no momento.";
         }
 
         var label = response.StudentsOnly ? "aluno(s)" : "participante(s)";
