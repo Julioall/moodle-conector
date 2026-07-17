@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -917,7 +918,7 @@ app.MapDelete("/api/account/moodle/{id}", async (
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapDelete("/api/account", async (
-    DeleteAccountInput input,
+    [FromBody] DeleteAccountInput input,
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
