@@ -4,6 +4,7 @@ public sealed record RegisterAccountRequest(string Name, string Email, string Pa
 public sealed record LoginAccountRequest(string Email, string Password);
 public sealed record ConnectMoodleAccountRequest(Guid UserId, string MoodleAlias, string MoodleBaseUrl, string MoodleUsername, string MoodlePassword, bool IsDefault, bool CanWrite);
 public sealed record UpdateMoodleAccountRequest(Guid UserId, string MoodleId, string MoodleAlias, string MoodleBaseUrl, string? MoodleUsername, string? MoodlePassword, bool IsDefault, bool CanWrite);
+public sealed record DeleteAccountRequest(Guid UserId, string Password, string ConfirmationText);
 public sealed record AccountDto(Guid Id, string Name, string Email, bool HasMoodleConnected, string? ConnectorClientId);
 public sealed record MoodleConnectionDto(string Id, string Alias, string BaseUrl, bool IsDefault, bool CanWrite);
 public sealed record AccountProfileDto(Guid Id, string Name, string Email, bool HasMoodleConnected, string? ApiKey, IReadOnlyList<MoodleConnectionDto> MoodleConnections);
@@ -17,4 +18,5 @@ public interface IAccountService
     Task<string> RotateApiKeyAsync(Guid userId, CancellationToken cancellationToken);
     Task UpdateMoodleAsync(UpdateMoodleAccountRequest request, CancellationToken cancellationToken);
     Task DeleteMoodleAsync(Guid userId, string moodleId, CancellationToken cancellationToken);
+    Task DeleteAccountAsync(DeleteAccountRequest request, CancellationToken cancellationToken);
 }

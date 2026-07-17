@@ -271,6 +271,59 @@ internal sealed class AccountService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task DeleteAccountAsync(DeleteAccountRequest request, CancellationToken cancellationToken)
+    {
+        if (!string.Equals(request.ConfirmationText?.Trim(), "EXCLUIR MINHA CONTA", StringComparison.Ordinal))
+            throw new InvalidOperationException("Digite EXCLUIR MINHA CONTA para confirmar a exclusão definitiva.");
+
+        var account = await dbContext.UserAccounts
+            .SingleOrDefaultAsync(user => user.Id == request.UserId, cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+        if (string.IsNullOrWhiteSpace(request.Password) || !PasswordHasher.Verify(request.Password, account.PasswordHash))
+            throw new InvalidOperationException("Senha atual inválida.");
+
+        var clientId = account.ConnectorClientId ?? account.Id.ToString();
+        var subjects = new[] { account.Id.ToString(), clientId }.Distinct().ToArray();
+        var pendingActions = await dbContext.PendingMoodleActions
+            .Where(action => subjects.Contains(action.CreatedBySubject))
+            .ToListAsync(cancellationToken);
+        var pendingActionIds = pendingActions.Select(action => action.Id).ToArray();
+
+        dbContext.ConfirmedMoodleActions.RemoveRange(await dbContext.ConfirmedMoodleActions
+            .Where(action => subjects.Contains(action.ConfirmedBySubject) || pendingActionIds.Contains(action.PendingActionId))
+            .ToListAsync(cancellationToken));
+        dbContext.PendingMoodleActions.RemoveRange(pendingActions);
+        dbContext.MoodleAuditLogs.RemoveRange(await dbContext.MoodleAuditLogs
+            .Where(log => subjects.Contains(log.ActorSubject))
+            .ToListAsync(cancellationToken));
+        dbContext.MoodleUserLinks.RemoveRange(await dbContext.MoodleUserLinks
+            .Where(link => subjects.Contains(link.Subject))
+            .ToListAsync(cancellationToken));
+        dbContext.UserMemories.RemoveRange(await dbContext.UserMemories
+            .Where(memory => subjects.Contains(memory.OwnerSubject))
+            .ToListAsync(cancellationToken));
+        dbContext.UserMemoryDocuments.RemoveRange(await dbContext.UserMemoryDocuments
+            .Where(document => subjects.Contains(document.OwnerSubject))
+            .ToListAsync(cancellationToken));
+        dbContext.GradingBatches.RemoveRange(await dbContext.GradingBatches
+            .Where(batch => subjects.Contains(batch.CreatedBySubject))
+            .ToListAsync(cancellationToken));
+        dbContext.ConnectorClients.RemoveRange(await dbContext.ConnectorClients
+            .Where(connection => connection.ClientId == clientId)
+            .ToListAsync(cancellationToken));
+        var oauthAuthorizations = await dbContext.OAuthAuthorizations
+            .Where(authorization => authorization.Subject != null && subjects.Contains(authorization.Subject))
+            .ToListAsync(cancellationToken);
+        var oauthAuthorizationIds = oauthAuthorizations.Select(authorization => authorization.Id).ToArray();
+        dbContext.OAuthTokens.RemoveRange(await dbContext.OAuthTokens
+            .Where(token => token.AuthorizationId != null && oauthAuthorizationIds.Contains(token.AuthorizationId))
+            .ToListAsync(cancellationToken));
+        dbContext.OAuthAuthorizations.RemoveRange(oauthAuthorizations);
+        dbContext.UserAccounts.Remove(account);
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private static string NormalizeName(string name)
     {
         var normalized = string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim();

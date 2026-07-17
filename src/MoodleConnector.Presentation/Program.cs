@@ -641,18 +641,30 @@ app.MapGet("/api/info", (IOptions<MoodleApiOptions> moodleOpts) => Results.Ok(ne
 app.MapGet("/api/reports/student-course", async (
     int reportId,
     int? pageSize,
-    string? api_key,
     HttpContext context,
     IMcpConnectorClientResolver clientResolver,
     IMoodleReportBuilderClient reportClient,
     CancellationToken cancellationToken) =>
 {
-    if (string.IsNullOrWhiteSpace(api_key))
-        return Results.Json(new { error = "missing_api_key", message = "Informe api_key na query string." }, statusCode: 401);
+    var credential = ReportApiCredentialParser.Parse(context.Request);
+    if (credential.ApiKey is null)
+    {
+        context.Response.Headers.WWWAuthenticate = "Basic realm=\"Moodle Connector Reports\", charset=\"UTF-8\"";
+        return Results.Json(new
+        {
+            error = credential.Error,
+            message = credential.Error == "invalid_basic_credentials"
+                ? "Use o usuario excel-report e a API key do conector como senha."
+                : "Informe autenticacao Basica, X-Mcp-Api-Key ou api_key."
+        }, statusCode: 401);
+    }
 
-    var connectorClient = await clientResolver.ResolveByApiKeyAsync(api_key, cancellationToken);
+    var connectorClient = await clientResolver.ResolveByApiKeyAsync(credential.ApiKey, cancellationToken);
     if (connectorClient is null)
+    {
+        context.Response.Headers.WWWAuthenticate = "Basic realm=\"Moodle Connector Reports\", charset=\"UTF-8\"";
         return Results.Json(new { error = "invalid_api_key", message = "API key invalida ou inativa." }, statusCode: 401);
+    }
 
     if (reportId is not (509 or 512))
         return Results.BadRequest(new { error = "invalid_report_id", message = "reportId deve ser 509 ou 512." });
@@ -897,6 +909,30 @@ app.MapDelete("/api/account/moodle/{id}", async (
     {
         await accountService.DeleteMoodleAsync(identity.Id, id, cancellationToken);
         return Results.Ok(new { ok = true });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapDelete("/api/account", async (
+    DeleteAccountInput input,
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    try
+    {
+        await accountService.DeleteAccountAsync(
+            new DeleteAccountRequest(identity.Id, input.Password, input.ConfirmationText),
+            cancellationToken);
+        await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        return Results.Ok(new { ok = true, message = "Conta excluída definitivamente." });
     }
     catch (InvalidOperationException ex)
     {
@@ -1951,6 +1987,7 @@ public sealed record RegisterConnectorClientInput(
 
 public sealed record RegisterAccountInput(string Name, string Email, string Password);
 public sealed record LoginInput(string Email, string Password);
+public sealed record DeleteAccountInput(string Password, string ConfirmationText);
 public sealed record ConnectMoodleInput(string MoodleAlias, string MoodleBaseUrl, string MoodleUsername, string MoodlePassword, bool IsDefault = false, bool CanWrite = false);
 public sealed record UpdateMoodleInput(string MoodleAlias, string MoodleBaseUrl, string? MoodleUsername, string? MoodlePassword, bool IsDefault = false, bool CanWrite = false);
 
