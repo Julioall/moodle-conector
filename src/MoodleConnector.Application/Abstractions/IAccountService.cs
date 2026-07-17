@@ -14,6 +14,7 @@ public interface IAccountService
     Task<AccountDto?> ValidateLoginAsync(LoginAccountRequest request, CancellationToken cancellationToken);
     Task<AccountProfileDto?> GetProfileAsync(Guid userId, CancellationToken cancellationToken);
     Task<string> ConnectMoodleAsync(ConnectMoodleAccountRequest request, CancellationToken cancellationToken);
+    Task<string> RotateApiKeyAsync(Guid userId, CancellationToken cancellationToken);
     Task UpdateMoodleAsync(UpdateMoodleAccountRequest request, CancellationToken cancellationToken);
     Task DeleteMoodleAsync(Guid userId, string moodleId, CancellationToken cancellationToken);
 }

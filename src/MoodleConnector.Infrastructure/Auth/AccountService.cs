@@ -1,4 +1,5 @@
 using System.Net.Mail;
+using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using MoodleConnector.Application.Abstractions;
 
@@ -202,6 +203,43 @@ internal sealed class AccountService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<string> RotateApiKeyAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var account = await dbContext.UserAccounts
+            .FindAsync([userId], cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+
+        var clientId = account.ConnectorClientId ?? account.Id.ToString();
+        var connections = await dbContext.ConnectorClients
+            .Where(client => client.ClientId == clientId && client.IsActive)
+            .OrderByDescending(client => client.IsDefault)
+            .ThenBy(client => client.MoodleAlias)
+            .ToListAsync(cancellationToken);
+
+        if (connections.Count == 0)
+            throw new InvalidOperationException("Adicione uma conexão Moodle antes de gerar a API key.");
+
+        var apiKey = GenerateApiKey();
+        var apiKeyHash = ApiKeyHasher.Hash(apiKey);
+        var now = DateTimeOffset.UtcNow;
+
+        // Uma chave identifica o cliente e pode acessar suas conexões ativas.
+        // O hash fica somente na conexão principal; qualquer chave anterior é invalidada.
+        foreach (var connection in connections)
+        {
+            connection.ApiKeyHash = null;
+            connection.UpdatedAtUtc = now;
+        }
+        connections[0].ApiKeyHash = apiKeyHash;
+
+        account.ConnectorClientId = clientId;
+        account.ApiKeyEncrypted = secretProtector.Protect(apiKey);
+        account.UpdatedAtUtc = now;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return apiKey;
+    }
+
     public async Task DeleteMoodleAsync(Guid userId, string moodleId, CancellationToken cancellationToken)
     {
         var entity = await dbContext.UserAccounts
@@ -242,6 +280,12 @@ internal sealed class AccountService(
         }
 
         return normalized;
+    }
+
+    private static string GenerateApiKey()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(24);
+        return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
     private static void ValidatePassword(string password)

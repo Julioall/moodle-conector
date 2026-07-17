@@ -96,6 +96,14 @@
       cursor: pointer; transition: all 0.2s;
     }
     .btn-copy:hover { background: rgba(249,115,22,0.1); border-color: var(--accent); }
+    .btn-copy:disabled { opacity: 0.45; cursor: not-allowed; }
+    .api-key-actions { margin-top: 12px; display: flex; justify-content: flex-end; }
+    .btn-rotate-key {
+      padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border-subtle);
+      background: var(--bg-elevated); color: var(--text-secondary); font-family: inherit;
+      font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    }
+    .btn-rotate-key:hover { color: var(--accent); border-color: var(--accent); }
     .api-key-hint {
       margin-top: 12px; padding: 12px 16px; border-radius: 10px;
       background: rgba(234,179,8,0.06); border: 1px solid rgba(234,179,8,0.15);
@@ -268,6 +276,9 @@
             <div class="api-key-hint">
               <span>⚠️</span>
               <span>Adicione o header <code>X-Mcp-Api-Key: &lt;sua-chave&gt;</code> em requisições para o endpoint <code>/mcp</code>.</span>
+            </div>
+            <div class="api-key-actions">
+              <button onclick="rotateApiKey()" id="rotate-key-btn" class="btn-rotate-key">Gerar nova chave</button>
             </div>
           </div>
         </div>
@@ -475,6 +486,28 @@
         const d = document.getElementById('api-key-display');
         const r = document.createRange(); r.selectNodeContents(d);
         const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      }
+    }
+
+    async function rotateApiKey() {
+      if (state.connections.length === 0) {
+        alert('Adicione uma conexão Moodle antes de gerar a API key.');
+        return;
+      }
+      if (state.apiKey && !confirm('Gerar uma nova API key? A chave atual será invalidada imediatamente.')) return;
+
+      const btn = document.getElementById('rotate-key-btn');
+      try {
+        setLoading(btn, true);
+        const result = await api('/api/account/api-key/rotate', { method: 'POST' });
+        state.apiKey = result.apiKey;
+        document.getElementById('api-key-display').textContent = result.apiKey;
+        document.getElementById('copy-btn').disabled = false;
+        alert('Nova API key gerada. Copie e atualize as integrações que usavam a chave anterior.');
+      } catch (err) {
+        alert(err.message || 'Não foi possível gerar uma nova API key.');
+      } finally {
+        setLoading(btn, false, 'Gerar nova chave');
       }
     }
 

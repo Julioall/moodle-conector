@@ -182,7 +182,7 @@ internal sealed partial class MoodleReportBuilderClient(
         if (value.ValueKind == JsonValueKind.Number)
         {
             if (value.TryGetInt64(out var integer)) return integer;
-            if (value.TryGetDecimal(out var number)) return number;
+            if (value.TryGetDecimal(out var decimalNumber)) return decimalNumber;
             return value.GetDouble();
         }
         if (value.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
@@ -197,8 +197,8 @@ internal sealed partial class MoodleReportBuilderClient(
             return date.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
 
         if (header.StartsWith("nota", StringComparison.OrdinalIgnoreCase) &&
-            decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.GetCultureInfo("pt-BR"), out var number))
-            return number;
+            decimal.TryParse(trimmed, NumberStyles.Number, CultureInfo.GetCultureInfo("pt-BR"), out var grade))
+            return grade;
 
         return trimmed;
     }

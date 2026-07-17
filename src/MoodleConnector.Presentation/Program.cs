@@ -784,6 +784,32 @@ app.MapGet("/api/account/me", async (
     });
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapPost("/api/account/api-key/rotate", async (
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    context.Response.Headers.CacheControl = "no-store";
+    try
+    {
+        var apiKey = await accountService.RotateApiKeyAsync(identity.Id, cancellationToken);
+        return Results.Ok(new
+        {
+            ok = true,
+            apiKey,
+            message = "Nova API key gerada. A chave anterior foi invalidada."
+        });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapPost("/api/account/connect-moodle", async (
     ConnectMoodleInput input,
     HttpContext context,
