@@ -316,7 +316,9 @@ internal sealed class AccountService(
             .ToListAsync(cancellationToken);
         var oauthAuthorizationIds = oauthAuthorizations.Select(authorization => authorization.Id).ToArray();
         dbContext.OAuthTokens.RemoveRange(await dbContext.OAuthTokens
-            .Where(token => token.AuthorizationId != null && oauthAuthorizationIds.Contains(token.AuthorizationId))
+            .Where(token =>
+                EF.Property<string?>(token, "AuthorizationId") != null &&
+                oauthAuthorizationIds.Contains(EF.Property<string>(token, "AuthorizationId")))
             .ToListAsync(cancellationToken));
         dbContext.OAuthAuthorizations.RemoveRange(oauthAuthorizations);
         dbContext.UserAccounts.Remove(account);
