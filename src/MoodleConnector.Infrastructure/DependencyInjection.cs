@@ -8,6 +8,7 @@ using MoodleConnector.Application.Pedagogy;
 using MoodleConnector.Infrastructure.Configuration;
 using MoodleConnector.Infrastructure.DocumentExtraction;
 using MoodleConnector.Infrastructure.Pedagogy;
+using MoodleConnector.Infrastructure.Reports;
 using Polly;
 using Polly.Extensions.Http;
 
@@ -95,6 +96,7 @@ public static class DependencyInjection
         services.AddScoped<IMoodleConnectorCredentialsProvider, HttpContextMoodleConnectorCredentialsProvider>();
         services.AddScoped<IGradingTechnicalDiscoveryEnvironment, GradingTechnicalDiscoveryEnvironment>();
         services.AddScoped<IMoodleConnectionSelection, MoodleConnectionSelection>();
+        services.AddScoped<IMoodleReportBuilderClient, MoodleReportBuilderClient>();
         services.AddSingleton<IConnectorSecretProtector, AesGcmConnectorSecretProtector>();
 
         services

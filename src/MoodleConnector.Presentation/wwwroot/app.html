@@ -347,7 +347,12 @@
         state.apiKey = me.apiKey;
         state.connections = me.moodleConnections || [];
         document.getElementById('user-greeting').textContent = `Olá, ${me.name}!`;
-        document.getElementById('api-key-display').textContent = state.apiKey || 'Nenhuma API Key. Adicione um Moodle para gerar.';
+        document.getElementById('api-key-display').textContent = state.apiKey || (
+          state.connections.length > 0
+            ? 'API Key armazenada indisponível. É necessário gerar uma nova chave.'
+            : 'Nenhuma API Key. Adicione um Moodle para gerar.'
+        );
+        document.getElementById('copy-btn').disabled = !state.apiKey;
         renderConnections();
       } catch { window.location.href = '/auth.html'; }
     }

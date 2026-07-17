@@ -38,6 +38,7 @@ using System.Threading.RateLimiting;
 using MediatR;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Presentation;
+using MoodleConnector.Infrastructure.Reports;
 
 var builder = WebApplication.CreateBuilder(args);
 const string PortalAuthRateLimitPolicy = "portal-auth";
@@ -637,6 +638,54 @@ app.MapGet("/api/info", (IOptions<MoodleApiOptions> moodleOpts) => Results.Ok(ne
     moodleBaseUrlConfigured = !string.IsNullOrWhiteSpace(moodleOpts.Value.BaseUrl)
 }));
 
+app.MapGet("/api/reports/student-course", async (
+    int reportId,
+    int? pageSize,
+    string? api_key,
+    HttpContext context,
+    IMcpConnectorClientResolver clientResolver,
+    IMoodleReportBuilderClient reportClient,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(api_key))
+        return Results.Json(new { error = "missing_api_key", message = "Informe api_key na query string." }, statusCode: 401);
+
+    var connectorClient = await clientResolver.ResolveByApiKeyAsync(api_key, cancellationToken);
+    if (connectorClient is null)
+        return Results.Json(new { error = "invalid_api_key", message = "API key invalida ou inativa." }, statusCode: 401);
+
+    if (reportId is not (509 or 512))
+        return Results.BadRequest(new { error = "invalid_report_id", message = "reportId deve ser 509 ou 512." });
+
+    var identity = new ClaimsIdentity("ReportApiKey");
+    identity.AddClaim(new Claim("connector_client_id", connectorClient.ClientId));
+    identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, connectorClient.ClientId));
+    context.User = new ClaimsPrincipal(identity);
+
+    try
+    {
+        var report = await reportClient.DownloadAsync(reportId, pageSize ?? 5000, cancellationToken);
+        return Results.Ok(new
+        {
+            atualizadoEm = report.UpdatedAt,
+            total = report.Rows.Count,
+            dados = report.Rows
+        });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Json(new { error = "moodle_report_error", message = ex.Message }, statusCode: 502);
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Json(new { error = "moodle_unavailable", message = ex.Message }, statusCode: 502);
+    }
+    catch (JsonException ex)
+    {
+        return Results.Json(new { error = "invalid_moodle_json", message = "O Moodle devolveu um JSON invalido.", detail = ex.Message }, statusCode: 502);
+    }
+}).RequireRateLimiting(AdminApiRateLimitPolicy);
+
 app.MapPost("/api/account/register", async (
     RegisterAccountInput input,
     HttpContext context,
@@ -717,6 +766,8 @@ app.MapGet("/api/account/me", async (
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
+    context.Response.Headers.CacheControl = "no-store";
+
     var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
     if (profile is null) return Results.NotFound();
 
@@ -727,6 +778,7 @@ app.MapGet("/api/account/me", async (
         profile.Name,
         profile.Email,
         profile.HasMoodleConnected,
+        profile.ApiKey,
         hasApiKey = !string.IsNullOrWhiteSpace(profile.ApiKey),
         profile.MoodleConnections
     });
