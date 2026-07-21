@@ -14,7 +14,8 @@ namespace MoodleConnector.Application.Grading;
 public sealed record CreateGradingLaunchPreviewCommand(
     Guid BatchJobId,
     IReadOnlyList<Guid> GradingItemIds,
-    bool OnlyReviewed) : IRequest<CreateGradingLaunchPreviewResult>;
+    bool OnlyReviewed,
+    bool AllowOverwriteExisting = false) : IRequest<CreateGradingLaunchPreviewResult>;
 
 public sealed record CreateGradingLaunchPreviewResult(
     [property: JsonPropertyName("pendingActionId")] Guid PendingActionId,
@@ -52,7 +53,8 @@ public sealed record GradingLaunchFailure(
 
 public sealed record GradingLaunchPayload(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
-    [property: JsonPropertyName("items")] IReadOnlyList<GradingLaunchPayloadItem> Items);
+    [property: JsonPropertyName("items")] IReadOnlyList<GradingLaunchPayloadItem> Items,
+    [property: JsonPropertyName("allowOverwriteExisting")] bool AllowOverwriteExisting = false);
 
 public sealed record GradingLaunchPayloadItem(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -136,7 +138,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
 
         var payload = new GradingLaunchPayload(
             batch.Id,
-            ready.Select(ToPayloadItem).ToArray());
+            ready.Select(ToPayloadItem).ToArray(),
+            request.AllowOverwriteExisting);
         var previewItems = ready.Select(ToPreviewItem).ToArray();
         var itemLabel = ready.Count == 1 ? "CORRECAO" : "CORRECOES";
         var activityScope = string.Join(
@@ -145,8 +148,11 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 .Select(item => item.AssignmentId.ToString(CultureInfo.InvariantCulture))
                 .Distinct(StringComparer.Ordinal)
                 .Take(10));
+        var overwriteScope = request.AllowOverwriteExisting
+            ? " E AUTORIZO SOBRESCREVER NOTAS E FEEDBACKS EXISTENTES"
+            : string.Empty;
         var confirmationText =
-            $"CONFIRMO O LANCAMENTO DE {ready.Count} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO NOTA_E_FEEDBACK";
+            $"CONFIRMO O LANCAMENTO DE {ready.Count} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO NOTA_E_FEEDBACK{overwriteScope}";
         var pending = await pendingActions.CreatePendingActionAsync(
             ToolName,
             ToolRiskLevel.CriticalHumanConfirmedWrite,
@@ -366,7 +372,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 continue;
             }
 
-            if (existingGradeResult.ExistingGrade?.HasGrade == true)
+            if (existingGradeResult.ExistingGrade?.HasGrade == true && !payload.AllowOverwriteExisting)
             {
                 var message = $"O Moodle ja possui nota existente para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma confirmacao especifica de sobrescrita antes de lancar.";
                 item.MarkCommitFailed(message);
@@ -414,6 +420,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             }
 
             if (submissionAttemptResult.CurrentStatus?.HasFeedback == true &&
+                !payload.AllowOverwriteExisting &&
                 !string.IsNullOrWhiteSpace(payloadItem.FeedbackText))
             {
                 var message = $"O Moodle ja possui feedback existente para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma confirmacao especifica de sobrescrita antes de lancar.";

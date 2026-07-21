@@ -179,6 +179,8 @@ body{
 .btn-send:active:not(:disabled){transform:translateY(0)}
 .btn-send:disabled{opacity:.4;cursor:not-allowed;transform:none}
 .btn-send-count{font-size:.7rem;color:var(--text-muted);font-weight:500}
+.overwrite-option{display:flex;align-items:center;gap:6px;font-size:.7rem;color:var(--text-secondary);cursor:pointer}
+.overwrite-option input{accent-color:var(--danger)}
 
 /* ─── Confirm Modal ─── */
 .modal-overlay{
@@ -292,6 +294,10 @@ body{
 <!-- Bottom Bar -->
 <div class="bottom-bar" id="bottom-bar" style="display:none">
   <span class="btn-send-count" id="send-count-label">0 alunos para enviar</span>
+  <label class="overwrite-option" title="Exige uma confirmação explícita antes de substituir dados no Moodle.">
+    <input type="checkbox" id="allow-overwrite">
+    Sobrescrever nota/feedback existente
+  </label>
   <button class="btn-send" id="btn-send" disabled>Enviar Correções ao Moodle</button>
 </div>
 
@@ -300,6 +306,7 @@ body{
   <div class="modal">
     <h2>Confirmar envio</h2>
     <p>Você está prestes a enviar a nota e o feedback de <strong id="confirm-count">0</strong> aluno(s) para o Moodle. Deseja continuar?</p>
+    <p id="overwrite-warning" style="display:none;color:var(--danger);font-weight:600">Atenção: notas e feedbacks que já estiverem no Moodle serão substituídos.</p>
     <div class="modal-actions">
       <button class="btn btn-cancel" onclick="closeModal()">Cancelar</button>
       <button class="btn btn-confirm" id="btn-confirm" onclick="doSend()">Confirmar</button>
@@ -318,6 +325,7 @@ const state = {
   pendingActionId: null,
   confirmationText: null,
   selectedIds: new Set(),
+  launchItemIds: new Set(),
   courseName: null
 };
 let rpcId = 0;
@@ -470,7 +478,7 @@ function renderAll() {
   const container = document.getElementById("cards-container");
   container.style.display = "";
   container.innerHTML = "";
-  // Reset selection on each render (all cards start checked = all selected by default)
+  // Rebuild selection from persisted backend state. Already sent items stay locked.
   state.selectedIds.clear();
 
   if (state.items.length === 0) {
@@ -516,10 +524,11 @@ function renderAll() {
     const metaText = item.assignmentName ? item.assignmentName : ('Atividade ' + item.assignmentId);
 
     const gid = item.gradingItemId;
+    const wasSent = String(item.commitStatus).toLowerCase() === "succeeded";
 
     // ── Card root ──
     const card = document.createElement("div");
-    card.className = "student-card";
+    card.className = "student-card" + (wasSent ? " sent" : "");
     card.id = "card-" + gid;
 
     // ── Card Header ──
@@ -532,7 +541,9 @@ function renderAll() {
     chk.type = "checkbox";
     chk.className = "card-checkbox";
     chk.id = "chk-" + gid;
-    chk.checked = true;
+    chk.checked = !wasSent;
+    chk.disabled = wasSent;
+    if (!wasSent) state.selectedIds.add(gid);
     chk.addEventListener("click", e => e.stopPropagation());
     chk.addEventListener("change", () => toggleSelect(gid, chk.checked));
 
@@ -645,6 +656,8 @@ function renderAll() {
     container.appendChild(card);
   });
 
+  updateSendButton();
+
   // Auto-open card when there is only one student
   if (state.items.length === 1) {
     const onlyCard = document.getElementById("card-" + state.items[0].gradingItemId);
@@ -702,12 +715,12 @@ function toggleSelect(id, checked) {
 }
 
 function updateSendButton() {
-  const n = state.selectedIds.size > 0 ? state.selectedIds.size : state.items.length;
-  const label = state.selectedIds.size > 0
+  const n = state.selectedIds.size;
+  const label = n > 0
     ? n + " selecionado" + (n!==1?"s":"")
-    : n + " aluno" + (n!==1?"s":"")+" para enviar";
+    : "Nenhuma correção pendente selecionada";
   document.getElementById("send-count-label").textContent = label;
-  document.getElementById("btn-send").disabled = state.items.length === 0;
+  document.getElementById("btn-send").disabled = n === 0;
 }
 
 // ─── Send Flow ───
@@ -716,33 +729,38 @@ document.getElementById("btn-send").addEventListener("click", async ()=>{
   btn.disabled = true;
   btn.textContent = "Salvando rascunhos...";
 
-  // Only send selected items; fall back to all if none explicitly selected
-  const toSend = state.selectedIds.size > 0
-    ? state.items.filter(i => state.selectedIds.has(i.gradingItemId))
-    : state.items;
+  const toSend = state.items.filter(i => state.selectedIds.has(i.gradingItemId));
 
-  let savedCount = 0;
-  const savedIds = [];
-  for (const item of toSend) {
+  const reviews = toSend.map(item => {
     const fb = document.getElementById("fb-"+item.gradingItemId)?.value || "";
     const gr = document.getElementById("grade-"+item.gradingItemId)?.value;
-    try {
-      await callTool("atualizar_rascunho_correcao", {
-        gradingItemId: item.gradingItemId,
-        finalGrade: gr ? parseFloat(gr) : null,
-        finalFeedback: fb,
-        teacherDecision: "approved",
-        expectedReviewStatus: item.reviewStatus || "NotReviewed"
-      });
-      savedCount++;
-      savedIds.push(item.gradingItemId);
-    } catch(e) {
-      toast("Erro ao salvar "+getDisplayName(item)+": "+e.message, "error");
-    }
+    return {
+      gradingItemId: item.gradingItemId,
+      finalGrade: gr ? parseFloat(gr) : null,
+      finalFeedback: fb,
+      teacherDecision: "approved",
+      expectedReviewStatus: item.reviewStatus || "NotReviewed"
+    };
+  });
+
+  let savedIds = [];
+  try {
+    const saveResult = await callTool("atualizar_rascunhos_correcao_lote", { items: reviews });
+    const saveData = extractData(saveResult);
+    savedIds = Array.isArray(saveData?.savedItemIds) ? saveData.savedItemIds : [];
+    const failures = Array.isArray(saveData?.failures) ? saveData.failures : [];
+    failures.forEach(failure => {
+      const detail = document.getElementById("send-error-"+failure.gradingItemId);
+      const card = document.getElementById("card-"+failure.gradingItemId);
+      if (detail) detail.textContent = failure.message;
+      if (card) card.classList.add("send-error", "open");
+    });
+  } catch(e) {
+    toast(humanizeToolError(e, "save"), "error");
   }
 
-  if (savedCount === 0) {
-    toast("Nenhum item foi salvo.", "error");
+  if (savedIds.length === 0) {
+    toast("Não consegui salvar nenhuma das revisões. Os campos continuam na tela para você conferir e tentar novamente.", "error");
     btn.disabled = false;
     btn.textContent = "Enviar Correções ao Moodle";
     return;
@@ -754,19 +772,26 @@ document.getElementById("btn-send").addEventListener("click", async ()=>{
     const result = await callTool("criar_previa_lancamento_lote", {
       batchJobId: state.batchJobId,
       gradingItemIds: savedIds,
-      onlyReviewed: true
+      onlyReviewed: true,
+      allowOverwriteExisting: document.getElementById("allow-overwrite").checked
     });
     const data = extractData(result);
     if (data && data.pendingActionId && data.pendingActionId !== "00000000-0000-0000-0000-000000000000") {
       state.pendingActionId = data.pendingActionId;
       state.confirmationText = data.confirmationText;
-      document.getElementById("confirm-count").textContent = data.readyItems || savedCount;
+      state.launchItemIds = new Set((data.launches || []).map(item => item.gradingItemId));
+      document.getElementById("confirm-count").textContent = data.readyItems || savedIds.length;
+      document.getElementById("overwrite-warning").style.display =
+        document.getElementById("allow-overwrite").checked ? "" : "none";
       document.getElementById("confirm-modal").classList.add("show");
     } else {
-      toast("Não foi possível preparar o envio. Verifique se os itens têm nota e feedback.", "error");
+      const warning = Array.isArray(data?.warnings) ? data.warnings[0] : null;
+      toast(warning
+        ? "Ainda não há correções prontas para enviar. "+warning
+        : "Ainda não há correções pendentes prontas. Confira nota, feedback e revisão dos itens.", "info");
     }
   } catch(e) {
-    toast("Erro ao preparar: "+e.message, "error");
+    toast(humanizeToolError(e, "prepare"), "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Enviar Correções ao Moodle";
@@ -801,7 +826,7 @@ async function doSend() {
       state.items.forEach(i => {
         const c = document.getElementById("card-"+i.gradingItemId);
         if (!c) return;
-        const wasSending = state.selectedIds.size === 0 || state.selectedIds.has(i.gradingItemId);
+        const wasSending = state.launchItemIds.has(i.gradingItemId);
         if (!wasSending) return;
 
         c.classList.remove("sent", "send-error");
@@ -816,8 +841,11 @@ async function doSend() {
         } else {
           if (errorDetail) errorDetail.textContent = "";
           c.classList.add("sent");
+          i.commitStatus = "Succeeded";
+          state.selectedIds.delete(i.gradingItemId);
         }
       });
+      updateSendButton();
 
       const distinctReasons = [...new Set(
         failures.map(f => f.message).filter(Boolean)
@@ -840,7 +868,7 @@ async function doSend() {
       toast("Envio concluído.", "success");
     }
   } catch(e) {
-    toast("Erro no envio: "+e.message, "error");
+    toast(humanizeToolError(e, "send"), "error");
   } finally {
     btn.disabled = false;
     btn.textContent = "Confirmar";
@@ -854,6 +882,18 @@ function extractData(result) {
   if (result.data) return result.data;
   if (result.content?.[0]?.text) { try { return JSON.parse(result.content[0].text).data; } catch {} }
   return result;
+}
+
+function humanizeToolError(error, phase) {
+  const raw = String(error?.message || error || "");
+  if (/RATE_LIMITED|limite de chamadas MCP/i.test(raw)) {
+    return "Fizemos muitas operações em pouco tempo. Suas revisões já salvas não serão perdidas. Aguarde alguns minutos, recarregue o lote e tente novamente uma única vez.";
+  }
+  if (/Nenhum item (revisado e )?pronto para lancamento/i.test(raw)) {
+    return "Não encontrei nenhuma correção pendente pronta para enviar. Recarregue o lote: itens já enviados aparecerão marcados, e os demais precisam ter nota e feedback revisados.";
+  }
+  const action = phase === "send" ? "enviar as correções" : "preparar o envio";
+  return "Não foi possível "+action+" agora. Nada será reenviado automaticamente. Detalhes: "+raw;
 }
 
 function getDisplayName(item) {

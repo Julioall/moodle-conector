@@ -297,6 +297,31 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task ConfirmLaunch_SobrescreveNotaExistenteQuandoAutorizadoNaPrevia()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.ExistingGrades.ExistingGrades.Add(new AssignmentExistingGrade("501", "101", 7.5m, true));
+        fixture.SubmissionStatuses.Statuses.Add(new AssignmentSubmissionAttemptStatus("501", "101", 0, "submitted", HasFeedback: true));
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id, allowOverwriteExisting: true);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository, fixture.GradingRepository, fixture.Confirmations,
+            fixture.Capabilities, fixture.ExistingGrades, fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway, fixture.AuditLogs, fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.SentItems);
+        Assert.Equal(0, result.FailedItems);
+        Assert.Single(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Succeeded, item.CommitStatus);
+    }
+
+    [Fact]
     public async Task ConfirmLaunch_BloqueiaQuandoNaoConsegueValidarNotaExistente()
     {
         var fixture = new Fixture();
@@ -623,7 +648,8 @@ public sealed class GradingLaunchCommandHandlerTests
         public PendingMoodleAction CreatePendingLaunchAction(
             Guid batchId,
             Guid gradingItemId,
-            string? draftVersionHash = null)
+            string? draftVersionHash = null,
+            bool allowOverwriteExisting = false)
         {
             if (!SubmissionStatuses.Statuses.Any(status =>
                 status.AssignmentId == "501" &&
@@ -648,7 +674,8 @@ public sealed class GradingLaunchCommandHandlerTests
                         "Feedback final revisado.",
                         AttemptNumber: 0,
                         DraftVersionHash: draftVersionHash ?? GradingDraftVersionHash.Compute(GradingRepository.Items.Single(item => item.Id == gradingItemId)))
-                ]);
+                ],
+                allowOverwriteExisting);
 
             return new PendingMoodleAction
             {

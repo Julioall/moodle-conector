@@ -1102,7 +1102,8 @@ app.MapPost("/api/grading/batches/{id:guid}/preview", async (
             new CreateGradingLaunchPreviewCommand(
                 id,
                 input.GradingItemIds ?? [],
-                input.OnlyReviewed),
+                input.OnlyReviewed,
+                input.AllowOverwriteExisting),
             cancellationToken);
         return Results.Ok(result);
     }
@@ -1993,5 +1994,8 @@ public sealed record ConnectMoodleInput(string MoodleAlias, string MoodleBaseUrl
 public sealed record UpdateMoodleInput(string MoodleAlias, string MoodleBaseUrl, string? MoodleUsername, string? MoodlePassword, bool IsDefault = false, bool CanWrite = false);
 
 public sealed record ReviewGradingItemInput(decimal? FinalGrade, string? FinalFeedback, string? TeacherDecision, string? ReviewNotes, string? ExpectedReviewStatus);
-public sealed record PreviewGradingBatchInput(Guid[]? GradingItemIds, bool OnlyReviewed = true);
+public sealed record PreviewGradingBatchInput(
+    Guid[]? GradingItemIds,
+    bool OnlyReviewed = true,
+    bool AllowOverwriteExisting = false);
 public sealed record ConfirmGradingBatchInput(Guid PendingActionId, string ConfirmationText);

@@ -277,6 +277,72 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
+        Name = "atualizar_rascunhos_correcao_lote",
+        Title = "Atualizar Rascunhos Correcao Lote",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<BatchDraftUpdateResult>))]
+    [Description("Salva, em uma unica chamada, as revisoes humanas de nota e feedback de varios itens. Nao escreve no Moodle.")]
+    public async Task<CallToolResult> AtualizarRascunhosCorrecaoLoteAsync(
+        [Description("Revisoes selecionadas pelo professor/tutor.")]
+        ReviewedGradingDraftInput[] items,
+        CancellationToken cancellationToken = default)
+    {
+        if (items.Length == 0)
+        {
+            return ToolResultHelper.Error<BatchDraftUpdateResult>("Selecione pelo menos uma correcao para salvar.");
+        }
+
+        var savedIds = new List<Guid>();
+        var failures = new List<BatchDraftUpdateFailure>();
+        foreach (var item in items)
+        {
+            try
+            {
+                await mediator.Send(new UpdateAssistedGradingDraftCommand(
+                    item.GradingItemId,
+                    item.FinalGrade,
+                    item.FinalFeedback,
+                    item.TeacherDecision,
+                    item.ReviewNotes,
+                    item.ExpectedReviewStatus), cancellationToken);
+                savedIds.Add(item.GradingItemId);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                failures.Add(new BatchDraftUpdateFailure(item.GradingItemId, ex.Message));
+            }
+        }
+
+        var data = new BatchDraftUpdateResult(savedIds.Count, failures.Count, savedIds, failures);
+        var response = new ToolResponse<BatchDraftUpdateResult>(
+            failures.Count == 0 ? "ok" : "partial_failure",
+            data,
+            failures.Select(failure => failure.Message).ToArray(),
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock
+            {
+                Text = failures.Count == 0
+                    ? $"{savedIds.Count} correcao(oes) revisada(s) foram salvas e estao prontas para preparar o envio."
+                    : $"Salvei {savedIds.Count} correcao(oes), mas {failures.Count} precisam ser revisadas novamente."
+            }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = savedIds.Count == 0
+        };
+    }
+
+    [McpServerTool(
         Name = "criar_previa_lancamento_lote",
         Title = "Criar Previa Lancamento Lote",
         ReadOnly = false,
@@ -293,12 +359,15 @@ public sealed class MoodleGradingTools(
         Guid[]? gradingItemIds = null,
         [Description("Quando true, inclui apenas itens revisados.")]
         bool onlyReviewed = true,
+        [Description("Quando true, a confirmacao autoriza explicitamente sobrescrever notas e feedbacks que ja existem no Moodle.")]
+        bool allowOverwriteExisting = false,
         CancellationToken cancellationToken = default)
     {
         return CreateLaunchPreviewCoreAsync(
             batchJobId,
             gradingItemIds ?? [],
             onlyReviewed,
+            allowOverwriteExisting,
             cancellationToken);
     }
 
@@ -1063,6 +1132,7 @@ public sealed class MoodleGradingTools(
         Guid batchJobId,
         IReadOnlyList<Guid> gradingItemIds,
         bool onlyReviewed,
+        bool allowOverwriteExisting,
         CancellationToken cancellationToken)
     {
         if (batchJobId == Guid.Empty)
@@ -1074,7 +1144,7 @@ public sealed class MoodleGradingTools(
         try
         {
             data = await mediator.Send(
-                new CreateGradingLaunchPreviewCommand(batchJobId, gradingItemIds, onlyReviewed),
+                new CreateGradingLaunchPreviewCommand(batchJobId, gradingItemIds, onlyReviewed, allowOverwriteExisting),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -1097,7 +1167,9 @@ public sealed class MoodleGradingTools(
         {
             Content = [new TextContentBlock { Text = BuildLaunchPreviewNarration(data) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = data.PendingActionId == Guid.Empty
+            // Ausencia de itens prontos e um estado de negocio recuperavel, nao
+            // um argumento invalido da chamada MCP.
+            IsError = false
         };
     }
 
@@ -1616,3 +1688,21 @@ public sealed class MoodleGradingTools(
         return sb.ToString();
     }
 }
+
+public sealed record ReviewedGradingDraftInput(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("finalGrade")] decimal? FinalGrade,
+    [property: JsonPropertyName("finalFeedback")] string FinalFeedback,
+    [property: JsonPropertyName("teacherDecision")] string TeacherDecision,
+    [property: JsonPropertyName("reviewNotes")] string? ReviewNotes = null,
+    [property: JsonPropertyName("expectedReviewStatus")] string ExpectedReviewStatus = "NotReviewed");
+
+public sealed record BatchDraftUpdateFailure(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("message")] string Message);
+
+public sealed record BatchDraftUpdateResult(
+    [property: JsonPropertyName("savedItems")] int SavedItems,
+    [property: JsonPropertyName("failedItems")] int FailedItems,
+    [property: JsonPropertyName("savedItemIds")] IReadOnlyList<Guid> SavedItemIds,
+    [property: JsonPropertyName("failures")] IReadOnlyList<BatchDraftUpdateFailure> Failures);
