@@ -1,5 +1,4 @@
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -30,12 +29,14 @@ internal sealed class MoodleAccessTokenProvider(
             ? "moodle_mobile_app"
             : _moodleOptions.LoginService;
 
-        var endpointBuilder = new StringBuilder(credentials.BaseUrl.TrimEnd('/')).Append("/login/token.php?");
-        endpointBuilder.Append("username=").Append(Uri.EscapeDataString(credentials.Username));
-        endpointBuilder.Append("&password=").Append(Uri.EscapeDataString(credentials.Password));
-        endpointBuilder.Append("&service=").Append(Uri.EscapeDataString(serviceName));
-
-        using var response = await httpClient.GetAsync(endpointBuilder.ToString(), cancellationToken);
+        var endpoint = $"{credentials.BaseUrl.TrimEnd('/')}/login/token.php";
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["username"] = credentials.Username,
+            ["password"] = credentials.Password,
+            ["service"] = serviceName
+        });
+        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken: cancellationToken);

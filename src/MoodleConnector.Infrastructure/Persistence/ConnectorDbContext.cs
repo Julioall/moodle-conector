@@ -95,7 +95,13 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         auditLog.Property(x => x.RiskLevel).HasConversion<int>().IsRequired();
         auditLog.Property(x => x.ActorSubject).HasMaxLength(200).IsRequired();
         auditLog.Property(x => x.ActorEmail).HasMaxLength(320);
+        auditLog.Property(x => x.MoodleConnectionId).HasMaxLength(128);
+        auditLog.Property(x => x.MoodleConnectionAlias).HasMaxLength(128);
         auditLog.Property(x => x.MoodleFunction).HasMaxLength(120);
+        auditLog.Property(x => x.PendingActionId);
+        auditLog.Property(x => x.StartedAt);
+        auditLog.Property(x => x.FinishedAt);
+        auditLog.Property(x => x.DurationMs);
         auditLog.Property(x => x.RequestSanitizedJson).HasColumnType("jsonb").IsRequired();
         auditLog.Property(x => x.ResponseSummaryJson).HasColumnType("jsonb").IsRequired();
         auditLog.Property(x => x.Status).HasMaxLength(80).IsRequired();
@@ -103,6 +109,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         auditLog.HasIndex(x => x.CorrelationId);
         auditLog.HasIndex(x => new { x.BatchJobId, x.CreatedAt });
         auditLog.HasIndex(x => new { x.ActorSubject, x.CreatedAt });
+        auditLog.HasIndex(x => new { x.MoodleConnectionId, x.CreatedAt });
 
         var moodleUserLink = modelBuilder.Entity<MoodleUserLink>();
         moodleUserLink.ToTable("moodle_user_links");

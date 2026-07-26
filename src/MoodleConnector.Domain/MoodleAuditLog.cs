@@ -20,7 +20,19 @@ public sealed class MoodleAuditLog
 
     public long? CourseId { get; init; }
 
+    public string? MoodleConnectionId { get; init; }
+
+    public string? MoodleConnectionAlias { get; init; }
+
     public string? MoodleFunction { get; init; }
+
+    public Guid? PendingActionId { get; init; }
+
+    public DateTimeOffset? StartedAt { get; init; }
+
+    public DateTimeOffset? FinishedAt { get; init; }
+
+    public long? DurationMs { get; init; }
 
     public string RequestSanitizedJson { get; init; } = "{}";
 

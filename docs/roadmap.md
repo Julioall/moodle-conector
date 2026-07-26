@@ -97,7 +97,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Evidências necessárias / disponíveis:** texto institucional, canal, turma e destinatários autorizados; participantes visíveis e template informado pelo usuário.
 - **Funções Moodle / tool MCP:** `core_enrol_get_enrolled_users`, `core_message_send_instant_messages`; `preparar_mensagem_boas_vindas` / `confirmar_mensagem_boas_vindas`.
 - **Nível / cobertura e limites:** **Nível B**; envio é composto por mensagens individuais, sem broadcast nativo ou agendamento.
-- **Limitações:** `MessagesWriteEnabled=false` é o padrão, mas a flag ainda não controla efetivamente o registro/execução das tools; ver backlog P0.
+- **Limitações:** `MessagesWriteEnabled=false` é o padrão e bloqueia a preparação e a confirmação de mensagens; a tool pode continuar visível para oferecer uma resposta explícita de indisponibilidade.
 - **Gate humano:** prévia com critérios, exclusões, destinatários e corpo sanitizado; confirmação literal antes do envio.
 - **Status / evidência de conclusão:** **parcial**; pares em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs` e testes de preparação em `tests/MoodleConnector.Application.Tests/Messages/PrepareTutorMessageCommandHandlerTests.cs`; o gate da flag está incompleto.
 
@@ -221,9 +221,9 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Evidências necessárias / disponíveis:** nota atual, faixa, justificativa, feedback e autorização; dados da tarefa/grade e ação pendente.
 - **Funções Moodle / tool MCP:** `mod_assign_get_grades`, `mod_assign_save_grade`; `preparar_lancamento_nota`, `confirmar_lancamento_nota` e fluxo em lote.
 - **Nível / cobertura e limites:** **Nível B** para o fluxo individual enquanto não houver teste dedicado ponta a ponta; uma escrita por estudante/tarefa.
-- **Limitações:** `AssignmentGradeWriteEnabled=true` no `appsettings.json` atual viola o default seguro requerido; disponibilidade da função não prova permissão contextual.
+- **Limitações:** disponibilidade da função não prova permissão contextual; a escrita permanece bloqueada até a habilitação explícita de `AssignmentGradeWriteEnabled`.
 - **Gate humano:** justificativa, prévia, texto literal, escopo, `CanWrite`, flag, idempotência e auditoria.
-- **Status / evidência de conclusão:** **parcial, configuração insegura pendente**; implementação em `src/MoodleConnector.Application/Grading/IndividualGradeCommands.cs` e `src/MoodleConnector.Presentation/Tools/Grading/MoodleIndividualGradeTools.cs`, sem teste dedicado do fluxo individual; correção do default e cobertura de teste são P0.
+- **Status / evidência de conclusão:** implementação protegida por `AssignmentGradeWriteEnabled=false` como padrão e testes dedicados do fluxo individual.
 
 ## Jornada 4 — Recuperação e intervenção pedagógica
 
@@ -271,9 +271,9 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Evidências necessárias / disponíveis:** motivo observável, exclusões, consentimento/canal e histórico; sinais e participantes visíveis.
 - **Funções Moodle / tool MCP:** `core_message_send_instant_messages`; pares `preparar_mensagem_*` / `confirmar_mensagem_*` de acesso, pendência e recuperação.
 - **Nível / cobertura e limites:** **Nível B**; mensagens individuais, sem broadcast/scheduler.
-- **Limitações:** não expor nota ou “risco” a terceiros; flag de mensagens ainda não efetiva.
+- **Limitações:** não expor nota ou “risco” a terceiros; mensagens permanecem bloqueadas até a habilitação explícita de `MessagesWriteEnabled`.
 - **Gate humano:** revisar linguagem epistêmica, destinatários e confirmação literal.
-- **Status / evidência de conclusão:** **parcial**; seis pares prepare/confirm existem; flag efetiva é P0.
+- **Status / evidência de conclusão:** seis pares prepare/confirm existem, com gate efetivo na preparação e confirmação e cobertura de regressão.
 
 ### Planejar e acompanhar recuperação
 
@@ -299,7 +299,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Nível / cobertura e limites:** **Nível B**; cada destinatário recebe mensagem instantânea individual e o lote depende da seleção local.
 - **Limitações:** não há broadcast nativo, preferências completas de contato, agendamento ou garantia de leitura; `MessagesWriteEnabled` ainda não bloqueia efetivamente o fluxo.
 - **Gate humano:** prévia mostra curso, critérios, evidências, exclusões, quantidade/lista de destinatários e corpo sanitizado; confirmação literal, escopo, `CanWrite`, idempotência e auditoria.
-- **Status / evidência de conclusão:** **parcial**; tools em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs` e preparação testada em `tests/MoodleConnector.Application.Tests/Messages/PrepareTutorMessageCommandHandlerTests.cs`; flag efetiva, teste dedicado da confirmação e cobertura explícita são P0.
+- **Status / evidência de conclusão:** tools em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs`, com flag efetiva nos handlers de preparação e confirmação e cobertura de regressão.
 
 ### Publicar em fórum com confirmação
 
@@ -400,10 +400,10 @@ Todos os relatórios devem evoluir para declarar `source`, `collectedAt`, `perio
 - **Resultado humano:** manter escritas desligadas por padrão e executar somente a ação revisada e autorizada.
 - **Evidências necessárias / disponíveis:** conexão `CanWrite`, escopo, flag por domínio, `PendingAction`, prévia sanitizada, confirmação literal, expiração, idempotência e auditoria.
 - **Funções Moodle / tool MCP:** escritas de mensagens, fórum e nota; pares `preparar_*` / `confirmar_*`.
-- **Nível / cobertura e limites:** **Nível B** enquanto os defaults e flags não forem uniformes; uma confirmação cobre apenas a prévia persistida.
-- **Limitações:** `MessagesWriteEnabled` não controla hoje o registro/execução real; `AssignmentGradeWriteEnabled=true` no arquivo padrão é inseguro.
+- **Nível / cobertura e limites:** **Nível B**; uma confirmação cobre apenas a prévia persistida.
+- **Limitações:** as flags de escrita são fechadas por padrão e exigem habilitação operacional explícita; disponibilidade de função não substitui autorização contextual no Moodle.
 - **Gate humano:** revisão e confirmação literal obrigatórias; segurança aprova flags e escopos de produção.
-- **Status / evidência de conclusão:** **parcial**; gates de conexão, escopo, pending action e testes existem; correções de flags são P0.
+- **Status / evidência de conclusão:** gates de conexão, escopo, pending action, flags fechadas por padrão e testes de regressão existem.
 
 ### Operar, observar, endurecer e entregar
 
@@ -492,8 +492,6 @@ Esta tabela preserva rastreabilidade histórica; as jornadas são a organizaçã
 
 | Jornada(s) | Melhoria local comprovadamente pendente | Critério de conclusão |
 | --- | --- | --- |
-| 5, 7 | Tornar `MessagesWriteEnabled` efetiva no registro e/ou na execução de todas as tools reais de mensagem. | `false` impede preparo/confirmação e envio; testes cobrem ambos os estados sem registrar segredo. |
-| 3, 7 | Alterar o default de `AssignmentGradeWriteEnabled` para `false` e verificar overrides de deploy. | Configuração versionada segura; teste prova bloqueio por default e liberação explícita. |
 | 1, 2, 5, 6 | Uniformizar paginação pública **1-based** e rejeitar página menor que 1. | Contratos/tools/testes não expõem página zero. |
 | 2, 3, 4, 6 | Expor elegíveis, analisados, excluídos, limites, falhas e `isTruncated` em agregações. | Cada resposta coletiva declara denominador e cobertura, inclusive falha parcial. |
 | 1, 2, 3, 4, 6 | Implementar estados vazios não ambíguos (`zero_observado`, indisponibilidade, permissão, configuração, truncamento e falha). | Testes distinguem todos os estados; lista vazia isolada não sustenta conclusão. |

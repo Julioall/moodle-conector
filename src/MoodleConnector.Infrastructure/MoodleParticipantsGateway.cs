@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
@@ -10,10 +8,9 @@ using MoodleConnector.Domain;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleParticipantsGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleParticipantsGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleParticipantsGateway
 {
     private const int ParticipantFetchBatchSize = 100;
     private readonly MoodleApiOptions _options = options.Value;
@@ -39,7 +36,6 @@ internal sealed class MoodleParticipantsGateway(
             ? (int?)null
             : ParseMoodleId(groupId, "groupId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
 
         var targetSkip = (page - 1) * pageSize;
         var skipped = 0;
@@ -55,8 +51,7 @@ internal sealed class MoodleParticipantsGateway(
         while (participants.Count < pageSize + 1)
         {
             var moodleParticipants = await GetParticipantsBatchAsync(
-                credentials.BaseUrl,
-                token,
+                credentials,
                 normalizedCourseId,
                 statusFilter,
                 includeEmail,
@@ -152,22 +147,17 @@ internal sealed class MoodleParticipantsGateway(
 
         var normalizedCourseId = ParseMoodleId(courseId, "courseId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
-
-        var endpoint = BuildMoodleGetUrl(
-            credentials.BaseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "core_group_get_course_groups",
             new Dictionary<string, string>
             {
                 ["courseid"] = normalizedCourseId.ToString(CultureInfo.InvariantCulture)
-            });
+            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<List<GroupDto>>(cancellationToken: cancellationToken);
-        return (payload ?? [])
+        var groups = JsonSerializer.Deserialize<List<GroupDto>>(payload.GetRawText()) ?? [];
+        return groups
             .Select(group => new CourseGroupSummary(
                 ToIdString(group.Id),
                 ToIdString(group.CourseId),
@@ -177,8 +167,7 @@ internal sealed class MoodleParticipantsGateway(
     }
 
     private async Task<IReadOnlyList<ParticipantDto>> GetParticipantsBatchAsync(
-        string baseUrl,
-        string token,
+        MoodleConnectorCredentials credentials,
         int courseId,
         ParticipantStatusFilter statusFilter,
         bool includeEmail,
@@ -210,17 +199,13 @@ internal sealed class MoodleParticipantsGateway(
 
         AddMoodleOptions(parameters, options);
 
-        var endpoint = BuildMoodleGetUrl(
-            baseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "core_enrol_get_enrolled_users",
-            parameters);
+            parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<List<ParticipantDto>>(cancellationToken: cancellationToken);
-        return payload ?? [];
+        return JsonSerializer.Deserialize<List<ParticipantDto>>(payload.GetRawText()) ?? [];
     }
 
     private static CourseParticipantSummary ToParticipant(ParticipantDto dto, bool includeEmail)
@@ -308,24 +293,6 @@ internal sealed class MoodleParticipantsGateway(
             parameters[$"options[{i}][name]"] = options[i].Name;
             parameters[$"options[{i}][value]"] = options[i].Value;
         }
-    }
-
-    private static string BuildMoodleGetUrl(string baseUrl, string token, string wsFunction, IReadOnlyDictionary<string, string> parameters)
-    {
-        var builder = new StringBuilder(baseUrl.TrimEnd('/')).Append("/webservice/rest/server.php?");
-        builder.Append("wstoken=").Append(Uri.EscapeDataString(token));
-        builder.Append("&wsfunction=").Append(Uri.EscapeDataString(wsFunction));
-        builder.Append("&moodlewsrestformat=json");
-
-        foreach (var pair in parameters)
-        {
-            builder.Append('&')
-                .Append(Uri.EscapeDataString(pair.Key))
-                .Append('=')
-                .Append(Uri.EscapeDataString(pair.Value));
-        }
-
-        return builder.ToString();
     }
 
     private static int ParseMoodleId(string value, string parameterName)
@@ -434,13 +401,4 @@ internal sealed class MoodleParticipantsGateway(
         public string? IdNumber { get; init; }
     }
 
-    private async Task<string> ResolveReadTokenAsync(CancellationToken cancellationToken)
-    {
-        if (_options.AllowServiceTokenForReadOnlyQueries && !string.IsNullOrWhiteSpace(_options.ServiceToken))
-        {
-            return _options.ServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
-    }
 }

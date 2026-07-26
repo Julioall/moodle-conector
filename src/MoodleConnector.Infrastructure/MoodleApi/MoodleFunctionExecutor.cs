@@ -1,0 +1,115 @@
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Auditing;
+using MoodleConnector.Application.MoodleApi;
+using MoodleConnector.Domain;
+using System.Diagnostics;
+using System.Text.Json;
+
+namespace MoodleConnector.Infrastructure.MoodleApi;
+
+internal sealed class MoodleFunctionExecutor(
+    IMoodleFunctionCatalog catalog,
+    IMoodleRestClient restClient,
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleAuditLogRepository? auditLogs = null,
+    ICurrentUserContext? currentUser = null) : IMoodleFunctionExecutor
+{
+    public async Task<MoodleFunctionResult> ExecuteReadAsync(
+        string functionName,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            throw new ArgumentException("A funcao Moodle e obrigatoria.", nameof(functionName));
+        }
+
+        var connection = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var normalizedName = functionName.Trim();
+        var startedAt = DateTimeOffset.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var profile = await catalog.GetCurrentAsync(false, cancellationToken);
+            var descriptor = profile.Functions.FirstOrDefault(function =>
+                string.Equals(function.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+            if (descriptor is null || !descriptor.IsAvailable)
+            {
+                throw new MoodleApiException("function_not_available", "A funcao solicitada nao esta habilitada para a conexao Moodle selecionada.");
+            }
+
+            if (descriptor.Risk != MoodleFunctionRisk.Read)
+            {
+                throw new MoodleApiException(
+                    descriptor.Risk == MoodleFunctionRisk.Destructive ? "destructive_function_blocked" : "function_not_read_safe",
+                    "A funcao solicitada nao esta classificada explicitamente como leitura segura.");
+            }
+
+            var payload = await restClient.CallAsync(
+                connection,
+                descriptor.Name,
+                parameters,
+                allowServiceToken: true,
+                cancellationToken);
+            await RecordAuditAsync(connection, descriptor.Name, parameters, "read_executed", payload.GetRawText().Length, startedAt, DateTimeOffset.UtcNow, stopwatch.ElapsedMilliseconds, null, cancellationToken);
+            return new MoodleFunctionResult(descriptor.Name, payload);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await RecordAuditAsync(
+                connection,
+                normalizedName,
+                parameters,
+                "read_failed",
+                0,
+                startedAt,
+                DateTimeOffset.UtcNow,
+                stopwatch.ElapsedMilliseconds,
+                ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name,
+                cancellationToken);
+            throw;
+        }
+    }
+
+    private async Task RecordAuditAsync(
+        MoodleConnectorCredentials connection,
+        string functionName,
+        IReadOnlyDictionary<string, object?> parameters,
+        string status,
+        int responseSize,
+        DateTimeOffset startedAt,
+        DateTimeOffset finishedAt,
+        long durationMs,
+        string? errorCode,
+        CancellationToken cancellationToken)
+    {
+        if (auditLogs is null)
+        {
+            return;
+        }
+
+        await auditLogs.AddAsync(new MoodleAuditLog
+        {
+            CorrelationId = Guid.NewGuid().ToString("N"),
+            ToolName = "moodle_execute_read",
+            RiskLevel = ToolRiskLevel.ReadOnly,
+            ActorSubject = string.IsNullOrWhiteSpace(currentUser?.Subject) ? "unknown" : currentUser.Subject,
+            ActorEmail = currentUser?.Email,
+            MoodleConnectionId = connection.ConnectionId,
+            MoodleConnectionAlias = connection.Alias,
+            MoodleFunction = functionName,
+            StartedAt = startedAt,
+            FinishedAt = finishedAt,
+            DurationMs = durationMs,
+            RequestSanitizedJson = AuditPayloadSanitizer.SerializeSanitized(new
+            {
+                connectionAlias = connection.Alias,
+                parameterNames = parameters.Keys.OrderBy(name => name, StringComparer.Ordinal).ToArray()
+            }),
+            ResponseSummaryJson = JsonSerializer.Serialize(new { responseSize, durationMs }),
+            Status = status,
+            ErrorCode = errorCode
+        }, cancellationToken);
+        await auditLogs.SaveChangesAsync(cancellationToken);
+    }
+}

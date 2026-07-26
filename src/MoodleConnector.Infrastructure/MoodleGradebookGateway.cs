@@ -7,10 +7,9 @@ using MoodleConnector.Application.Configuration;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleGradebookGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleGradebookGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleGradebookGateway
 {
     private const string MoodleFunction = "gradereport_user_get_grade_items";
     private readonly MoodleApiOptions _options = options.Value;
@@ -24,25 +23,13 @@ internal sealed class MoodleGradebookGateway(
         var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
         
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
-        
-        var endpoint = $"{credentials.BaseUrl.TrimEnd('/')}/webservice/rest/server.php";
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var payload = await restClient.CallAsync(credentials, MoodleFunction, new Dictionary<string, object?>
         {
-            ["wstoken"] = token,
-            ["wsfunction"] = MoodleFunction,
-            ["moodlewsrestformat"] = "json",
             ["courseid"] = courseIdNumber.ToString(CultureInfo.InvariantCulture),
             ["userid"] = studentIdNumber.ToString(CultureInfo.InvariantCulture)
-        });
-        
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        }, cancellationToken);
 
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        ThrowIfMoodleReturnedError(payload);
-
-        return ParseGradebook(payload, courseId, studentId);
+        return ParseGradebook(payload.GetRawText(), courseId, studentId);
     }
 
     private static CourseGradebook ParseGradebook(string payload, string courseId, string studentId)
@@ -137,24 +124,4 @@ internal sealed class MoodleGradebookGateway(
         throw new ArgumentException($"O parametro {parameterName} deve ser um identificador numerico do Moodle.", parameterName);
     }
 
-    private static void ThrowIfMoodleReturnedError(string payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload) ||
-            string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        using var document = JsonDocument.Parse(payload);
-        if (document.RootElement.ValueKind != JsonValueKind.Object ||
-            !document.RootElement.TryGetProperty("exception", out var exceptionElement))
-        {
-            return;
-        }
-
-        var errorCode = document.RootElement.TryGetProperty("errorcode", out var errorCodeElement)
-            ? errorCodeElement.GetString()
-            : exceptionElement.GetString();
-        throw new InvalidOperationException($"O Moodle rejeitou a leitura de notas (gradebook): {errorCode ?? "erro_desconhecido"}.");
-    }
 }

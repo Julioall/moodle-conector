@@ -7,10 +7,9 @@ using MoodleConnector.Application.Grading;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleAssignmentSubmissionStatusGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleAssignmentSubmissionStatusGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleAssignmentSubmissionStatusGateway
 {
     private const string MoodleFunction = "mod_assign_get_submission_status";
     private readonly MoodleApiOptions _options = options.Value;
@@ -34,28 +33,13 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
         var assignmentIdNumber = ParseMoodleId(assignmentId, nameof(assignmentId));
         var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveTokenAsync(cancellationToken);
-        var endpoint = $"{credentials.BaseUrl.TrimEnd('/')}/webservice/rest/server.php";
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var payload = await restClient.CallAsync(credentials, MoodleFunction, new Dictionary<string, object?>
         {
-            ["wstoken"] = token,
-            ["wsfunction"] = MoodleFunction,
-            ["moodlewsrestformat"] = "json",
             ["assignid"] = assignmentIdNumber.ToString(CultureInfo.InvariantCulture),
             ["userid"] = studentIdNumber.ToString(CultureInfo.InvariantCulture)
-        });
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        }, cancellationToken);
 
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        ThrowIfMoodleReturnedError(payload);
-
-        return ParseStatus(payload, assignmentIdNumber, studentIdNumber);
-    }
-
-    private Task<string> ResolveTokenAsync(CancellationToken cancellationToken)
-    {
-        return tokenProvider.GetAccessTokenAsync(cancellationToken);
+        return ParseStatus(payload.GetRawText(), assignmentIdNumber, studentIdNumber);
     }
 
     private static AssignmentSubmissionAttemptStatus? ParseStatus(
@@ -170,24 +154,4 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
         throw new ArgumentException($"O parametro {parameterName} deve ser um identificador numerico do Moodle.", parameterName);
     }
 
-    private static void ThrowIfMoodleReturnedError(string payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload) ||
-            string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        using var document = JsonDocument.Parse(payload);
-        if (document.RootElement.ValueKind != JsonValueKind.Object ||
-            !document.RootElement.TryGetProperty("exception", out var exceptionElement))
-        {
-            return;
-        }
-
-        var errorCode = document.RootElement.TryGetProperty("errorcode", out var errorCodeElement)
-            ? errorCodeElement.GetString()
-            : exceptionElement.GetString();
-        throw new InvalidOperationException($"O Moodle rejeitou a leitura do status da submissao: {errorCode ?? "erro_desconhecido"}.");
-    }
 }

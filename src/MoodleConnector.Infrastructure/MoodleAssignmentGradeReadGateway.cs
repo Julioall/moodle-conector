@@ -7,10 +7,9 @@ using MoodleConnector.Application.Grading;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleAssignmentGradeReadGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleAssignmentGradeReadGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleAssignmentGradeReadGateway
 {
     private const string MoodleFunction = "mod_assign_get_grades";
     private readonly MoodleApiOptions _options = options.Value;
@@ -34,27 +33,12 @@ internal sealed class MoodleAssignmentGradeReadGateway(
         var assignmentIdNumber = ParseMoodleId(assignmentId, nameof(assignmentId));
         var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveTokenAsync(cancellationToken);
-        var endpoint = $"{credentials.BaseUrl.TrimEnd('/')}/webservice/rest/server.php";
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var payload = await restClient.CallAsync(credentials, MoodleFunction, new Dictionary<string, object?>
         {
-            ["wstoken"] = token,
-            ["wsfunction"] = MoodleFunction,
-            ["moodlewsrestformat"] = "json",
             ["assignmentids[0]"] = assignmentIdNumber.ToString(CultureInfo.InvariantCulture)
-        });
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        }, cancellationToken);
 
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        ThrowIfMoodleReturnedError(payload);
-
-        return FindGrade(payload, assignmentIdNumber, studentIdNumber);
-    }
-
-    private Task<string> ResolveTokenAsync(CancellationToken cancellationToken)
-    {
-        return tokenProvider.GetAccessTokenAsync(cancellationToken);
+        return FindGrade(payload.GetRawText(), assignmentIdNumber, studentIdNumber);
     }
 
     private static AssignmentExistingGrade? FindGrade(
@@ -138,24 +122,4 @@ internal sealed class MoodleAssignmentGradeReadGateway(
         throw new ArgumentException($"O parametro {parameterName} deve ser um identificador numerico do Moodle.", parameterName);
     }
 
-    private static void ThrowIfMoodleReturnedError(string payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload) ||
-            string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        using var document = JsonDocument.Parse(payload);
-        if (document.RootElement.ValueKind != JsonValueKind.Object ||
-            !document.RootElement.TryGetProperty("exception", out var exceptionElement))
-        {
-            return;
-        }
-
-        var errorCode = document.RootElement.TryGetProperty("errorcode", out var errorCodeElement)
-            ? errorCodeElement.GetString()
-            : exceptionElement.GetString();
-        throw new InvalidOperationException($"O Moodle rejeitou a leitura de notas: {errorCode ?? "erro_desconhecido"}.");
-    }
 }

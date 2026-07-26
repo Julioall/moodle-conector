@@ -1,21 +1,22 @@
 using System.Globalization;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleCoursesGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
     IMemoryCache cache,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleCoursesGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient,
+    IMoodleFunctionCatalog functionCatalog,
+    IMoodleBusinessFlowRegistry businessFlows,
+    IMoodleResourceResolver resourceResolver) : IMoodleCoursesGateway
 {
     private readonly MoodleApiOptions _options = options.Value;
     private static readonly TimeSpan CourseListCacheDuration = TimeSpan.FromMinutes(10);
@@ -44,6 +45,22 @@ internal sealed class MoodleCoursesGateway(
         }
 
         var normalizedQuery = query.Trim();
+        var reference = resourceResolver.Resolve(normalizedQuery);
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+        var strategy = businessFlows.ResolveStrategy("buscar_cursos", profile);
+        if (strategy?.StrategyName == "course_search" && reference.Type is MoodleResourceType.SearchTerm or MoodleResourceType.SearchUrl)
+        {
+            var searched = await SearchCoursesAsync(credentials, reference.Value, cancellationToken);
+            return searched.Take(limit).ToArray();
+        }
+        if (strategy?.StrategyName == "course_by_field" && reference.Type is MoodleResourceType.CourseId or MoodleResourceType.CourseUrl or MoodleResourceType.IdNumber or MoodleResourceType.ShortName or MoodleResourceType.CategoryId or MoodleResourceType.CategoryUrl)
+        {
+            var field = GetMoodleField(reference.Type);
+            var found = await GetCoursesByFieldAsync(credentials, field, reference.Value, cancellationToken);
+            return found.Take(limit).ToArray();
+        }
+
         var courses = await GetCachedCoursesAsync(userExternalId, cancellationToken);
 
         return courses
@@ -60,6 +77,27 @@ internal sealed class MoodleCoursesGateway(
         if (string.IsNullOrWhiteSpace(courseId))
         {
             return null;
+        }
+
+        var reference = resourceResolver.Resolve(courseId);
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+        var strategy = businessFlows.ResolveStrategy("consultar_curso", profile);
+        if (strategy?.StrategyName == "course_by_field" && reference.Type is MoodleResourceType.CourseId or MoodleResourceType.CourseUrl or MoodleResourceType.IdNumber or MoodleResourceType.ShortName)
+        {
+            var found = await GetCoursesByFieldAsync(credentials, GetMoodleField(reference.Type), reference.Value, cancellationToken);
+            var course = found.FirstOrDefault();
+            if (course is not null)
+            {
+                if (await IsEnrolledInCourseAsync(credentials, userExternalId, course.CourseId, profile, cancellationToken))
+                {
+                    return course;
+                }
+
+                throw new MoodleApiException(
+                    "not_enrolled",
+                    "O curso foi localizado, mas o usuario atual nao possui matricula nele.");
+            }
         }
 
         var courses = await GetCachedCoursesAsync(userExternalId, cancellationToken);
@@ -79,9 +117,7 @@ internal sealed class MoodleCoursesGateway(
         }
 
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
-
-        var moodleUserId = await ResolveMoodleUserIdAsync(credentials.BaseUrl, token, userExternalId, cancellationToken);
+        var moodleUserId = await ResolveMoodleUserIdAsync(credentials, userExternalId, cancellationToken);
         var cacheKey = $"moodle:courses:{credentials.ConnectionId}:{moodleUserId}";
         return await cache.GetOrCreateAsync(
             cacheKey,
@@ -90,7 +126,7 @@ internal sealed class MoodleCoursesGateway(
                 entry.AbsoluteExpirationRelativeToNow = CourseListCacheDuration;
                 entry.SlidingExpiration = TimeSpan.FromMinutes(3);
 
-                var moodleCourses = await GetCoursesAsync(credentials.BaseUrl, token, moodleUserId, cancellationToken);
+                var moodleCourses = await GetCoursesAsync(credentials, moodleUserId, cancellationToken);
                 return moodleCourses
                     .Select(course => new CourseSummary(
                         course.Id.ToString(CultureInfo.InvariantCulture),
@@ -113,57 +149,113 @@ internal sealed class MoodleCoursesGateway(
             }) ?? [];
     }
 
-    private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(string baseUrl, string token, int moodleUserId, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(MoodleConnectorCredentials credentials, int moodleUserId, CancellationToken cancellationToken)
     {
-        var endpoint = BuildMoodleGetUrl(
-            baseUrl,
-            token,
+        var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+        var strategy = businessFlows.ResolveStrategy("listar_cursos_ativos", profile);
+        if (strategy?.StrategyName == "timeline")
+        {
+            var timelinePayload = await restClient.CallAsync(
+                credentials,
+                "core_course_get_enrolled_courses_by_timeline_classification",
+                new Dictionary<string, object?>
+                {
+                    ["classification"] = "inprogress",
+                    ["limit"] = 1_000,
+                    ["offset"] = 0,
+                    ["sort"] = "fullname"
+                },
+                cancellationToken);
+            var timeline = JsonSerializer.Deserialize<TimelineCoursesResponseDto>(timelinePayload.GetRawText());
+            return timeline?.Courses ?? [];
+        }
+
+        if (strategy?.StrategyName != "enrolled_courses_fallback")
+        {
+            throw new MoodleApiException(
+                "flow_unavailable",
+                "O fluxo listar_cursos_ativos nao possui uma estrategia compativel com as funcoes habilitadas nesta conexao Moodle.");
+        }
+
+        var payload = await restClient.CallAsync(
+            credentials,
             "core_enrol_get_users_courses",
             new Dictionary<string, string>
             {
                 ["userid"] = moodleUserId.ToString(CultureInfo.InvariantCulture)
-            });
+            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<List<CourseDto>>(cancellationToken: cancellationToken);
-        return payload ?? [];
+        return JsonSerializer.Deserialize<List<CourseDto>>(payload.GetRawText()) ?? [];
     }
 
-    private static string BuildMoodleGetUrl(string baseUrl, string token, string wsFunction, IReadOnlyDictionary<string, string> parameters)
+    private async Task<IReadOnlyList<CourseSummary>> GetCoursesByFieldAsync(
+        MoodleConnectorCredentials credentials,
+        string field,
+        string value,
+        CancellationToken cancellationToken)
     {
-        var builder = new StringBuilder(baseUrl.TrimEnd('/')).Append("/webservice/rest/server.php?");
-        builder.Append("wstoken=").Append(Uri.EscapeDataString(token));
-        builder.Append("&wsfunction=").Append(Uri.EscapeDataString(wsFunction));
-        builder.Append("&moodlewsrestformat=json");
+        var payload = await restClient.CallAsync(
+            credentials,
+            "core_course_get_courses_by_field",
+            new Dictionary<string, object?> { ["field"] = field, ["value"] = value },
+            cancellationToken);
+        var response = JsonSerializer.Deserialize<CoursesByFieldResponseDto>(payload.GetRawText());
+        return (response?.Courses ?? []).Select(ToCourseSummary).ToArray();
+    }
 
-        foreach (var pair in parameters)
+    private async Task<IReadOnlyList<CourseSummary>> SearchCoursesAsync(
+        MoodleConnectorCredentials credentials,
+        string query,
+        CancellationToken cancellationToken)
+    {
+        var payload = await restClient.CallAsync(
+            credentials,
+            "core_course_search_courses",
+            new Dictionary<string, object?> { ["criterianame"] = "search", ["criteriavalue"] = query },
+            cancellationToken);
+        var response = JsonSerializer.Deserialize<CourseSearchResponseDto>(payload.GetRawText());
+        return (response?.Courses ?? []).Select(ToCourseSummary).ToArray();
+    }
+
+    private async Task<bool> IsEnrolledInCourseAsync(
+        MoodleConnectorCredentials credentials,
+        string userExternalId,
+        string courseId,
+        MoodleFunctionProfile profile,
+        CancellationToken cancellationToken)
+    {
+        if (int.TryParse(userExternalId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var moodleUserId) &&
+            long.TryParse(courseId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedCourseId) &&
+            profile.Functions.Any(function => function.IsAvailable && string.Equals(function.Name, "core_enrol_get_enrolled_users", StringComparison.OrdinalIgnoreCase)))
         {
-            builder.Append('&')
-                .Append(Uri.EscapeDataString(pair.Key))
-                .Append('=')
-                .Append(Uri.EscapeDataString(pair.Value));
+            var payload = await restClient.CallAsync(
+                credentials,
+                "core_enrol_get_enrolled_users",
+                new Dictionary<string, object?> { ["courseid"] = parsedCourseId },
+                cancellationToken);
+            var enrolledUsers = JsonSerializer.Deserialize<IReadOnlyList<EnrolledUserDto>>(payload.GetRawText()) ?? [];
+            return enrolledUsers.Any(user => user.Id == moodleUserId);
         }
 
-        return builder.ToString();
+        var enrolledCourses = await GetCachedCoursesAsync(userExternalId, cancellationToken);
+        return enrolledCourses.Any(course => string.Equals(course.CourseId, courseId, StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task<int> ResolveMoodleUserIdAsync(string baseUrl, string token, string userExternalId, CancellationToken cancellationToken)
+    private async Task<int> ResolveMoodleUserIdAsync(MoodleConnectorCredentials credentials, string userExternalId, CancellationToken cancellationToken)
     {
         if (int.TryParse(userExternalId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var moodleUserId))
         {
             return moodleUserId;
         }
 
-        var endpoint = BuildMoodleGetUrl(baseUrl, token, "core_webservice_get_site_info", new Dictionary<string, string>());
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        var payload = await restClient.CallAsync(
+            credentials,
+            "core_webservice_get_site_info",
+            new Dictionary<string, object?>(),
+            cancellationToken);
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var json = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-
-        if (!json.RootElement.TryGetProperty("userid", out var userIdElement) || userIdElement.ValueKind != JsonValueKind.Number)
+        if (!payload.TryGetProperty("userid", out var userIdElement) || userIdElement.ValueKind != JsonValueKind.Number)
         {
             throw new InvalidOperationException("Nao foi possivel resolver o usuario Moodle a partir do token atual.");
         }
@@ -226,15 +318,32 @@ internal sealed class MoodleCoursesGateway(
                value.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<string> ResolveReadTokenAsync(CancellationToken cancellationToken)
+    private static string GetMoodleField(MoodleResourceType type) => type switch
     {
-        if (_options.AllowServiceTokenForReadOnlyQueries && !string.IsNullOrWhiteSpace(_options.ServiceToken))
-        {
-            return _options.ServiceToken;
-        }
+        MoodleResourceType.CourseId or MoodleResourceType.CourseUrl => "id",
+        MoodleResourceType.IdNumber => "idnumber",
+        MoodleResourceType.ShortName => "shortname",
+        MoodleResourceType.CategoryId or MoodleResourceType.CategoryUrl => "category",
+        _ => "id"
+    };
 
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
-    }
+    private static CourseSummary ToCourseSummary(CourseDto course) => new(
+        course.Id.ToString(CultureInfo.InvariantCulture),
+        course.IdNumber,
+        course.ShortName,
+        course.FullName,
+        course.DisplayName,
+        course.CategoryId,
+        course.CategoryName,
+        ToDateTimeOffset(course.StartDate),
+        ToDateTimeOffset(course.EndDate),
+        ToBool(course.Visible),
+        course.ViewUrl,
+        course.CourseImage,
+        ToDecimal(course.Progress),
+        ToBool(course.HasProgress),
+        ToBool(course.IsFavourite),
+        ToDateTimeOffset(course.TimeAccess));
 
     private sealed class CourseDto
     {
@@ -285,5 +394,29 @@ internal sealed class MoodleCoursesGateway(
 
         [JsonPropertyName("timeaccess")]
         public JsonElement TimeAccess { get; init; }
+    }
+
+    private sealed class CoursesByFieldResponseDto
+    {
+        [JsonPropertyName("courses")]
+        public IReadOnlyList<CourseDto>? Courses { get; init; }
+    }
+
+    private sealed class CourseSearchResponseDto
+    {
+        [JsonPropertyName("courses")]
+        public IReadOnlyList<CourseDto>? Courses { get; init; }
+    }
+
+    private sealed class TimelineCoursesResponseDto
+    {
+        [JsonPropertyName("courses")]
+        public IReadOnlyList<CourseDto>? Courses { get; init; }
+    }
+
+    private sealed class EnrolledUserDto
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; init; }
     }
 }

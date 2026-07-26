@@ -1,4 +1,5 @@
 using System.Net.Mime;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
@@ -30,15 +31,12 @@ internal sealed class MoodleSubmissionFileGateway(
             throw new ArgumentException("A URL do arquivo e obrigatoria.", nameof(fileUrl));
         }
 
-        var token = await ResolveReadTokenAsync(cancellationToken);
-        // Verifica que a conexão atual tem acesso de leitura antes de fazer o download.
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var urlWithToken = AppendToken(fileUrl, token);
-
-        using var response = await httpClient.GetAsync(
-            urlWithToken,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+        var fileUri = ValidateFileUri(fileUrl, credentials.BaseUrl);
+        var token = await ResolveReadTokenAsync(cancellationToken);
+        using var request = new HttpRequestMessage(HttpMethod.Get, fileUri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
         response.EnsureSuccessStatusCode();
 
@@ -94,10 +92,28 @@ internal sealed class MoodleSubmissionFileGateway(
         return await tokenProvider.GetAccessTokenAsync(cancellationToken);
     }
 
-    private static string AppendToken(string url, string token)
+    private static Uri ValidateFileUri(string fileUrl, string moodleBaseUrl)
     {
-        var separator = url.Contains('?') ? "&" : "?";
-        return $"{url}{separator}token={Uri.EscapeDataString(token)}";
+        if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var fileUri) ||
+            !Uri.TryCreate(moodleBaseUrl, UriKind.Absolute, out var moodleUri) ||
+            fileUri.Scheme is not ("http" or "https") ||
+            !string.Equals(fileUri.Host, moodleUri.Host, StringComparison.OrdinalIgnoreCase) ||
+            fileUri.Port != moodleUri.Port)
+        {
+            throw new InvalidOperationException("A URL do arquivo deve pertencer ao Moodle selecionado e usar HTTP(S).");
+        }
+
+        var safeQuery = string.Join("&", fileUri.Query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Where(part =>
+            {
+                var separator = part.IndexOf('=');
+                var name = separator < 0 ? part : part[..separator];
+                return !string.Equals(name, "token", StringComparison.OrdinalIgnoreCase) &&
+                       !string.Equals(name, "wstoken", StringComparison.OrdinalIgnoreCase);
+            }));
+        var builder = new UriBuilder(fileUri) { Query = safeQuery };
+        return builder.Uri;
     }
 
     private static string DetectMimeType(HttpResponseMessage response, string filename)

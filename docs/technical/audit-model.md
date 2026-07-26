@@ -22,9 +22,12 @@ Campos principais:
 | `ActorEmail` | Email do ator, quando disponível. |
 | `ActorMoodleUserId` | ID Moodle, quando resolvido. |
 | `CourseId` | Curso relacionado, quando aplicável. |
+| `MoodleConnectionId` / `MoodleConnectionAlias` | Conexão Moodle associada às operações universais. |
 | `MoodleFunction` | Função Moodle relacionada, quando aplicável. |
-| `RequestSanitizedJson` | Dados de entrada sanitizados. |
-| `ResponseSummaryJson` | Resumo da resposta, sem segredos. |
+| `PendingActionId` | Ação pendente associada às escritas universais, quando aplicável. |
+| `StartedAt` / `FinishedAt` / `DurationMs` | Marcos e duração da chamada universal. |
+| `RequestSanitizedJson` | Dados de entrada sanitizados, incluindo alias da conexão e somente os nomes dos parâmetros quando a chamada é universal. |
+| `ResponseSummaryJson` | Resumo da resposta, sem segredos, incluindo tamanho e duração da chamada quando aplicável. |
 | `Status` | Status do evento. |
 | `ErrorCode` | Código de erro, quando aplicável. |
 | `ErrorMessage` | Mensagem de erro, quando aplicável. |
@@ -39,6 +42,9 @@ Campos principais:
 | Falha por usuário diferente do criador | Implementado |
 | Falha por escopo ausente | Implementado |
 | Falhas de autenticação/autorização no `/mcp` | Implementado |
+| Leitura universal Moodle executada ou recusada | Implementado |
+| Prévia universal Moodle criada ou bloqueada | Implementado |
+| Escrita universal Moodle confirmada, executada ou falha | Implementado |
 
 ## Pending actions
 
@@ -49,7 +55,7 @@ Tabelas relacionadas:
 - `moodle_audit_logs`
 - `moodle_user_links`
 
-`moodle_confirmed_actions` existe no schema, mas a execução real pós-confirmação ainda não está implementada.
+`moodle_confirmed_actions` registra a confirmação válida. As ferramentas de escrita confirmada executam a operação Moodle correspondente uma única vez após essa confirmação, respeitando `CanWrite`, escopo, feature flag e a classificação local de risco.
 
 ## Inicialização de schema
 
@@ -62,6 +68,7 @@ Esse baseline cria as tabelas da aplicação, pending actions, auditoria, víncu
 - Registrar payload sanitizado, não payload bruto com segredo.
 - Usar `CorrelationId` em fluxos multi-etapa.
 - Não persistir token Moodle, JWT, API key ou senha.
+- Para chamadas universais, persistir somente o código normalizado de erro; não registrar a mensagem remota, que pode refletir parâmetros enviados.
 - Em falhas de autorização, registrar motivo e área, sem credencial recebida.
 
 ## Sanitização Centralizada

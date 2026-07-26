@@ -3,6 +3,7 @@ using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Memory;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using Microsoft.Extensions.Options;
 
@@ -16,6 +17,8 @@ public static class DependencyInjection
             cfg.RegisterServicesFromAssembly(typeof(DependencyInjection).Assembly));
         services.AddOptions<AssignmentWriteFeatureOptions>();
         services.AddOptions<MessageWriteFeatureOptions>();
+        services.AddOptions<MoodleUniversalApiFeatureOptions>();
+        services.AddSingleton<IMoodleBusinessFlowRegistry, MoodleBusinessFlowRegistry>();
         services.AddOptions<GradingLimitsOptions>();
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();

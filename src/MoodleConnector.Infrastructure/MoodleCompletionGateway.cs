@@ -7,10 +7,9 @@ using MoodleConnector.Application.Configuration;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleCompletionGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleCompletionGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleCompletionGateway
 {
     private readonly MoodleApiOptions _options = options.Value;
 
@@ -23,15 +22,8 @@ internal sealed class MoodleCompletionGateway(
         var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
         
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
-        
-        var endpoint = $"{credentials.BaseUrl.TrimEnd('/')}/webservice/rest/server.php";
-
-        // Fetch Activities Completion
-        var activitiesCompletionTask = FetchActivitiesCompletionAsync(endpoint, token, courseIdNumber, studentIdNumber, cancellationToken);
-        
-        // Fetch Course Completion
-        var courseCompletionTask = FetchCourseCompletionAsync(endpoint, token, courseIdNumber, studentIdNumber, cancellationToken);
+        var activitiesCompletionTask = FetchActivitiesCompletionAsync(credentials, courseIdNumber, studentIdNumber, cancellationToken);
+        var courseCompletionTask = FetchCourseCompletionAsync(credentials, courseIdNumber, studentIdNumber, cancellationToken);
 
         await Task.WhenAll(activitiesCompletionTask, courseCompletionTask);
 
@@ -45,59 +37,38 @@ internal sealed class MoodleCompletionGateway(
     }
 
     private async Task<List<ActivityCompletionStatus>> FetchActivitiesCompletionAsync(
-        string endpoint,
-        string token,
+        MoodleConnectorCredentials credentials,
         long courseId,
         long studentId,
         CancellationToken cancellationToken)
     {
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var payload = await restClient.CallAsync(credentials, "core_completion_get_activities_completion_status", new Dictionary<string, object?>
         {
-            ["wstoken"] = token,
-            ["wsfunction"] = "core_completion_get_activities_completion_status",
-            ["moodlewsrestformat"] = "json",
             ["courseid"] = courseId.ToString(CultureInfo.InvariantCulture),
             ["userid"] = studentId.ToString(CultureInfo.InvariantCulture)
-        });
-        
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        ThrowIfMoodleReturnedError(payload);
-
-        return ParseActivitiesCompletion(payload);
+        }, cancellationToken);
+        return ParseActivitiesCompletion(payload.GetRawText());
     }
 
     private async Task<(bool Completed, long Timecompleted)> FetchCourseCompletionAsync(
-        string endpoint,
-        string token,
+        MoodleConnectorCredentials credentials,
         long courseId,
         long studentId,
         CancellationToken cancellationToken)
     {
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        try
         {
-            ["wstoken"] = token,
-            ["wsfunction"] = "core_completion_get_course_completion_status",
-            ["moodlewsrestformat"] = "json",
-            ["courseid"] = courseId.ToString(CultureInfo.InvariantCulture),
-            ["userid"] = studentId.ToString(CultureInfo.InvariantCulture)
-        });
-        
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        
-        // Sometimes course completion is not configured and Moodle returns an error for this function specifically.
-        // We will catch it and return false instead of throwing if it's an error.
-        if (IsMoodleError(payload))
+            var payload = await restClient.CallAsync(credentials, "core_completion_get_course_completion_status", new Dictionary<string, object?>
+            {
+                ["courseid"] = courseId.ToString(CultureInfo.InvariantCulture),
+                ["userid"] = studentId.ToString(CultureInfo.InvariantCulture)
+            }, cancellationToken);
+            return ParseCourseCompletion(payload.GetRawText());
+        }
+        catch (MoodleConnector.Application.MoodleApi.MoodleApiException)
         {
             return (false, 0);
         }
-
-        return ParseCourseCompletion(payload);
     }
 
     private static List<ActivityCompletionStatus> ParseActivitiesCompletion(string payload)
@@ -200,32 +171,4 @@ internal sealed class MoodleCompletionGateway(
         throw new ArgumentException($"O parametro {parameterName} deve ser um identificador numerico do Moodle.", parameterName);
     }
 
-    private static bool IsMoodleError(string payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload) || string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-        using var document = JsonDocument.Parse(payload);
-        return document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("exception", out _);
-    }
-
-    private static void ThrowIfMoodleReturnedError(string payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload) || string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        using var document = JsonDocument.Parse(payload);
-        if (document.RootElement.ValueKind != JsonValueKind.Object || !document.RootElement.TryGetProperty("exception", out var exceptionElement))
-        {
-            return;
-        }
-
-        var errorCode = document.RootElement.TryGetProperty("errorcode", out var errorCodeElement)
-            ? errorCodeElement.GetString()
-            : exceptionElement.GetString();
-        throw new InvalidOperationException($"O Moodle rejeitou a leitura de progresso: {errorCode ?? "erro_desconhecido"}.");
-    }
 }

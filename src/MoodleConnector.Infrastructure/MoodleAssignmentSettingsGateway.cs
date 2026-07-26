@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
@@ -10,10 +8,9 @@ using MoodleConnector.Application.Abstractions;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleAssignmentSettingsGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
     IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient,
     IMemoryCache memoryCache) : IMoodleAssignmentSettingsGateway
 {
     private readonly MoodleApiOptions _options = options.Value;
@@ -39,24 +36,18 @@ internal sealed class MoodleAssignmentSettingsGateway(
         }
 
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await tokenProvider.GetAccessTokenAsync(cancellationToken);
 
         var parameters = new Dictionary<string, string>
         {
             ["courseids[0]"] = normalizedCourseId.ToString(CultureInfo.InvariantCulture)
         };
 
-        var endpoint = BuildMoodleGetUrl(
-            credentials.BaseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "mod_assign_get_assignments",
-            parameters);
-
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        var settings = ParseSettings(payload, normalizedAssignmentId);
+            parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
+        var settings = ParseSettings(payload.GetRawText(), normalizedAssignmentId);
 
         if (settings is not null)
         {
@@ -145,24 +136,6 @@ internal sealed class MoodleAssignmentSettingsGateway(
         }
 
         return null;
-    }
-
-    private static string BuildMoodleGetUrl(string baseUrl, string token, string wsFunction, IReadOnlyDictionary<string, string> parameters)
-    {
-        var builder = new StringBuilder(baseUrl.TrimEnd('/')).Append("/webservice/rest/server.php?");
-        builder.Append("wstoken=").Append(Uri.EscapeDataString(token));
-        builder.Append("&wsfunction=").Append(Uri.EscapeDataString(wsFunction));
-        builder.Append("&moodlewsrestformat=json");
-
-        foreach (var pair in parameters)
-        {
-            builder.Append('&')
-                .Append(Uri.EscapeDataString(pair.Key))
-                .Append('=')
-                .Append(Uri.EscapeDataString(pair.Value));
-        }
-
-        return builder.ToString();
     }
 
     private static long ParseMoodleId(string value, string parameterName)

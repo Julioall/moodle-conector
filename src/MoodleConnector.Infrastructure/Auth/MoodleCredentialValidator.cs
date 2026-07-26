@@ -16,11 +16,13 @@ internal sealed class MoodleCredentialValidator(
             : options.Value.LoginService;
 
         var baseUrl = moodleBaseUrl.Trim().TrimEnd('/');
-        var query = $"{baseUrl}/login/token.php?username={Uri.EscapeDataString(username)}" +
-                    $"&password={Uri.EscapeDataString(password)}" +
-                    $"&service={Uri.EscapeDataString(serviceName)}";
-
-        using var response = await httpClient.GetAsync(query, cancellationToken);
+        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["username"] = username,
+            ["password"] = password,
+            ["service"] = serviceName
+        });
+        using var response = await httpClient.PostAsync($"{baseUrl}/login/token.php", content, cancellationToken);
         if (!response.IsSuccessStatusCode) return false;
 
         var payload = await response.Content

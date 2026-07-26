@@ -1,7 +1,5 @@
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -12,10 +10,9 @@ using MoodleConnector.Domain;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed partial class MoodleCourseContentsGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleCourseContentsGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleCourseContentsGateway
 {
     private readonly MoodleApiOptions _options = options.Value;
 
@@ -35,19 +32,15 @@ internal sealed partial class MoodleCourseContentsGateway(
         var normalizedCourseId = ParseMoodleId(courseId, "courseId");
         var normalizedModuleTypes = NormalizeModuleTypes(moduleTypes);
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
-
-        var endpoint = BuildMoodleGetUrl(
-            credentials.BaseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "core_course_get_contents",
-            BuildCourseContentsParameters(normalizedCourseId, includeHidden, normalizedModuleTypes));
+            BuildCourseContentsParameters(normalizedCourseId, includeHidden, normalizedModuleTypes)
+                .ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<List<SectionDto>>(cancellationToken: cancellationToken) ?? [];
-        var sections = payload
+        var sectionsPayload = JsonSerializer.Deserialize<List<SectionDto>>(payload.GetRawText()) ?? [];
+        var sections = sectionsPayload
             .Select(section => ToSection(section, normalizedModuleTypes, includeHidden, onlyWithFiles))
             .ToArray();
 
@@ -199,24 +192,6 @@ internal sealed partial class MoodleCourseContentsGateway(
         }
     }
 
-    private static string BuildMoodleGetUrl(string baseUrl, string token, string wsFunction, IReadOnlyDictionary<string, string> parameters)
-    {
-        var builder = new StringBuilder(baseUrl.TrimEnd('/')).Append("/webservice/rest/server.php?");
-        builder.Append("wstoken=").Append(Uri.EscapeDataString(token));
-        builder.Append("&wsfunction=").Append(Uri.EscapeDataString(wsFunction));
-        builder.Append("&moodlewsrestformat=json");
-
-        foreach (var pair in parameters)
-        {
-            builder.Append('&')
-                .Append(Uri.EscapeDataString(pair.Key))
-                .Append('=')
-                .Append(Uri.EscapeDataString(pair.Value));
-        }
-
-        return builder.ToString();
-    }
-
     private static int ParseMoodleId(string value, string parameterName)
     {
         if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0)
@@ -288,16 +263,6 @@ internal sealed partial class MoodleCourseContentsGateway(
         var normalized = WhitespaceRegex().Replace(decoded, " ").Trim();
 
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
-    }
-
-    private async Task<string> ResolveReadTokenAsync(CancellationToken cancellationToken)
-    {
-        if (_options.AllowServiceTokenForReadOnlyQueries && !string.IsNullOrWhiteSpace(_options.ServiceToken))
-        {
-            return _options.ServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
     }
 
     [GeneratedRegex("<[^>]+>", RegexOptions.Compiled)]

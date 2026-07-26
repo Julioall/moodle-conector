@@ -1,7 +1,5 @@
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -12,10 +10,9 @@ using MoodleConnector.Domain;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed partial class MoodleForumGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleForumGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleForumGateway
 {
     private const string AddDiscussionFunction = "mod_forum_add_discussion";
     private const string AddDiscussionPostFunction = "mod_forum_add_discussion_post";
@@ -40,11 +37,8 @@ internal sealed partial class MoodleForumGateway(
 
         var normalizedForumId = ParseMoodleId(forumId, "forumId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
-
-        var endpoint = BuildMoodleGetUrl(
-            credentials.BaseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "mod_forum_get_forum_discussions",
             new Dictionary<string, string>
             {
@@ -53,13 +47,11 @@ internal sealed partial class MoodleForumGateway(
                 ["sortdirection"] = NormalizeSortDirection(sortDirection),
                 ["page"] = Math.Max(0, page - 1).ToString(CultureInfo.InvariantCulture),
                 ["perpage"] = Math.Max(1, pageSize).ToString(CultureInfo.InvariantCulture)
-            });
+            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<ForumDiscussionsResponseDto>(cancellationToken: cancellationToken);
-        return (payload?.Discussions ?? [])
+        var discussions = JsonSerializer.Deserialize<ForumDiscussionsResponseDto>(payload.GetRawText());
+        return (discussions?.Discussions ?? [])
             .Select(ToDiscussion)
             .Where(discussion => !string.IsNullOrWhiteSpace(discussion.DiscussionId))
             .ToArray();
@@ -79,24 +71,19 @@ internal sealed partial class MoodleForumGateway(
 
         var normalizedDiscussionId = ParseMoodleId(discussionId, "discussionId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
-
-        var endpoint = BuildMoodleGetUrl(
-            credentials.BaseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "mod_forum_get_discussion_posts",
             new Dictionary<string, string>
             {
                 ["discussionid"] = normalizedDiscussionId.ToString(CultureInfo.InvariantCulture),
                 ["sortby"] = NormalizeSortField(sortBy, PostSortFields, "created"),
                 ["sortdirection"] = NormalizeSortDirection(sortDirection)
-            });
+            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<DiscussionPostsResponseDto>(cancellationToken: cancellationToken);
-        return (payload?.Posts ?? [])
+        var posts = JsonSerializer.Deserialize<DiscussionPostsResponseDto>(payload.GetRawText());
+        return (posts?.Posts ?? [])
             .Select(ToPost)
             .Where(post => !string.IsNullOrWhiteSpace(post.PostId))
             .ToArray();
@@ -120,23 +107,14 @@ internal sealed partial class MoodleForumGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         EnsureCanWrite(credentials);
 
-        var token = await ResolveWriteTokenAsync(cancellationToken);
-        var endpoint = BuildMoodlePostEndpoint(credentials.BaseUrl);
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var payload = await restClient.CallAsync(credentials, AddDiscussionFunction, new Dictionary<string, object?>
         {
-            ["wstoken"] = token,
-            ["wsfunction"] = AddDiscussionFunction,
-            ["moodlewsrestformat"] = "json",
             ["forumid"] = normalizedForumId.ToString(CultureInfo.InvariantCulture),
             ["subject"] = subject.Trim(),
             ["message"] = messageHtml.Trim(),
             ["groupid"] = groupId.ToString(CultureInfo.InvariantCulture)
-        });
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        var root = ParseMoodleSuccessPayload(payload, "O Moodle rejeitou a criacao de discussao no forum");
+        }, allowServiceToken: false, cancellationToken);
+        var root = ParseMoodleSuccessPayload(payload.GetRawText(), "O Moodle rejeitou a criacao de discussao no forum");
         return new ForumWriteResult(
             Success: true,
             AddDiscussionFunction,
@@ -163,23 +141,14 @@ internal sealed partial class MoodleForumGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         EnsureCanWrite(credentials);
 
-        var token = await ResolveWriteTokenAsync(cancellationToken);
-        var endpoint = BuildMoodlePostEndpoint(credentials.BaseUrl);
-        using var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        var payload = await restClient.CallAsync(credentials, AddDiscussionPostFunction, new Dictionary<string, object?>
         {
-            ["wstoken"] = token,
-            ["wsfunction"] = AddDiscussionPostFunction,
-            ["moodlewsrestformat"] = "json",
             ["postid"] = normalizedPostId.ToString(CultureInfo.InvariantCulture),
             ["subject"] = subject.Trim(),
             ["message"] = messageHtml.Trim(),
             ["messageformat"] = HtmlMessageFormat
-        });
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        var root = ParseMoodleSuccessPayload(payload, "O Moodle rejeitou a resposta no forum");
+        }, allowServiceToken: false, cancellationToken);
+        var root = ParseMoodleSuccessPayload(payload.GetRawText(), "O Moodle rejeitou a resposta no forum");
         return new ForumWriteResult(
             Success: true,
             AddDiscussionPostFunction,
@@ -201,22 +170,17 @@ internal sealed partial class MoodleForumGateway(
 
         var normalizedCourseId = ParseMoodleId(courseId, "courseId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
-
-        var endpoint = BuildMoodleGetUrl(
-            credentials.BaseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "mod_forum_get_forums_by_courses",
             new Dictionary<string, string>
             {
                 ["courseids[0]"] = normalizedCourseId.ToString(CultureInfo.InvariantCulture)
-            });
+            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<IReadOnlyList<JsonElement>>(cancellationToken: cancellationToken) ?? [];
-        return payload
+        var forums = JsonSerializer.Deserialize<IReadOnlyList<JsonElement>>(payload.GetRawText()) ?? [];
+        return forums
             .Where(element => element.ValueKind == JsonValueKind.Object)
             .Select(element => new ForumInfo(
                 GetIdString(element, "id"),
@@ -322,28 +286,6 @@ internal sealed partial class MoodleForumGateway(
             .ToArray();
     }
 
-    private static string BuildMoodleGetUrl(string baseUrl, string token, string wsFunction, IReadOnlyDictionary<string, string> parameters)
-    {
-        var builder = new StringBuilder(baseUrl.TrimEnd('/')).Append("/webservice/rest/server.php?");
-        builder.Append("wstoken=").Append(Uri.EscapeDataString(token));
-        builder.Append("&wsfunction=").Append(Uri.EscapeDataString(wsFunction));
-        builder.Append("&moodlewsrestformat=json");
-
-        foreach (var pair in parameters)
-        {
-            builder.Append('&')
-                .Append(Uri.EscapeDataString(pair.Key))
-                .Append('=')
-                .Append(Uri.EscapeDataString(pair.Value));
-        }
-
-        return builder.ToString();
-    }
-
-    private static string BuildMoodlePostEndpoint(string baseUrl)
-    {
-        return $"{baseUrl.TrimEnd('/')}/webservice/rest/server.php";
-    }
 
     private static int ParseMoodleId(string value, string parameterName)
     {
@@ -556,21 +498,6 @@ internal sealed partial class MoodleForumGateway(
         var normalized = WhitespaceRegex().Replace(decoded, " ").Trim();
 
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
-    }
-
-    private async Task<string> ResolveReadTokenAsync(CancellationToken cancellationToken)
-    {
-        if (_options.AllowServiceTokenForReadOnlyQueries && !string.IsNullOrWhiteSpace(_options.ServiceToken))
-        {
-            return _options.ServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
-    }
-
-    private Task<string> ResolveWriteTokenAsync(CancellationToken cancellationToken)
-    {
-        return tokenProvider.GetAccessTokenAsync(cancellationToken);
     }
 
     private static void ValidateWriteInput(string userExternalId, string subject, string messageHtml)
