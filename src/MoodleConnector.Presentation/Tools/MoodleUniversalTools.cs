@@ -1,0 +1,193 @@
+using System.ComponentModel;
+using System.Text.Json;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
+using MoodleConnector.Application.Tools;
+
+namespace MoodleConnector.Presentation.Tools;
+
+[McpServerToolType]
+public sealed class MoodleUniversalTools(
+    IMoodleFunctionCatalog functionCatalog,
+    IMoodleFunctionExecutor functionExecutor,
+    IMoodleBusinessFlowRegistry businessFlows,
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleConnectionSelection connectionSelection)
+{
+    [McpServerTool(Name = "moodle_diagnose_connection", Title = "Diagnosticar Conexao Moodle",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleConnectionDiagnostic>))]
+    [Description("Verifica a conexao Moodle selecionada e descobre as funcoes Web Service efetivamente habilitadas para o token. Nao expõe tokens ou senhas.")]
+    public async Task<CallToolResult> DiagnoseConnectionAsync(
+        [Description("Alias opcional da conexao Moodle.")] string? moodleAlias = null,
+        [Description("Ignora o cache e consulta novamente o Moodle.")] bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
+    {
+        connectionSelection.Alias = moodleAlias;
+        try
+        {
+            var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
+            var connection = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+            var flows = businessFlows.EvaluateAll(profile);
+            var data = new MoodleConnectionDiagnostic(
+                profile.ConnectionAlias,
+                profile.SiteName,
+                profile.Release,
+                profile.MoodleUserId,
+                profile.Functions.Count,
+                profile.Functions.Count(function => function.Risk == MoodleFunctionRisk.Read),
+                profile.Functions.Count(function => function.Risk == MoodleFunctionRisk.ControlledWrite),
+                connection.CanWrite,
+                flows,
+                profile.DiscoveredAt);
+            return Success(data, $"Conexao '{profile.ConnectionAlias}' diagnosticada: {profile.Functions.Count} funcoes descobertas.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleConnectionDiagnostic>(ex.Message); }
+        catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleConnectionDiagnostic>(ex.Message); }
+    }
+
+    [McpServerTool(Name = "moodle_list_functions", Title = "Listar Funcoes Moodle",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<IReadOnlyList<MoodleFunctionDescriptor>>))]
+    [Description("Lista as funcoes Web Service habilitadas para a conexao Moodle atual. Funcoes desconhecidas permanecem classificadas como Unknown e nao podem ser executadas pela tool de leitura.")]
+    public async Task<CallToolResult> ListFunctionsAsync(
+        [Description("Termo opcional para filtrar o nome da funcao.")] string? search = null,
+        [Description("Alias opcional da conexao Moodle.")] string? moodleAlias = null,
+        [Description("Ignora o cache e consulta novamente o Moodle.")] bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
+    {
+        connectionSelection.Alias = moodleAlias;
+        try
+        {
+            var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
+            var functions = string.IsNullOrWhiteSpace(search)
+                ? profile.Functions
+                : profile.Functions.Where(function => function.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+            return Success<IReadOnlyList<MoodleFunctionDescriptor>>(functions, $"{functions.Count} funcao(oes) encontrada(s).");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyList<MoodleFunctionDescriptor>>(ex.Message); }
+        catch (InvalidOperationException ex) { return ToolResultHelper.Error<IReadOnlyList<MoodleFunctionDescriptor>>(ex.Message); }
+    }
+
+    [McpServerTool(Name = "moodle_check_function", Title = "Verificar Funcao Moodle",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleFunctionDescriptor>))]
+    [Description("Confirma se uma funcao Moodle esta disponivel para o token atual e informa sua classificacao de risco local.")]
+    public async Task<CallToolResult> CheckFunctionAsync(
+        [Description("Nome exato da funcao Web Service Moodle.")] string functionName,
+        [Description("Alias opcional da conexao Moodle.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            return ToolResultHelper.Error<MoodleFunctionDescriptor>("Informe o nome da funcao Moodle.");
+        }
+
+        connectionSelection.Alias = moodleAlias;
+        try
+        {
+            var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+            var descriptor = profile.Functions.FirstOrDefault(function =>
+                string.Equals(function.Name, functionName.Trim(), StringComparison.OrdinalIgnoreCase))
+                ?? new MoodleFunctionDescriptor(functionName.Trim(), MoodleFunctionRisk.Unknown, false);
+            return Success(descriptor, descriptor.IsAvailable ? "Funcao Moodle disponivel." : "Funcao Moodle nao esta disponivel para esta conexao.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleFunctionDescriptor>(ex.Message); }
+        catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleFunctionDescriptor>(ex.Message); }
+    }
+
+    [McpServerTool(Name = "moodle_describe_function", Title = "Descrever Funcao Moodle",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleFunctionDescriptor>))]
+    [Description("Retorna a disponibilidade e a classificação de risco local de uma função Web Service Moodle. O Moodle não fornece, por esse endpoint, um schema completo de parâmetros.")]
+    public Task<CallToolResult> DescribeFunctionAsync(
+        [Description("Nome exato da função Web Service Moodle.")] string functionName,
+        [Description("Alias opcional da conexão Moodle.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default) =>
+        CheckFunctionAsync(functionName, moodleAlias, cancellationToken);
+
+    [McpServerTool(Name = "moodle_list_available_flows", Title = "Listar Fluxos Moodle Disponiveis",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<IReadOnlyCollection<BusinessFlowAvailability>>))]
+    [Description("Avalia os fluxos acadêmicos registrados para a conexão Moodle atual, selecionando a melhor estratégia ou informando as funções ausentes.")]
+    public async Task<CallToolResult> ListAvailableFlowsAsync(
+        [Description("Alias opcional da conexão Moodle.")] string? moodleAlias = null,
+        [Description("Ignora o cache e consulta novamente o Moodle.")] bool forceRefresh = false,
+        CancellationToken cancellationToken = default)
+    {
+        connectionSelection.Alias = moodleAlias;
+        try
+        {
+            var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
+            var flows = businessFlows.EvaluateAll(profile);
+            return Success<IReadOnlyCollection<BusinessFlowAvailability>>(flows, $"{flows.Count(flow => flow.IsAvailable)} fluxo(s) Moodle disponível(is).");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyCollection<BusinessFlowAvailability>>(ex.Message); }
+        catch (InvalidOperationException ex) { return ToolResultHelper.Error<IReadOnlyCollection<BusinessFlowAvailability>>(ex.Message); }
+    }
+
+    [McpServerTool(Name = "moodle_execute_read", Title = "Executar Leitura Moodle",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleFunctionResult>))]
+    [Description("Executa uma funcao Moodle explicitamente classificada como leitura, desde que esteja habilitada para o token da conexao atual. Escritas, funcoes destrutivas e funcoes desconhecidas sao recusadas.")]
+    public async Task<CallToolResult> ExecuteReadAsync(
+        [Description("Nome exato da funcao Web Service Moodle.")] string functionName,
+        [Description("Objeto JSON com os parametros da funcao Moodle.")] JsonElement parameters,
+        [Description("Alias opcional da conexao Moodle.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            return ToolResultHelper.Error<MoodleFunctionResult>("Informe o nome da funcao Moodle.");
+        }
+
+        if (parameters.ValueKind != JsonValueKind.Object)
+        {
+            return ToolResultHelper.Error<MoodleFunctionResult>("Os parametros devem ser fornecidos como um objeto JSON.");
+        }
+
+        connectionSelection.Alias = moodleAlias;
+        try
+        {
+            var values = parameters.EnumerateObject().ToDictionary(
+                property => property.Name,
+                property => (object?)property.Value.Clone(),
+                StringComparer.Ordinal);
+            var data = await functionExecutor.ExecuteReadAsync(functionName, values, cancellationToken);
+            return Success(data, $"Funcao de leitura '{data.Function}' executada com sucesso.");
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
+        catch (ArgumentException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
+        catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
+    }
+
+    private static CallToolResult Success<T>(T data, string narration)
+    {
+        var response = new ToolResponse<T>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = narration }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+}
+
+public sealed record MoodleConnectionDiagnostic(
+    string Alias,
+    string? SiteName,
+    string? Release,
+    long? MoodleUserId,
+    int FunctionCount,
+    int ReadFunctionCount,
+    int ControlledWriteFunctionCount,
+    bool CanWrite,
+    IReadOnlyCollection<BusinessFlowAvailability> Flows,
+    DateTimeOffset DiscoveredAt);

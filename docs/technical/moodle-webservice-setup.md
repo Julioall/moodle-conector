@@ -69,7 +69,7 @@ MoodleApi__LoginService=moodle_mobile_app
 | --- | --- | --- |
 | `mod_forum_add_discussion` | Criar nova discussão em fórum autorizado após confirmação humana. | Implementado |
 | `mod_forum_add_discussion_post` | Responder a um post de discussão em fórum autorizado após confirmação humana. | Implementado |
-| `core_message_send_instant_messages` | Enviar mensagens instantâneas individuais após prévia e confirmação humana. Não oferece broadcast nativo nem agendamento. | Implementado com gate de feature flag pendente |
+| `core_message_send_instant_messages` | Enviar mensagens instantâneas individuais após prévia e confirmação humana. Não oferece broadcast nativo nem agendamento. | Implementado; bloqueado por padrão por feature flag |
 | `mod_assign_save_grade` | Lançar nota e feedback individual em tarefa autorizada após confirmação humana. | Implementado |
 
 ## Permissões necessárias
@@ -94,7 +94,7 @@ Qualquer escrita deve seguir o fluxo:
 3. exigir confirmação humana;
 4. executar somente após confirmação válida.
 
-Além das permissões Moodle da função, a conexão cadastrada precisa estar com `CanWrite=true`, o chamador precisa ter o escopo aplicável e a feature flag do domínio precisa estar ativa. No estado atual, `MessagesWriteEnabled=false` é o default, mas ainda não bloqueia efetivamente todo o fluxo real de mensagens; `AssignmentGradeWriteEnabled` também deve ser alterada para `false` por padrão. Ambos são bloqueadores P0 documentados no roadmap.
+Além das permissões Moodle da função, a conexão cadastrada precisa estar com `CanWrite=true`, o chamador precisa ter o escopo aplicável e a feature flag do domínio precisa estar ativa. `MessagesWriteEnabled=false` e `AssignmentGradeWriteEnabled=false` são os defaults configurados; ambos bloqueiam preparação/confirmação até a habilitação explícita pelo operador.
 
 ## Cadastro de conexão Moodle
 

@@ -79,6 +79,13 @@ humana e minimização de dados.
 
 | Tool | Título | Risco | Leitura | Escrita | Status |
 | --- | --- | --- | --- | --- | --- |
+| `moodle_diagnose_connection` | Diagnosticar Conexão Moodle | `ReadOnly` | Verifica conectividade, site, funções, permissão de escrita e fluxos disponíveis | Não | Implementada |
+| `moodle_list_functions` | Listar Funções Moodle | `ReadOnly` | Lista por conexão as funções autorizadas pelo serviço | Não | Implementada |
+| `moodle_describe_function` / `moodle_check_function` | Descrever Função Moodle | `ReadOnly` | Consulta disponibilidade e classificação local de risco | Não | Implementadas |
+| `moodle_list_available_flows` | Listar Fluxos Moodle Disponíveis | `ReadOnly` | Mostra a estratégia compatível e as funções ausentes | Não | Implementada |
+| `moodle_execute_read` | Executar Leitura Moodle | `ReadOnly` | Executa somente funções classificadas como leitura | Não | Implementada |
+| `moodle_prepare_write` | Preparar Escrita Moodle | `HumanConfirmedWrite` | Prévia, hash de parâmetros e ação pendente | Não | Implementada; desativada por padrão |
+| `moodle_confirm_write` | Confirmar Escrita Moodle | `HumanConfirmedWrite` | Não | Executa escrita controlada após confirmação literal | Implementada; desativada por padrão |
 | `salvar_documento_memoria_usuario` | Salvar documento de memoria do usuario | `InternalStateWrite` | Nao | Salva documento interno e link de memoria | Implementada |
 | `listar_documentos_memoria_usuario` | Listar documentos de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
 | `ler_documento_memoria_usuario` | Ler documento de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
@@ -174,12 +181,12 @@ humana e minimização de dados.
 | `consultar_auditoria_correcao_lote` | Consultar Auditoria Correcao Lote | `ReadOnly` | Sim | Não | Implementada |
 | `criar_previa_lancamento_lote` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
 | `confirmar_lancamento_lote_moodle` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
-| `preparar_mensagem_boas_vindas` / `confirmar_mensagem_boas_vindas` | Mensagem Boas Vindas | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; flag efetiva pendente |
-| `preparar_mensagem_cobranca_acesso` / `confirmar_mensagem_cobranca_acesso` | Mensagem Cobranca Acesso | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; flag efetiva pendente |
-| `preparar_mensagem_cobranca_sa` / `confirmar_mensagem_cobranca_sa` | Mensagem Cobranca SA | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; flag efetiva pendente |
-| `preparar_mensagem_recuperacao` / `confirmar_mensagem_recuperacao` | Mensagem Recuperacao | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; flag efetiva pendente |
-| `preparar_mensagem_encerramento` / `confirmar_mensagem_encerramento` | Mensagem Encerramento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; flag efetiva pendente |
-| `preparar_mensagem_acompanhamento` / `confirmar_mensagem_acompanhamento` | Mensagem Acompanhamento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; flag efetiva pendente |
+| `preparar_mensagem_boas_vindas` / `confirmar_mensagem_boas_vindas` | Mensagem Boas Vindas | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `preparar_mensagem_cobranca_acesso` / `confirmar_mensagem_cobranca_acesso` | Mensagem Cobranca Acesso | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `preparar_mensagem_cobranca_sa` / `confirmar_mensagem_cobranca_sa` | Mensagem Cobranca SA | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `preparar_mensagem_recuperacao` / `confirmar_mensagem_recuperacao` | Mensagem Recuperacao | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `preparar_mensagem_encerramento` / `confirmar_mensagem_encerramento` | Mensagem Encerramento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `preparar_mensagem_acompanhamento` / `confirmar_mensagem_acompanhamento` | Mensagem Acompanhamento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `preparar_lancamento_nota` / `prepare_individual_grade_launch` | Preparar Nota Individual | `CriticalHumanConfirmedWrite` | Nota atual/prévia | Cria ação pendente | Implementadas (aliases PT/EN) |
 | `confirmar_lancamento_nota` / `confirm_individual_grade_launch` | Confirmar Nota Individual | `CriticalHumanConfirmedWrite` | Não | Nota/feedback individual no Moodle | Implementadas (aliases PT/EN) |
 | `consultar_auditoria_correcao` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Implementada |
@@ -191,13 +198,13 @@ humana e minimização de dados.
 
 `MoodleTutorMessageTools.cs` expõe seis pares `preparar_*` / `confirmar_*`: boas-vindas, cobrança de acesso, cobrança de SA, recuperação, encerramento e acompanhamento. A preparação recebe `courseId`, `recipientIds`, texto opcional e alias, resolve nomes quando possível e cria `PendingAction` com prévia, riscos, expiração e texto literal. A confirmação recebe `pendingActionId`, texto literal e alias, exige escopo `moodle.write`; a conexão precisa de `CanWrite=true`, e o gateway usa `core_message_send_instant_messages` para cada destinatário.
 
-Limitações: são mensagens instantâneas individuais, sem broadcast atômico, agendamento ou garantia de leitura. O resultado pode ter sucessos e falhas por destinatário. `MessagesWriteEnabled=false` é o default configurado, mas a flag ainda não controla efetivamente o registro/execução dessas tools; esse gate é P0 e não deve ser anunciado como proteção ativa.
+Limitações: são mensagens instantâneas individuais, sem broadcast atômico, agendamento ou garantia de leitura. O resultado pode ter sucessos e falhas por destinatário. `MessagesWriteEnabled=false` é o default configurado e bloqueia a preparação e a confirmação até ser habilitado explicitamente pelo operador.
 
 ## Nota individual confirmada
 
 `MoodleIndividualGradeTools.cs` expõe o par em português `preparar_lancamento_nota` / `confirmar_lancamento_nota` e os aliases em inglês `prepare_individual_grade_launch` / `confirm_individual_grade_launch`. A preparação recebe curso, tarefa, estudante, nota proposta, justificativa, feedback opcional e alias; consulta a nota atual e cria `PendingAction` com prévia e confirmação literal que inclui a nota. A confirmação exige `moodle.write.assignments.grade`, conexão `CanWrite=true`, `AssignmentGradeWriteEnabled=true`, pending action válida e `mod_assign_save_grade` disponível.
 
-Limitações: a escrita é individual e imediatamente visível ao estudante; não decide nota nem substitui revisão pedagógica. O `appsettings.json` versionado ainda define `AssignmentGradeWriteEnabled=true`; mudar o default para `false` é P0.
+Limitações: a escrita é individual e imediatamente visível ao estudante; não decide nota nem substitui revisão pedagógica. `AssignmentGradeWriteEnabled=false` é o default configurado e a confirmação é recusada até que o operador a habilite explicitamente.
 
 ## `listar_meus_cursos` / `list_courses`
 
@@ -1288,4 +1295,4 @@ Descricao:
 
 ## Planejado
 
-O planejamento canônico está organizado pelas sete jornadas em `docs/roadmap.md`. Este catálogo descreve as tools existentes e não deve ser usado para inferir que um domínio inteiro está ausente ou concluído. As lacunas prioritárias atuais incluem flags efetivas e defaults seguros de escrita, paginação 1-based uniforme, cobertura/truncamento, estados vazios não ambíguos e testes de todos os fluxos Nível A.
+O planejamento canônico está organizado pelas sete jornadas em `docs/roadmap.md`. Este catálogo descreve as tools existentes e não deve ser usado para inferir que um domínio inteiro está ausente ou concluído. As lacunas prioritárias atuais incluem paginação 1-based uniforme, cobertura/truncamento, estados vazios não ambíguos e testes de todos os fluxos Nível A.

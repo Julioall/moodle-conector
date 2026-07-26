@@ -8,7 +8,7 @@ Conector MCP não oficial para Moodle, criado para conectar o ChatGPT diretament
 
 Este projeto ainda está em construção e aceita contribuições. Sugestões, melhorias, correções, novas tools, testes e revisões de segurança são bem-vindos.
 
-O conector já possui escritas confirmadas e limitadas, como publicação em fórum, mensagens individuais e nota/feedback de tarefa. Esses fluxos usam `PendingAction`, confirmação literal, escopo de escrita, conexão `CanWrite` e auditoria; a permissão Moodle contextual continua obrigatória. Os gates de feature flag ainda têm lacunas: `MessagesWriteEnabled` não bloqueia efetivamente as mensagens e `AssignmentGradeWriteEnabled=true` é o default versionado atual, um risco P0. Escrita geral de conteúdo, broadcast e agendamento não estão implementados.
+O conector já possui escritas confirmadas e limitadas, como publicação em fórum, mensagens individuais e nota/feedback de tarefa. Esses fluxos usam `PendingAction`, confirmação literal, escopo de escrita, conexão `CanWrite` e auditoria; a permissão Moodle contextual continua obrigatória. As flags versionadas para mensagens e notas individuais agora iniciam desabilitadas. Escrita geral de conteúdo, broadcast e agendamento não estão implementados.
 
 > Este projeto não é oficial do Moodle HQ. Ele é uma integração independente baseada em MCP, ASP.NET Core, OAuth e APIs WebService do Moodle.
 
@@ -182,7 +182,7 @@ As ferramentas de escrita ainda estão em desenvolvimento e devem seguir um flux
 3. o sistema pede uma confirmação explícita;
 4. somente depois disso a ação pode ser executada.
 
-Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write` e conexão `CanWrite`, mas `MessagesWriteEnabled` ainda não é um gate efetivo. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`; o default versionado atual é `true` e precisa ser corrigido para `false`. Até a conclusão desses P0, a operação deve manter as escritas desabilitadas por configuração externa e menor privilégio.
+Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write`, conexão `CanWrite` e `MessagesWriteEnabled=true`. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`. Ambas as flags iniciam como `false` no arquivo versionado; habilite-as somente por configuração externa e com menor privilégio.
 
 ## Arquitetura
 
@@ -215,7 +215,7 @@ Responsabilidades:
 
 ## Stack
 
-- Moodle 5.0.1 (versão alvo validada)
+- Compatibilidade orientada pelas funções Web Service habilitadas em cada conexão Moodle
 - ASP.NET Core / .NET 10
 - Solution: `MoodleConnector.slnx`
 - MCP: `ModelContextProtocol.AspNetCore 1.3.0`
@@ -367,9 +367,24 @@ Contrato de ação pendente:
 }
 ```
 
-O projeto mantém tools demo e também possui escritas reais confirmadas para fórum, mensagens individuais e nota/feedback. A conexão `CanWrite`, o escopo aplicável, a capability Moodle, a prévia, a confirmação e a auditoria continuam obrigatórios. Os defaults e gates ainda não são uniformemente seguros; consulte o backlog P0 em `docs/roadmap.md` antes de habilitar escrita.
+O projeto mantém tools demo e também possui escritas reais confirmadas para fórum, mensagens individuais e nota/feedback. A conexão `CanWrite`, o escopo aplicável, a capability Moodle, a prévia, a confirmação e a auditoria continuam obrigatórios. As flags de mensagens e notas individuais iniciam desabilitadas e são verificadas pelos handlers antes de preparar ou confirmar uma escrita.
 
 ## Tools Existentes
+
+Tools universais de leitura:
+
+| Tool | Descrição | Status |
+| --- | --- | --- |
+| `moodle_diagnose_connection` | Descobre o perfil técnico da conexão, sem expor segredos. | Implementada |
+| `moodle_list_functions` | Lista as funções Web Service habilitadas para o token. | Implementada |
+| `moodle_check_function` | Verifica disponibilidade e classificação de risco local. | Implementada |
+| `moodle_describe_function` | Descreve disponibilidade e classificação de risco local. | Implementada |
+| `moodle_list_available_flows` | Mostra estratégias selecionadas e funções ausentes por fluxo. | Implementada |
+| `moodle_execute_read` | Executa somente funções explicitamente classificadas como leitura segura. | Implementada |
+| `moodle_prepare_write` | Cria prévia de escrita controlada sem chamar o Moodle. | Implementada, desabilitada por padrão |
+| `moodle_confirm_write` | Executa uma prévia confirmada uma única vez. | Implementada, desabilitada por padrão |
+
+As chamadas universais usam `POST /webservice/rest/server.php`, serializam arrays e objetos no formato nativo do Moodle e nunca inserem o token na URL. Uma função descoberta, mas ainda não classificada no catálogo local, é tratada como `Unknown` e recusada pela tool de execução. `moodle_prepare_write` e `moodle_confirm_write` só permitem funções explicitamente classificadas como escrita controlada, com feature flag desabilitada por padrão, `CanWrite`, confirmação literal, auditoria e execução única; funções destrutivas continuam bloqueadas.
 
 Leitura:
 

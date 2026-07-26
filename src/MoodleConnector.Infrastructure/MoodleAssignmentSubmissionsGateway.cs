@@ -1,6 +1,4 @@
 using System.Globalization;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
@@ -10,10 +8,9 @@ using MoodleConnector.Domain;
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleAssignmentSubmissionsGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleAssignmentSubmissionsGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleAssignmentSubmissionsGateway
 {
     private readonly MoodleApiOptions _options = options.Value;
 
@@ -32,7 +29,6 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
 
         var normalizedAssignmentId = ParseMoodleId(assignmentId, "assignmentId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var token = await ResolveReadTokenAsync(cancellationToken);
 
         var parameters = new Dictionary<string, string>
         {
@@ -54,17 +50,14 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
             parameters["before"] = before.Value.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
         }
 
-        var endpoint = BuildMoodleGetUrl(
-            credentials.BaseUrl,
-            token,
+        var payload = await restClient.CallAsync(
+            credentials,
             "mod_assign_get_submissions",
-            parameters);
+            parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
 
-        using var response = await httpClient.GetAsync(endpoint, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadFromJsonAsync<GetSubmissionsResponseDto>(cancellationToken: cancellationToken);
-        return (payload?.Assignments ?? [])
+        var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
+        return (submissions?.Assignments ?? [])
             .SelectMany(assignment => assignment.Submissions ?? [])
             .Select(ToRecord)
             .ToArray();
@@ -127,24 +120,6 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
             GetString(file, "mimetype"),
             GetNullableLong(file, "filesize"),
             fileUrl);
-    }
-
-    private static string BuildMoodleGetUrl(string baseUrl, string token, string wsFunction, IReadOnlyDictionary<string, string> parameters)
-    {
-        var builder = new StringBuilder(baseUrl.TrimEnd('/')).Append("/webservice/rest/server.php?");
-        builder.Append("wstoken=").Append(Uri.EscapeDataString(token));
-        builder.Append("&wsfunction=").Append(Uri.EscapeDataString(wsFunction));
-        builder.Append("&moodlewsrestformat=json");
-
-        foreach (var pair in parameters)
-        {
-            builder.Append('&')
-                .Append(Uri.EscapeDataString(pair.Key))
-                .Append('=')
-                .Append(Uri.EscapeDataString(pair.Value));
-        }
-
-        return builder.ToString();
     }
 
     private static int ParseMoodleId(string value, string parameterName)
@@ -274,13 +249,4 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
         public IReadOnlyList<JsonElement>? Files { get; init; }
     }
 
-    private async Task<string> ResolveReadTokenAsync(CancellationToken cancellationToken)
-    {
-        if (_options.AllowServiceTokenForReadOnlyQueries && !string.IsNullOrWhiteSpace(_options.ServiceToken))
-        {
-            return _options.ServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
-    }
 }

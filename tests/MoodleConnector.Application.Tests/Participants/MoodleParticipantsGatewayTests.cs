@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
+using MoodleConnector.Infrastructure.MoodleApi;
 
 namespace MoodleConnector.Application.Tests.Participants;
 
@@ -20,9 +21,10 @@ public sealed class MoodleParticipantsGatewayTests
         var result = await sut.GetCourseParticipantsAsync(
             "42", "10", ParticipantStatusFilter.All, 1, 20, false, false, null, CancellationToken.None);
 
-        var query = Uri.UnescapeDataString(handler.LastRequestUri!.Query);
-        Assert.Contains("roles", query);
-        Assert.Contains("groups", query);
+        var body = Uri.UnescapeDataString(handler.LastRequestBody);
+        Assert.Contains("roles", body);
+        Assert.Contains("groups", body);
+        Assert.DoesNotContain("token", handler.LastRequestUri!.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Equal("Turma A", Assert.Single(result.Participants).Groups[0].Name);
     }
 
@@ -65,25 +67,31 @@ public sealed class MoodleParticipantsGatewayTests
     private static MoodleParticipantsGateway CreateGateway(JsonHandler handler)
     {
         return new MoodleParticipantsGateway(
-            new HttpClient(handler),
             Options.Create(new MoodleApiOptions()),
-            new FakeTokenProvider(),
-            new FakeCredentialsProvider());
+            new FakeCredentialsProvider(),
+            new MoodleRestClient(
+                new HttpClient(handler),
+                Options.Create(new MoodleApiOptions()),
+                new FakeTokenProvider()));
     }
 
     private sealed class JsonHandler(string json) : HttpMessageHandler
     {
         public Uri? LastRequestUri { get; private set; }
+        public string LastRequestBody { get; private set; } = string.Empty;
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             LastRequestUri = request.RequestUri;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            LastRequestBody = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            };
         }
     }
 

@@ -5,10 +5,12 @@ using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Pedagogy;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Infrastructure.Configuration;
 using MoodleConnector.Infrastructure.DocumentExtraction;
 using MoodleConnector.Infrastructure.Pedagogy;
 using MoodleConnector.Infrastructure.Reports;
+using MoodleConnector.Infrastructure.MoodleApi;
 using Polly;
 using Polly.Extensions.Http;
 
@@ -88,6 +90,13 @@ public static class DependencyInjection
         services.AddScoped<IAuthorizationAuditService, AuthorizationAuditService>();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
         services.AddScoped<IMoodleUserResolver, MoodleUserResolver>();
+        services
+            .AddHttpClient<IMoodleRestClient, MoodleRestClient>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+        services.AddScoped<IMoodleFunctionCatalog, MoodleFunctionCatalog>();
+        services.AddScoped<IMoodleFunctionExecutor, MoodleFunctionExecutor>();
+        services.AddScoped<IMoodleUniversalWriteService, MoodleUniversalWriteService>();
+        services.AddSingleton<IMoodleResourceResolver, MoodleResourceResolver>();
         services
             .AddHttpClient<IMoodleCurrentUserIdGateway, MoodleCurrentUserIdGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);

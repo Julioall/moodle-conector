@@ -76,6 +76,10 @@ builder.Services
     .Bind(builder.Configuration.GetSection(MessageWriteFeatureOptions.SectionName));
 
 builder.Services
+    .AddOptions<MoodleUniversalApiFeatureOptions>()
+    .Bind(builder.Configuration.GetSection(MoodleUniversalApiFeatureOptions.SectionName));
+
+builder.Services
     .AddOptions<GradingLimitsOptions>()
     .Bind(builder.Configuration.GetSection(GradingLimitsOptions.SectionName));
 
@@ -268,6 +272,8 @@ var mcpServerBuilder = builder.Services
         });
     })
     .WithTools<MoodleCoursesTools>()
+    .WithTools<MoodleUniversalTools>()
+    .WithTools<MoodleUniversalWriteTools>()
     .WithTools<MoodleParticipantsTools>()
     .WithTools<MoodleCourseContentsTools>()
     .WithTools<MoodleCourseActivitiesTools>()

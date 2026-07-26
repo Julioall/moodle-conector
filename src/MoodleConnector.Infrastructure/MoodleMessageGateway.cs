@@ -9,10 +9,9 @@ namespace MoodleConnector.Infrastructure;
 /// Implementação do gateway de mensagens instantâneas via API Moodle (core_message_send_instant_messages).
 /// </summary>
 internal sealed class MoodleMessageGateway(
-    HttpClient httpClient,
     IOptions<MoodleApiOptions> options,
-    IMoodleAccessTokenProvider tokenProvider,
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleMessageGateway
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleMessageGateway
 {
     private const string SendMessagesFunction = "core_message_send_instant_messages";
     private readonly MoodleApiOptions _options = options.Value;
@@ -39,18 +38,7 @@ internal sealed class MoodleMessageGateway(
             throw new InvalidOperationException("A conexao Moodle atual nao permite escrita.");
         }
 
-        var token = await ResolveWriteTokenAsync(cancellationToken);
-        var endpoint = BuildMoodlePostEndpoint(credentials.BaseUrl);
-
-        // Build form-encoded body
-        // core_message_send_instant_messages accepts:
-        //   messages[0][touserid], messages[0][text], messages[0][textformat]
-        var formParams = new Dictionary<string, string>
-        {
-            ["wstoken"] = token,
-            ["wsfunction"] = SendMessagesFunction,
-            ["moodlewsrestformat"] = "json"
-        };
+        var formParams = new Dictionary<string, object?>();
 
         for (int i = 0; i < recipientUserIds.Count; i++)
         {
@@ -65,12 +53,8 @@ internal sealed class MoodleMessageGateway(
             formParams[$"messages[{i}][textformat]"] = "1"; // HTML
         }
 
-        using var content = new FormUrlEncodedContent(formParams);
-        using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        return ParseSendResult(payload, recipientUserIds);
+        var payload = await restClient.CallAsync(credentials, SendMessagesFunction, formParams, allowServiceToken: false, cancellationToken);
+        return ParseSendResult(payload.GetRawText(), recipientUserIds);
     }
 
     private MessageSendResult ParseSendResult(string payload, IReadOnlyList<string> requested)
@@ -144,11 +128,4 @@ internal sealed class MoodleMessageGateway(
             ErrorMessage: failed.Count > 0 ? $"Falha ao entregar mensagem para {failed.Count} destinatário(s)." : null);
     }
 
-    private Task<string> ResolveWriteTokenAsync(CancellationToken cancellationToken) =>
-        tokenProvider.GetAccessTokenAsync(cancellationToken);
-
-    private static string BuildMoodlePostEndpoint(string baseUrl)
-    {
-        return $"{baseUrl.TrimEnd('/')}/webservice/rest/server.php";
-    }
 }

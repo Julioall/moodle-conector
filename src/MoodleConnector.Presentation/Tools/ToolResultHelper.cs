@@ -12,10 +12,10 @@ internal static class ToolResultHelper
     /// <summary>
     /// Cria um <see cref="CallToolResult"/> de erro tipado no formato padrão <see cref="ToolResponse{T}"/>.
     /// </summary>
-    internal static CallToolResult Error<T>(string message)
+    internal static CallToolResult Error<T>(string message, string status = "error")
     {
         var response = new ToolResponse<T>(
-            "error",
+            status,
             Data: default,
             Warnings: [message],
             AuditId: null,

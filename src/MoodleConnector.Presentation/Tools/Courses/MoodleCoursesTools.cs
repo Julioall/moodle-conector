@@ -6,6 +6,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Courses;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
 
@@ -55,6 +56,10 @@ public sealed class MoodleCoursesTools(
         catch (ArgumentOutOfRangeException ex)
         {
             return ToolResultHelper.Error<ListMyCoursesResponse>(ex.Message);
+        }
+        catch (MoodleApiException ex) when (ex.ErrorCode == "flow_unavailable")
+        {
+            return ToolResultHelper.Error<ListMyCoursesResponse>(ex.Message, "flow_unavailable");
         }
         catch
         {
@@ -335,6 +340,10 @@ public sealed class MoodleCoursesTools(
         {
             throw;
         }
+        catch (MoodleApiException ex) when (ex.ErrorCode == "flow_unavailable")
+        {
+            return ToolResultHelper.Error<ListMyCoursesResponse>(ex.Message, "flow_unavailable");
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return ToolResultHelper.Error<ListMyCoursesResponse>($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
@@ -376,6 +385,10 @@ public sealed class MoodleCoursesTools(
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (MoodleApiException ex) when (ex.ErrorCode == "flow_unavailable")
+        {
+            return ToolResultHelper.Error<CourseDetailsResponse>(ex.Message, "flow_unavailable");
         }
         catch
         {
