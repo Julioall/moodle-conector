@@ -287,6 +287,8 @@ Configuração recomendada:
 
 ```text
 APP_DOMAIN=moodle-conector.seu-dominio.com
+CLARIS_DOMAIN=claris.seu-dominio.com
+PUBLIC_PROXY_NETWORK=novascript-proxy
 COMPOSE_PROFILES=https
 CADDYFILE=./Caddyfile
 
@@ -313,6 +315,8 @@ Use `.env.example` como base. Principais grupos:
 ```text
 APP_PORT=8787
 APP_DOMAIN=<APP_DOMAIN>
+CLARIS_DOMAIN=<CLARIS_DOMAIN>
+PUBLIC_PROXY_NETWORK=novascript-proxy
 COMPOSE_PROFILES=https
 CADDYFILE=./Caddyfile
 

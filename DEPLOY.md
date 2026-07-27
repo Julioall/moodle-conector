@@ -25,18 +25,21 @@ curl http://127.0.0.1:8787/api/status
 
 ## VPS Com Domínio
 
-Configure DNS apontando `APP_DOMAIN` para a VPS e habilite o profile HTTPS:
+Configure DNS apontando `APP_DOMAIN` e `CLARIS_DOMAIN` para a VPS e habilite o profile HTTPS. O Caddy deste projeto e o unico proxy publico da VPS e encaminha o host Claris ao container do outro projeto pela rede Docker externa compartilhada:
 
 ```env
 APP_DOMAIN=moodle-conector.seu-dominio.com
+CLARIS_DOMAIN=claris.seu-dominio.com
+PUBLIC_PROXY_NETWORK=novascript-proxy
 COMPOSE_PROFILES=https
 CADDYFILE=./Caddyfile
 ```
 
-O Caddy publica a aplicação em HTTPS:
+O Caddy publica o Moodle Connector e o frontend Claris em HTTPS:
 
 ```bash
 curl https://moodle-conector.seu-dominio.com/health
+curl https://claris.seu-dominio.com/health
 ```
 
 O endpoint do ChatGPT App deve ser:
@@ -103,6 +106,8 @@ Variables opcionais:
 - `VPS_SSH_PORT` - padrão `22`
 - `APP_PORT` - padrão `8787`
 - `APP_DOMAIN` - domínio público usado pelo Caddy para HTTPS automático
+- `CLARIS_DOMAIN` - subdomínio público encaminhado para o frontend Claris; padrão `claris.novascript.com.br`
+- `PUBLIC_PROXY_NETWORK` - rede Docker externa compartilhada com o Claris; padrão `novascript-proxy`
 - `COMPOSE_PROFILES` - padrão `https`
 - `CADDYFILE` - padrão `./Caddyfile`
 - `MCP_REQUIRE_JWT` - padrão `true`
@@ -127,6 +132,8 @@ O workflow sincroniza o código para a VPS, escreve `.env.production` remoto e e
 ```bash
 docker compose --env-file .env.production up -d --build --remove-orphans
 ```
+
+Ele cria a rede externa `PUBLIC_PROXY_NETWORK` quando ela ainda não existir. Faça o deploy deste projeto antes do Claris para o Caddy carregar o host adicional; em seguida, publique o frontend Claris, que entra na mesma rede sem expor portas públicas.
 
 Antes do deploy, o workflow valida:
 

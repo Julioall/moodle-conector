@@ -29,6 +29,8 @@ env:
   VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
   APP_PORT: ${{ vars.APP_PORT || '8787' }}
   APP_DOMAIN: ${{ vars.APP_DOMAIN || secrets.APP_DOMAIN || '' }}
+  CLARIS_DOMAIN: ${{ vars.CLARIS_DOMAIN || 'claris.novascript.com.br' }}
+  PUBLIC_PROXY_NETWORK: ${{ vars.PUBLIC_PROXY_NETWORK || 'novascript-proxy' }}
   COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES || 'https' }}
   CADDYFILE: ${{ vars.CADDYFILE || './Caddyfile' }}
   MCP_REQUIRE_JWT: ${{ vars.MCP_REQUIRE_JWT || 'true' }}
@@ -108,6 +110,18 @@ jobs:
             fi
           }
 
+          require_hostname() {
+            case "$2" in
+              ''|*://*|*/*|*:*|*' '*) echo "::error::$1 must be a hostname without protocol, path or port" && exit 1 ;;
+            esac
+          }
+
+          require_network_name() {
+            case "$2" in
+              ''|*[!a-zA-Z0-9_.-]*) echo "::error::$1 must contain only letters, numbers, dot, underscore or hyphen" && exit 1 ;;
+            esac
+          }
+
           test -n "${{ secrets.VPS_HOST }}" || (echo "::error::Configure VPS_HOST" && exit 1)
           test -n "${{ secrets.VPS_USER }}" || (echo "::error::Configure VPS_USER" && exit 1)
           test -n "$VPS_AUTH_SECRET" || (echo "::error::Configure VPS_SSH_KEY with a private key or SSH password" && exit 1)
@@ -115,6 +129,14 @@ jobs:
           test -n "${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}" || (echo "::error::Configure CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64" && exit 1)
           test -n "${{ secrets.ADMIN_API_KEY }}" || (echo "::error::Configure ADMIN_API_KEY" && exit 1)
           test -n "$APP_DOMAIN" || (echo "::error::Configure APP_DOMAIN via variables or secrets" && exit 1)
+
+          require_hostname APP_DOMAIN "$APP_DOMAIN"
+          require_hostname CLARIS_DOMAIN "$CLARIS_DOMAIN"
+          require_network_name PUBLIC_PROXY_NETWORK "$PUBLIC_PROXY_NETWORK"
+          if [ "$APP_DOMAIN" = "$CLARIS_DOMAIN" ]; then
+            echo "::error::CLARIS_DOMAIN must be different from APP_DOMAIN."
+            exit 1
+          fi
 
           require_bool MCP_REQUIRE_JWT "$MCP_REQUIRE_JWT"
           require_bool MCP_REQUIRE_API_KEY "$MCP_REQUIRE_API_KEY"
@@ -179,6 +201,8 @@ jobs:
 
           for value in \
             "$APP_DOMAIN" \
+            "$CLARIS_DOMAIN" \
+            "$PUBLIC_PROXY_NETWORK" \
             "$OAUTH_ISSUER" \
             "$OAUTH_AUDIENCE" \
             "$OAUTH_CHATGPT_REDIRECT_URI" \
@@ -311,6 +335,10 @@ jobs:
               exit 1
             fi
 
+            if ! \$SUDO docker network inspect '$PUBLIC_PROXY_NETWORK' >/dev/null 2>&1; then
+              \$SUDO docker network create '$PUBLIC_PROXY_NETWORK'
+            fi
+
             \$SUDO mkdir -p '$VPS_APP_DIR'
             \$SUDO chown -R '${{ secrets.VPS_USER }}': '$VPS_APP_DIR'"
 
@@ -367,6 +395,8 @@ jobs:
             printf 'GIT_COMMIT=%s\n' "$GITHUB_SHA"
             printf 'BUILD_DATE=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'APP_DOMAIN=%s\n' "$APP_DOMAIN"
+            printf 'CLARIS_DOMAIN=%s\n' "$CLARIS_DOMAIN"
+            printf 'PUBLIC_PROXY_NETWORK=%s\n' "$PUBLIC_PROXY_NETWORK"
             printf 'COMPOSE_PROFILES=%s\n' "$COMPOSE_PROFILES"
             printf 'CADDYFILE=%s\n' "$CADDYFILE"
             printf 'POSTGRES_DB=%s\n' "$POSTGRES_DB"

@@ -40,6 +40,9 @@ services:
       - ${CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
+    networks:
+      - default
+      - public-proxy
     depends_on:
       app:
         condition: service_healthy
@@ -65,3 +68,8 @@ volumes:
   postgres-data:
   caddy-data:
   caddy-config:
+
+networks:
+  public-proxy:
+    name: ${PUBLIC_PROXY_NETWORK:-novascript-proxy}
+    external: true

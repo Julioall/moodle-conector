@@ -1,4 +1,9 @@
 {$APP_DOMAIN} {
-  encode gzip zstd
-  reverse_proxy app:8080
+	encode gzip zstd
+	reverse_proxy app:8080
+}
+
+{$CLARIS_DOMAIN:claris.novascript.com.br} {
+	encode gzip zstd
+	reverse_proxy claris-frontend:80
 }
