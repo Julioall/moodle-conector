@@ -43,6 +43,13 @@ public sealed class ConfirmTutorMessageCommandHandlerTests
         public PendingMoodleAction? ActionToReturn { get; set; }
         public Task<PendingMoodleAction?> GetByIdAsync(Guid id, CancellationToken cancellationToken) => Task.FromResult(ActionToReturn);
         public Task AddAsync(PendingMoodleAction action, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<PendingActionConfirmationClaimResult> TryConfirmWithAuditAsync(Guid id, string confirmedBySubject, DateTimeOffset confirmedAt, MoodleAuditLog confirmationAudit, CancellationToken cancellationToken)
+        {
+            if (ActionToReturn?.Status != PendingActionStatus.PendingConfirmation)
+                return Task.FromResult(new PendingActionConfirmationClaimResult(false, ActionToReturn?.Status ?? PendingActionStatus.Expired, ActionToReturn?.ConfirmedAt));
+            ActionToReturn.Confirm(confirmedBySubject, confirmedAt);
+            return Task.FromResult(new PendingActionConfirmationClaimResult(true, ActionToReturn.Status, ActionToReturn.ConfirmedAt));
+        }
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 

@@ -198,13 +198,13 @@ humana e minimização de dados.
 
 `MoodleTutorMessageTools.cs` expõe seis pares `preparar_*` / `confirmar_*`: boas-vindas, cobrança de acesso, cobrança de SA, recuperação, encerramento e acompanhamento. A preparação recebe `courseId`, `recipientIds`, texto opcional e alias, resolve nomes quando possível e cria `PendingAction` com prévia, riscos, expiração e texto literal. A confirmação recebe `pendingActionId`, texto literal e alias, exige escopo `moodle.write`; a conexão precisa de `CanWrite=true`, e o gateway usa `core_message_send_instant_messages` para cada destinatário.
 
-Limitações: são mensagens instantâneas individuais, sem broadcast atômico, agendamento ou garantia de leitura. O resultado pode ter sucessos e falhas por destinatário. `MessagesWriteEnabled=false` é o default configurado e bloqueia a preparação e a confirmação até ser habilitado explicitamente pelo operador.
+Limitações: são mensagens instantâneas individuais, sem broadcast atômico, agendamento ou garantia de leitura. O resultado pode ter sucessos e falhas por destinatário. No `appsettings.json` versionado atual, `MessagesWriteEnabled=true`; quando definida como `false` por ambiente, a flag bloqueia a preparação e a confirmação.
 
 ## Nota individual confirmada
 
 `MoodleIndividualGradeTools.cs` expõe o par em português `preparar_lancamento_nota` / `confirmar_lancamento_nota` e os aliases em inglês `prepare_individual_grade_launch` / `confirm_individual_grade_launch`. A preparação recebe curso, tarefa, estudante, nota proposta, justificativa, feedback opcional e alias; consulta a nota atual e cria `PendingAction` com prévia e confirmação literal que inclui a nota. A confirmação exige `moodle.write.assignments.grade`, conexão `CanWrite=true`, `AssignmentGradeWriteEnabled=true`, pending action válida e `mod_assign_save_grade` disponível.
 
-Limitações: a escrita é individual e imediatamente visível ao estudante; não decide nota nem substitui revisão pedagógica. `AssignmentGradeWriteEnabled=false` é o default configurado e a confirmação é recusada até que o operador a habilite explicitamente.
+Limitações: a escrita é individual e imediatamente visível ao estudante; não decide nota nem substitui revisão pedagógica. No `appsettings.json` versionado atual, `AssignmentGradeWriteEnabled=true`; quando definida como `false` por ambiente, a confirmação é recusada.
 
 ## `listar_meus_cursos` / `list_courses`
 

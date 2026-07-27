@@ -10,8 +10,10 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using MoodleConnector.Application;
@@ -39,6 +41,7 @@ using System.Threading.RateLimiting;
 using MediatR;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Presentation;
+using MoodleConnector.Presentation.Health;
 using MoodleConnector.Infrastructure.Reports;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -46,6 +49,8 @@ const string PortalAuthRateLimitPolicy = "portal-auth";
 const string AdminApiRateLimitPolicy = "admin-api";
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddHealthChecks()
+    .AddCheck<ConnectorDatabaseHealthCheck>("database", tags: ["ready"]);
 
 builder.Services
     .AddOptions<McpServerSecurityOptions>()
@@ -278,10 +283,14 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodleCourseContentsTools>()
     .WithTools<MoodleCourseActivitiesTools>()
     .WithTools<MoodleForumTools>()
+    .WithTools<MoodleForumParticipationTools>()
     .WithTools<MoodleAssignmentSubmissionsTools>()
+    .WithTools<MoodlePendingSubmissionsTools>()
     .WithTools<MoodleGradingTools>()
     .WithTools<MoodleGradebookTools>()
+    .WithTools<MoodleStudentPerformanceTools>()
     .WithTools<MoodleCompletionTools>()
+    .WithTools<MoodleAccessMonitoringTools>()
     .WithTools<MoodleRiskAnalysisTools>()
     .WithTools<MoodleGradingContextDiagnosticsTools>()
     .WithTools<MoodleGradingReviewAppTools>()
@@ -554,9 +563,18 @@ app.Use(async (context, next) =>
 
 app.UseRateLimiter();
 
-app.MapGet("/api/status", (HttpContext context, IOptions<McpServerSecurityOptions> security, IOptions<OAuthBrokerOptions> oauth) =>
+app.MapGet("/api/status", (
+    HttpContext context,
+    IOptions<McpServerSecurityOptions> security,
+    IOptions<OAuthBrokerOptions> oauth,
+    IOptions<AssignmentWriteFeatureOptions> assignmentWrites,
+    IOptions<FeatureOptions> features) =>
 {
     var publicBaseUrl = GetPublicBaseUrl(context);
+    var gitCommit = builder.Configuration["GIT_COMMIT"] ?? "unknown";
+    var buildDate = builder.Configuration["BUILD_DATE"] ?? "unknown";
+    var toolsCount = 137 + (assignmentWrites.Value.AssignmentGradeWriteEnabled ? 4 : 0) +
+                     (features.Value.DemoToolsEnabled ? 2 : 0);
     return Results.Ok(new
     {
         ok = true,
@@ -565,6 +583,12 @@ app.MapGet("/api/status", (HttpContext context, IOptions<McpServerSecurityOption
         transport = "mcp-streamable-http",
         endpoint = mcpPath,
         source = "aspnetcore-mcp",
+        version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown",
+        gitCommit,
+        buildDate,
+        toolsCount,
+        universalExecutorEnabled = true,
+        capabilityDiscoveryEnabled = true,
         auth = new
         {
             requireJwt = security.Value.RequireJwt,
@@ -577,7 +601,14 @@ app.MapGet("/api/status", (HttpContext context, IOptions<McpServerSecurityOption
     });
 });
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapHealthChecks("/health/live", new HealthCheckOptions
+{
+    Predicate = _ => false
+});
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+});
 
 app.MapGet("/.well-known/oauth-protected-resource", BuildOAuthProtectedResourceMetadata);
 app.MapGet("/.well-known/oauth-protected-resource/{**resourcePath}", BuildOAuthProtectedResourceMetadata);

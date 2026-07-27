@@ -78,7 +78,7 @@ public sealed class MoodleUniversalWriteServiceTests
     {
         var rest = new FakeRestClient();
         var pendingActions = new FakePendingActions();
-        var confirmation = new FakeConfirmation();
+        var confirmation = new FakeConfirmation { StatusToReturn = "already_confirmed" };
         var sut = CreateService(rest, pendingActions, enabled: true, confirmation: confirmation);
         var preview = await sut.PrepareAsync(
             "mod_assign_save_grade",
@@ -227,12 +227,21 @@ public sealed class MoodleUniversalWriteServiceTests
         public Task<PendingMoodleAction?> GetByIdAsync(Guid id, CancellationToken cancellationToken) =>
             Task.FromResult(Action?.Id == id ? Action : null);
 
+        public Task<PendingActionConfirmationClaimResult> TryConfirmWithAuditAsync(Guid id, string confirmedBySubject, DateTimeOffset confirmedAt, MoodleAuditLog confirmationAudit, CancellationToken cancellationToken)
+        {
+            if (Action?.Id != id || Action.Status != PendingActionStatus.PendingConfirmation)
+                return Task.FromResult(new PendingActionConfirmationClaimResult(false, Action?.Status ?? PendingActionStatus.Expired, Action?.ConfirmedAt));
+            Action.Confirm(confirmedBySubject, confirmedAt);
+            return Task.FromResult(new PendingActionConfirmationClaimResult(true, Action.Status, Action.ConfirmedAt));
+        }
+
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class FakeConfirmation : IActionConfirmationService
     {
         public int Calls { get; private set; }
+        public string StatusToReturn { get; set; } = "confirmed";
 
         public Task<ActionConfirmationResponse> ConfirmAsync(Guid pendingActionId, string confirmationText, string? requiredScope, CancellationToken cancellationToken) =>
             Task.FromResult(CreateResponse(pendingActionId));
@@ -240,7 +249,7 @@ public sealed class MoodleUniversalWriteServiceTests
         private ActionConfirmationResponse CreateResponse(Guid pendingActionId)
         {
             Calls++;
-            return new ActionConfirmationResponse("confirmed", pendingActionId, "moodle_prepare_write", ToolRiskLevel.CriticalHumanConfirmedWrite, DateTimeOffset.UtcNow, "audit");
+            return new ActionConfirmationResponse(StatusToReturn, pendingActionId, "moodle_prepare_write", ToolRiskLevel.CriticalHumanConfirmedWrite, DateTimeOffset.UtcNow, "audit");
         }
     }
 

@@ -8,7 +8,6 @@ namespace MoodleConnector.Application.PendingActions;
 
 public sealed class ActionConfirmationService(
     IPendingMoodleActionRepository pendingActions,
-    IMoodleAuditLogRepository auditLogs,
     ICurrentUserContext currentUser,
     IMoodleUserResolver moodleUserResolver,
     IAuthorizationAuditService authorizationAudit) : IActionConfirmationService
@@ -53,7 +52,7 @@ public sealed class ActionConfirmationService(
         if (action.Status == PendingActionStatus.Confirmed)
         {
             return new ActionConfirmationResponse(
-                "confirmed",
+                "already_confirmed",
                 action.Id,
                 action.ToolName,
                 action.RiskLevel,
@@ -66,18 +65,9 @@ public sealed class ActionConfirmationService(
             throw new InvalidOperationException($"A acao nao pode ser confirmada no estado {action.Status}.");
         }
 
-        if (action.IsExpired(DateTimeOffset.UtcNow))
-        {
-            action.MarkExpired();
-            await pendingActions.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException("A acao pendente expirou.");
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        action.Confirm(currentUser.Subject, now);
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-
-        await auditLogs.AddAsync(new MoodleAuditLog
+        var now = DateTimeOffset.UtcNow;
+        var audit = new MoodleAuditLog
         {
             CorrelationId = action.CorrelationId,
             ToolName = action.ToolName,
@@ -89,9 +79,33 @@ public sealed class ActionConfirmationService(
             RequestSanitizedJson = AuditPayloadSanitizer.SanitizeJson(action.PreviewJson),
             ResponseSummaryJson = JsonSerializer.Serialize(new { action.Id, confirmedAt = now }, JsonOptions),
             Status = "confirmed"
-        }, cancellationToken);
+        };
+        var claim = await pendingActions.TryConfirmWithAuditAsync(
+            action.Id,
+            currentUser.Subject,
+            now,
+            audit,
+            cancellationToken);
+        if (!claim.ConfirmedByCaller)
+        {
+            if (claim.Status == PendingActionStatus.Confirmed)
+            {
+                return new ActionConfirmationResponse(
+                    "already_confirmed",
+                    action.Id,
+                    action.ToolName,
+                    action.RiskLevel,
+                    claim.ConfirmedAt ?? now,
+                    action.CorrelationId);
+            }
 
-        await pendingActions.SaveChangesAsync(cancellationToken);
+            if (claim.Status == PendingActionStatus.Expired)
+            {
+                throw new InvalidOperationException("A acao pendente expirou.");
+            }
+
+            throw new InvalidOperationException($"A acao nao pode ser confirmada no estado {claim.Status}.");
+        }
 
         return new ActionConfirmationResponse(
             "confirmed",

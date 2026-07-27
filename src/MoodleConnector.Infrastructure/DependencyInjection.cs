@@ -97,9 +97,7 @@ public static class DependencyInjection
         services.AddScoped<IMoodleFunctionExecutor, MoodleFunctionExecutor>();
         services.AddScoped<IMoodleUniversalWriteService, MoodleUniversalWriteService>();
         services.AddSingleton<IMoodleResourceResolver, MoodleResourceResolver>();
-        services
-            .AddHttpClient<IMoodleCurrentUserIdGateway, MoodleCurrentUserIdGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
+        services.AddScoped<IMoodleCurrentUserIdGateway, MoodleCurrentUserIdGateway>();
         services.AddScoped<IMcpConnectorClientResolver, DatabaseConnectorClientResolver>();
         services.AddScoped<IConnectorClientRegistrationService, DatabaseConnectorClientRegistrationService>();
         services.AddScoped<IMoodleConnectorCredentialsProvider, HttpContextMoodleConnectorCredentialsProvider>();

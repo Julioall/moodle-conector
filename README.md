@@ -182,7 +182,7 @@ As ferramentas de escrita ainda estão em desenvolvimento e devem seguir um flux
 3. o sistema pede uma confirmação explícita;
 4. somente depois disso a ação pode ser executada.
 
-Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write`, conexão `CanWrite` e `MessagesWriteEnabled=true`. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`. Ambas as flags iniciam como `false` no arquivo versionado; habilite-as somente por configuração externa e com menor privilégio.
+Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write`, conexão `CanWrite` e `MessagesWriteEnabled=true`. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`. No `appsettings.json` versionado atual essas flags estão habilitadas; operadores devem revisá-las e podem sobrescrevê-las por ambiente conforme sua política de menor privilégio.
 
 ## Arquitetura
 
@@ -381,10 +381,10 @@ Tools universais de leitura:
 | `moodle_describe_function` | Descreve disponibilidade e classificação de risco local. | Implementada |
 | `moodle_list_available_flows` | Mostra estratégias selecionadas e funções ausentes por fluxo. | Implementada |
 | `moodle_execute_read` | Executa somente funções explicitamente classificadas como leitura segura. | Implementada |
-| `moodle_prepare_write` | Cria prévia de escrita controlada sem chamar o Moodle. | Implementada, desabilitada por padrão |
-| `moodle_confirm_write` | Executa uma prévia confirmada uma única vez. | Implementada, desabilitada por padrão |
+| `moodle_prepare_write` | Cria prévia de escrita controlada sem chamar o Moodle. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
+| `moodle_confirm_write` | Executa uma prévia confirmada uma única vez. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
 
-As chamadas universais usam `POST /webservice/rest/server.php`, serializam arrays e objetos no formato nativo do Moodle e nunca inserem o token na URL. Uma função descoberta, mas ainda não classificada no catálogo local, é tratada como `Unknown` e recusada pela tool de execução. `moodle_prepare_write` e `moodle_confirm_write` só permitem funções explicitamente classificadas como escrita controlada, com feature flag desabilitada por padrão, `CanWrite`, confirmação literal, auditoria e execução única; funções destrutivas continuam bloqueadas.
+As chamadas universais usam `POST /webservice/rest/server.php`, serializam arrays e objetos no formato nativo do Moodle e nunca inserem o token na URL. Uma função descoberta, mas ainda não classificada no catálogo local, é tratada como `Unknown` e recusada pela tool de execução. `moodle_prepare_write` e `moodle_confirm_write` só permitem funções explicitamente classificadas como escrita controlada, com `UniversalMoodleWriteEnabled=true`, `CanWrite`, confirmação literal, auditoria e execução única; funções destrutivas continuam bloqueadas.
 
 Leitura:
 

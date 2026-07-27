@@ -341,14 +341,13 @@ public sealed class ConfirmTutorMessageCommandHandler(
         }
 
         // 2. Validate confirmation
-        var wasAlreadyConfirmed = action.Status == PendingActionStatus.Confirmed;
         var confirmation = await confirmationService.ConfirmAsync(
             request.PendingActionId,
             request.ConfirmationText,
             requiredScope: RequiredScope,
             cancellationToken);
 
-        if (wasAlreadyConfirmed)
+        if (confirmation.Status == "already_confirmed")
         {
             return new TutorMessageSendResult(
                 Status: "already_confirmed",

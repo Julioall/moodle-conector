@@ -94,7 +94,7 @@ Qualquer escrita deve seguir o fluxo:
 3. exigir confirmação humana;
 4. executar somente após confirmação válida.
 
-Além das permissões Moodle da função, a conexão cadastrada precisa estar com `CanWrite=true`, o chamador precisa ter o escopo aplicável e a feature flag do domínio precisa estar ativa. `MessagesWriteEnabled=false` e `AssignmentGradeWriteEnabled=false` são os defaults configurados; ambos bloqueiam preparação/confirmação até a habilitação explícita pelo operador.
+Além das permissões Moodle da função, a conexão cadastrada precisa estar com `CanWrite=true`, o chamador precisa ter o escopo aplicável e a feature flag do domínio precisa estar ativa. No `appsettings.json` versionado atual, `MessagesWriteEnabled=true` e `AssignmentGradeWriteEnabled=true`; ambos podem ser sobrescritos por ambiente e bloqueiam preparação/confirmação quando definidos como `false`.
 
 ## Cadastro de conexão Moodle
 

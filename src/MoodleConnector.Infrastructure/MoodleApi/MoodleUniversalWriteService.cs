@@ -139,8 +139,6 @@ internal sealed class MoodleUniversalWriteService(
 
         var payload = JsonSerializer.Deserialize<UniversalMoodleWritePayload>(action.PayloadJson, JsonOptions)
             ?? throw new InvalidOperationException("Os dados da acao pendente estao invalidos.");
-        var wasAlreadyConfirmed = action.Status == PendingActionStatus.Confirmed;
-
         var connection = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         if (!connection.CanWrite)
         {
@@ -167,7 +165,7 @@ internal sealed class MoodleUniversalWriteService(
             requiredScope: "moodle.write",
             cancellationToken);
 
-        if (wasAlreadyConfirmed)
+        if (confirmation.Status == "already_confirmed")
         {
             return new MoodleWriteResult("already_confirmed", action.Id, payload.Function, confirmation.AuditId, 0);
         }

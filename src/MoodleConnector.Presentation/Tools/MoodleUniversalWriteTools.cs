@@ -14,7 +14,7 @@ public sealed class MoodleUniversalWriteTools(
     IMoodleConnectionSelection connectionSelection)
 {
     [McpServerTool(Name = "moodle_prepare_write", Title = "Preparar Escrita Moodle",
-        ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleWritePreview>))]
     [Description("Cria uma prévia de uma escrita Moodle explicitamente classificada como controlada. Não chama o Moodle. Exige Features:UniversalMoodleWriteEnabled=true, conexão CanWrite e confirmação literal posterior.")]
     public async Task<CallToolResult> PrepareWriteAsync(
@@ -39,7 +39,7 @@ public sealed class MoodleUniversalWriteTools(
             return Success(data, $"Escrita '{data.Function}' preparada. Revise e confirme usando o texto literal informado.");
         }
         catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleWritePreview>(ex.Message); }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleWritePreview>(ex); }
         catch (ArgumentException ex) { return ToolResultHelper.Error<MoodleWritePreview>(ex.Message); }
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleWritePreview>(ex.Message); }
     }
@@ -64,7 +64,7 @@ public sealed class MoodleUniversalWriteTools(
                 : "A escrita já havia sido confirmada anteriormente e não foi repetida.", isError);
         }
         catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleWriteResult>(ex.Message); }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleWriteResult>(ex); }
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleWriteResult>(ex.Message); }
     }
 
