@@ -15,6 +15,7 @@ internal sealed class MoodleCoursesGateway(
     IMoodleConnectorCredentialsProvider credentialsProvider,
     IMoodleRestClient restClient,
     IMoodleFunctionCatalog functionCatalog,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMoodleBusinessFlowRegistry businessFlows,
     IMoodleResourceResolver resourceResolver) : IMoodleCoursesGateway
 {
@@ -249,18 +250,8 @@ internal sealed class MoodleCoursesGateway(
             return moodleUserId;
         }
 
-        var payload = await restClient.CallAsync(
-            credentials,
-            "core_webservice_get_site_info",
-            new Dictionary<string, object?>(),
-            cancellationToken);
-
-        if (!payload.TryGetProperty("userid", out var userIdElement) || userIdElement.ValueKind != JsonValueKind.Number)
-        {
-            throw new InvalidOperationException("Nao foi possivel resolver o usuario Moodle a partir do token atual.");
-        }
-
-        return userIdElement.GetInt32();
+        var currentMoodleUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+        return checked((int)currentMoodleUserId);
     }
 
     private static DateTimeOffset? ToDateTimeOffset(JsonElement value)

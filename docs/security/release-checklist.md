@@ -32,12 +32,8 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
 
 ## Escritas E Feature Flags
 
-- [ ] Escritas reais continuam desabilitadas por padrão:
-  - `Features__MessagesWriteEnabled=false`;
-  - `Features__ScheduledMessagesEnabled=false`;
-  - `Features__AssignmentFeedbackWriteEnabled=false`;
-  - `Features__AssignmentGradeWriteEnabled=false`;
-  - `Features__CourseContentWriteEnabled=false`.
+- [ ] As flags de escrita refletem a política aprovada para o ambiente. No arquivo versionado atual, mensagens, notas, feedbacks e conteúdo estão habilitados; qualquer alteração deve ser registrada no release.
+- [ ] Para cada escrita habilitada, `CanWrite`, escopo exigido, prévia, confirmação literal, expiração, reivindicação atômica e auditoria foram verificados.
 - [ ] `Features__DemoToolsEnabled=false` em qualquer endpoint submetido ao ChatGPT ou publicado.
 - [ ] Qualquer escrita nova usa fluxo `prepare_*` e `confirm_*`.
 - [ ] Confirmação exige usuário correto, escopo requerido, expiração e texto exato.

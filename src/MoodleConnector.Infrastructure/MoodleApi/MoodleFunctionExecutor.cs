@@ -56,6 +56,21 @@ internal sealed class MoodleFunctionExecutor(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            if (ex is MoodleApiException { ErrorCode: "function_not_available" })
+            {
+                // Moodle can revoke a function while the connector remains online.
+                // Refresh the per-connection catalog before the next request.
+                try
+                {
+                    await catalog.GetCurrentAsync(true, cancellationToken);
+                }
+                catch (Exception refreshException) when (refreshException is not OperationCanceledException)
+                {
+                    // Preserve the original operation error. The refresh is best effort
+                    // and must not hide the function that actually failed.
+                }
+            }
+
             await RecordAuditAsync(
                 connection,
                 normalizedName,

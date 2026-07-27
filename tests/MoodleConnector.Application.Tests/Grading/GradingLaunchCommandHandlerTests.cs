@@ -831,6 +831,15 @@ public sealed class GradingLaunchCommandHandlerTests
             return Task.FromResult(Actions.SingleOrDefault(action => action.Id == id));
         }
 
+        public Task<PendingActionConfirmationClaimResult> TryConfirmWithAuditAsync(Guid id, string confirmedBySubject, DateTimeOffset confirmedAt, MoodleAuditLog confirmationAudit, CancellationToken cancellationToken)
+        {
+            var action = Actions.SingleOrDefault(candidate => candidate.Id == id);
+            if (action?.Status != PendingActionStatus.PendingConfirmation)
+                return Task.FromResult(new PendingActionConfirmationClaimResult(false, action?.Status ?? PendingActionStatus.Expired, action?.ConfirmedAt));
+            action.Confirm(confirmedBySubject, confirmedAt);
+            return Task.FromResult(new PendingActionConfirmationClaimResult(true, action.Status, action.ConfirmedAt));
+        }
+
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
             GradingBatchStatus status, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());

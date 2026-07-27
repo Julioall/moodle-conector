@@ -373,14 +373,13 @@ public sealed class ConfirmForumPostCommandHandler(
             ?? throw new InvalidOperationException("Acao pendente nao encontrada.");
         var payload = JsonSerializer.Deserialize<ForumPostPendingPayload>(action.PayloadJson, JsonOptions)
             ?? throw new InvalidOperationException("Payload de publicacao em forum invalido.");
-        var wasAlreadyConfirmed = action.Status == PendingActionStatus.Confirmed;
         var confirmation = await confirmations.ConfirmAsync(
             request.PendingActionId,
             request.ConfirmationText,
             requiredScope: "moodle.write",
             cancellationToken);
 
-        if (wasAlreadyConfirmed)
+        if (confirmation.Status == "already_confirmed")
         {
             return new ConfirmForumPostResult(
                 "already_confirmed",

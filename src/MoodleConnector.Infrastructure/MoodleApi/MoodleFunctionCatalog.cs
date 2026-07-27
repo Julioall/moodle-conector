@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using MoodleConnector.Application.Abstractions;
@@ -15,7 +17,9 @@ internal sealed class MoodleFunctionCatalog(
     public async Task<MoodleFunctionProfile> GetCurrentAsync(bool forceRefresh, CancellationToken cancellationToken)
     {
         var connection = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var cacheKey = $"moodle:function-profile:{connection.ConnectionId}";
+        // A rotated Moodle credential must not inherit the capabilities discovered
+        // with its predecessor.
+        var cacheKey = $"moodle:function-profile:{connection.ConnectionId}:{CreateCredentialFingerprint(connection)}";
         if (forceRefresh)
         {
             cache.Remove(cacheKey);
@@ -73,4 +77,11 @@ internal sealed class MoodleFunctionCatalog(
         payload.TryGetProperty(name, out var value) && value.TryGetInt64(out var number)
             ? number
             : null;
+
+    private static string CreateCredentialFingerprint(MoodleConnectorCredentials connection)
+    {
+        var value = $"{connection.Username}\u001f{connection.Password}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(hash.AsSpan(0, 8));
+    }
 }

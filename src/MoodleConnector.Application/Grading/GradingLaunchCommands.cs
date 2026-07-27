@@ -286,6 +286,16 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             cancellationToken);
         var payload = JsonSerializer.Deserialize<GradingLaunchPayload>(action.PayloadJson, JsonOptions)
             ?? throw new InvalidOperationException("Payload de lancamento invalido.");
+        if (confirmation.Status == "already_confirmed")
+        {
+            return new ConfirmMoodleBatchLaunchResult(
+                "already_confirmed",
+                request.PendingActionId,
+                SentItems: 0,
+                FailedItems: 0,
+                Failures: [],
+                confirmation.AuditId);
+        }
         var sent = 0;
         var failures = new List<GradingLaunchFailure>();
         var userExternalId = action.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture) ??

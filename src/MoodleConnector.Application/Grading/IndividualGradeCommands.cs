@@ -246,6 +246,18 @@ public sealed class ConfirmIndividualGradeCommandHandler(
         var payload = JsonSerializer.Deserialize<IndividualGradePayload>(action.PayloadJson, JsonOptions)
             ?? throw new InvalidOperationException("Payload de nota individual inválido.");
 
+        if (confirmation.Status == "already_confirmed")
+        {
+            return new IndividualGradeSendResult(
+                "already_confirmed",
+                request.PendingActionId,
+                payload.AssignmentId,
+                payload.StudentId,
+                payload.ProposedGrade,
+                confirmation.AuditId,
+                ["Esta ação já foi confirmada e não será executada novamente."]);
+        }
+
         var userExternalId = action.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture)
             ?? action.CreatedBySubject;
 

@@ -23,6 +23,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
             new FakeCredentialsProvider(),
             restClient,
             new FakeCatalog(Profile(availableFunction)),
+            new FakeCurrentUserIdGateway(),
             new MoodleBusinessFlowRegistry(),
             new MoodleResourceResolver());
 
@@ -43,6 +44,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
             new FakeCredentialsProvider(),
             restClient,
             new FakeCatalog(Profile("core_course_get_courses_by_field", "core_enrol_get_enrolled_users")),
+            new FakeCurrentUserIdGateway(),
             new MoodleBusinessFlowRegistry(),
             new MoodleResourceResolver());
 
@@ -63,6 +65,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
             new FakeCredentialsProvider(),
             restClient,
             new FakeCatalog(Profile("core_course_get_courses_by_field", "core_enrol_get_enrolled_users")),
+            new FakeCurrentUserIdGateway(),
             new MoodleBusinessFlowRegistry(),
             new MoodleResourceResolver());
 
@@ -86,6 +89,11 @@ public sealed class MoodleCoursesCapabilityGatewayTests
     {
         public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken) =>
             Task.FromResult(new MoodleConnectorCredentials("client", "connection", "goias", "https://moodle.example", "user", "password", "goias", false));
+    }
+
+    private sealed class FakeCurrentUserIdGateway : IMoodleCurrentUserIdGateway
+    {
+        public Task<long> GetCurrentUserIdAsync(CancellationToken cancellationToken) => Task.FromResult(7L);
     }
 
     private sealed class FakeRestClient : IMoodleRestClient

@@ -127,7 +127,7 @@ public sealed class PendingActionServicesTests
     }
 
     [Fact]
-    public async Task ConfirmAsync_SecondConfirmation_ReturnsConfirmedWithoutDuplicateAudit()
+    public async Task ConfirmAsync_SecondConfirmation_ReturnsAlreadyConfirmedWithoutDuplicateAudit()
     {
         var fixture = new Fixture();
         var pending = await fixture.CreatePendingAsync("CONFIRMAR");
@@ -141,8 +141,23 @@ public sealed class PendingActionServicesTests
             null,
             CancellationToken.None);
 
-        Assert.Equal("confirmed", response.Status);
+        Assert.Equal("already_confirmed", response.Status);
         Assert.Equal(auditCountAfterFirstConfirmation, fixture.AuditRepository.Logs.Count);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_ConcurrentRequests_HasOneClaimAndOneConfirmationAudit()
+    {
+        var fixture = new Fixture();
+        var pending = await fixture.CreatePendingAsync("CONFIRMAR");
+
+        var results = await Task.WhenAll(
+            fixture.ConfirmationService.ConfirmAsync(pending.PendingActionId, "CONFIRMAR", null, CancellationToken.None),
+            fixture.ConfirmationService.ConfirmAsync(pending.PendingActionId, "CONFIRMAR", null, CancellationToken.None));
+
+        Assert.Single(results, result => result.Status == "confirmed");
+        Assert.Single(results, result => result.Status == "already_confirmed");
+        Assert.Single(fixture.AuditRepository.Logs, log => log.Status == "confirmed");
     }
 
     [Fact]
@@ -204,8 +219,9 @@ public sealed class PendingActionServicesTests
     {
         public Fixture()
         {
+            PendingRepository.AuditRepository = AuditRepository;
             PendingService = new PendingActionService(PendingRepository, AuditRepository, CurrentUser, MoodleUserResolver);
-            ConfirmationService = new ActionConfirmationService(PendingRepository, AuditRepository, CurrentUser, MoodleUserResolver, AuthorizationAudit);
+            ConfirmationService = new ActionConfirmationService(PendingRepository, CurrentUser, MoodleUserResolver, AuthorizationAudit);
         }
 
         public FakePendingActionRepository PendingRepository { get; } = new();
@@ -233,6 +249,7 @@ public sealed class PendingActionServicesTests
     private sealed class FakePendingActionRepository : IPendingMoodleActionRepository
     {
         public List<PendingMoodleAction> Actions { get; } = [];
+        public FakeAuditLogRepository? AuditRepository { get; set; }
 
         public Task AddAsync(PendingMoodleAction action, CancellationToken cancellationToken)
         {
@@ -243,6 +260,34 @@ public sealed class PendingActionServicesTests
         public Task<PendingMoodleAction?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
         {
             return Task.FromResult(Actions.SingleOrDefault(action => action.Id == id));
+        }
+
+        public Task<PendingActionConfirmationClaimResult> TryConfirmWithAuditAsync(
+            Guid id,
+            string confirmedBySubject,
+            DateTimeOffset confirmedAt,
+            MoodleAuditLog confirmationAudit,
+            CancellationToken cancellationToken)
+        {
+            lock (Actions)
+            {
+                var action = Actions.SingleOrDefault(candidate => candidate.Id == id)
+                    ?? throw new InvalidOperationException("Acao pendente nao encontrada.");
+                if (action.Status != PendingActionStatus.PendingConfirmation)
+                {
+                    return Task.FromResult(new PendingActionConfirmationClaimResult(false, action.Status, action.ConfirmedAt));
+                }
+
+                if (action.ExpiresAt <= confirmedAt)
+                {
+                    action.MarkExpired();
+                    return Task.FromResult(new PendingActionConfirmationClaimResult(false, action.Status, action.ConfirmedAt));
+                }
+
+                action.Confirm(confirmedBySubject, confirmedAt);
+                AuditRepository?.Logs.Add(confirmationAudit);
+                return Task.FromResult(new PendingActionConfirmationClaimResult(true, action.Status, action.ConfirmedAt));
+            }
         }
 
         public Task SaveChangesAsync(CancellationToken cancellationToken)

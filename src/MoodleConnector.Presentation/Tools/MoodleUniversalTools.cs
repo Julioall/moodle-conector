@@ -45,7 +45,7 @@ public sealed class MoodleUniversalTools(
             return Success(data, $"Conexao '{profile.ConnectionAlias}' diagnosticada: {profile.Functions.Count} funcoes descobertas.");
         }
         catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleConnectionDiagnostic>(ex.Message); }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleConnectionDiagnostic>(ex); }
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleConnectionDiagnostic>(ex.Message); }
     }
 
@@ -69,7 +69,7 @@ public sealed class MoodleUniversalTools(
             return Success<IReadOnlyList<MoodleFunctionDescriptor>>(functions, $"{functions.Count} funcao(oes) encontrada(s).");
         }
         catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyList<MoodleFunctionDescriptor>>(ex.Message); }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyList<MoodleFunctionDescriptor>>(ex); }
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<IReadOnlyList<MoodleFunctionDescriptor>>(ex.Message); }
     }
 
@@ -97,7 +97,7 @@ public sealed class MoodleUniversalTools(
             return Success(descriptor, descriptor.IsAvailable ? "Funcao Moodle disponivel." : "Funcao Moodle nao esta disponivel para esta conexao.");
         }
         catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleFunctionDescriptor>(ex.Message); }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleFunctionDescriptor>(ex); }
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleFunctionDescriptor>(ex.Message); }
     }
 
@@ -128,7 +128,7 @@ public sealed class MoodleUniversalTools(
             return Success<IReadOnlyCollection<BusinessFlowAvailability>>(flows, $"{flows.Count(flow => flow.IsAvailable)} fluxo(s) Moodle disponível(is).");
         }
         catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyCollection<BusinessFlowAvailability>>(ex.Message); }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyCollection<BusinessFlowAvailability>>(ex); }
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<IReadOnlyCollection<BusinessFlowAvailability>>(ex.Message); }
     }
 
@@ -163,7 +163,7 @@ public sealed class MoodleUniversalTools(
             return Success(data, $"Funcao de leitura '{data.Function}' executada com sucesso.");
         }
         catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
+        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex); }
         catch (ArgumentException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
     }
