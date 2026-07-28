@@ -51,6 +51,21 @@ public sealed class MoodleUserResolverTests
         Assert.Equal(0, gateway.Calls);
     }
 
+    [Fact]
+    public async Task ResolveMoodleUserIdAsync_WithExplicitAlias_DoesNotReuseGlobalMoodleClaim()
+    {
+        var gateway = new FakeCurrentUserIdGateway { UserId = 847 };
+        var resolver = new MoodleUserResolver(
+            BuildHttpContextAccessor([new Claim("moodle_user_id", "123")]),
+            gateway,
+            new FakeConnectionSelection { Alias = "goias" });
+
+        var result = await resolver.ResolveMoodleUserIdAsync(CancellationToken.None);
+
+        Assert.Equal(847, result);
+        Assert.Equal(1, gateway.Calls);
+    }
+
     private static IHttpContextAccessor BuildHttpContextAccessor(IEnumerable<Claim> claims)
     {
         var identity = new ClaimsIdentity(claims, "test-auth");
@@ -68,5 +83,10 @@ public sealed class MoodleUserResolverTests
             Calls++;
             return Task.FromResult(UserId);
         }
+    }
+
+    private sealed class FakeConnectionSelection : IMoodleConnectionSelection
+    {
+        public string? Alias { get; set; }
     }
 }

@@ -8,4 +8,5 @@ public sealed record ToolResponse<T>(
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
     [property: JsonPropertyName("auditId")] string? AuditId,
     [property: JsonPropertyName("timestamp")] DateTimeOffset Timestamp,
-    [property: JsonPropertyName("errorCode")] string? ErrorCode = null);
+    [property: JsonPropertyName("errorCode")] string? ErrorCode = null,
+    [property: JsonPropertyName("message")] string? Message = null);

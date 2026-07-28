@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Infrastructure;
@@ -17,8 +17,8 @@ public sealed class MoodleRestClientTests
         using var client = new HttpClient(handler);
         var sut = new MoodleRestClient(
             client,
-            Options.Create(new MoodleApiOptions()),
-            new FakeTokenProvider("secret-token"));
+            new FakeTokenProvider("secret-token"),
+            NullLogger<MoodleRestClient>.Instance);
 
         await sut.CallAsync(
             Connection(),
@@ -40,12 +40,16 @@ public sealed class MoodleRestClientTests
             "{\"exception\":\"invalid_parameter_exception\",\"errorcode\":\"invalidparameter\",\"message\":\"ParÃ¢metro invÃ¡lido\"}",
             HttpStatusCode.BadRequest);
         using var client = new HttpClient(handler);
-        var sut = new MoodleRestClient(client, Options.Create(new MoodleApiOptions()), new FakeTokenProvider("secret-token"));
+        var sut = new MoodleRestClient(
+            client,
+            new FakeTokenProvider("secret-token"),
+            NullLogger<MoodleRestClient>.Instance);
 
         var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.CallAsync(
             Connection(), "core_course_get_courses_by_field", new Dictionary<string, object?>(), CancellationToken.None));
 
-        Assert.Equal("invalidparameter", error.ErrorCode);
+        Assert.Equal(MoodleErrorContract.ApiError, error.ErrorCode);
+        Assert.Equal("invalidparameter", error.RemoteErrorCode);
         Assert.DoesNotContain("secret-token", error.Message, StringComparison.Ordinal);
     }
 
@@ -54,7 +58,13 @@ public sealed class MoodleRestClientTests
 
     private sealed class FakeTokenProvider(string token) : IMoodleAccessTokenProvider
     {
-        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) => Task.FromResult(token);
+        public Task<string> GetAccessTokenAsync(
+            MoodleConnectorCredentials connection,
+            CancellationToken cancellationToken) => Task.FromResult(token);
+
+        public void Invalidate(MoodleConnectorCredentials connection)
+        {
+        }
     }
 
     private sealed class CapturingHandler(string responseBody, HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler

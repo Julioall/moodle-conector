@@ -28,13 +28,60 @@ public sealed record MoodleFunctionResult(
     string Function,
     JsonElement Payload);
 
-public sealed class MoodleApiException(
-    string errorCode,
-    string message,
-    int? httpStatusCode = null) : Exception(message)
+public enum MoodleIntegrationStage
 {
-    public string ErrorCode { get; } = errorCode;
-    public int? HttpStatusCode { get; } = httpStatusCode;
+    Unknown = 0,
+    ConnectionLookup = 10,
+    ConnectionState = 20,
+    UrlValidation = 30,
+    CredentialPresence = 40,
+    CredentialDecryption = 50,
+    TokenRequest = 60,
+    MoodleRequest = 70,
+    ResponseParsing = 80
+}
+
+public sealed class MoodleApiException : Exception
+{
+    public MoodleApiException(
+        string errorCode,
+        string message,
+        int? httpStatusCode = null,
+        Exception? innerException = null,
+        string? auditId = null,
+        string? connectionId = null,
+        string? connectionAlias = null,
+        string? endpoint = null,
+        string? functionName = null,
+        long? durationMs = null,
+        string? remoteErrorCode = null,
+        MoodleIntegrationStage stage = MoodleIntegrationStage.Unknown)
+        : base(message, innerException)
+    {
+        ErrorCode = string.IsNullOrWhiteSpace(errorCode)
+            ? MoodleErrorContract.Unexpected
+            : errorCode.Trim().ToLowerInvariant();
+        HttpStatusCode = httpStatusCode;
+        AuditId = string.IsNullOrWhiteSpace(auditId) ? Guid.NewGuid().ToString("N") : auditId;
+        ConnectionId = connectionId;
+        ConnectionAlias = connectionAlias;
+        Endpoint = endpoint;
+        FunctionName = functionName;
+        DurationMs = durationMs;
+        RemoteErrorCode = remoteErrorCode;
+        Stage = stage;
+    }
+
+    public string ErrorCode { get; }
+    public int? HttpStatusCode { get; }
+    public string AuditId { get; }
+    public string? ConnectionId { get; }
+    public string? ConnectionAlias { get; }
+    public string? Endpoint { get; }
+    public string? FunctionName { get; }
+    public long? DurationMs { get; }
+    public string? RemoteErrorCode { get; }
+    public MoodleIntegrationStage Stage { get; }
 }
 
 public interface IMoodleFunctionCatalog

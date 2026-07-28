@@ -11,7 +11,12 @@ internal sealed class MoodleCurrentUserIdGateway(
         var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
         if (profile.MoodleUserId is not { } moodleUserId)
         {
-            throw new InvalidOperationException("Nao foi possivel resolver o usuario Moodle a partir da conexao atual.");
+            throw new MoodleApiException(
+                MoodleErrorContract.InvalidResponse,
+                "The selected Moodle site info response did not contain a user id.",
+                connectionId: profile.ConnectionId,
+                connectionAlias: profile.ConnectionAlias,
+                functionName: "core_webservice_get_site_info");
         }
 
         return moodleUserId;

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Infrastructure;
@@ -39,7 +40,10 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
         using var httpClient = app.GetTestClient();
         var catalog = new MoodleFunctionCatalog(
             cache,
-            new MoodleRestClient(httpClient, Options.Create(new MoodleApiOptions()), new SwitchingTokenProvider(credentials)),
+            new MoodleRestClient(
+                httpClient,
+                new SwitchingTokenProvider(),
+                NullLogger<MoodleRestClient>.Instance),
             credentials);
 
         credentials.Current = "goias";
@@ -66,9 +70,15 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
             Task.FromResult(new MoodleConnectorCredentials("client", Current, Current, "http://localhost", "user", "password", Current, false));
     }
 
-    private sealed class SwitchingTokenProvider(SwitchingCredentialsProvider credentials) : IMoodleAccessTokenProvider
+    private sealed class SwitchingTokenProvider : IMoodleAccessTokenProvider
     {
-        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(credentials.Current == "goias" ? "token-goias" : "token-nacional");
+        public Task<string> GetAccessTokenAsync(
+            MoodleConnectorCredentials connection,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(connection.Alias == "goias" ? "token-goias" : "token-nacional");
+
+        public void Invalidate(MoodleConnectorCredentials connection)
+        {
+        }
     }
 }

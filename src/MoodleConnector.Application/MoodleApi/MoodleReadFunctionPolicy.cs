@@ -1,8 +1,6 @@
-using MoodleConnector.Application.MoodleApi;
+namespace MoodleConnector.Application.MoodleApi;
 
-namespace MoodleConnector.Infrastructure.MoodleApi;
-
-internal static class MoodleReadFunctionPolicy
+public static class MoodleReadFunctionPolicy
 {
     private static readonly HashSet<string> ReadFunctions = new(StringComparer.OrdinalIgnoreCase)
     {

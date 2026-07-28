@@ -171,7 +171,23 @@ internal sealed class AccountService(
             clientEntity.MoodlePasswordEncrypted = secretProtector.Protect(request.MoodlePassword);
         }
 
-        clientEntity.MoodleAlias = string.IsNullOrWhiteSpace(request.MoodleAlias) ? "Moodle" : request.MoodleAlias;
+        var normalizedAlias = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleAlias);
+        var otherAliases = await dbContext.ConnectorClients
+            .AsNoTracking()
+            .Where(c => c.ClientId == clientId && c.Id != clientEntity.Id)
+            .Select(c => c.MoodleAlias)
+            .ToArrayAsync(cancellationToken);
+        if (otherAliases.Any(alias =>
+                string.Equals(
+                    MoodleConnectionAlias.Normalize(alias),
+                    normalizedAlias,
+                    StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"Ja existe uma conexao Moodle com o alias '{normalizedAlias}' nesta conta.");
+        }
+
+        clientEntity.MoodleAlias = normalizedAlias;
         clientEntity.MoodleBaseUrl = moodleBaseUrl;
         clientEntity.CanWrite = request.CanWrite;
         clientEntity.UpdatedAtUtc = DateTimeOffset.UtcNow;
@@ -399,9 +415,11 @@ internal sealed class AccountService(
     {
         var trimmed = string.IsNullOrWhiteSpace(moodleBaseUrl) ? string.Empty : moodleBaseUrl.Trim();
         if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) ||
-            uri.Scheme is not ("http" or "https"))
+            uri.Scheme != Uri.UriSchemeHttps ||
+            string.IsNullOrWhiteSpace(uri.Host) ||
+            !string.IsNullOrEmpty(uri.UserInfo))
         {
-            throw new InvalidOperationException("URL do Moodle deve ser uma URL absoluta http/https.");
+            throw new InvalidOperationException("URL do Moodle deve ser HTTPS, absoluta e sem credenciais na URL.");
         }
 
         var builder = new UriBuilder(uri)

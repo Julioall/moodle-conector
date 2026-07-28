@@ -80,6 +80,8 @@ public static class DependencyInjection
         });
 
         services.AddMemoryCache();
+        services.AddPolicyRegistry();
+        services.AddSingleton<IMoodleEndpointValidator, MoodleEndpointValidator>();
         services.AddSingleton<IPedagogicGuidanceSearch>(_ =>
             new MarkdownPedagogicGuidanceSearch(Path.Combine(AppContext.BaseDirectory, "public", "pedagogic")));
         services.AddScoped<IPendingMoodleActionRepository, PendingMoodleActionRepository>();
@@ -215,7 +217,9 @@ public static class DependencyInjection
             .ConfigureHttpClient(client => client.Timeout = settings.Timeout)
             .ConfigurePrimaryHttpMessageHandler(() => CreatePooledHandler())
             .SetHandlerLifetime(HandlerLifetime)
-            .AddPolicyHandler(CreateCircuitBreakerPolicy(settings))
+            .AddPolicyHandler(
+                (_, _, _) => CreateCircuitBreakerPolicy(settings),
+                request => BuildCircuitBreakerPolicyKey(settings, request))
             .AddPolicyHandler(CreateRetryPolicy(settings));
     }
 
@@ -264,9 +268,23 @@ public static class DependencyInjection
     {
         return new SocketsHttpHandler
         {
+            AllowAutoRedirect = false,
             PooledConnectionLifetime = PooledConnectionLifetime,
             PooledConnectionIdleTimeout = PooledConnectionIdleTimeout
         };
+    }
+
+    private static string BuildCircuitBreakerPolicyKey(
+        MoodleHttpResilienceSettings settings,
+        HttpRequestMessage request)
+    {
+        var origin = request.RequestUri?.GetLeftPart(UriPartial.Authority) ?? "unknown";
+        return string.Join(
+            ':',
+            "moodle-circuit",
+            settings.CircuitBreakerHandledEventsAllowedBeforeBreaking,
+            settings.CircuitBreakerDuration.TotalSeconds,
+            origin);
     }
 
     private sealed record MoodleHttpResilienceSettings(

@@ -9,7 +9,9 @@ internal static class MoodleResponseParser
     {
         if (string.IsNullOrWhiteSpace(payload))
         {
-            throw new MoodleApiException("moodle_empty_response", "O Moodle retornou uma resposta vazia.");
+            throw new MoodleApiException(
+                MoodleErrorContract.InvalidResponse,
+                "Moodle returned an empty response.");
         }
 
         try
@@ -21,19 +23,20 @@ internal static class MoodleResponseParser
                 var errorCode = root.TryGetProperty("errorcode", out var errorCodeElement)
                     ? errorCodeElement.GetString()
                     : null;
-                var message = root.TryGetProperty("message", out var messageElement)
-                    ? messageElement.GetString()
-                    : null;
                 throw new MoodleApiException(
-                    string.IsNullOrWhiteSpace(errorCode) ? "moodle_error" : errorCode,
-                    string.IsNullOrWhiteSpace(message) ? "O Moodle recusou a chamada solicitada." : message);
+                    string.IsNullOrWhiteSpace(errorCode) ? MoodleErrorContract.ApiError : errorCode,
+                    "Moodle returned a structured Web Service error.",
+                    remoteErrorCode: errorCode);
             }
 
             return root.Clone();
         }
         catch (JsonException ex)
         {
-            throw new MoodleApiException("moodle_invalid_response", "O Moodle retornou uma resposta JSON invalida.", null) { Source = ex.Source };
+            throw new MoodleApiException(
+                MoodleErrorContract.InvalidResponse,
+                "Moodle returned invalid JSON.",
+                innerException: ex);
         }
     }
 }

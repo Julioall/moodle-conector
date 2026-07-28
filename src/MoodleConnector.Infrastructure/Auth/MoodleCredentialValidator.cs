@@ -2,12 +2,14 @@ using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleCredentialValidator(
     HttpClient httpClient,
-    IOptions<MoodleApiOptions> options) : IMoodleCredentialValidator
+    IOptions<MoodleApiOptions> options,
+    IMoodleEndpointValidator endpointValidator) : IMoodleCredentialValidator
 {
     public async Task<bool> ValidateAsync(string moodleBaseUrl, string username, string password, CancellationToken cancellationToken)
     {
@@ -15,7 +17,17 @@ internal sealed class MoodleCredentialValidator(
             ? "moodle_mobile_app"
             : options.Value.LoginService;
 
-        var baseUrl = moodleBaseUrl.Trim().TrimEnd('/');
+        Uri validatedEndpoint;
+        try
+        {
+            validatedEndpoint = await endpointValidator.ValidateAsync(moodleBaseUrl, cancellationToken);
+        }
+        catch (MoodleApiException)
+        {
+            return false;
+        }
+
+        var baseUrl = validatedEndpoint.AbsoluteUri.TrimEnd('/');
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
             ["username"] = username,

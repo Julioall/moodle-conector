@@ -5,7 +5,8 @@ namespace MoodleConnector.Infrastructure;
 
 public sealed class MoodleUserResolver(
     IHttpContextAccessor httpContextAccessor,
-    IMoodleCurrentUserIdGateway currentUserIdGateway) : IMoodleUserResolver
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleConnectionSelection? connectionSelection = null) : IMoodleUserResolver
 {
     private static readonly string[] MoodleUserIdClaimTypes =
     [
@@ -23,12 +24,17 @@ public sealed class MoodleUserResolver(
             return null;
         }
 
-        foreach (var claimType in MoodleUserIdClaimTypes)
+        // Moodle user ids are local to a Moodle installation. A global claim can
+        // only be trusted when no explicit multi-Moodle connection was selected.
+        if (string.IsNullOrWhiteSpace(connectionSelection?.Alias))
         {
-            var value = principal.FindFirst(claimType)?.Value;
-            if (long.TryParse(value, out var moodleUserId))
+            foreach (var claimType in MoodleUserIdClaimTypes)
             {
-                return moodleUserId;
+                var value = principal.FindFirst(claimType)?.Value;
+                if (long.TryParse(value, out var moodleUserId))
+                {
+                    return moodleUserId;
+                }
             }
         }
 

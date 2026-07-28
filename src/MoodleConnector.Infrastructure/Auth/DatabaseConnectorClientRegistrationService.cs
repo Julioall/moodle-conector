@@ -23,20 +23,37 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         }
 
         if (!Uri.TryCreate(request.MoodleBaseUrl.Trim(), UriKind.Absolute, out var moodleBaseUri) ||
-            moodleBaseUri.Scheme is not ("http" or "https"))
+            moodleBaseUri.Scheme != Uri.UriSchemeHttps ||
+            string.IsNullOrWhiteSpace(moodleBaseUri.Host) ||
+            !string.IsNullOrEmpty(moodleBaseUri.UserInfo))
         {
-            throw new ArgumentException("MoodleBaseUrl deve ser uma URL absoluta http/https.", nameof(request));
+            throw new ArgumentException("MoodleBaseUrl deve ser uma URL HTTPS absoluta e sem credenciais na URL.", nameof(request));
         }
 
         var apiKey = GenerateApiKey();
         var apiKeyHash = ApiKeyHasher.Hash(apiKey);
         var now = DateTimeOffset.UtcNow;
         var clientId = request.ClientId.Trim();
-        var alias = NormalizeAlias(request.MoodleAlias);
+        var alias = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleAlias);
         var connectionId = BuildConnectionId(clientId, alias);
 
-        var entity = await dbContext.ConnectorClients
-            .SingleOrDefaultAsync(client => client.Id == connectionId, cancellationToken);
+        var existingConnections = await dbContext.ConnectorClients
+            .Where(client => client.ClientId == clientId)
+            .ToListAsync(cancellationToken);
+        var entity = existingConnections.SingleOrDefault(client => client.Id == connectionId);
+        if (entity is null)
+        {
+            var canonicalMatches = existingConnections
+                .Where(client => MoodleConnectionAlias.Normalize(client.MoodleAlias) == alias)
+                .ToArray();
+            if (canonicalMatches.Length > 1)
+            {
+                throw new InvalidOperationException(
+                    $"Mais de uma conexao existente corresponde ao alias canonico '{alias}'. Saneie os aliases duplicados antes de reconectar.");
+            }
+
+            entity = canonicalMatches.SingleOrDefault();
+        }
 
         var replaced = entity is not null;
         if (entity is null)
@@ -51,7 +68,7 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         }
 
         var hasExistingApiKey = await dbContext.ConnectorClients
-            .AnyAsync(client => client.ClientId == clientId && client.ApiKeyHash != null && client.Id != connectionId, cancellationToken);
+            .AnyAsync(client => client.ClientId == clientId && client.ApiKeyHash != null && client.Id != entity.Id, cancellationToken);
 
         entity.ApiKeyHash = hasExistingApiKey ? entity.ApiKeyHash : apiKeyHash;
         entity.ClientId = clientId;
@@ -59,8 +76,8 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         entity.MoodleBaseUrl = NormalizeBaseUrl(moodleBaseUri);
         entity.MoodleUsernameEncrypted = secretProtector.Protect(request.MoodleUsername.Trim());
         entity.MoodlePasswordEncrypted = secretProtector.Protect(request.MoodlePassword);
-        entity.MoodleTarget = string.IsNullOrWhiteSpace(request.MoodleTarget) ? "default" : request.MoodleTarget.Trim().ToLowerInvariant();
-        entity.IsDefault = request.IsDefault || !await dbContext.ConnectorClients.AnyAsync(client => client.ClientId == clientId && client.IsActive && client.Id != connectionId, cancellationToken);
+        entity.MoodleTarget = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleTarget);
+        entity.IsDefault = request.IsDefault || !await dbContext.ConnectorClients.AnyAsync(client => client.ClientId == clientId && client.IsActive && client.Id != entity.Id, cancellationToken);
         entity.CanWrite = request.CanWrite;
         entity.IsActive = true;
         entity.UpdatedAtUtc = now;
@@ -68,7 +85,7 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         if (entity.IsDefault)
         {
             await dbContext.ConnectorClients
-                .Where(client => client.ClientId == clientId && client.Id != connectionId)
+                .Where(client => client.ClientId == clientId && client.Id != entity.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(client => client.IsDefault, false), cancellationToken);
         }
 
@@ -80,12 +97,6 @@ internal sealed class DatabaseConnectorClientRegistrationService(
     {
         var bytes = RandomNumberGenerator.GetBytes(24);
         return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    }
-
-    private static string NormalizeAlias(string alias)
-    {
-        var normalized = string.IsNullOrWhiteSpace(alias) ? "default" : alias.Trim().ToLowerInvariant();
-        return normalized.Length > 64 ? normalized[..64] : normalized;
     }
 
     private static string NormalizeBaseUrl(Uri uri)
