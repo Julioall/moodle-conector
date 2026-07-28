@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -18,6 +17,7 @@ internal sealed class MoodleAccessTokenProvider(
     IMemoryCache cache,
     IOptions<MoodleApiOptions> options,
     IOptions<ConnectorSecretsOptions> connectorSecretsOptions,
+    IMoodleEndpointValidator endpointValidator,
     ILogger<MoodleAccessTokenProvider> logger) : IMoodleAccessTokenProvider
 {
     private readonly MoodleApiOptions _moodleOptions = options.Value;
@@ -27,20 +27,11 @@ internal sealed class MoodleAccessTokenProvider(
         MoodleConnectorCredentials connection,
         CancellationToken cancellationToken)
     {
-        var cacheKey = $"moodle:token:{connection.ConnectionId}:{CreateCredentialFingerprint(connection)}";
+        var baseUri = await endpointValidator.ValidateAsync(connection.BaseUrl, cancellationToken);
+        var cacheKey = CreateCacheKey(connection);
         if (cache.TryGetValue(cacheKey, out string? cachedToken) && !string.IsNullOrWhiteSpace(cachedToken))
         {
             return cachedToken;
-        }
-
-        if (!Uri.TryCreate(connection.BaseUrl, UriKind.Absolute, out var baseUri) ||
-            baseUri.Scheme is not ("http" or "https"))
-        {
-            throw CreateFailure(
-                MoodleErrorContract.NetworkError,
-                connection,
-                null,
-                "The Moodle token endpoint URL is invalid.");
         }
 
         var serviceName = string.IsNullOrWhiteSpace(_moodleOptions.LoginService)
@@ -59,29 +50,16 @@ internal sealed class MoodleAccessTokenProvider(
                 ["service"] = serviceName
             });
             using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
-            TokenResponse? payload;
-            try
-            {
-                payload = await response.Content.ReadFromJsonAsync<TokenResponse>(cancellationToken: cancellationToken);
-            }
-            catch (JsonException exception)
-            {
-                throw CreateFailure(
-                    MoodleErrorContract.InvalidResponse,
-                    connection,
-                    endpoint,
-                    "The Moodle token endpoint returned invalid JSON.",
-                    (int)response.StatusCode,
-                    exception,
-                    auditId,
-                    stopwatch.ElapsedMilliseconds);
-            }
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            var parsed = TryParseTokenResponse(responseBody, out var payload);
 
             if (!response.IsSuccessStatusCode)
             {
                 var code = response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
                     ? MoodleErrorContract.AuthenticationFailed
-                    : MoodleErrorContract.NetworkError;
+                    : (int)response.StatusCode >= 500
+                        ? MoodleErrorContract.NetworkError
+                        : MoodleErrorContract.ApiError;
                 throw CreateFailure(
                     code,
                     connection,
@@ -90,7 +68,19 @@ internal sealed class MoodleAccessTokenProvider(
                     (int)response.StatusCode,
                     auditId: auditId,
                     durationMs: stopwatch.ElapsedMilliseconds,
-                    remoteErrorCode: payload?.ErrorCode);
+                    remoteErrorCode: parsed ? payload?.ErrorCode : null);
+            }
+
+            if (!parsed)
+            {
+                throw CreateFailure(
+                    MoodleErrorContract.InvalidResponse,
+                    connection,
+                    endpoint,
+                    "The Moodle token endpoint returned invalid JSON.",
+                    (int)response.StatusCode,
+                    auditId: auditId,
+                    durationMs: stopwatch.ElapsedMilliseconds);
             }
 
             if (payload is null || string.IsNullOrWhiteSpace(payload.Token))
@@ -165,7 +155,21 @@ internal sealed class MoodleAccessTokenProvider(
                 auditId: auditId,
                 durationMs: stopwatch.ElapsedMilliseconds);
         }
+        catch (Exception exception)
+        {
+            throw CreateFailure(
+                MoodleErrorContract.Unexpected,
+                connection,
+                endpoint,
+                "An unexpected error occurred while acquiring a Moodle token.",
+                innerException: exception,
+                auditId: auditId,
+                durationMs: stopwatch.ElapsedMilliseconds);
+        }
     }
+
+    public void Invalidate(MoodleConnectorCredentials connection) =>
+        cache.Remove(CreateCacheKey(connection));
 
     private MoodleApiException CreateFailure(
         string code,
@@ -189,7 +193,8 @@ internal sealed class MoodleAccessTokenProvider(
             endpoint?.GetLeftPart(UriPartial.Path),
             "login/token.php",
             durationMs,
-            remoteErrorCode);
+            remoteErrorCode,
+            MoodleIntegrationStage.TokenRequest);
         logger.LogWarning(
             innerException,
             "Moodle token acquisition failed. AuditId={AuditId} ErrorCode={ErrorCode} RemoteErrorCode={RemoteErrorCode} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint} HttpStatus={HttpStatus} DurationMs={DurationMs}",
@@ -208,6 +213,29 @@ internal sealed class MoodleAccessTokenProvider(
     {
         var source = $"{connection.BaseUrl.Trim().TrimEnd('/')}\u001f{connection.Username}\u001f{connection.Password}";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)).AsSpan(0, 12));
+    }
+
+    private static string CreateCacheKey(MoodleConnectorCredentials connection) =>
+        $"moodle:token:{connection.ClientId}:{connection.ConnectionId}:{CreateCredentialFingerprint(connection)}";
+
+    private static bool TryParseTokenResponse(string payload, out TokenResponse? response)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            response = null;
+            return false;
+        }
+
+        try
+        {
+            response = JsonSerializer.Deserialize<TokenResponse>(payload);
+            return response is not null;
+        }
+        catch (JsonException)
+        {
+            response = null;
+            return false;
+        }
     }
 
     private sealed class TokenResponse

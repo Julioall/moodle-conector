@@ -40,7 +40,8 @@ public sealed class MoodleUniversalToolsTests
             "internal",
             connectionId: "goias-connection",
             connectionAlias: "goias",
-            endpoint: "https://ead.fieg.com.br");
+            endpoint: "https://ead.fieg.com.br",
+            stage: MoodleIntegrationStage.CredentialDecryption);
         var sut = CreateSut(new FakeCredentialsProvider(error: failure), new FakeRestClient(SiteInfo()));
 
         var result = await sut.DiagnoseConnectionAsync("goias");
@@ -50,10 +51,37 @@ public sealed class MoodleUniversalToolsTests
         Assert.False(data.GetProperty("healthy").GetBoolean());
         Assert.True(data.GetProperty("connectionFound").GetBoolean());
         Assert.True(data.GetProperty("active").GetBoolean());
+        Assert.True(data.GetProperty("urlValid").GetBoolean());
+        Assert.True(data.GetProperty("credentialsPresent").GetBoolean());
         Assert.False(data.GetProperty("decryptionSucceeded").GetBoolean());
+        Assert.False(data.GetProperty("tokenAvailable").GetBoolean());
+        Assert.False(data.GetProperty("authenticationSucceeded").GetBoolean());
         Assert.Equal(
             MoodleErrorContract.TokenDecryptionFailed,
             data.GetProperty("diagnosticErrorCode").GetString());
+    }
+
+    [Fact]
+    public async Task DiagnoseConnectionAsync_NaoMarcaEtapasPosterioresQuandoUrlForInvalida()
+    {
+        var failure = new MoodleApiException(
+            MoodleErrorContract.NetworkError,
+            "internal",
+            connectionId: "goias-connection",
+            connectionAlias: "goias",
+            stage: MoodleIntegrationStage.UrlValidation);
+        var sut = CreateSut(new FakeCredentialsProvider(error: failure), new FakeRestClient(SiteInfo()));
+
+        var result = await sut.DiagnoseConnectionAsync("goias");
+
+        var data = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data");
+        Assert.True(data.GetProperty("connectionFound").GetBoolean());
+        Assert.True(data.GetProperty("active").GetBoolean());
+        Assert.False(data.GetProperty("urlValid").GetBoolean());
+        Assert.False(data.GetProperty("credentialsPresent").GetBoolean());
+        Assert.False(data.GetProperty("decryptionSucceeded").GetBoolean());
+        Assert.False(data.GetProperty("tokenAvailable").GetBoolean());
+        Assert.False(data.GetProperty("authenticationSucceeded").GetBoolean());
     }
 
     private static MoodleUniversalTools CreateSut(

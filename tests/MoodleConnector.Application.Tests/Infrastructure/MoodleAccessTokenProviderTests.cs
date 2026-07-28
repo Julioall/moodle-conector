@@ -48,6 +48,70 @@ public sealed class MoodleAccessTokenProviderTests
     }
 
     [Fact]
+    public async Task GetAccessTokenAsync_IsolaCachePorClienteMesmoComIdECredenciaisIguais()
+    {
+        var handler = Handler.Json("""{"token":"tenant-token"}""");
+        var sut = CreateSut(handler);
+
+        await sut.GetAccessTokenAsync(Connection(clientId: "client-a"), CancellationToken.None);
+        await sut.GetAccessTokenAsync(Connection(clientId: "client-b"), CancellationToken.None);
+
+        Assert.Equal(2, handler.Calls);
+    }
+
+    [Fact]
+    public async Task Invalidate_RemoveSomenteOTokenDaConexao()
+    {
+        var handler = Handler.Json("""{"token":"renewed-token"}""");
+        var sut = CreateSut(handler);
+        var connection = Connection();
+
+        await sut.GetAccessTokenAsync(connection, CancellationToken.None);
+        sut.Invalidate(connection);
+        await sut.GetAccessTokenAsync(connection, CancellationToken.None);
+
+        Assert.Equal(2, handler.Calls);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_RevalidaEndpointAntesDeUsarTokenEmCache()
+    {
+        var handler = Handler.Json("""{"token":"cached-token"}""");
+        var validator = new SequenceEndpointValidator();
+        var sut = CreateSut(handler, endpointValidator: validator);
+
+        await sut.GetAccessTokenAsync(Connection(), CancellationToken.None);
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() =>
+            sut.GetAccessTokenAsync(Connection(), CancellationToken.None));
+
+        Assert.Equal(MoodleIntegrationStage.UrlValidation, error.Stage);
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal(2, validator.Calls);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_UsaEndpointCanonicoProduzidoPeloValidador()
+    {
+        Uri? requestedUri = null;
+        var handler = new Handler((request, _) =>
+        {
+            requestedUri = request.RequestUri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"token":"token"}""", Encoding.UTF8, "application/json")
+            });
+        });
+        var sut = CreateSut(
+            handler,
+            endpointValidator: new FixedEndpointValidator("https://validated.example/moodle"));
+
+        await sut.GetAccessTokenAsync(Connection(), CancellationToken.None);
+
+        Assert.Equal("validated.example", requestedUri?.Host);
+        Assert.Equal("/moodle/login/token.php", requestedUri?.AbsolutePath);
+    }
+
+    [Fact]
     public async Task GetAccessTokenAsync_ClassificaInvalidLoginEmHttp200()
     {
         var sut = CreateSut(Handler.Json("""{"error":"Invalid login","errorcode":"invalidlogin"}"""));
@@ -72,6 +136,20 @@ public sealed class MoodleAccessTokenProviderTests
 
         Assert.Equal(MoodleErrorContract.AuthenticationFailed, error.ErrorCode);
         Assert.Equal(401, error.HttpStatusCode);
+    }
+
+    [Fact]
+    public async Task GetAccessTokenAsync_ClassificaRedirectSemArmazenarToken()
+    {
+        var handler = Handler.Json("{}", HttpStatusCode.TemporaryRedirect);
+        var sut = CreateSut(handler);
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() =>
+            sut.GetAccessTokenAsync(Connection(), CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.ApiError, error.ErrorCode);
+        Assert.Equal(307, error.HttpStatusCode);
+        Assert.Equal(1, handler.Calls);
     }
 
     [Fact]
@@ -107,18 +185,24 @@ public sealed class MoodleAccessTokenProviderTests
         Assert.Equal(MoodleErrorContract.RequestTimeout, error.ErrorCode);
     }
 
-    private static MoodleAccessTokenProvider CreateSut(Handler handler)
+    private static MoodleAccessTokenProvider CreateSut(
+        Handler handler,
+        IMemoryCache? cache = null,
+        IMoodleEndpointValidator? endpointValidator = null)
     {
         return new MoodleAccessTokenProvider(
             new HttpClient(handler),
-            new MemoryCache(new MemoryCacheOptions()),
+            cache ?? new MemoryCache(new MemoryCacheOptions()),
             Options.Create(new MoodleApiOptions()),
             Options.Create(new ConnectorSecretsOptions { TokenCacheMinutes = 20 }),
+            endpointValidator ?? new FixedEndpointValidator("https://ead.fieg.com.br"),
             NullLogger<MoodleAccessTokenProvider>.Instance);
     }
 
-    private static MoodleConnectorCredentials Connection(string password = "password") => new(
-        "client",
+    private static MoodleConnectorCredentials Connection(
+        string password = "password",
+        string clientId = "client") => new(
+        clientId,
         "goias-connection",
         "goias",
         "https://ead.fieg.com.br",
@@ -144,6 +228,31 @@ public sealed class MoodleAccessTokenProviderTests
         {
             Calls++;
             return response(request, cancellationToken);
+        }
+    }
+
+    private sealed class FixedEndpointValidator(string endpoint) : IMoodleEndpointValidator
+    {
+        public Task<Uri> ValidateAsync(string baseUrl, CancellationToken cancellationToken) =>
+            Task.FromResult(new Uri(endpoint));
+    }
+
+    private sealed class SequenceEndpointValidator : IMoodleEndpointValidator
+    {
+        public int Calls { get; private set; }
+
+        public Task<Uri> ValidateAsync(string baseUrl, CancellationToken cancellationToken)
+        {
+            Calls++;
+            if (Calls == 1)
+            {
+                return Task.FromResult(new Uri(baseUrl));
+            }
+
+            throw new MoodleApiException(
+                MoodleErrorContract.NetworkError,
+                "Endpoint no longer resolves publicly.",
+                stage: MoodleIntegrationStage.UrlValidation);
         }
     }
 }

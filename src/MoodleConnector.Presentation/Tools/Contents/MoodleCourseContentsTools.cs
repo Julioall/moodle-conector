@@ -2,6 +2,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
@@ -16,7 +17,8 @@ namespace MoodleConnector.Presentation.Tools;
 public sealed class MoodleCourseContentsTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    ILogger<MoodleCourseContentsTools>? logger = null)
 {
     private static readonly string[] ResourceModuleTypes = ["resource", "page", "url", "book", "folder", "label"];
     private static readonly string[] AllowedModuleTypes =
@@ -418,6 +420,14 @@ public sealed class MoodleCourseContentsTools(
         catch (Exception ex)
         {
             var failure = MoodleErrorContract.Describe(ex);
+            logger?.LogError(
+                "Unexpected Moodle tool failure was converted to a structured result. AuditId={AuditId} ErrorCode={ErrorCode} Tool={Tool} Alias={Alias} ExceptionType={ExceptionType} SafeMessage={SafeMessage}",
+                failure.AuditId,
+                failure.ErrorCode,
+                "listar_conteudos_curso",
+                MoodleConnectionAlias.Normalize(moodleAlias),
+                ex.GetType().FullName,
+                failure.Message);
             return ToolResultHelper.Error<ListCourseContentsResponse>(
                 "Nao foi possivel listar conteudos no Moodle neste momento.",
                 errorCode: failure.ErrorCode,

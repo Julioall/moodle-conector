@@ -133,6 +133,24 @@ public sealed class HttpContextMoodleConnectorCredentialsProviderTests
     }
 
     [Fact]
+    public async Task GetCurrentCredentialsAsync_PreservaContextoDaConexaoQuandoDnsFalha()
+    {
+        await using var db = CreateDb();
+        db.ConnectorClients.Add(Connection());
+        await db.SaveChangesAsync();
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() =>
+            CreateSut(db, "goias", endpointValidator: new RejectEndpointValidator())
+                .GetCurrentCredentialsAsync(CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.NetworkError, error.ErrorCode);
+        Assert.Equal(MoodleIntegrationStage.UrlValidation, error.Stage);
+        Assert.Equal("goias-connection", error.ConnectionId);
+        Assert.Equal("goias", error.ConnectionAlias);
+        Assert.Equal("https://ead.fieg.com.br", error.Endpoint);
+    }
+
+    [Fact]
     public async Task GetCurrentCredentialsAsync_PrefereConnectorClientIdPersistidoDaConta()
     {
         await using var db = CreateDb();
@@ -172,7 +190,8 @@ public sealed class HttpContextMoodleConnectorCredentialsProviderTests
         string? alias,
         string clientId = "client",
         IConnectorSecretProtector? protector = null,
-        ClaimsPrincipal? principal = null)
+        ClaimsPrincipal? principal = null,
+        IMoodleEndpointValidator? endpointValidator = null)
     {
         principal ??= new ClaimsPrincipal(new ClaimsIdentity(
         [
@@ -185,6 +204,7 @@ public sealed class HttpContextMoodleConnectorCredentialsProviderTests
             db,
             protector ?? new PassThroughProtector(),
             new MoodleConnectionSelection { Alias = alias },
+            endpointValidator ?? new AllowEndpointValidator(),
             NullLogger<HttpContextMoodleConnectorCredentialsProvider>.Instance);
     }
 
@@ -217,5 +237,20 @@ public sealed class HttpContextMoodleConnectorCredentialsProviderTests
     {
         public string Protect(string plaintext) => plaintext;
         public string Unprotect(string ciphertext) => throw new CryptographicException("bad ciphertext");
+    }
+
+    private sealed class AllowEndpointValidator : IMoodleEndpointValidator
+    {
+        public Task<Uri> ValidateAsync(string baseUrl, CancellationToken cancellationToken) =>
+            Task.FromResult(new Uri(baseUrl));
+    }
+
+    private sealed class RejectEndpointValidator : IMoodleEndpointValidator
+    {
+        public Task<Uri> ValidateAsync(string baseUrl, CancellationToken cancellationToken) =>
+            Task.FromException<Uri>(new MoodleApiException(
+                MoodleErrorContract.NetworkError,
+                "DNS failed.",
+                stage: MoodleIntegrationStage.UrlValidation));
     }
 }

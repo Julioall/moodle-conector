@@ -72,7 +72,6 @@ public sealed class MoodleParticipantsGatewayTests
             new FakeCredentialsProvider(),
             new MoodleRestClient(
                 new HttpClient(handler),
-                Options.Create(new MoodleApiOptions()),
                 new FakeTokenProvider(),
                 NullLogger<MoodleRestClient>.Instance));
     }
@@ -103,6 +102,10 @@ public sealed class MoodleParticipantsGatewayTests
             MoodleConnectorCredentials connection,
             CancellationToken cancellationToken) =>
             Task.FromResult("token");
+
+        public void Invalidate(MoodleConnectorCredentials connection)
+        {
+        }
     }
 
     private sealed class FakeCredentialsProvider : IMoodleConnectorCredentialsProvider

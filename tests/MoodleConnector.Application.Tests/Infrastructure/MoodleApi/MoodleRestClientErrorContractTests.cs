@@ -44,6 +44,22 @@ public sealed class MoodleRestClientErrorContractTests
     }
 
     [Fact]
+    public async Task CallAsync_InvalidaTokenCacheadoQuandoMoodleRetornaInvalidToken()
+    {
+        var tokenProvider = new TokenProvider();
+        var sut = CreateSut(
+            Handler.Json(
+                """{"exception":"moodle_exception","errorcode":"invalidtoken","message":"invalid"}"""),
+            tokenProvider);
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() =>
+            sut.CallAsync(Connection(), "core_webservice_get_site_info", new Dictionary<string, object?>(), CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.AuthenticationFailed, error.ErrorCode);
+        Assert.Equal(1, tokenProvider.Invalidations);
+    }
+
+    [Fact]
     public async Task CallAsync_ClassificaJsonInvalido()
     {
         var sut = CreateSut(Handler.Json("<html>invalid</html>"));
@@ -80,13 +96,7 @@ public sealed class MoodleRestClientErrorContractTests
     public async Task CallAsync_NaoEnviaServiceTokenGlobalParaOutroHost()
     {
         var tokenProvider = new TokenProvider();
-        var options = new MoodleApiOptions
-        {
-            BaseUrl = "https://ead.senai.br",
-            ServiceToken = "global-token",
-            AllowServiceTokenForReadOnlyQueries = true
-        };
-        var sut = CreateSut(Handler.Json("{}"), tokenProvider, options);
+        var sut = CreateSut(Handler.Json("{}"), tokenProvider);
 
         await sut.CallAsync(Connection(), "core_webservice_get_site_info", new Dictionary<string, object?>(), CancellationToken.None);
 
@@ -95,10 +105,8 @@ public sealed class MoodleRestClientErrorContractTests
 
     private static MoodleRestClient CreateSut(
         Handler handler,
-        TokenProvider? tokenProvider = null,
-        MoodleApiOptions? options = null) => new(
+        TokenProvider? tokenProvider = null) => new(
         new HttpClient(handler),
-        Options.Create(options ?? new MoodleApiOptions()),
         tokenProvider ?? new TokenProvider(),
         NullLogger<MoodleRestClient>.Instance);
 
@@ -115,6 +123,7 @@ public sealed class MoodleRestClientErrorContractTests
     private sealed class TokenProvider : IMoodleAccessTokenProvider
     {
         public int Calls { get; private set; }
+        public int Invalidations { get; private set; }
 
         public Task<string> GetAccessTokenAsync(
             MoodleConnectorCredentials connection,
@@ -122,6 +131,11 @@ public sealed class MoodleRestClientErrorContractTests
         {
             Calls++;
             return Task.FromResult("connection-token");
+        }
+
+        public void Invalidate(MoodleConnectorCredentials connection)
+        {
+            Invalidations++;
         }
     }
 

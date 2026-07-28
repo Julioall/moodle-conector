@@ -96,7 +96,9 @@ internal sealed class MoodleFunctionExecutor(
                         startedAt,
                         DateTimeOffset.UtcNow,
                         stopwatch.ElapsedMilliseconds,
-                        ex is MoodleApiException moodleError ? moodleError.ErrorCode : MoodleErrorContract.Unexpected,
+                        ex is MoodleApiException moodleError
+                            ? MoodleErrorContract.NormalizeCode(moodleError.ErrorCode)
+                            : MoodleErrorContract.Unexpected,
                         (ex as MoodleApiException)?.AuditId,
                         cancellationToken);
                 }

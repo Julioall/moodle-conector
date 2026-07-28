@@ -7,4 +7,6 @@ internal interface IMoodleAccessTokenProvider
     Task<string> GetAccessTokenAsync(
         MoodleConnectorCredentials connection,
         CancellationToken cancellationToken);
+
+    void Invalidate(MoodleConnectorCredentials connection);
 }

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
 
@@ -10,12 +9,9 @@ namespace MoodleConnector.Infrastructure.MoodleApi;
 
 internal sealed class MoodleRestClient(
     HttpClient httpClient,
-    IOptions<MoodleApiOptions> options,
     IMoodleAccessTokenProvider tokenProvider,
     ILogger<MoodleRestClient> logger) : IMoodleRestClient
 {
-    private readonly MoodleApiOptions _options = options.Value;
-
     public Task<JsonElement> CallAsync(
         MoodleConnectorCredentials connection,
         string functionName,
@@ -36,6 +32,7 @@ internal sealed class MoodleRestClient(
         }
 
         var normalizedFunction = functionName.Trim();
+        _ = allowServiceToken; // Tenant-scoped reads always use the selected connection credentials.
         var endpoint = BuildEndpoint(connection);
         var auditId = Guid.NewGuid().ToString("N");
         var stopwatch = Stopwatch.StartNew();
@@ -63,6 +60,12 @@ internal sealed class MoodleRestClient(
                     }
                     catch (MoodleApiException remoteFailure)
                     {
+                        if (MoodleErrorContract.NormalizeCode(remoteFailure.ErrorCode) ==
+                            MoodleErrorContract.AuthenticationFailed)
+                        {
+                            tokenProvider.Invalidate(connection);
+                        }
+
                         throw CreateFailure(
                             remoteFailure.ErrorCode,
                             connection,
@@ -84,6 +87,11 @@ internal sealed class MoodleRestClient(
                     _ when (int)response.StatusCode >= 500 => MoodleErrorContract.NetworkError,
                     _ => MoodleErrorContract.ApiError
                 };
+                if (code == MoodleErrorContract.AuthenticationFailed)
+                {
+                    tokenProvider.Invalidate(connection);
+                }
+
                 throw CreateFailure(
                     code,
                     connection,
@@ -102,6 +110,12 @@ internal sealed class MoodleRestClient(
             }
             catch (MoodleApiException remoteFailure)
             {
+                if (MoodleErrorContract.NormalizeCode(remoteFailure.ErrorCode) ==
+                    MoodleErrorContract.AuthenticationFailed)
+                {
+                    tokenProvider.Invalidate(connection);
+                }
+
                 throw CreateFailure(
                     remoteFailure.ErrorCode,
                     connection,
@@ -171,38 +185,45 @@ internal sealed class MoodleRestClient(
                 auditId: auditId,
                 durationMs: stopwatch.ElapsedMilliseconds);
         }
+        catch (Exception exception)
+        {
+            throw CreateFailure(
+                MoodleErrorContract.Unexpected,
+                connection,
+                endpoint,
+                normalizedFunction,
+                "An unexpected error occurred while calling Moodle.",
+                innerException: exception,
+                auditId: auditId,
+                durationMs: stopwatch.ElapsedMilliseconds);
+        }
     }
 
     private static Uri BuildEndpoint(MoodleConnectorCredentials connection)
     {
         if (!Uri.TryCreate(connection.BaseUrl, UriKind.Absolute, out var baseUri) ||
-            baseUri.Scheme is not ("http" or "https") ||
-            string.IsNullOrWhiteSpace(baseUri.Host))
+            !IsAllowedEndpoint(baseUri) ||
+            string.IsNullOrWhiteSpace(baseUri.Host) ||
+            !string.IsNullOrEmpty(baseUri.UserInfo))
         {
             throw new MoodleApiException(
                 MoodleErrorContract.NetworkError,
                 "The selected Moodle connection has an invalid URL.",
                 connectionId: connection.ConnectionId,
-                connectionAlias: connection.Alias);
+                connectionAlias: connection.Alias,
+                stage: MoodleIntegrationStage.UrlValidation);
         }
 
         return new Uri(baseUri.ToString().TrimEnd('/') + "/webservice/rest/server.php");
     }
 
-    private async Task<string> ResolveTokenAsync(
+    private Task<string> ResolveTokenAsync(
         MoodleConnectorCredentials connection,
         bool allowServiceToken,
         CancellationToken cancellationToken)
     {
-        if (allowServiceToken &&
-            _options.AllowServiceTokenForReadOnlyQueries &&
-            !string.IsNullOrWhiteSpace(_options.ServiceToken) &&
-            HasSameOrigin(_options.BaseUrl, connection.BaseUrl))
-        {
-            return _options.ServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(connection, cancellationToken);
+        _ = allowServiceToken;
+        return tokenProvider.GetAccessTokenAsync(connection, cancellationToken);
     }
 
     private MoodleApiException CreateFailure(
@@ -217,8 +238,9 @@ internal sealed class MoodleRestClient(
         long? durationMs = null,
         string? remoteErrorCode = null)
     {
+        var stableCode = MoodleErrorContract.NormalizeCode(code);
         var failure = new MoodleApiException(
-            code,
+            stableCode,
             internalMessage,
             httpStatusCode,
             innerException,
@@ -228,7 +250,10 @@ internal sealed class MoodleRestClient(
             endpoint.GetLeftPart(UriPartial.Path),
             functionName,
             durationMs,
-            remoteErrorCode);
+            remoteErrorCode ?? (string.Equals(stableCode, code, StringComparison.Ordinal) ? null : code),
+            stableCode == MoodleErrorContract.InvalidResponse
+                ? MoodleIntegrationStage.ResponseParsing
+                : MoodleIntegrationStage.MoodleRequest);
         logger.LogWarning(
             innerException,
             "Moodle read failed. AuditId={AuditId} ErrorCode={ErrorCode} RemoteErrorCode={RemoteErrorCode} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint} Function={Function} HttpStatus={HttpStatus} DurationMs={DurationMs}",
@@ -244,12 +269,15 @@ internal sealed class MoodleRestClient(
         return failure;
     }
 
-    private static bool HasSameOrigin(string? configuredBaseUrl, string connectionBaseUrl)
+    private static bool IsAllowedEndpoint(Uri endpoint)
     {
-        return Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configured) &&
-               Uri.TryCreate(connectionBaseUrl, UriKind.Absolute, out var connection) &&
-               string.Equals(configured.Scheme, connection.Scheme, StringComparison.OrdinalIgnoreCase) &&
-               string.Equals(configured.Host, connection.Host, StringComparison.OrdinalIgnoreCase) &&
-               configured.Port == connection.Port;
+        if (endpoint.Scheme == Uri.UriSchemeHttps)
+        {
+            return true;
+        }
+
+        return endpoint.Scheme == Uri.UriSchemeHttp &&
+               (string.Equals(endpoint.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                IPAddress.TryParse(endpoint.Host, out var address) && IPAddress.IsLoopback(address));
     }
 }

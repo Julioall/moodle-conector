@@ -28,6 +28,19 @@ public sealed record MoodleFunctionResult(
     string Function,
     JsonElement Payload);
 
+public enum MoodleIntegrationStage
+{
+    Unknown = 0,
+    ConnectionLookup = 10,
+    ConnectionState = 20,
+    UrlValidation = 30,
+    CredentialPresence = 40,
+    CredentialDecryption = 50,
+    TokenRequest = 60,
+    MoodleRequest = 70,
+    ResponseParsing = 80
+}
+
 public sealed class MoodleApiException : Exception
 {
     public MoodleApiException(
@@ -41,7 +54,8 @@ public sealed class MoodleApiException : Exception
         string? endpoint = null,
         string? functionName = null,
         long? durationMs = null,
-        string? remoteErrorCode = null)
+        string? remoteErrorCode = null,
+        MoodleIntegrationStage stage = MoodleIntegrationStage.Unknown)
         : base(message, innerException)
     {
         ErrorCode = string.IsNullOrWhiteSpace(errorCode)
@@ -55,6 +69,7 @@ public sealed class MoodleApiException : Exception
         FunctionName = functionName;
         DurationMs = durationMs;
         RemoteErrorCode = remoteErrorCode;
+        Stage = stage;
     }
 
     public string ErrorCode { get; }
@@ -66,6 +81,7 @@ public sealed class MoodleApiException : Exception
     public string? FunctionName { get; }
     public long? DurationMs { get; }
     public string? RemoteErrorCode { get; }
+    public MoodleIntegrationStage Stage { get; }
 }
 
 public interface IMoodleFunctionCatalog

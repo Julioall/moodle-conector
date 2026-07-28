@@ -33,10 +33,15 @@ internal sealed class MoodleSubmissionFileGateway(
 
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var fileUri = ValidateFileUri(fileUrl, credentials.BaseUrl);
-        var token = await ResolveReadTokenAsync(credentials, cancellationToken);
+        var token = await tokenProvider.GetAccessTokenAsync(credentials, cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Get, fileUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            tokenProvider.Invalidate(credentials);
+        }
 
         response.EnsureSuccessStatusCode();
 
@@ -82,38 +87,16 @@ internal sealed class MoodleSubmissionFileGateway(
             truncated);
     }
 
-    private async Task<string> ResolveReadTokenAsync(
-        MoodleConnectorCredentials connection,
-        CancellationToken cancellationToken)
-    {
-        if (_options.AllowServiceTokenForReadOnlyQueries &&
-            !string.IsNullOrWhiteSpace(_options.ServiceToken) &&
-            HasSameOrigin(_options.BaseUrl, connection.BaseUrl))
-        {
-            return _options.ServiceToken;
-        }
-
-        return await tokenProvider.GetAccessTokenAsync(connection, cancellationToken);
-    }
-
-    private static bool HasSameOrigin(string? configuredBaseUrl, string connectionBaseUrl)
-    {
-        return Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configured) &&
-               Uri.TryCreate(connectionBaseUrl, UriKind.Absolute, out var connection) &&
-               string.Equals(configured.Scheme, connection.Scheme, StringComparison.OrdinalIgnoreCase) &&
-               string.Equals(configured.Host, connection.Host, StringComparison.OrdinalIgnoreCase) &&
-               configured.Port == connection.Port;
-    }
-
     private static Uri ValidateFileUri(string fileUrl, string moodleBaseUrl)
     {
         if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var fileUri) ||
             !Uri.TryCreate(moodleBaseUrl, UriKind.Absolute, out var moodleUri) ||
-            fileUri.Scheme is not ("http" or "https") ||
+            !IsAllowedFileEndpoint(fileUri, moodleUri) ||
+            !string.IsNullOrEmpty(fileUri.UserInfo) ||
             !string.Equals(fileUri.Host, moodleUri.Host, StringComparison.OrdinalIgnoreCase) ||
             fileUri.Port != moodleUri.Port)
         {
-            throw new InvalidOperationException("A URL do arquivo deve pertencer ao Moodle selecionado e usar HTTP(S).");
+            throw new InvalidOperationException("A URL do arquivo deve pertencer ao Moodle HTTPS selecionado.");
         }
 
         var safeQuery = string.Join("&", fileUri.Query.TrimStart('?')
@@ -127,6 +110,20 @@ internal sealed class MoodleSubmissionFileGateway(
             }));
         var builder = new UriBuilder(fileUri) { Query = safeQuery };
         return builder.Uri;
+    }
+
+    private static bool IsAllowedFileEndpoint(Uri fileUri, Uri moodleUri)
+    {
+        if (fileUri.Scheme == Uri.UriSchemeHttps && moodleUri.Scheme == Uri.UriSchemeHttps)
+        {
+            return true;
+        }
+
+        return fileUri.Scheme == Uri.UriSchemeHttp &&
+               moodleUri.Scheme == Uri.UriSchemeHttp &&
+               (string.Equals(fileUri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                System.Net.IPAddress.TryParse(fileUri.Host, out var address) &&
+                System.Net.IPAddress.IsLoopback(address));
     }
 
     private static string DetectMimeType(HttpResponseMessage response, string filename)

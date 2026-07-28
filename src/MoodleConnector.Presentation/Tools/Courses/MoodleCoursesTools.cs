@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
@@ -16,7 +17,8 @@ namespace MoodleConnector.Presentation.Tools;
 public sealed class MoodleCoursesTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    ILogger<MoodleCoursesTools>? logger = null)
 {
     [McpServerTool(
         Name = "listar_meus_cursos",
@@ -68,6 +70,7 @@ public sealed class MoodleCoursesTools(
         catch (Exception ex)
         {
             var failure = MoodleErrorContract.Describe(ex);
+            LogUnexpectedFailure(ex, failure, "listar_meus_cursos", moodleAlias);
             return ToolResultHelper.Error<ListMyCoursesResponse>(
                 "Nao foi possivel listar os cursos no Moodle neste momento.",
                 errorCode: failure.ErrorCode,
@@ -358,6 +361,7 @@ public sealed class MoodleCoursesTools(
         catch (Exception ex)
         {
             var failure = MoodleErrorContract.Describe(ex);
+            LogUnexpectedFailure(ex, failure, "buscar_cursos", moodleAlias);
             return ToolResultHelper.Error<ListMyCoursesResponse>(
                 "Nao foi possivel buscar cursos no Moodle neste momento.",
                 errorCode: failure.ErrorCode,
@@ -416,6 +420,7 @@ public sealed class MoodleCoursesTools(
         catch (Exception ex)
         {
             var failure = MoodleErrorContract.Describe(ex);
+            LogUnexpectedFailure(ex, failure, "consultar_curso", moodleAlias);
             return ToolResultHelper.Error<CourseDetailsResponse>(
                 "Nao foi possivel consultar o curso no Moodle neste momento.",
                 errorCode: failure.ErrorCode,
@@ -445,6 +450,22 @@ public sealed class MoodleCoursesTools(
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
+    }
+
+    private void LogUnexpectedFailure(
+        Exception exception,
+        MoodleErrorDescriptor failure,
+        string toolName,
+        string? moodleAlias)
+    {
+        logger?.LogError(
+            "Unexpected Moodle tool failure was converted to a structured result. AuditId={AuditId} ErrorCode={ErrorCode} Tool={Tool} Alias={Alias} ExceptionType={ExceptionType} SafeMessage={SafeMessage}",
+            failure.AuditId,
+            failure.ErrorCode,
+            toolName,
+            MoodleConnectionAlias.Normalize(moodleAlias),
+            exception.GetType().FullName,
+            failure.Message);
     }
 
     private static string BuildNarration(ListMyCoursesResponse response)

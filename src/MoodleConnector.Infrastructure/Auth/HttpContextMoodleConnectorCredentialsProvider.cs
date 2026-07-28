@@ -13,20 +13,34 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
     ConnectorDbContext dbContext,
     IConnectorSecretProtector secretProtector,
     IMoodleConnectionSelection selection,
+    IMoodleEndpointValidator endpointValidator,
     ILogger<HttpContextMoodleConnectorCredentialsProvider> logger) : IMoodleConnectorCredentialsProvider
 {
+    private static readonly object ResolvedClientIdItemKey = new();
+    private static readonly object CredentialsCacheItemKey = new();
+
     public async Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken)
     {
-        var principal = httpContextAccessor.HttpContext?.User;
+        var httpContext = httpContextAccessor.HttpContext;
+        var principal = httpContext?.User;
         var clientId = await ResolveClientIdAsync(principal, cancellationToken);
         if (string.IsNullOrWhiteSpace(clientId))
         {
             throw LogFailure(
                 MoodleErrorContract.ConnectionNotFound,
-                "Authenticated connector client context was not found.");
+                "Authenticated connector client context was not found.",
+                stage: MoodleIntegrationStage.ConnectionLookup);
         }
 
         var requestedAlias = MoodleConnectionAlias.Normalize(selection.Alias);
+        var requestCacheKey = $"{clientId}\u001f{requestedAlias ?? "<default>"}";
+        if (httpContext?.Items.TryGetValue(CredentialsCacheItemKey, out var cachedValue) == true &&
+            cachedValue is Dictionary<string, MoodleConnectorCredentials> credentialsCache &&
+            credentialsCache.TryGetValue(requestCacheKey, out var cachedCredentials))
+        {
+            return cachedCredentials;
+        }
+
         var connections = await dbContext.ConnectorClients
             .AsNoTracking()
             .Where(connection => connection.ClientId == clientId)
@@ -41,7 +55,8 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
             {
                 throw LogFailure(
                     MoodleErrorContract.ConnectionNotFound,
-                    "No Moodle connection belongs to the authenticated connector client.");
+                    "No Moodle connection belongs to the authenticated connector client.",
+                    stage: MoodleIntegrationStage.ConnectionLookup);
             }
 
             var defaults = connections.Where(connection => connection.IsDefault).ToArray();
@@ -49,7 +64,8 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
             {
                 throw LogFailure(
                     MoodleErrorContract.DefaultConnectionNotConfigured,
-                    $"Expected one default Moodle connection but found {defaults.Length}.");
+                    $"Expected one default Moodle connection but found {defaults.Length}.",
+                    stage: MoodleIntegrationStage.ConnectionLookup);
             }
 
             entity = defaults[0];
@@ -69,14 +85,34 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
             {
                 throw LogFailure(
                     MoodleErrorContract.ConnectionNotFound,
-                    $"Moodle connection alias '{requestedAlias}' was not found.");
+                    $"Moodle connection alias '{requestedAlias}' was not found.",
+                    stage: MoodleIntegrationStage.ConnectionLookup);
             }
 
             if (matches.Length > 1)
             {
-                throw LogFailure(
-                    MoodleErrorContract.ConnectionNotFound,
-                    $"Moodle connection alias '{requestedAlias}' is ambiguous.");
+                var exactMatches = matches
+                    .Where(connection => string.Equals(
+                        connection.MoodleAlias?.Trim(),
+                        requestedAlias,
+                        StringComparison.Ordinal))
+                    .ToArray();
+                var activeMatches = matches.Where(connection => connection.IsActive).ToArray();
+                var defaultMatches = matches.Where(connection => connection.IsDefault).ToArray();
+                matches = exactMatches.Length == 1
+                    ? exactMatches
+                    : activeMatches.Length == 1
+                        ? activeMatches
+                        : defaultMatches.Length == 1
+                            ? defaultMatches
+                            : matches;
+                if (matches.Length > 1)
+                {
+                    throw LogFailure(
+                        MoodleErrorContract.ConnectionNotFound,
+                        $"Moodle connection alias '{requestedAlias}' is ambiguous.",
+                        stage: MoodleIntegrationStage.ConnectionLookup);
+                }
             }
 
             entity = matches[0];
@@ -89,19 +125,44 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
                 MoodleErrorContract.ConnectionDisabled,
                 "The selected Moodle connection is disabled.",
                 entity,
-                safeBaseUrl);
+                safeBaseUrl,
+                MoodleIntegrationStage.ConnectionState);
         }
 
         if (!Uri.TryCreate(entity.MoodleBaseUrl, UriKind.Absolute, out var baseUri) ||
-            baseUri.Scheme is not ("http" or "https") ||
-            string.IsNullOrWhiteSpace(baseUri.Host))
+            baseUri.Scheme != Uri.UriSchemeHttps ||
+            string.IsNullOrWhiteSpace(baseUri.Host) ||
+            !string.IsNullOrEmpty(baseUri.UserInfo))
         {
             throw LogFailure(
                 MoodleErrorContract.NetworkError,
                 "The selected Moodle connection has an invalid base URL.",
                 entity,
-                safeBaseUrl);
+                safeBaseUrl,
+                MoodleIntegrationStage.UrlValidation);
         }
+
+        try
+        {
+            baseUri = await endpointValidator.ValidateAsync(entity.MoodleBaseUrl, cancellationToken);
+        }
+        catch (MoodleApiException exception)
+        {
+            throw new MoodleApiException(
+                exception.ErrorCode,
+                exception.Message,
+                exception.HttpStatusCode,
+                exception,
+                exception.AuditId,
+                entity.Id,
+                MoodleConnectionAlias.Normalize(entity.MoodleAlias),
+                safeBaseUrl,
+                exception.FunctionName,
+                exception.DurationMs,
+                exception.RemoteErrorCode,
+                exception.Stage);
+        }
+        safeBaseUrl = GetSafeBaseUrl(baseUri.AbsoluteUri);
 
         if (string.IsNullOrWhiteSpace(entity.MoodleUsernameEncrypted) ||
             string.IsNullOrWhiteSpace(entity.MoodlePasswordEncrypted))
@@ -110,7 +171,8 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
                 MoodleErrorContract.TokenMissing,
                 "The selected Moodle connection has incomplete encrypted credentials.",
                 entity,
-                safeBaseUrl);
+                safeBaseUrl,
+                MoodleIntegrationStage.CredentialPresence);
         }
 
         string username;
@@ -120,7 +182,7 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
             username = secretProtector.Unprotect(entity.MoodleUsernameEncrypted);
             password = secretProtector.Unprotect(entity.MoodlePasswordEncrypted);
         }
-        catch (Exception exception) when (exception is CryptographicException or FormatException)
+        catch (Exception exception) when (exception is CryptographicException or FormatException or InvalidOperationException)
         {
             var failure = new MoodleApiException(
                 MoodleErrorContract.TokenDecryptionFailed,
@@ -128,7 +190,8 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
                 innerException: exception,
                 connectionId: entity.Id,
                 connectionAlias: MoodleConnectionAlias.Normalize(entity.MoodleAlias),
-                endpoint: safeBaseUrl);
+                endpoint: safeBaseUrl,
+                stage: MoodleIntegrationStage.CredentialDecryption);
             logger.LogError(
                 exception,
                 "Moodle credential decryption failed. AuditId={AuditId} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint}",
@@ -145,7 +208,8 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
                 MoodleErrorContract.TokenMissing,
                 "The decrypted Moodle credentials are incomplete.",
                 entity,
-                safeBaseUrl);
+                safeBaseUrl,
+                MoodleIntegrationStage.TokenRequest);
         }
 
         logger.LogDebug(
@@ -154,15 +218,33 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
             MoodleConnectionAlias.Normalize(entity.MoodleAlias),
             safeBaseUrl);
 
-        return new MoodleConnectorCredentials(
+        var resolvedCredentials = new MoodleConnectorCredentials(
             entity.ClientId,
             entity.Id,
             MoodleConnectionAlias.NormalizeOrDefault(entity.MoodleAlias),
-            entity.MoodleBaseUrl.Trim().TrimEnd('/'),
+            safeBaseUrl!,
             username,
             password,
             MoodleConnectionAlias.NormalizeOrDefault(entity.MoodleTarget),
             entity.CanWrite);
+        if (httpContext is not null)
+        {
+            if (httpContext.Items.TryGetValue(CredentialsCacheItemKey, out cachedValue) &&
+                cachedValue is Dictionary<string, MoodleConnectorCredentials> existingCache)
+            {
+                existingCache[requestCacheKey] = resolvedCredentials;
+            }
+            else
+            {
+                httpContext.Items[CredentialsCacheItemKey] =
+                    new Dictionary<string, MoodleConnectorCredentials>(StringComparer.Ordinal)
+                    {
+                        [requestCacheKey] = resolvedCredentials
+                    };
+            }
+        }
+
+        return resolvedCredentials;
     }
 
     private async Task<string?> ResolveClientIdAsync(
@@ -174,6 +256,15 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
             return null;
         }
 
+        var httpContext = httpContextAccessor.HttpContext;
+        if (httpContext?.Items.TryGetValue(ResolvedClientIdItemKey, out var cachedClientId) == true &&
+            cachedClientId is string cached &&
+            !string.IsNullOrWhiteSpace(cached))
+        {
+            return cached;
+        }
+
+        string? resolvedClientId = null;
         var subject = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? principal.FindFirst("sub")?.Value;
         if (Guid.TryParse(subject, out var userId))
@@ -183,41 +274,51 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
                 .SingleOrDefaultAsync(user => user.Id == userId, cancellationToken);
             if (!string.IsNullOrWhiteSpace(account?.ConnectorClientId))
             {
-                return account.ConnectorClientId;
+                resolvedClientId = account.ConnectorClientId;
             }
         }
 
-        var email = principal.FindFirst(ClaimTypes.Email)?.Value
-            ?? principal.FindFirst("email")?.Value
-            ?? principal.FindFirst("preferred_username")?.Value;
-        if (!string.IsNullOrWhiteSpace(email))
+        if (resolvedClientId is null)
         {
-            var normalizedEmail = email.Trim().ToLowerInvariant();
-            var account = await dbContext.UserAccounts
-                .AsNoTracking()
-                .SingleOrDefaultAsync(user => user.Email == normalizedEmail, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(account?.ConnectorClientId))
+            var email = principal.FindFirst(ClaimTypes.Email)?.Value
+                ?? principal.FindFirst("email")?.Value
+                ?? principal.FindFirst("preferred_username")?.Value;
+            if (!string.IsNullOrWhiteSpace(email))
             {
-                return account.ConnectorClientId;
+                var normalizedEmail = email.Trim().ToLowerInvariant();
+                var account = await dbContext.UserAccounts
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(user => user.Email == normalizedEmail, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(account?.ConnectorClientId))
+                {
+                    resolvedClientId = account.ConnectorClientId;
+                }
             }
         }
 
-        return principal.FindFirst("connector_client_id")?.Value
-            ?? subject;
+        resolvedClientId ??= principal.FindFirst("connector_client_id")?.Value ?? subject;
+        if (httpContext is not null && !string.IsNullOrWhiteSpace(resolvedClientId))
+        {
+            httpContext.Items[ResolvedClientIdItemKey] = resolvedClientId;
+        }
+
+        return resolvedClientId;
     }
 
     private MoodleApiException LogFailure(
         string errorCode,
         string internalMessage,
         ConnectorClientCredentialEntity? entity = null,
-        string? endpoint = null)
+        string? endpoint = null,
+        MoodleIntegrationStage stage = MoodleIntegrationStage.Unknown)
     {
         var failure = new MoodleApiException(
             errorCode,
             internalMessage,
             connectionId: entity?.Id,
             connectionAlias: MoodleConnectionAlias.Normalize(entity?.MoodleAlias ?? selection.Alias),
-            endpoint: endpoint);
+            endpoint: endpoint,
+            stage: stage);
         logger.LogWarning(
             "Moodle connection resolution failed. AuditId={AuditId} ErrorCode={ErrorCode} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint}",
             failure.AuditId,

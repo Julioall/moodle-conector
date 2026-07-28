@@ -42,7 +42,7 @@ public sealed class MoodleUniversalTools(
                 new Dictionary<string, object?>(),
                 allowServiceToken: false,
                 cancellationToken);
-            var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
+            var profile = MoodleFunctionProfileParser.Parse(connection, liveSiteInfo);
             var flows = businessFlows.EvaluateAll(profile);
             var data = new MoodleConnectionDiagnostic(
                 Healthy: true,
@@ -94,18 +94,16 @@ public sealed class MoodleUniversalTools(
         {
             var descriptor = MoodleErrorContract.Describe(ex);
             var moodleFailure = ex as MoodleApiException;
-            var found = descriptor.ErrorCode is not MoodleErrorContract.ConnectionNotFound and
-                not MoodleErrorContract.DefaultConnectionNotConfigured;
-            var active = found && descriptor.ErrorCode != MoodleErrorContract.ConnectionDisabled;
-            var decryptionSucceeded = active &&
-                descriptor.ErrorCode != MoodleErrorContract.TokenDecryptionFailed;
-            var credentialsPresent = decryptionSucceeded &&
-                descriptor.ErrorCode != MoodleErrorContract.TokenMissing;
-            var tokenAvailable = credentialsPresent &&
-                descriptor.ErrorCode != MoodleErrorContract.AuthenticationFailed &&
-                !string.Equals(moodleFailure?.FunctionName, "login/token.php", StringComparison.Ordinal);
-            var urlValid = Uri.TryCreate(moodleFailure?.Endpoint, UriKind.Absolute, out var diagnosticUri) &&
-                diagnosticUri.Scheme is "http" or "https";
+            var stage = moodleFailure?.Stage ?? MoodleIntegrationStage.Unknown;
+            var found = stage > MoodleIntegrationStage.ConnectionLookup ||
+                descriptor.ErrorCode == MoodleErrorContract.ConnectionDisabled;
+            var active = stage > MoodleIntegrationStage.ConnectionState;
+            var urlValid = stage > MoodleIntegrationStage.UrlValidation;
+            var credentialsPresent = stage > MoodleIntegrationStage.CredentialPresence;
+            var decryptionSucceeded = stage > MoodleIntegrationStage.CredentialDecryption;
+            var tokenAvailable = stage > MoodleIntegrationStage.TokenRequest &&
+                descriptor.ErrorCode != MoodleErrorContract.AuthenticationFailed;
+            var httpSucceeded = moodleFailure?.HttpStatusCode is >= 200 and < 300;
             var data = new MoodleConnectionDiagnostic(
                 Healthy: false,
                 RequestedAlias: MoodleConnectionAlias.Normalize(moodleAlias),
@@ -118,7 +116,7 @@ public sealed class MoodleUniversalTools(
                 CredentialsPresent: credentialsPresent,
                 DecryptionSucceeded: decryptionSucceeded,
                 TokenAvailable: tokenAvailable,
-                HttpSucceeded: moodleFailure?.HttpStatusCode is not null,
+                HttpSucceeded: httpSucceeded,
                 AuthenticationSucceeded: tokenAvailable &&
                     descriptor.ErrorCode != MoodleErrorContract.AuthenticationFailed,
                 SiteInfoSucceeded: false,

@@ -18,6 +18,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Infrastructure;
 
 namespace MoodleConnector.Application.Tests.Integration;
@@ -166,6 +167,63 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.Contains("list_submissions_awaiting_grading", body, StringComparison.Ordinal);
         Assert.Contains("consultar_status_submissao", body, StringComparison.Ordinal);
         Assert.Contains("get_submission_status", body, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("listar_meus_cursos", """{"limite":5,"pagina":1,"moodleAlias":"goias"}""")]
+    [InlineData("buscar_cursos", """{"termo":"32786","limite":5,"moodleAlias":"goias"}""")]
+    [InlineData("consultar_curso", """{"courseId":"32786","moodleAlias":"goias"}""")]
+    [InlineData("listar_conteudos_curso", """{"courseId":"32786","moodleAlias":"goias"}""")]
+    public async Task ToolsCall_DeveConverterFalhaDeConexaoEmErroEstruturado(
+        string toolName,
+        string argumentsJson)
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IMoodleUserResolver>();
+                services.AddScoped<IMoodleUserResolver, ConnectionNotFoundMoodleUserResolver>();
+            });
+        });
+        var apiKey = await RegisterClientAsync(canWrite: false, factory);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Mcp-Api-Key", apiKey);
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+
+        var sessionId = await InitializeMcpSessionAsync(client);
+        await NotifyInitializedAsync(client, sessionId);
+        var payload = $$"""
+        {
+          "jsonrpc": "2.0",
+          "id": "stable-error-{{toolName}}",
+          "method": "tools/call",
+          "params": {
+            "name": "{{toolName}}",
+            "arguments": {{argumentsJson}}
+          }
+        }
+        """;
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            request.Headers.Add("Mcp-Session-Id", sessionId);
+        }
+
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains("\"isError\":true", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(MoodleErrorContract.ConnectionNotFound, body, StringComparison.Ordinal);
+        Assert.Contains("\"auditId\":\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"auditId\":null", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("INVALID_ARGUMENT", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -1019,4 +1077,12 @@ internal sealed class AlwaysValidMoodleCredentialValidator : IMoodleCredentialVa
     {
         return Task.FromResult(true);
     }
+}
+
+internal sealed class ConnectionNotFoundMoodleUserResolver : IMoodleUserResolver
+{
+    public Task<long?> ResolveMoodleUserIdAsync(CancellationToken cancellationToken) =>
+        Task.FromException<long?>(new MoodleApiException(
+            MoodleErrorContract.ConnectionNotFound,
+            "Connection lookup failed in the integration-test boundary."));
 }

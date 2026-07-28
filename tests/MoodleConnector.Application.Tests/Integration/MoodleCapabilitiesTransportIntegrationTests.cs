@@ -42,7 +42,6 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
             cache,
             new MoodleRestClient(
                 httpClient,
-                Options.Create(new MoodleApiOptions()),
                 new SwitchingTokenProvider(),
                 NullLogger<MoodleRestClient>.Instance),
             credentials);
@@ -77,5 +76,9 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
             MoodleConnectorCredentials connection,
             CancellationToken cancellationToken) =>
             Task.FromResult(connection.Alias == "goias" ? "token-goias" : "token-nacional");
+
+        public void Invalidate(MoodleConnectorCredentials connection)
+        {
+        }
     }
 }
