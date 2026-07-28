@@ -158,7 +158,23 @@ jobs:
           set -euo pipefail
           PAYLOAD_FILE="$(mktemp)"
           ADMIN_FILE="$(mktemp)"
-          trap 'rm -f "$PAYLOAD_FILE" "$ADMIN_FILE"' EXIT
+          REMOTE_PAYLOAD="$VPS_APP_DIR/.maintenance-goias.json"
+          REMOTE_ADMIN_KEY="$VPS_APP_DIR/.maintenance-admin-key"
+          REMOTE_RESPONSE="$VPS_APP_DIR/.maintenance-response.json"
+
+          cleanup() {
+            rm -f "$PAYLOAD_FILE" "$ADMIN_FILE"
+            if [ "${VPS_AUTH_MODE:-}" = "key" ]; then
+              ssh -i ~/.ssh/deploy_key -p "$VPS_SSH_PORT" \
+                "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+                rm -f "$REMOTE_PAYLOAD" "$REMOTE_ADMIN_KEY" "$REMOTE_RESPONSE" >/dev/null 2>&1 || true
+            elif [ "${VPS_AUTH_MODE:-}" = "password" ]; then
+              sshpass -p "$VPS_AUTH_SECRET" ssh -p "$VPS_SSH_PORT" \
+                "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+                rm -f "$REMOTE_PAYLOAD" "$REMOTE_ADMIN_KEY" "$REMOTE_RESPONSE" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
           jq -cn \
             --arg clientId "$CLIENT_ID" \
             --arg username "$TEMP_MOODLE_USERNAME" \
@@ -176,8 +192,6 @@ jobs:
           printf '%s' "$ADMIN_API_KEY" > "$ADMIN_FILE"
           chmod 600 "$PAYLOAD_FILE" "$ADMIN_FILE"
 
-          REMOTE_PAYLOAD="$VPS_APP_DIR/.maintenance-goias.json"
-          REMOTE_ADMIN_KEY="$VPS_APP_DIR/.maintenance-admin-key"
           if [ "$VPS_AUTH_MODE" = "key" ]; then
             scp -q -i ~/.ssh/deploy_key -P "$VPS_SSH_PORT" "$PAYLOAD_FILE" \
               "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$REMOTE_PAYLOAD"
@@ -225,8 +239,6 @@ jobs:
           printf 'registered=true alias=goias canWrite=false\n'
           REMOTE
           )"
-          REMOTE_RESPONSE="$VPS_APP_DIR/.maintenance-response.json"
-
           if [ "$VPS_AUTH_MODE" = "key" ]; then
             printf '%s\n' "$REMOTE_SCRIPT" | ssh -i ~/.ssh/deploy_key -p "$VPS_SSH_PORT" \
               "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
