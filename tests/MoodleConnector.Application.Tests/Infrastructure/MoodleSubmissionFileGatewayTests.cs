@@ -41,7 +41,9 @@ public sealed class MoodleSubmissionFileGatewayTests
 
     private sealed class TokenProvider : IMoodleAccessTokenProvider
     {
-        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) => Task.FromResult("new-token");
+        public Task<string> GetAccessTokenAsync(
+            MoodleConnectorCredentials connection,
+            CancellationToken cancellationToken) => Task.FromResult("new-token");
     }
 
     private sealed class CredentialsProvider : IMoodleConnectorCredentialsProvider

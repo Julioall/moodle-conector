@@ -19,6 +19,7 @@ using Microsoft.IdentityModel.Tokens;
 using MoodleConnector.Application;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Infrastructure;
 using MoodleConnector.Presentation.Configuration;
@@ -254,6 +255,31 @@ var mcpServerBuilder = builder.Services
     .WithHttpTransport()
     .WithRequestFilters(filters =>
     {
+        filters.AddCallToolFilter(next => async (request, cancellationToken) =>
+        {
+            try
+            {
+                return await next(request, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var descriptor = MoodleErrorContract.Describe(exception);
+                var loggerFactory = request.Services?.GetService<ILoggerFactory>();
+                loggerFactory?
+                    .CreateLogger("MoodleConnector.McpToolBoundary")
+                    .LogError(
+                        exception,
+                        "Unhandled MCP tool exception was converted to a structured result. AuditId={AuditId} ErrorCode={ErrorCode}",
+                        descriptor.AuditId,
+                        descriptor.ErrorCode);
+                return ToolResultHelper.Error<object>(exception);
+            }
+        });
+
         filters.AddListToolsFilter(next => async (request, cancellationToken) =>
         {
             var result = await next(request, cancellationToken);
@@ -646,7 +672,11 @@ app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async 
     claims.SetClaim(OpenIddictConstants.Claims.Subject, identity.Id.ToString());
     claims.SetClaim(OpenIddictConstants.Claims.Name, identity.Name);
     claims.SetClaim(OpenIddictConstants.Claims.Email, identity.Email);
-    claims.SetClaim("connector_client_id", identity.Id.ToString());
+    claims.SetClaim(
+        "connector_client_id",
+        string.IsNullOrWhiteSpace(identity.ConnectorClientId)
+            ? identity.Id.ToString()
+            : identity.ConnectorClientId);
 
     var principal = new ClaimsPrincipal(claims);
     principal.SetScopes(request.GetScopes());
@@ -1806,8 +1836,7 @@ static void ValidateProductionSecuritySettings(
 static async Task EnrichMcpPrincipalFromLocalAccountAsync(HttpContext context, CancellationToken cancellationToken)
 {
     var principal = context.User;
-    if (principal.Identity?.IsAuthenticated != true ||
-        principal.HasClaim(claim => claim.Type == "connector_client_id"))
+    if (principal.Identity?.IsAuthenticated != true)
     {
         return;
     }
@@ -1835,6 +1864,10 @@ static async Task EnrichMcpPrincipalFromLocalAccountAsync(HttpContext context, C
         return;
     }
 
+    foreach (var existingClaim in identity.FindAll("connector_client_id").ToArray())
+    {
+        identity.RemoveClaim(existingClaim);
+    }
     identity.AddClaim(new Claim("connector_client_id", account.ConnectorClientId));
 
     var canWrite = await dbContext.ConnectorClients
@@ -1877,7 +1910,11 @@ static async Task<PortalIdentity?> ResolvePortalIdentityAsync(
             var accountById = await dbContext.UserAccounts.FindAsync([userId], cancellationToken);
             if (accountById is not null)
             {
-                return new PortalIdentity(accountById.Id, accountById.Name, accountById.Email);
+                return new PortalIdentity(
+                    accountById.Id,
+                    accountById.Name,
+                    accountById.Email,
+                    accountById.ConnectorClientId);
             }
         }
 
@@ -1896,7 +1933,11 @@ static async Task<PortalIdentity?> ResolvePortalIdentityAsync(
                     await dbContext.SaveChangesAsync(cancellationToken);
                 }
 
-                return new PortalIdentity(accountByEmail.Id, accountByEmail.Name, accountByEmail.Email);
+                return new PortalIdentity(
+                    accountByEmail.Id,
+                    accountByEmail.Name,
+                    accountByEmail.Email,
+                    accountByEmail.ConnectorClientId);
             }
         }
     }
@@ -2010,7 +2051,7 @@ static async Task SeedChatGptOAuthClientAsync(
     await manager.UpdateAsync(existing, descriptor);
 }
 
-public sealed record PortalIdentity(Guid Id, string Name, string Email);
+public sealed record PortalIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);
 
 public partial class Program;
 

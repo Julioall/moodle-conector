@@ -171,7 +171,7 @@ internal sealed class AccountService(
             clientEntity.MoodlePasswordEncrypted = secretProtector.Protect(request.MoodlePassword);
         }
 
-        clientEntity.MoodleAlias = string.IsNullOrWhiteSpace(request.MoodleAlias) ? "Moodle" : request.MoodleAlias;
+        clientEntity.MoodleAlias = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleAlias);
         clientEntity.MoodleBaseUrl = moodleBaseUrl;
         clientEntity.CanWrite = request.CanWrite;
         clientEntity.UpdatedAtUtc = DateTimeOffset.UtcNow;

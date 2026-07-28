@@ -33,7 +33,7 @@ internal sealed class MoodleSubmissionFileGateway(
 
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var fileUri = ValidateFileUri(fileUrl, credentials.BaseUrl);
-        var token = await ResolveReadTokenAsync(cancellationToken);
+        var token = await ResolveReadTokenAsync(credentials, cancellationToken);
         using var request = new HttpRequestMessage(HttpMethod.Get, fileUri);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -82,14 +82,27 @@ internal sealed class MoodleSubmissionFileGateway(
             truncated);
     }
 
-    private async Task<string> ResolveReadTokenAsync(CancellationToken cancellationToken)
+    private async Task<string> ResolveReadTokenAsync(
+        MoodleConnectorCredentials connection,
+        CancellationToken cancellationToken)
     {
-        if (_options.AllowServiceTokenForReadOnlyQueries && !string.IsNullOrWhiteSpace(_options.ServiceToken))
+        if (_options.AllowServiceTokenForReadOnlyQueries &&
+            !string.IsNullOrWhiteSpace(_options.ServiceToken) &&
+            HasSameOrigin(_options.BaseUrl, connection.BaseUrl))
         {
             return _options.ServiceToken;
         }
 
-        return await tokenProvider.GetAccessTokenAsync(cancellationToken);
+        return await tokenProvider.GetAccessTokenAsync(connection, cancellationToken);
+    }
+
+    private static bool HasSameOrigin(string? configuredBaseUrl, string connectionBaseUrl)
+    {
+        return Uri.TryCreate(configuredBaseUrl, UriKind.Absolute, out var configured) &&
+               Uri.TryCreate(connectionBaseUrl, UriKind.Absolute, out var connection) &&
+               string.Equals(configured.Scheme, connection.Scheme, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(configured.Host, connection.Host, StringComparison.OrdinalIgnoreCase) &&
+               configured.Port == connection.Port;
     }
 
     private static Uri ValidateFileUri(string fileUrl, string moodleBaseUrl)

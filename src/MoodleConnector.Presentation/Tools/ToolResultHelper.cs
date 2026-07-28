@@ -6,22 +6,28 @@ using MoodleConnector.Application.Tools;
 namespace MoodleConnector.Presentation.Tools;
 
 /// <summary>
-/// Helpers estáticos compartilhados por todas as MCP tool classes da camada de Apresentação.
+/// Shared MCP result factory. Every failure receives a stable code and correlation id.
 /// </summary>
 internal static class ToolResultHelper
 {
-    /// <summary>
-    /// Cria um <see cref="CallToolResult"/> de erro tipado no formato padrão <see cref="ToolResponse{T}"/>.
-    /// </summary>
-    internal static CallToolResult Error<T>(string message, string status = "error", string? errorCode = null)
+    internal static CallToolResult Error<T>(
+        string message,
+        string status = "error",
+        string? errorCode = null,
+        string? auditId = null)
     {
+        var normalizedCode = MoodleErrorContract.NormalizeCode(errorCode ?? MoodleErrorContract.Unexpected);
+        var correlationId = string.IsNullOrWhiteSpace(auditId)
+            ? Guid.NewGuid().ToString("N")
+            : auditId;
         var response = new ToolResponse<T>(
             status,
             Data: default,
             Warnings: [message],
-            AuditId: null,
+            AuditId: correlationId,
             DateTimeOffset.UtcNow,
-            errorCode);
+            normalizedCode,
+            message);
 
         return new CallToolResult
         {
@@ -32,16 +38,17 @@ internal static class ToolResultHelper
     }
 
     internal static CallToolResult Error<T>(MoodleApiException error) =>
-        Error<T>(GetSafeMessage(error.ErrorCode), errorCode: error.ErrorCode);
+        Error<T>(
+            MoodleErrorContract.SafeMessage(error.ErrorCode),
+            errorCode: error.ErrorCode,
+            auditId: error.AuditId);
 
-    private static string GetSafeMessage(string errorCode) => errorCode switch
+    internal static CallToolResult Error<T>(Exception error)
     {
-        "invalid_token" => "A credencial Moodle foi recusada. Atualize a conexão e tente novamente.",
-        "function_not_available" or "function_not_discovered" => "A função solicitada não está disponível nesta conexão Moodle.",
-        "destructive_function_blocked" => "A função solicitada é destrutiva e está bloqueada.",
-        "function_not_read_safe" or "function_not_allowed" => "A função solicitada não está autorizada para esta operação.",
-        "moodle_unavailable" or "timeout" => "O Moodle está indisponível no momento. Tente novamente.",
-        "moodle_invalid_response" or "moodle_empty_response" => "O Moodle retornou uma resposta inválida.",
-        _ => "A chamada ao Moodle não pôde ser concluída com segurança."
-    };
+        var descriptor = MoodleErrorContract.Describe(error);
+        return Error<T>(
+            descriptor.Message,
+            errorCode: descriptor.ErrorCode,
+            auditId: descriptor.AuditId);
+    }
 }

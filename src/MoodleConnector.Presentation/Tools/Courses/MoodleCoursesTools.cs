@@ -37,33 +37,41 @@ public sealed class MoodleCoursesTools(
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
-        moodleSelection.Alias = moodleAlias;
-        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-        if (moodleUserId is null)
-        {
-            return ToolResultHelper.Error<ListMyCoursesResponse>("Usuario nao autenticado para listar cursos.");
-        }
-
         PagedCourses paged;
         try
         {
+            moodleSelection.Alias = moodleAlias;
+            var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+            if (moodleUserId is null)
+            {
+                return ToolResultHelper.Error<ListMyCoursesResponse>(
+                    "Usuario nao autenticado para listar cursos.",
+                    errorCode: MoodleErrorContract.AuthenticationFailed);
+            }
+
             paged = await mediator.Send(new ListMyCoursesQuery(moodleUserId.Value.ToString(), limite, pagina), cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
         catch (ArgumentOutOfRangeException ex)
         {
-            return ToolResultHelper.Error<ListMyCoursesResponse>(ex.Message);
+            return ToolResultHelper.Error<ListMyCoursesResponse>(
+                ex.Message,
+                errorCode: MoodleErrorContract.ApiError);
         }
-        catch (MoodleApiException ex) when (ex.ErrorCode == "flow_unavailable")
+        catch (MoodleApiException ex)
         {
-            return ToolResultHelper.Error<ListMyCoursesResponse>(ex.Message, "flow_unavailable");
+            return ToolResultHelper.Error<ListMyCoursesResponse>(ex);
         }
-        catch
+        catch (Exception ex)
         {
-            return ToolResultHelper.Error<ListMyCoursesResponse>("Nao foi possivel listar os cursos no Moodle neste momento.");
+            var failure = MoodleErrorContract.Describe(ex);
+            return ToolResultHelper.Error<ListMyCoursesResponse>(
+                "Nao foi possivel listar os cursos no Moodle neste momento.",
+                errorCode: failure.ErrorCode,
+                auditId: failure.AuditId);
         }
 
         var data = new ListMyCoursesResponse(
@@ -76,8 +84,9 @@ public sealed class MoodleCoursesTools(
             "ok",
             data,
             [],
-            AuditId: null,
-            DateTimeOffset.UtcNow);
+            AuditId: Guid.NewGuid().ToString("N"),
+            DateTimeOffset.UtcNow,
+            Message: BuildNarration(data));
 
         return new CallToolResult
         {
@@ -324,33 +333,45 @@ public sealed class MoodleCoursesTools(
             return ToolResultHelper.Error<ListMyCoursesResponse>("Informe um termo de busca para localizar cursos.");
         }
 
-        moodleSelection.Alias = moodleAlias;
-        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-        if (moodleUserId is null)
-        {
-            return ToolResultHelper.Error<ListMyCoursesResponse>("Usuario nao autenticado para buscar cursos.");
-        }
-
         IReadOnlyList<CourseSummary> courses;
         try
         {
+            moodleSelection.Alias = moodleAlias;
+            var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+            if (moodleUserId is null)
+            {
+                return ToolResultHelper.Error<ListMyCoursesResponse>(
+                    "Usuario nao autenticado para buscar cursos.",
+                    errorCode: MoodleErrorContract.AuthenticationFailed);
+            }
+
             courses = await mediator.Send(new SearchCoursesQuery(moodleUserId.Value.ToString(), query, limit), cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (MoodleApiException ex) when (ex.ErrorCode == "flow_unavailable")
+        catch (MoodleApiException ex)
         {
-            return ToolResultHelper.Error<ListMyCoursesResponse>(ex.Message, "flow_unavailable");
+            return ToolResultHelper.Error<ListMyCoursesResponse>(ex);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
-            return ToolResultHelper.Error<ListMyCoursesResponse>($"Nao foi possivel buscar cursos no Moodle neste momento ({ex.GetType().Name}).");
+            var failure = MoodleErrorContract.Describe(ex);
+            return ToolResultHelper.Error<ListMyCoursesResponse>(
+                "Nao foi possivel buscar cursos no Moodle neste momento.",
+                errorCode: failure.ErrorCode,
+                auditId: failure.AuditId);
         }
 
         var data = new ListMyCoursesResponse(courses.Count, 1, 1, false, courses.Select(ToCourseItem).ToArray());
-        var response = new ToolResponse<ListMyCoursesResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<ListMyCoursesResponse>(
+            "ok",
+            data,
+            [],
+            AuditId: Guid.NewGuid().ToString("N"),
+            DateTimeOffset.UtcNow,
+            Message: BuildNarration(data));
 
         return new CallToolResult
         {
@@ -370,42 +391,57 @@ public sealed class MoodleCoursesTools(
             return ToolResultHelper.Error<CourseDetailsResponse>("Informe um identificador de curso.");
         }
 
-        moodleSelection.Alias = moodleAlias;
-        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-        if (moodleUserId is null)
-        {
-            return ToolResultHelper.Error<CourseDetailsResponse>("Usuario nao autenticado para consultar curso.");
-        }
-
         CourseSummary? course;
         try
         {
+            moodleSelection.Alias = moodleAlias;
+            var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+            if (moodleUserId is null)
+            {
+                return ToolResultHelper.Error<CourseDetailsResponse>(
+                    "Usuario nao autenticado para consultar curso.",
+                    errorCode: MoodleErrorContract.AuthenticationFailed);
+            }
+
             course = await mediator.Send(new GetCourseQuery(moodleUserId.Value.ToString(), courseId), cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (MoodleApiException ex) when (ex.ErrorCode == "flow_unavailable")
+        catch (MoodleApiException ex)
         {
-            return ToolResultHelper.Error<CourseDetailsResponse>(ex.Message, "flow_unavailable");
+            return ToolResultHelper.Error<CourseDetailsResponse>(ex);
         }
-        catch
+        catch (Exception ex)
         {
-            return ToolResultHelper.Error<CourseDetailsResponse>("Nao foi possivel consultar o curso no Moodle neste momento.");
+            var failure = MoodleErrorContract.Describe(ex);
+            return ToolResultHelper.Error<CourseDetailsResponse>(
+                "Nao foi possivel consultar o curso no Moodle neste momento.",
+                errorCode: failure.ErrorCode,
+                auditId: failure.AuditId);
         }
 
         if (course is null)
         {
-            return ToolResultHelper.Error<CourseDetailsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<CourseDetailsResponse>(
+                "Curso nao encontrado entre os cursos vinculados ao usuario.",
+                errorCode: MoodleErrorContract.CourseNotFound);
         }
 
         var data = new CourseDetailsResponse(ToCourseItem(course));
-        var response = new ToolResponse<CourseDetailsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var narration = $"Curso encontrado: {course.FullName} (ID: {course.CourseId}).";
+        var response = new ToolResponse<CourseDetailsResponse>(
+            "ok",
+            data,
+            [],
+            AuditId: Guid.NewGuid().ToString("N"),
+            DateTimeOffset.UtcNow,
+            Message: narration);
 
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = $"Curso encontrado: {course.FullName} (ID: {course.CourseId})." }],
+            Content = [new TextContentBlock { Text = narration }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };

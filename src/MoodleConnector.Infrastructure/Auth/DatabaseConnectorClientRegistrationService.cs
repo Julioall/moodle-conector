@@ -32,7 +32,7 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         var apiKeyHash = ApiKeyHasher.Hash(apiKey);
         var now = DateTimeOffset.UtcNow;
         var clientId = request.ClientId.Trim();
-        var alias = NormalizeAlias(request.MoodleAlias);
+        var alias = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleAlias);
         var connectionId = BuildConnectionId(clientId, alias);
 
         var entity = await dbContext.ConnectorClients
@@ -80,12 +80,6 @@ internal sealed class DatabaseConnectorClientRegistrationService(
     {
         var bytes = RandomNumberGenerator.GetBytes(24);
         return Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
-    }
-
-    private static string NormalizeAlias(string alias)
-    {
-        var normalized = string.IsNullOrWhiteSpace(alias) ? "default" : alias.Trim().ToLowerInvariant();
-        return normalized.Length > 64 ? normalized[..64] : normalized;
     }
 
     private static string NormalizeBaseUrl(Uri uri)

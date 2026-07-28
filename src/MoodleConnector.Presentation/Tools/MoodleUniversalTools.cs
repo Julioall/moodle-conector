@@ -1,10 +1,13 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
+using Microsoft.Extensions.Logging;
 
 namespace MoodleConnector.Presentation.Tools;
 
@@ -14,7 +17,9 @@ public sealed class MoodleUniversalTools(
     IMoodleFunctionExecutor functionExecutor,
     IMoodleBusinessFlowRegistry businessFlows,
     IMoodleConnectorCredentialsProvider credentialsProvider,
-    IMoodleConnectionSelection connectionSelection)
+    IMoodleConnectionSelection connectionSelection,
+    IMoodleRestClient restClient,
+    ILogger<MoodleUniversalTools> logger)
 {
     [McpServerTool(Name = "moodle_diagnose_connection", Title = "Diagnosticar Conexao Moodle",
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
@@ -26,27 +31,122 @@ public sealed class MoodleUniversalTools(
         CancellationToken cancellationToken = default)
     {
         connectionSelection.Alias = moodleAlias;
+        var auditId = Guid.NewGuid().ToString("N");
+        var stopwatch = Stopwatch.StartNew();
         try
         {
-            var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
             var connection = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+            var liveSiteInfo = await restClient.CallAsync(
+                connection,
+                "core_webservice_get_site_info",
+                new Dictionary<string, object?>(),
+                allowServiceToken: false,
+                cancellationToken);
+            var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
             var flows = businessFlows.EvaluateAll(profile);
             var data = new MoodleConnectionDiagnostic(
+                Healthy: true,
+                RequestedAlias: MoodleConnectionAlias.Normalize(moodleAlias),
                 profile.ConnectionAlias,
+                profile.ConnectionId,
+                BaseUrl: SanitizeBaseUrl(connection.BaseUrl),
+                ConnectionFound: true,
+                Active: true,
+                UrlValid: true,
+                CredentialsPresent: true,
+                DecryptionSucceeded: true,
+                TokenAvailable: true,
+                HttpSucceeded: true,
+                AuthenticationSucceeded: true,
+                SiteInfoSucceeded: true,
                 profile.SiteName,
                 profile.Release,
                 profile.MoodleUserId,
+                LatencyMs: stopwatch.ElapsedMilliseconds,
                 profile.Functions.Count,
                 profile.Functions.Count(function => function.Risk == MoodleFunctionRisk.Read),
                 profile.Functions.Count(function => function.Risk == MoodleFunctionRisk.ControlledWrite),
                 connection.CanWrite,
                 flows,
-                profile.DiscoveredAt);
-            return Success(data, $"Conexao '{profile.ConnectionAlias}' diagnosticada: {profile.Functions.Count} funcoes descobertas.");
+                profile.DiscoveredAt,
+                DiagnosticErrorCode: null,
+                DiagnosticMessage: null);
+            logger.LogInformation(
+                "Moodle diagnostic completed. AuditId={AuditId} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint} Function={Function} HttpStatus={HttpStatus} DurationMs={DurationMs} SiteInfoUserId={SiteInfoUserId}",
+                auditId,
+                connection.ConnectionId,
+                connection.Alias,
+                SanitizeBaseUrl(connection.BaseUrl),
+                "core_webservice_get_site_info",
+                200,
+                stopwatch.ElapsedMilliseconds,
+                GetInt64(liveSiteInfo, "userid"));
+            return Success(
+                data,
+                $"Conexao '{profile.ConnectionAlias}' diagnosticada: {profile.Functions.Count} funcoes descobertas.",
+                auditId);
         }
-        catch (OperationCanceledException) { throw; }
-        catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleConnectionDiagnostic>(ex); }
-        catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleConnectionDiagnostic>(ex.Message); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var descriptor = MoodleErrorContract.Describe(ex);
+            var moodleFailure = ex as MoodleApiException;
+            var found = descriptor.ErrorCode is not MoodleErrorContract.ConnectionNotFound and
+                not MoodleErrorContract.DefaultConnectionNotConfigured;
+            var active = found && descriptor.ErrorCode != MoodleErrorContract.ConnectionDisabled;
+            var decryptionSucceeded = active &&
+                descriptor.ErrorCode != MoodleErrorContract.TokenDecryptionFailed;
+            var credentialsPresent = decryptionSucceeded &&
+                descriptor.ErrorCode != MoodleErrorContract.TokenMissing;
+            var tokenAvailable = credentialsPresent &&
+                descriptor.ErrorCode != MoodleErrorContract.AuthenticationFailed &&
+                !string.Equals(moodleFailure?.FunctionName, "login/token.php", StringComparison.Ordinal);
+            var urlValid = Uri.TryCreate(moodleFailure?.Endpoint, UriKind.Absolute, out var diagnosticUri) &&
+                diagnosticUri.Scheme is "http" or "https";
+            var data = new MoodleConnectionDiagnostic(
+                Healthy: false,
+                RequestedAlias: MoodleConnectionAlias.Normalize(moodleAlias),
+                Alias: moodleFailure?.ConnectionAlias ?? MoodleConnectionAlias.NormalizeOrDefault(moodleAlias),
+                ConnectionId: moodleFailure?.ConnectionId,
+                BaseUrl: SanitizeBaseUrl(moodleFailure?.Endpoint),
+                ConnectionFound: found,
+                Active: active,
+                UrlValid: urlValid,
+                CredentialsPresent: credentialsPresent,
+                DecryptionSucceeded: decryptionSucceeded,
+                TokenAvailable: tokenAvailable,
+                HttpSucceeded: moodleFailure?.HttpStatusCode is not null,
+                AuthenticationSucceeded: tokenAvailable &&
+                    descriptor.ErrorCode != MoodleErrorContract.AuthenticationFailed,
+                SiteInfoSucceeded: false,
+                SiteName: null,
+                Release: null,
+                MoodleUserId: null,
+                LatencyMs: stopwatch.ElapsedMilliseconds,
+                FunctionCount: 0,
+                ReadFunctionCount: 0,
+                ControlledWriteFunctionCount: 0,
+                CanWrite: false,
+                Flows: [],
+                DiscoveredAt: DateTimeOffset.UtcNow,
+                DiagnosticErrorCode: descriptor.ErrorCode,
+                DiagnosticMessage: descriptor.Message);
+            logger.LogWarning(
+                ex,
+                "Moodle diagnostic failed. AuditId={AuditId} ErrorCode={ErrorCode} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint} Function={Function} HttpStatus={HttpStatus} DurationMs={DurationMs}",
+                descriptor.AuditId,
+                descriptor.ErrorCode,
+                moodleFailure?.ConnectionId,
+                moodleFailure?.ConnectionAlias,
+                moodleFailure?.Endpoint,
+                moodleFailure?.FunctionName ?? "core_webservice_get_site_info",
+                moodleFailure?.HttpStatusCode,
+                stopwatch.ElapsedMilliseconds);
+            return Success(data, descriptor.Message, descriptor.AuditId, [descriptor.Message]);
+        }
     }
 
     [McpServerTool(Name = "moodle_list_functions", Title = "Listar Funcoes Moodle",
@@ -168,9 +268,19 @@ public sealed class MoodleUniversalTools(
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
     }
 
-    private static CallToolResult Success<T>(T data, string narration)
+    private static CallToolResult Success<T>(
+        T data,
+        string narration,
+        string? auditId = null,
+        IReadOnlyList<string>? warnings = null)
     {
-        var response = new ToolResponse<T>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<T>(
+            "ok",
+            data,
+            warnings ?? [],
+            AuditId: auditId ?? Guid.NewGuid().ToString("N"),
+            DateTimeOffset.UtcNow,
+            Message: narration);
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = narration }],
@@ -178,16 +288,55 @@ public sealed class MoodleUniversalTools(
             IsError = false
         };
     }
+
+    private static string? SanitizeBaseUrl(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            return null;
+        }
+
+        return new UriBuilder(uri)
+        {
+            Query = string.Empty,
+            Fragment = string.Empty,
+            UserName = string.Empty,
+            Password = string.Empty
+        }.Uri.AbsoluteUri.TrimEnd('/');
+    }
+
+    private static long? GetInt64(JsonElement payload, string name) =>
+        payload.ValueKind == JsonValueKind.Object &&
+        payload.TryGetProperty(name, out var value) &&
+        value.TryGetInt64(out var number)
+            ? number
+            : null;
 }
 
 public sealed record MoodleConnectionDiagnostic(
-    string Alias,
-    string? SiteName,
-    string? Release,
-    long? MoodleUserId,
-    int FunctionCount,
-    int ReadFunctionCount,
-    int ControlledWriteFunctionCount,
-    bool CanWrite,
-    IReadOnlyCollection<BusinessFlowAvailability> Flows,
-    DateTimeOffset DiscoveredAt);
+    [property: JsonPropertyName("healthy")] bool Healthy,
+    [property: JsonPropertyName("requestedAlias")] string? RequestedAlias,
+    [property: JsonPropertyName("alias")] string Alias,
+    [property: JsonPropertyName("connectionId")] string? ConnectionId,
+    [property: JsonPropertyName("baseUrl")] string? BaseUrl,
+    [property: JsonPropertyName("connectionFound")] bool ConnectionFound,
+    [property: JsonPropertyName("active")] bool Active,
+    [property: JsonPropertyName("urlValid")] bool UrlValid,
+    [property: JsonPropertyName("credentialsPresent")] bool CredentialsPresent,
+    [property: JsonPropertyName("decryptionSucceeded")] bool DecryptionSucceeded,
+    [property: JsonPropertyName("tokenAvailable")] bool TokenAvailable,
+    [property: JsonPropertyName("httpSucceeded")] bool HttpSucceeded,
+    [property: JsonPropertyName("authenticationSucceeded")] bool AuthenticationSucceeded,
+    [property: JsonPropertyName("siteInfoSucceeded")] bool SiteInfoSucceeded,
+    [property: JsonPropertyName("siteName")] string? SiteName,
+    [property: JsonPropertyName("release")] string? Release,
+    [property: JsonPropertyName("moodleUserId")] long? MoodleUserId,
+    [property: JsonPropertyName("latencyMs")] long LatencyMs,
+    [property: JsonPropertyName("functionCount")] int FunctionCount,
+    [property: JsonPropertyName("readFunctionCount")] int ReadFunctionCount,
+    [property: JsonPropertyName("controlledWriteFunctionCount")] int ControlledWriteFunctionCount,
+    [property: JsonPropertyName("canWrite")] bool CanWrite,
+    [property: JsonPropertyName("flows")] IReadOnlyCollection<BusinessFlowAvailability> Flows,
+    [property: JsonPropertyName("discoveredAt")] DateTimeOffset DiscoveredAt,
+    [property: JsonPropertyName("diagnosticErrorCode")] string? DiagnosticErrorCode,
+    [property: JsonPropertyName("diagnosticMessage")] string? DiagnosticMessage);

@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Contents;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 using MoodleConnector.Presentation.Tools;
 
@@ -142,6 +143,25 @@ public class MoodleCourseContentsToolsTests
         Assert.Equal("empty_section", data.GetProperty("findings")[0].GetProperty("code").GetString());
     }
 
+    [Fact]
+    public async Task ListarConteudosCursoAsync_NuncaDeixaFalhaDeAliasEscaparAoMcp()
+    {
+        var sut = new MoodleCourseContentsTools(
+            new FakeMediator(),
+            new FakeMoodleConnectionSelection(),
+            new ThrowingMoodleUserResolver(new MoodleApiException(
+                MoodleErrorContract.ConnectionNotFound,
+                "internal")));
+
+        var result = await sut.ListarConteudosCursoAsync("32786", moodleAlias: "goias");
+
+        Assert.True(result.IsError);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal(MoodleErrorContract.ConnectionNotFound, structured.GetProperty("errorCode").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(structured.GetProperty("auditId").GetString()));
+        Assert.Equal(JsonValueKind.Null, structured.GetProperty("data").ValueKind);
+    }
+
     private sealed class FakeMoodleConnectionSelection : IMoodleConnectionSelection
     {
         public string? Alias { get; set; }
@@ -153,6 +173,12 @@ public class MoodleCourseContentsToolsTests
         {
             return Task.FromResult(userId);
         }
+    }
+
+    private sealed class ThrowingMoodleUserResolver(Exception error) : IMoodleUserResolver
+    {
+        public Task<long?> ResolveMoodleUserIdAsync(CancellationToken cancellationToken) =>
+            throw error;
     }
 
     private sealed class FakeMediator : IMediator

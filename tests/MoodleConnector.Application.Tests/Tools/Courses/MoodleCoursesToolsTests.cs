@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Courses;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 using MoodleConnector.Presentation.Tools;
 
@@ -275,15 +276,77 @@ public class MoodleCoursesToolsTests
         Assert.DoesNotContain("pagina=", text);
     }
 
+    [Fact]
+    public async Task ListarMeusCursosAsync_NuncaDeixaFalhaDeResolucaoEscaparAoMcp()
+    {
+        var sut = new MoodleCoursesTools(
+            new FakeMediator(),
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(
+                error: new MoodleApiException(
+                    MoodleErrorContract.ConnectionNotFound,
+                    "internal")));
+
+        var result = await sut.ListarMeusCursosAsync(moodleAlias: "goias");
+
+        Assert.True(result.IsError);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal(MoodleErrorContract.ConnectionNotFound, structured.GetProperty("errorCode").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(structured.GetProperty("auditId").GetString()));
+        Assert.Equal(JsonValueKind.Null, structured.GetProperty("data").ValueKind);
+        Assert.False(string.IsNullOrWhiteSpace(structured.GetProperty("message").GetString()));
+    }
+
+    [Fact]
+    public async Task BuscarCursosAsync_DevolveConexaoDesativadaComContratoEstavel()
+    {
+        var sut = new MoodleCoursesTools(
+            new FakeMediator(),
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(
+                error: new MoodleApiException(
+                    MoodleErrorContract.ConnectionDisabled,
+                    "internal")));
+
+        var result = await sut.BuscarCursosAsync("32786", moodleAlias: "goias");
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal(MoodleErrorContract.ConnectionDisabled, structured.GetProperty("errorCode").GetString());
+        Assert.True(result.IsError);
+    }
+
+    [Fact]
+    public async Task ConsultarCursoAsync_ConverteExcecaoInesperadaSemExporTipo()
+    {
+        var sut = new MoodleCoursesTools(
+            new FakeMediator(),
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(error: new InvalidOperationException("secret detail")));
+
+        var result = await sut.ConsultarCursoAsync("32786", "goias");
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal(MoodleErrorContract.Unexpected, structured.GetProperty("errorCode").GetString());
+        Assert.DoesNotContain("InvalidOperationException", structured.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("secret detail", structured.GetRawText(), StringComparison.Ordinal);
+    }
+
     private sealed class FakeMoodleConnectionSelection : IMoodleConnectionSelection
     {
         public string? Alias { get; set; }
     }
 
-    private sealed class FakeMoodleUserResolver(long? userId) : IMoodleUserResolver
+    private sealed class FakeMoodleUserResolver(
+        long? userId = null,
+        Exception? error = null) : IMoodleUserResolver
     {
         public Task<long?> ResolveMoodleUserIdAsync(CancellationToken cancellationToken)
         {
+            if (error is not null)
+            {
+                throw error;
+            }
+
             return Task.FromResult(userId);
         }
     }

@@ -32,7 +32,7 @@ internal sealed class MoodleFunctionCatalog(
                 connection,
                 "core_webservice_get_site_info",
                 new Dictionary<string, object?>(),
-                allowServiceToken: true,
+                allowServiceToken: false,
                 cancellationToken);
 
             return CreateProfile(connection, payload);
@@ -80,7 +80,7 @@ internal sealed class MoodleFunctionCatalog(
 
     private static string CreateCredentialFingerprint(MoodleConnectorCredentials connection)
     {
-        var value = $"{connection.Username}\u001f{connection.Password}";
+        var value = $"{connection.BaseUrl}\u001f{connection.Username}\u001f{connection.Password}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
         return Convert.ToHexString(hash.AsSpan(0, 8));
     }

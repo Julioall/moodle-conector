@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
@@ -72,7 +73,8 @@ public sealed class MoodleParticipantsGatewayTests
             new MoodleRestClient(
                 new HttpClient(handler),
                 Options.Create(new MoodleApiOptions()),
-                new FakeTokenProvider()));
+                new FakeTokenProvider(),
+                NullLogger<MoodleRestClient>.Instance));
     }
 
     private sealed class JsonHandler(string json) : HttpMessageHandler
@@ -97,7 +99,9 @@ public sealed class MoodleParticipantsGatewayTests
 
     private sealed class FakeTokenProvider : IMoodleAccessTokenProvider
     {
-        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) =>
+        public Task<string> GetAccessTokenAsync(
+            MoodleConnectorCredentials connection,
+            CancellationToken cancellationToken) =>
             Task.FromResult("token");
     }
 

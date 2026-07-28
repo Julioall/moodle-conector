@@ -6,6 +6,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Contents;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
 
@@ -385,16 +386,18 @@ public sealed class MoodleCourseContentsTools(
             return ToolResultHelper.Error<ListCourseContentsResponse>("Informe um identificador de curso.");
         }
 
-        moodleSelection.Alias = moodleAlias;
-        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-        if (moodleUserId is null)
-        {
-            return ToolResultHelper.Error<ListCourseContentsResponse>("Usuario nao autenticado para consultar conteudos.");
-        }
-
         CourseContentsSummary? contents;
         try
         {
+            moodleSelection.Alias = moodleAlias;
+            var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+            if (moodleUserId is null)
+            {
+                return ToolResultHelper.Error<ListCourseContentsResponse>(
+                    "Usuario nao autenticado para consultar conteudos.",
+                    errorCode: MoodleErrorContract.AuthenticationFailed);
+            }
+
             contents = await mediator.Send(
                 new ListCourseContentsQuery(
                     moodleUserId.Value.ToString(),
@@ -404,18 +407,28 @@ public sealed class MoodleCourseContentsTools(
                     onlyWithFiles),
                 cancellationToken);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch
+        catch (MoodleApiException ex)
         {
-            return ToolResultHelper.Error<ListCourseContentsResponse>("Nao foi possivel listar conteudos no Moodle neste momento.");
+            return ToolResultHelper.Error<ListCourseContentsResponse>(ex);
+        }
+        catch (Exception ex)
+        {
+            var failure = MoodleErrorContract.Describe(ex);
+            return ToolResultHelper.Error<ListCourseContentsResponse>(
+                "Nao foi possivel listar conteudos no Moodle neste momento.",
+                errorCode: failure.ErrorCode,
+                auditId: failure.AuditId);
         }
 
         if (contents is null)
         {
-            return ToolResultHelper.Error<ListCourseContentsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
+            return ToolResultHelper.Error<ListCourseContentsResponse>(
+                "Curso nao encontrado entre os cursos vinculados ao usuario.",
+                errorCode: MoodleErrorContract.CourseNotFound);
         }
 
         return ContentsSuccess(contents);
@@ -529,11 +542,18 @@ public sealed class MoodleCourseContentsTools(
     private static CallToolResult ContentsSuccess(CourseContentsSummary contents)
     {
         var data = ToContentsResponse(contents);
-        var response = new ToolResponse<ListCourseContentsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var narration = BuildContentsNarration(data);
+        var response = new ToolResponse<ListCourseContentsResponse>(
+            "ok",
+            data,
+            [],
+            AuditId: Guid.NewGuid().ToString("N"),
+            DateTimeOffset.UtcNow,
+            Message: narration);
 
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = BuildContentsNarration(data) }],
+            Content = [new TextContentBlock { Text = narration }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
