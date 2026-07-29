@@ -110,16 +110,41 @@ public sealed class MoodleUniversalWriteServiceTests
     }
 
     [Fact]
-    public async Task PrepareAsync_RecusaConteudoSensivelQueSeriaPersistidoNaAcaoPendente()
+    public async Task PrepareAsync_AceitaConteudoDeNegocioNaPrevia()
     {
         var sut = CreateService(new FakeRestClient(), new FakePendingActions(), enabled: true);
 
-        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+        var preview = await sut.PrepareAsync(
             "mod_assign_save_grade",
             new Dictionary<string, object?> { ["feedback"] = "conteúdo confidencial" },
-            CancellationToken.None));
+            CancellationToken.None);
 
-        Assert.Equal("sensitive_write_parameter_blocked", error.ErrorCode);
+        Assert.Equal("mod_assign_save_grade", preview.Function);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_AceitaTextoDaMensagemComoConteudoDeNegocio()
+    {
+        using var document = JsonDocument.Parse("[{\"touserid\":211211,\"text\":\"Olá, Jefferson!\",\"textformat\":1}]");
+        var pendingActions = new FakePendingActions();
+        var sut = CreateService(
+            new FakeRestClient(),
+            pendingActions,
+            enabled: true,
+            profile: Profile(new MoodleFunctionDescriptor("core_message_send_instant_messages", MoodleFunctionRisk.ControlledWrite, true)));
+
+        var preview = await sut.PrepareAsync(
+            "core_message_send_instant_messages",
+            new Dictionary<string, object?> { ["messages"] = document.RootElement.Clone() },
+            CancellationToken.None);
+
+        Assert.Equal("core_message_send_instant_messages", preview.Function);
+        Assert.Contains("messages", preview.ParameterNames);
+        using var payload = JsonDocument.Parse(pendingActions.Action!.PayloadJson);
+        var message = payload.RootElement.GetProperty("Parameters").GetProperty("messages")[0];
+        Assert.Equal(211211, message.GetProperty("touserid").GetInt64());
+        Assert.Equal("Olá, Jefferson!", message.GetProperty("text").GetString());
+        Assert.Equal(1, message.GetProperty("textformat").GetInt32());
     }
 
     [Fact]
