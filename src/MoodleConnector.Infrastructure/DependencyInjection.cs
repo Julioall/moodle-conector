@@ -108,61 +108,24 @@ public static class DependencyInjection
         services.AddScoped<IMoodleReportBuilderClient, MoodleReportBuilderClient>();
         services.AddSingleton<IConnectorSecretProtector, AesGcmConnectorSecretProtector>();
 
-        services
-            .AddHttpClient<IMoodleCoursesGateway, MoodleCoursesGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleParticipantsGateway, MoodleParticipantsGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleCourseContentsGateway, MoodleCourseContentsGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleForumGateway, MoodleForumGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleAssignmentSubmissionsGateway, MoodleAssignmentSubmissionsGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleAssignmentGradingGateway, MoodleAssignmentGradingGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleAssignmentGradeReadGateway, MoodleAssignmentGradeReadGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleAssignmentSubmissionStatusGateway, MoodleAssignmentSubmissionStatusGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleGradingCapabilitiesGateway, MoodleGradingCapabilitiesGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
+        services.AddScoped<IMoodleCoursesGateway, MoodleCoursesGateway>();
+        services.AddScoped<IMoodleParticipantsGateway, MoodleParticipantsGateway>();
+        services.AddScoped<IMoodleCourseContentsGateway, MoodleCourseContentsGateway>();
+        services.AddScoped<IMoodleForumGateway, MoodleForumGateway>();
+        services.AddScoped<IMoodleAssignmentSubmissionsGateway, MoodleAssignmentSubmissionsGateway>();
+        services.AddScoped<IMoodleAssignmentGradingGateway, MoodleAssignmentGradingGateway>();
+        services.AddScoped<IMoodleAssignmentGradeReadGateway, MoodleAssignmentGradeReadGateway>();
+        services.AddScoped<IMoodleAssignmentSubmissionStatusGateway, MoodleAssignmentSubmissionStatusGateway>();
+        services.AddScoped<IMoodleGradingCapabilitiesGateway, MoodleGradingCapabilitiesGateway>();
 
         services
             .AddHttpClient<IMoodleSubmissionFileGateway, MoodleSubmissionFileGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
 
-        services
-            .AddHttpClient<IMoodleAssignmentSettingsGateway, MoodleAssignmentSettingsGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleGradebookGateway, MoodleGradebookGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleCompletionGateway, MoodleCompletionGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
-
-        services
-            .AddHttpClient<IMoodleMessageGateway, MoodleMessageGateway>(ConfigureMoodleApiClient)
-            .AddMoodleResilience(moodleApiResilience);
+        services.AddScoped<IMoodleAssignmentSettingsGateway, MoodleAssignmentSettingsGateway>();
+        services.AddScoped<IMoodleGradebookGateway, MoodleGradebookGateway>();
+        services.AddScoped<IMoodleCompletionGateway, MoodleCompletionGateway>();
+        services.AddScoped<IMoodleMessageGateway, MoodleMessageGateway>();
 
         services.AddSingleton<IDocumentExtractionService, DocumentExtractionService>();
 

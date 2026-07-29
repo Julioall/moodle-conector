@@ -73,9 +73,9 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
                 candidate.NormalizedKey,
                 candidate.Content,
                 candidate.Origin,
-                candidate.MoodleAlias ?? (object)DBNull.Value,
-                candidate.CourseId ?? (object)DBNull.Value,
-                candidate.LinkedDocumentId ?? (object)DBNull.Value,
+                candidate.MoodleAlias,
+                candidate.CourseId,
+                candidate.LinkedDocumentId,
                 candidate.CreatedAtUtc,
                 candidate.UpdatedAtUtc
             ],
