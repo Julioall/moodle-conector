@@ -16,19 +16,14 @@ public sealed class MoodleHttpClientResilienceTests
         using var provider = services.BuildServiceProvider();
         var httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
 
-        var coursesClient = httpClientFactory.CreateClient("IMoodleCoursesGateway");
-        var forumClient = httpClientFactory.CreateClient("IMoodleForumGateway");
-        var assignmentGradingClient = httpClientFactory.CreateClient("IMoodleAssignmentGradingGateway");
-        var gradingCapabilitiesClient = httpClientFactory.CreateClient("IMoodleGradingCapabilitiesGateway");
+        var restClient = httpClientFactory.CreateClient("IMoodleRestClient");
+        var submissionFileClient = httpClientFactory.CreateClient("IMoodleSubmissionFileGateway");
         var proxyClient = httpClientFactory.CreateClient("IMoodleProxyGateway");
 
-        Assert.Equal(TimeSpan.FromSeconds(7), coursesClient.Timeout);
-        Assert.Equal(TimeSpan.FromSeconds(7), forumClient.Timeout);
-        Assert.Equal(new Uri("https://moodle.tests/"), forumClient.BaseAddress);
-        Assert.Equal(TimeSpan.FromSeconds(7), assignmentGradingClient.Timeout);
-        Assert.Equal(new Uri("https://moodle.tests/"), assignmentGradingClient.BaseAddress);
-        Assert.Equal(TimeSpan.FromSeconds(7), gradingCapabilitiesClient.Timeout);
-        Assert.Equal(new Uri("https://moodle.tests/"), gradingCapabilitiesClient.BaseAddress);
+        Assert.Equal(TimeSpan.FromSeconds(7), restClient.Timeout);
+        Assert.Equal(new Uri("https://moodle.tests/"), restClient.BaseAddress);
+        Assert.Equal(TimeSpan.FromSeconds(7), submissionFileClient.Timeout);
+        Assert.Equal(new Uri("https://moodle.tests/"), submissionFileClient.BaseAddress);
         Assert.Equal(TimeSpan.FromSeconds(11), proxyClient.Timeout);
         Assert.Equal(new Uri("https://proxy.tests/"), proxyClient.BaseAddress);
     }
