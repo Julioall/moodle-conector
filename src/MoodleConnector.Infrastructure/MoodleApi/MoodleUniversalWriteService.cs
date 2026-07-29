@@ -28,7 +28,7 @@ internal sealed class MoodleUniversalWriteService(
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] SensitiveParameterFragments =
     [
-        "feedback", "message", "password", "passwd", "pwd", "token", "secret", "authorization",
+        "password", "passwd", "pwd", "token", "secret", "authorization",
         "cookie", "connectionstring", "apikey", "privatekey", "accesskey", "refresh", "clientsecret", "jwt", "bearer"
     ];
 
@@ -43,8 +43,8 @@ internal sealed class MoodleUniversalWriteService(
         try
         {
             EnsureEnabled();
-            EnsureNoSensitiveParameters(parameters);
             var descriptor = await ResolveControlledWriteAsync(functionName, cancellationToken);
+            EnsureNoSensitiveParameters(parameters);
             if (!connection.CanWrite)
             {
                 throw new MoodleApiException("write_not_allowed", "A conexao Moodle selecionada nao permite escrita.");
@@ -307,7 +307,7 @@ internal sealed class MoodleUniversalWriteService(
         var sensitive = MoodleParameterSerializer.Flatten(parameters).Keys.FirstOrDefault(IsSensitiveParameterName);
         if (sensitive is not null)
         {
-            throw new MoodleApiException("sensitive_write_parameter_blocked", "A escrita universal não aceita parâmetros de conteúdo confidencial até que exista armazenamento pendente criptografado; use a tool de negócio específica.");
+            throw new MoodleApiException("sensitive_write_parameter_blocked", "A escrita universal não aceita parâmetros que possam conter credenciais ou segredos técnicos.");
         }
     }
 
@@ -319,9 +319,7 @@ internal sealed class MoodleUniversalWriteService(
             var normalized = component.Replace("_", string.Empty, StringComparison.Ordinal)
                 .Replace("-", string.Empty, StringComparison.Ordinal)
                 .ToLowerInvariant();
-            return normalized == "text" ||
-                   normalized.EndsWith("text", StringComparison.OrdinalIgnoreCase) ||
-                   SensitiveParameterFragments.Any(fragment => normalized.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+            return SensitiveParameterFragments.Any(fragment => normalized.Contains(fragment, StringComparison.OrdinalIgnoreCase));
         });
     }
 
