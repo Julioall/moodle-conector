@@ -150,7 +150,7 @@ internal sealed class MoodleCoursesGateway(
             }) ?? [];
     }
 
-    private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(MoodleConnectorCredentials credentials, int moodleUserId, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(MoodleConnectorCredentials credentials, long moodleUserId, CancellationToken cancellationToken)
     {
         var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
         var strategy = businessFlows.ResolveStrategy("listar_cursos_ativos", profile);
@@ -243,15 +243,14 @@ internal sealed class MoodleCoursesGateway(
         return enrolledCourses.Any(course => string.Equals(course.CourseId, courseId, StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task<int> ResolveMoodleUserIdAsync(MoodleConnectorCredentials credentials, string userExternalId, CancellationToken cancellationToken)
+    private async Task<long> ResolveMoodleUserIdAsync(MoodleConnectorCredentials credentials, string userExternalId, CancellationToken cancellationToken)
     {
-        if (int.TryParse(userExternalId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var moodleUserId))
+        if (long.TryParse(userExternalId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var moodleUserId))
         {
             return moodleUserId;
         }
 
-        var currentMoodleUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
-        return checked((int)currentMoodleUserId);
+        return await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
     }
 
     private static DateTimeOffset? ToDateTimeOffset(JsonElement value)

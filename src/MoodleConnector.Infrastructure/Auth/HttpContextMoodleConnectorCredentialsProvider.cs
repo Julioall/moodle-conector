@@ -83,6 +83,15 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
 
             if (matches.Length == 0)
             {
+                matches = connections
+                    .Where(connection =>
+                        (MoodleConnectionAlias.Normalize(connection.MoodleAlias)?.Contains(requestedAlias, StringComparison.Ordinal) == true) ||
+                        (MoodleConnectionAlias.Normalize(connection.MoodleTarget)?.Contains(requestedAlias, StringComparison.Ordinal) == true))
+                    .ToArray();
+            }
+
+            if (matches.Length == 0)
+            {
                 throw LogFailure(
                     MoodleErrorContract.ConnectionNotFound,
                     $"Moodle connection alias '{requestedAlias}' was not found.",

@@ -459,6 +459,7 @@ public sealed class MoodleCoursesTools(
         string? moodleAlias)
     {
         logger?.LogError(
+            exception,
             "Unexpected Moodle tool failure was converted to a structured result. AuditId={AuditId} ErrorCode={ErrorCode} Tool={Tool} Alias={Alias} ExceptionType={ExceptionType} SafeMessage={SafeMessage}",
             failure.AuditId,
             failure.ErrorCode,
