@@ -1,6 +1,14 @@
 name: CI
 
 on:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - src/**
+      - tests/**
+      - MoodleConnector.slnx
+      - .github/workflows/ci.yml
   pull_request:
     branches:
       - main
