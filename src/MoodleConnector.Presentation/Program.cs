@@ -711,7 +711,7 @@ app.MapGet("/api/reports/student-course", async (
     int? pageSize,
     HttpContext context,
     IMcpConnectorClientResolver clientResolver,
-    IMoodleReportBuilderClient reportClient,
+    IMoodleReportBuilderGateway reportClient,
     CancellationToken cancellationToken) =>
 {
     var credential = ReportApiCredentialParser.Parse(context.Request);

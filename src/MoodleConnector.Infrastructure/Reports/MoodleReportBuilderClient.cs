@@ -6,19 +6,9 @@ using MoodleConnector.Application.Abstractions;
 
 namespace MoodleConnector.Infrastructure.Reports;
 
-public sealed record MoodleReportResult(DateTimeOffset UpdatedAt, IReadOnlyList<Dictionary<string, object?>> Rows, int TotalAvailable, bool IsTruncated);
-
-public sealed record MoodleReportInfo(int Id, string Name, string Source);
-
-public interface IMoodleReportBuilderClient
-{
-    Task<MoodleReportResult> DownloadAsync(int reportId, int pageSize, IDictionary<string, object?>? filters, CancellationToken cancellationToken);
-    Task<IReadOnlyList<MoodleReportInfo>> ListReportsAsync(CancellationToken cancellationToken);
-}
-
-internal sealed partial class MoodleReportBuilderClient(
+internal sealed partial class MoodleReportBuilderGateway(
     IMoodleConnectorCredentialsProvider credentialsProvider,
-    IMoodleRestClient restClient) : IMoodleReportBuilderClient
+    IMoodleRestClient restClient) : IMoodleReportBuilderGateway
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> FilterLocks = new();
     public async Task<IReadOnlyList<MoodleReportInfo>> ListReportsAsync(CancellationToken cancellationToken)
