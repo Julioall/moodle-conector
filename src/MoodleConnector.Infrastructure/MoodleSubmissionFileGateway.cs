@@ -34,8 +34,13 @@ internal sealed class MoodleSubmissionFileGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var fileUri = ValidateFileUri(fileUrl, credentials.BaseUrl);
         var token = await tokenProvider.GetAccessTokenAsync(credentials, cancellationToken);
-        using var request = new HttpRequestMessage(HttpMethod.Get, fileUri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        
+        var uriBuilder = new UriBuilder(fileUri);
+        var query = uriBuilder.Query.TrimStart('?');
+        uriBuilder.Query = string.IsNullOrEmpty(query) ? $"token={token}" : $"{query}&token={token}";
+        var downloadUri = uriBuilder.Uri;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, downloadUri);
         using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
