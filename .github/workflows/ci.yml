@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - src/**
+      - tests/**
+      - MoodleConnector.slnx
+      - .github/workflows/ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: ${{ vars.DOTNET_VERSION || '10.0.x' }}
+
+jobs:
+  test:
+    name: Restore and test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore MoodleConnector.slnx
+
+      - name: Test
+        run: |
+          unset APP_DOMAIN
+          unset OAUTH_ISSUER
+          unset OAUTH_AUDIENCE
+          unset OAUTH_CHATGPT_REDIRECT_URI
+          dotnet test MoodleConnector.slnx --configuration Release --no-restore
