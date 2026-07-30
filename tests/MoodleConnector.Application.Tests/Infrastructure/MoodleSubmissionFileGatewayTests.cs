@@ -8,7 +8,7 @@ namespace MoodleConnector.Application.Tests.Infrastructure;
 public sealed class MoodleSubmissionFileGatewayTests
 {
     [Fact]
-    public async Task DownloadFileAsync_UsaBearerESanitizaTokenDaUrl()
+    public async Task DownloadFileAsync_UsaTokenNaQueryESubstituiTokenAnterior()
     {
         var handler = new Handler();
         var sut = new MoodleSubmissionFileGateway(
@@ -19,9 +19,10 @@ public sealed class MoodleSubmissionFileGatewayTests
 
         await sut.DownloadFileAsync("1", "https://moodle.example/pluginfile.php/1/a.pdf?token=old&x=1", "a.pdf", 1000, CancellationToken.None);
 
-        Assert.Equal("Bearer", handler.AuthorizationScheme);
-        Assert.Equal("new-token", handler.AuthorizationParameter);
-        Assert.DoesNotContain("token", handler.Uri!.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(handler.AuthorizationScheme);
+        Assert.Null(handler.AuthorizationParameter);
+        Assert.DoesNotContain("token=old", handler.Uri!.Query, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("token=new-token", handler.Uri.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("x=1", handler.Uri.Query);
     }
 
