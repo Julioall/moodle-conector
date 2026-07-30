@@ -6,9 +6,9 @@ using MoodleConnector.Presentation.Tools;
 using MoodleConnector.Presentation.Tools.Completion;
 using MoodleConnector.Presentation.Tools.Grading;
 using MoodleConnector.Presentation.Tools.Gradebook;
-using MoodleConnector.Presentation.Tools.Risk;
 using MoodleConnector.Presentation.Tools.Memory;
 using MoodleConnector.Presentation.Tools.Pedagogy;
+using MoodleConnector.Presentation.Tools.Risk;
 
 namespace MoodleConnector.Application.Tests.Tools;
 
@@ -30,6 +30,7 @@ public sealed class McpToolMetadataTests
             {
                 Assert.False(attribute.Destructive, $"{toolName} deve declarar Destructive=false.");
             }
+
             if (toolName is "gerenciar_memoria_usuario" or "gerenciar_documento_memoria_usuario" or "salvar_documento_memoria_usuario")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} grava estado interno e deve declarar ReadOnly=false.");
@@ -68,7 +69,6 @@ public sealed class McpToolMetadataTests
             else
             {
                 Assert.True(attribute.Idempotent, $"{toolName} deve declarar Idempotent=true.");
-
                 if (toolType != typeof(DemoPendingActionTools))
                 {
                     Assert.True(attribute.ReadOnly, $"{toolName} deve declarar ReadOnly=true enquanto for tool de leitura Moodle.");
@@ -87,6 +87,7 @@ public sealed class McpToolMetadataTests
         Assert.NotNull(attribute);
         Assert.Equal(MoodleGradingReviewAppMetadata.ResourceUri, attribute!.UriTemplate);
         Assert.Equal(MoodleGradingReviewAppMetadata.ResourceMimeType, attribute.MimeType);
+        Assert.Contains("/v2/", MoodleGradingReviewAppMetadata.ResourceUri);
 
         var resource = Assert.Single(new MoodleGradingReviewAppResources().GetReviewApp());
         Assert.Equal(MoodleGradingReviewAppMetadata.ResourceUri, resource.Uri);
@@ -94,14 +95,13 @@ public sealed class McpToolMetadataTests
 
         var meta = resource.Meta;
         Assert.NotNull(meta);
-
         var ui = Assert.IsType<JsonObject>(meta!["ui"]);
         Assert.Equal(true, ui["prefersBorder"]?.GetValue<bool>());
         Assert.False(string.IsNullOrWhiteSpace(ui["domain"]?.GetValue<string>()));
 
         var csp = Assert.IsType<JsonObject>(ui["csp"]);
-        Assert.IsType<JsonArray>(csp["connectDomains"]);
-        Assert.IsType<JsonArray>(csp["resourceDomains"]);
+        Assert.Empty(Assert.IsType<JsonArray>(csp["connectDomains"]));
+        Assert.Empty(Assert.IsType<JsonArray>(csp["resourceDomains"]));
 
         Assert.False(string.IsNullOrWhiteSpace(meta["openai/widgetDescription"]?.GetValue<string>()));
         Assert.Equal(true, meta["openai/widgetPrefersBorder"]?.GetValue<bool>());
@@ -117,15 +117,58 @@ public sealed class McpToolMetadataTests
 
         Assert.Equal(MoodleGradingReviewAppMetadata.ResourceUri, ui["resourceUri"]?.GetValue<string>());
         Assert.Equal(MoodleGradingReviewAppMetadata.ResourceUri, meta["openai/outputTemplate"]?.GetValue<string>());
+        Assert.False(string.IsNullOrWhiteSpace(meta["openai/toolInvocation/invoking"]?.GetValue<string>()));
+        Assert.False(string.IsNullOrWhiteSpace(meta["openai/toolInvocation/invoked"]?.GetValue<string>()));
     }
 
     [Fact]
-    public void ReviewAppDeveFecharFuncaoCallToolAntesDosUtilitarios()
+    public void ReviewAppDeveUsarBridgePadraoEPreservarEstadoVisual()
     {
         var resource = Assert.IsType<TextResourceContents>(
             Assert.Single(new MoodleGradingReviewAppResources().GetReviewApp()));
+        var html = resource.Text;
 
-        Assert.Contains("  });\n}\n\n// ", resource.Text.Replace("\r\n", "\n"));
+        Assert.Contains("ui/notifications/tool-result", html);
+        Assert.Contains("tools/call", html);
+        Assert.Contains("window.openai?.widgetState", html);
+        Assert.Contains("setWidgetState", html);
+        Assert.Contains("privateContent", html);
+        Assert.Contains("consultar_estado_interface_correcao_lote", html);
+        Assert.Contains("hydration-error", html);
+        Assert.Contains("O lote não foi marcado como vazio", html);
+        Assert.Contains("empty-state", html);
+        Assert.DoesNotContain("fonts.googleapis.com", html);
+        Assert.DoesNotContain("localStorage", html);
+    }
+
+    [Fact]
+    public void ReviewAppDtoDeveExporEstadoAutoritativoEPaginacao()
+    {
+        Assert.NotNull(typeof(GradingReviewAppData).GetProperty(nameof(GradingReviewAppData.Page)));
+        Assert.NotNull(typeof(GradingReviewAppData).GetProperty(nameof(GradingReviewAppData.PageSize)));
+        Assert.NotNull(typeof(GradingReviewAppData).GetProperty(nameof(GradingReviewAppData.HasMore)));
+
+        Assert.NotNull(typeof(GradingReviewItem).GetProperty(nameof(GradingReviewItem.WorkflowState)));
+        Assert.NotNull(typeof(GradingReviewItem).GetProperty(nameof(GradingReviewItem.CanEdit)));
+        Assert.NotNull(typeof(GradingReviewItem).GetProperty(nameof(GradingReviewItem.CanSelect)));
+        Assert.NotNull(typeof(GradingReviewItem).GetProperty(nameof(GradingReviewItem.CanSend)));
+        Assert.NotNull(typeof(GradingReviewItem).GetProperty(nameof(GradingReviewItem.StatusReason)));
+        Assert.NotNull(typeof(GradingReviewItem).GetProperty(nameof(GradingReviewItem.DraftVersionHash)));
+    }
+
+    [Fact]
+    public void SnapshotDaInterfaceDeveSerToolDeDadosSemMutacao()
+    {
+        var method = typeof(MoodleGradingReviewAppTools)
+            .GetMethod(nameof(MoodleGradingReviewAppTools.ConsultarEstadoInterfaceCorrecaoLoteAsync))!;
+        var attribute = method.GetCustomAttribute<McpServerToolAttribute>();
+
+        Assert.NotNull(attribute);
+        Assert.Equal("consultar_estado_interface_correcao_lote", attribute!.Name);
+        Assert.True(attribute.ReadOnly);
+        Assert.True(attribute.Idempotent);
+        Assert.False(attribute.Destructive);
+        Assert.False(attribute.OpenWorld);
     }
 
     private static IEnumerable<(Type ToolType, MethodInfo Method, McpServerToolAttribute Attribute)> EnumerateToolAttributes()
