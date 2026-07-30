@@ -734,9 +734,6 @@ app.MapGet("/api/reports/student-course", async (
         return Results.Json(new { error = "invalid_api_key", message = "API key invalida ou inativa." }, statusCode: 401);
     }
 
-    if (reportId is not (509 or 512))
-        return Results.BadRequest(new { error = "invalid_report_id", message = "reportId deve ser 509 ou 512." });
-
     var identity = new ClaimsIdentity("ReportApiKey");
     identity.AddClaim(new Claim("connector_client_id", connectorClient.ClientId));
     identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, connectorClient.ClientId));
@@ -744,7 +741,7 @@ app.MapGet("/api/reports/student-course", async (
 
     try
     {
-        var report = await reportClient.DownloadAsync(reportId, pageSize ?? 5000, cancellationToken);
+        var report = await reportClient.DownloadAsync(reportId, pageSize ?? 5000, null, cancellationToken);
         return Results.Ok(new
         {
             atualizadoEm = report.UpdatedAt,

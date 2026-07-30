@@ -17,7 +17,8 @@ namespace MoodleConnector.Presentation.Tools.Reports;
 public sealed class MoodleReportTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleConnector.Infrastructure.Reports.IMoodleReportBuilderClient reportBuilderClient)
 {
     // ── Relatório semanal de desempenho ───────────────────────────────────────
 
@@ -166,6 +167,164 @@ public sealed class MoodleReportTools(
                       $"Provável conclusão: {result.LikelyComplete} | Recuperação: {result.PendingRecovery} | " +
                       $"Risco: {result.AtRisk} | Dados insuficientes: {result.Unknown}.",
             cancellationToken);
+
+    // ── Report Builder Moodle ──────────────────────────────────────────────────
+    
+    [McpServerTool(
+        Name = "baixar_relatorio_moodle_builder",
+        Title = "Baixar Relatório do Report Builder",
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<MoodleConnector.Infrastructure.Reports.MoodleReportResult>))]
+    [Description("Baixa o JSON de qualquer relatório personalizado do Moodle Report Builder acessível ao usuário do token. Retorna os registros paginados limitados ao 'pageSize'.")]
+    public async Task<CallToolResult> BaixarRelatorioBuilderAsync(
+        [Description("Identificador numérico do relatório.")] int reportId,
+        [Description("Dicionário opcional de filtros em formato JSON (ex: '{\"user:firstname_operator\":2, \"user:firstname_value\":\"João\"}').")] string? filtersJson = null,
+        [Description("Quantidade máxima de registros a retornar. Padrão: 5000.")] int pageSize = 5000,
+        [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+            return ToolResultHelper.Error<MoodleConnector.Infrastructure.Reports.MoodleReportResult>("Usuário não autenticado.");
+
+        MoodleConnector.Infrastructure.Reports.MoodleReportResult data;
+        try
+        {
+            var filters = !string.IsNullOrWhiteSpace(filtersJson)
+                ? JsonSerializer.Deserialize<Dictionary<string, object?>>(filtersJson)
+                : null;
+            data = await reportBuilderClient.DownloadAsync(reportId, pageSize, filters, cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return ToolResultHelper.Error<MoodleConnector.Infrastructure.Reports.MoodleReportResult>($"Não foi possível baixar o relatório: {ex.Message}");
+        }
+
+        var response = new ToolResponse<MoodleConnector.Infrastructure.Reports.MoodleReportResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = $"Relatório {reportId} baixado com sucesso: {data.Rows.Count} registro(s) retornado(s)." }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    [McpServerTool(
+        Name = "download_moodle_builder_report",
+        Title = "Download Moodle Builder Report",
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<MoodleConnector.Infrastructure.Reports.MoodleReportResult>))]
+    [Description("Downloads any custom Moodle Report Builder report accessible to the token user and returns its rows in JSON format, paginated up to 'pageSize'.")]
+    public async Task<CallToolResult> DownloadBuilderReportAsync(
+        [Description("Numeric identifier of the report.")] int reportId,
+        [Description("Optional JSON string of filters (e.g., '{\"user:firstname_operator\":2, \"user:firstname_value\":\"João\"}').")] string? filtersJson = null,
+        [Description("Maximum number of rows to return. Default: 5000.")] int pageSize = 5000,
+        [Description("Moodle connection alias.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+            return ToolResultHelper.Error<MoodleConnector.Infrastructure.Reports.MoodleReportResult>("Usuário não autenticado.");
+
+        MoodleConnector.Infrastructure.Reports.MoodleReportResult data;
+        try
+        {
+            var filters = !string.IsNullOrWhiteSpace(filtersJson)
+                ? JsonSerializer.Deserialize<Dictionary<string, object?>>(filtersJson)
+                : null;
+            data = await reportBuilderClient.DownloadAsync(reportId, pageSize, filters, cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return ToolResultHelper.Error<MoodleConnector.Infrastructure.Reports.MoodleReportResult>($"Failed to download report: {ex.Message}");
+        }
+
+        var response = new ToolResponse<MoodleConnector.Infrastructure.Reports.MoodleReportResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = $"Report {reportId} downloaded successfully: {data.Rows.Count} row(s) returned." }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    [McpServerTool(
+        Name = "listar_relatorios_moodle_builder",
+        Title = "Listar Relatorios do Report Builder",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>))]
+    [Description("Lista os relatórios personalizados acessíveis ao usuário associado ao token.")]
+    public async Task<CallToolResult> ListarRelatoriosBuilderAsync(
+        [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+            return ToolResultHelper.Error<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>("Usuário não autenticado.");
+
+        IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo> data;
+        try
+        {
+            data = await reportBuilderClient.ListReportsAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return ToolResultHelper.Error<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>($"Não foi possível listar os relatórios: {ex.Message}");
+        }
+
+        var response = new ToolResponse<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = $"{data.Count} relatório(s) encontrado(s)." }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    [McpServerTool(
+        Name = "list_moodle_builder_reports",
+        Title = "List Moodle Builder Reports",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>))]
+    [Description("Lists available custom Moodle Report Builder reports accessible to the token user.")]
+    public async Task<CallToolResult> ListBuilderReportsAsync(
+        [Description("Moodle connection alias.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+            return ToolResultHelper.Error<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>("Usuário não autenticado.");
+
+        IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo> data;
+        try
+        {
+            data = await reportBuilderClient.ListReportsAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return ToolResultHelper.Error<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>($"Failed to list reports: {ex.Message}");
+        }
+
+        var response = new ToolResponse<IReadOnlyList<MoodleConnector.Infrastructure.Reports.MoodleReportInfo>>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = $"{data.Count} report(s) found." }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
 
     // ── Core helper ──────────────────────────────────────────────────────────
 

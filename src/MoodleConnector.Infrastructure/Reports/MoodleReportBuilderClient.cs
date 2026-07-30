@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -7,151 +6,210 @@ using MoodleConnector.Application.Abstractions;
 
 namespace MoodleConnector.Infrastructure.Reports;
 
-public sealed record MoodleReportResult(DateTimeOffset UpdatedAt, IReadOnlyList<Dictionary<string, object?>> Rows);
+public sealed record MoodleReportResult(DateTimeOffset UpdatedAt, IReadOnlyList<Dictionary<string, object?>> Rows, int TotalAvailable, bool IsTruncated);
+
+public sealed record MoodleReportInfo(int Id, string Name, string Source);
 
 public interface IMoodleReportBuilderClient
 {
-    Task<MoodleReportResult> DownloadAsync(int reportId, int pageSize, CancellationToken cancellationToken);
+    Task<MoodleReportResult> DownloadAsync(int reportId, int pageSize, IDictionary<string, object?>? filters, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MoodleReportInfo>> ListReportsAsync(CancellationToken cancellationToken);
 }
 
 internal sealed partial class MoodleReportBuilderClient(
-    IMoodleConnectorCredentialsProvider credentialsProvider) : IMoodleReportBuilderClient
+    IMoodleConnectorCredentialsProvider credentialsProvider,
+    IMoodleRestClient restClient) : IMoodleReportBuilderClient
 {
-    private static readonly HashSet<int> AllowedReportIds = [509, 512];
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> FilterLocks = new();
+    public async Task<IReadOnlyList<MoodleReportInfo>> ListReportsAsync(CancellationToken cancellationToken)
+    {
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        
+        var response = await restClient.CallAsync(
+            credentials,
+            "core_reportbuilder_list_reports",
+            new Dictionary<string, object?>(),
+            cancellationToken);
+
+        if (response.ValueKind == JsonValueKind.Object && response.TryGetProperty("reports", out var reportsElement) && reportsElement.ValueKind == JsonValueKind.Array)
+        {
+            var reports = new List<MoodleReportInfo>();
+            foreach (var element in reportsElement.EnumerateArray())
+            {
+                if (element.TryGetProperty("id", out var idElement) && idElement.TryGetInt32(out var id))
+                {
+                    var name = element.TryGetProperty("name", out var nameElement) ? nameElement.GetString() ?? "" : "";
+                    var source = element.TryGetProperty("source", out var sourceElement) ? sourceElement.GetString() ?? "" : "";
+                    reports.Add(new MoodleReportInfo(id, name, source));
+                }
+            }
+            return reports;
+        }
+
+        return [];
+    }
 
     public async Task<MoodleReportResult> DownloadAsync(
         int reportId,
         int pageSize,
+        IDictionary<string, object?>? filters,
         CancellationToken cancellationToken)
     {
-        if (!AllowedReportIds.Contains(reportId))
-            throw new ArgumentOutOfRangeException(nameof(reportId), "Somente os relatorios 509 e 512 sao permitidos.");
-
-        pageSize = Math.Clamp(pageSize, 1, 50_000);
+        var limit = Math.Clamp(pageSize, 1, 50_000);
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var baseUri = ValidateBaseUri(credentials.BaseUrl);
+        var hasFilters = filters != null && filters.Count > 0;
+        var lockKey = $"{credentials.BaseUrl}_{credentials.Username}_{reportId}";
+        SemaphoreSlim? semaphore = null;
 
-        using var handler = new HttpClientHandler
+        if (hasFilters)
         {
-            CookieContainer = new CookieContainer(),
-            AllowAutoRedirect = true,
-            AutomaticDecompression = DecompressionMethods.All
-        };
-        using var client = new HttpClient(handler) { BaseAddress = baseUri, Timeout = TimeSpan.FromMinutes(5) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("MoodleConnector/1.0");
-
-        var loginHtml = await GetTextAsync(client, "login/index.php", cancellationToken);
-        var loginToken = ExtractRequired(LoginTokenRegex(), loginHtml, "logintoken");
-
-        using var loginResponse = await client.PostAsync(
-            "login/index.php",
-            new FormUrlEncodedContent(new Dictionary<string, string>
+            semaphore = FilterLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
+            await semaphore.WaitAsync(cancellationToken);
+            try
             {
-                ["username"] = credentials.Username,
-                ["password"] = credentials.Password,
-                ["logintoken"] = loginToken
-            }),
-            cancellationToken);
-        loginResponse.EnsureSuccessStatusCode();
-        var postLoginHtml = await loginResponse.Content.ReadAsStringAsync(cancellationToken);
-        if (LoginTokenRegex().IsMatch(postLoginHtml) || loginResponse.RequestMessage?.RequestUri?.AbsolutePath.Contains("/login/", StringComparison.OrdinalIgnoreCase) == true)
-            throw new InvalidOperationException("O Moodle recusou o login usado para obter o relatorio.");
-
-        var viewHtml = await GetTextAsync(client, $"reportbuilder/view.php?id={reportId}", cancellationToken);
-        var sessKey = ExtractRequired(SessKeyRegex(), viewHtml, "sesskey");
-
-        using var jsonResponse = await client.GetAsync(
-            $"reportbuilder/download.php?sesskey={Uri.EscapeDataString(sessKey)}&download=json&id={reportId}",
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        jsonResponse.EnsureSuccessStatusCode();
-
-        var mediaType = jsonResponse.Content.Headers.ContentType?.MediaType;
-        if (string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("O Moodle devolveu HTML em vez do JSON do relatorio. Verifique a permissao do usuario no Report Builder.");
-
-        await using var stream = await jsonResponse.Content.ReadAsStreamAsync(cancellationToken);
-        var rows = await ReadJsonAsync(stream, pageSize, cancellationToken);
-        var saoPaulo = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
-        return new MoodleReportResult(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, saoPaulo), rows);
-    }
-
-    internal static async Task<IReadOnlyList<Dictionary<string, object?>>> ReadJsonAsync(
-        Stream stream,
-        int limit,
-        CancellationToken cancellationToken)
-    {
-        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        var rowsElement = document.RootElement;
-        if (rowsElement.ValueKind == JsonValueKind.Object)
-        {
-            if (!TryGetRowsProperty(rowsElement, out rowsElement))
-                throw new InvalidOperationException("O JSON devolvido pelo Moodle nao contem uma lista de dados reconhecida.");
+                await restClient.CallAsync(
+                    credentials,
+                    "core_reportbuilder_set_filters",
+                    new Dictionary<string, object?>
+                    {
+                        ["reportid"] = reportId,
+                        ["parameters"] = "{}",
+                        ["values"] = JsonSerializer.Serialize(filters)
+                    },
+                    cancellationToken);
+            }
+            catch
+            {
+                semaphore.Release();
+                throw;
+            }
         }
 
-        // O exportador JSON do Report Builder pode devolver [[{...}, {...}]].
-        if (rowsElement.ValueKind == JsonValueKind.Array &&
-            rowsElement.GetArrayLength() == 1 &&
-            rowsElement[0].ValueKind == JsonValueKind.Array)
-            rowsElement = rowsElement[0];
+        try
+        {
+            var allRows = new List<Dictionary<string, object?>>();
+            var saoPaulo = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+            int totalAvailable = 0;
+            int page = 0;
+            int perPage = Math.Min(limit, 500);
+            
+            while (true)
+            {
+                var wsParameters = new Dictionary<string, object?>
+                {
+                    ["reportid"] = reportId,
+                    ["page"] = page,
+                    ["perpage"] = perPage
+                };
 
-        if (rowsElement.ValueKind != JsonValueKind.Array)
-            throw new InvalidOperationException("O JSON devolvido pelo Moodle nao e uma lista de registros.");
+                var jsonResponse = await restClient.CallAsync(
+                    credentials,
+                    "core_reportbuilder_retrieve_report",
+                    wsParameters,
+                    cancellationToken);
+
+                var (rows, total) = ParseWsReportData(jsonResponse);
+                totalAvailable = total;
+                allRows.AddRange(rows);
+
+                if (allRows.Count >= limit || allRows.Count >= totalAvailable || rows.Count == 0)
+                    break;
+                
+                page++;
+            }
+
+            var isTruncated = allRows.Count < totalAvailable;
+            if (allRows.Count > limit) allRows = allRows.Take(limit).ToList();
+
+            return new MoodleReportResult(
+                TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, saoPaulo),
+                allRows,
+                totalAvailable,
+                isTruncated);
+        }
+        finally
+        {
+            if (semaphore != null)
+            {
+                try
+                {
+                    await restClient.CallAsync(
+                        credentials,
+                        "core_reportbuilder_filters_reset",
+                        new Dictionary<string, object?>
+                        {
+                            ["reportid"] = reportId,
+                            ["parameters"] = "{}"
+                        },
+                        CancellationToken.None);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }
+        }
+    }
+
+    private static (IReadOnlyList<Dictionary<string, object?>> Rows, int TotalRowCount) ParseWsReportData(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("data", out var data))
+        {
+            throw new InvalidOperationException("O retorno do Web Service nao contem dados (data) validos.");
+        }
+
+        if (!data.TryGetProperty("headers", out var headers))
+        {
+            throw new InvalidOperationException("O retorno do Web Service nao contem cabecalhos (headers) validos na estrutura 'data'.");
+        }
+
+        int totalRowCount = 0;
+        if (data.TryGetProperty("totalrowcount", out var totalRowElement) && totalRowElement.ValueKind == JsonValueKind.Number)
+        {
+            totalRowCount = totalRowElement.GetInt32();
+        }
+
+        var headerList = new List<string>();
+        foreach (var headerElement in headers.EnumerateArray())
+        {
+            var headerName = headerElement.GetString() ?? "campo";
+            headerList.Add(headerName);
+        }
 
         var result = new List<Dictionary<string, object?>>();
-        foreach (var item in rowsElement.EnumerateArray())
+        if (!data.TryGetProperty("rows", out var rowsElement) || rowsElement.ValueKind != JsonValueKind.Array)
         {
-            if (result.Count >= limit) break;
-            if (item.ValueKind != JsonValueKind.Object) continue;
+            return (result, totalRowCount);
+        }
 
-            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            var usedHeaders = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var property in item.EnumerateObject())
+        foreach (var rowElement in rowsElement.EnumerateArray())
+        {
+            if (rowElement.ValueKind != JsonValueKind.Object || !rowElement.TryGetProperty("columns", out var columns) || columns.ValueKind != JsonValueKind.Array)
             {
-                var header = MakeUniqueHeader(NormalizeHeader(property.Name), usedHeaders);
-                row[header] = NormalizeValue(header, property.Value);
+                continue;
             }
-            result.Add(row);
+
+            var rowDict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            var usedHeaders = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            
+            int colIndex = 0;
+            foreach (var cellElement in columns.EnumerateArray())
+            {
+                var rawHeader = colIndex < headerList.Count ? headerList[colIndex] : $"campo{colIndex}";
+                var header = MakeUniqueHeader(NormalizeHeader(rawHeader), usedHeaders);
+                rowDict[header] = NormalizeValue(header, cellElement);
+                colIndex++;
+            }
+            result.Add(rowDict);
         }
-        return result;
-    }
 
-    private static bool TryGetRowsProperty(JsonElement root, out JsonElement rows)
-    {
-        foreach (var name in new[] { "dados", "data", "rows", "records" })
-        {
-            if (root.TryGetProperty(name, out rows) && rows.ValueKind == JsonValueKind.Array)
-                return true;
-        }
-
-        rows = default;
-        return false;
-    }
-
-    private static async Task<string> GetTextAsync(HttpClient client, string uri, CancellationToken cancellationToken)
-    {
-        using var response = await client.GetAsync(uri, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStringAsync(cancellationToken);
-    }
-
-    private static Uri ValidateBaseUri(string value)
-    {
-        if (!Uri.TryCreate(value.TrimEnd('/') + "/", UriKind.Absolute, out var uri) ||
-            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
-            throw new InvalidOperationException("A URL base do Moodle e invalida.");
-        return uri;
-    }
-
-    private static string ExtractRequired(Regex regex, string html, string name)
-    {
-        var match = regex.Match(html);
-        if (!match.Success) throw new InvalidOperationException($"Nao foi possivel localizar {name} na pagina do Moodle.");
-        return WebUtility.HtmlDecode(match.Groups[1].Value);
+        return (result, totalRowCount);
     }
 
     private static string NormalizeHeader(string value)
     {
+        value = Regex.Replace(value, "<.*?>", string.Empty);
+        
         var compact = NonAlphaNumericRegex().Replace(RemoveDiacritics(value), string.Empty).ToLowerInvariant();
         if (KnownHeaders.TryGetValue(compact, out var knownHeader)) return knownHeader;
 
@@ -189,9 +247,14 @@ internal sealed partial class MoodleReportBuilderClient(
             return JsonSerializer.Deserialize<object>(value.GetRawText());
 
         var trimmed = value.GetString()?.Trim();
+        if (!string.IsNullOrEmpty(trimmed) && trimmed.Contains('<')) 
+        {
+            trimmed = Regex.Replace(trimmed, "<.*?>", string.Empty).Trim();
+        }
+
         if (string.IsNullOrWhiteSpace(trimmed))
             return IsNullableReportField(header) ? null : string.Empty;
-        if (trimmed is "-" or "Não disponível" or "Nunca") return null;
+        if (trimmed is "-" or "Nao disponivel" or "Nunca") return null;
         if ((header.StartsWith("data", StringComparison.OrdinalIgnoreCase) ||
              header.StartsWith("ultimoAcesso", StringComparison.OrdinalIgnoreCase)) && TryParseMoodleDate(trimmed, out var date))
             return date.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture);
@@ -263,12 +326,6 @@ internal sealed partial class MoodleReportBuilderClient(
             ["datamatricula"] = "dataMatricula",
             ["categoria"] = "categoria"
         };
-
-    [GeneratedRegex("name=[\\\"']logintoken[\\\"'][^>]*value=[\\\"']([^\\\"']+)", RegexOptions.IgnoreCase)]
-    private static partial Regex LoginTokenRegex();
-
-    [GeneratedRegex("(?:sesskey=|[\\\"']sesskey[\\\"']\\s*:\\s*[\\\"'])([A-Za-z0-9]+)", RegexOptions.IgnoreCase)]
-    private static partial Regex SessKeyRegex();
 
     [GeneratedRegex("[^A-Za-z0-9]+")]
     private static partial Regex NonAlphaNumericRegex();
