@@ -15,10 +15,6 @@ using MoodleConnector.Domain;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
-// ============================================================
-// MCP Tool: revisar_feedbacks_lote
-// ============================================================
-
 [McpServerToolType]
 public sealed class MoodleGradingReviewAppTools(
     IMediator mediator,
@@ -34,7 +30,7 @@ public sealed class MoodleGradingReviewAppTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GradingReviewAppData>))]
-    [Description("Retorna uma interface interativa para revisar, editar e confirmar feedbacks de um lote de correção assistida. A interface permite visualizar feedbacks, editar nota e feedback por aluno, e enviar ao Moodle.")]
+    [Description("Retorna uma interface interativa para revisar, editar e confirmar feedbacks de um lote de correção assistida. A interface preserva o estado visual, diferencia os estados do fluxo e sempre reconcilia alterações com o estado persistido no servidor.")]
     public async Task<CallToolResult> RevisarFeedbacksLoteAsync(
         [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
         Guid batchJobId,
@@ -65,11 +61,8 @@ public sealed class MoodleGradingReviewAppTools(
             return Error("Não foi possível consultar o lote de correção assistida neste momento.");
         }
 
-        // ── Phase 1: Resolve course name + student names (non-critical, single pass) ─────
         var studentNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string? resolvedCourseName = null;
-
-        // Cache the first item's detail result so it is not fetched twice in Phase 2
         var detailCache = new Dictionary<Guid, AssistedGradingItemDetailResult>();
 
         if (batchStatus.Items.Count > 0)
@@ -83,7 +76,10 @@ public sealed class MoodleGradingReviewAppTools(
                     cancellationToken);
                 detailCache[firstItem.GradingItemId] = firstDetail;
             }
-            catch { /* non-critical */ }
+            catch
+            {
+                // Dados complementares não devem impedir a abertura do painel.
+            }
 
             var courseId = firstDetail?.CourseId;
             if (!string.IsNullOrWhiteSpace(courseId))
@@ -91,14 +87,18 @@ public sealed class MoodleGradingReviewAppTools(
                 try
                 {
                     var course = await coursesGateway.GetMyCourseAsync(
-                        currentUser.Subject, courseId, cancellationToken);
+                        currentUser.Subject,
+                        courseId,
+                        cancellationToken);
                     resolvedCourseName = course?.FullName ?? course?.DisplayName;
                 }
-                catch { /* non-critical */ }
+                catch
+                {
+                    // O nome do curso é enriquecimento opcional.
+                }
 
                 try
                 {
-                    // Paginate through all participants (max 1000 students = 20 pages × 50)
                     var page = 1;
                     const int pageSize = 50;
                     const int maxPages = 20;
@@ -115,24 +115,30 @@ public sealed class MoodleGradingReviewAppTools(
                                 StudentsOnly: true,
                                 IncludeEmail: false),
                             cancellationToken);
-                        if (participantsPage is null) break;
-                        foreach (var p in participantsPage.Participants)
+                        if (participantsPage is null)
                         {
-                            studentNameMap[p.UserId] = p.FullName;
+                            break;
                         }
+
+                        foreach (var participant in participantsPage.Participants)
+                        {
+                            studentNameMap[participant.UserId] = participant.FullName;
+                        }
+
                         hasMore = participantsPage.HasMore;
                         page++;
                     } while (hasMore && page <= maxPages);
                 }
-                catch { /* non-critical: fallback to "Aluno {id}" */ }
+                catch
+                {
+                    // A interface usa o identificador do aluno como fallback.
+                }
             }
         }
 
-        // ── Phase 2: Enrich each item (feedback, grade, maxGrade, assignmentName) ─────────
-        var enrichedItems = new List<GradingReviewItem>();
+        var enrichedItems = new List<GradingReviewItem>(batchStatus.Items.Count);
         foreach (var item in batchStatus.Items)
         {
-            // Reuse cached detail from Phase 1 (avoids double-fetching for item[0])
             if (!detailCache.TryGetValue(item.GradingItemId, out var detail))
             {
                 try
@@ -141,7 +147,10 @@ public sealed class MoodleGradingReviewAppTools(
                         new GetAssistedGradingItemQuery(item.GradingItemId, batchJobId),
                         cancellationToken);
                 }
-                catch { /* non-critical: fall back to context query */ }
+                catch
+                {
+                    // O status resumido do lote ainda permite renderizar o item.
+                }
             }
 
             GradingContextForChatResult? context = null;
@@ -151,28 +160,41 @@ public sealed class MoodleGradingReviewAppTools(
                     new PrepareGradingContextForChatQuery(item.GradingItemId, batchJobId),
                     cancellationToken);
             }
-            catch { /* non-critical */ }
+            catch
+            {
+                // Contexto de atividade, nota máxima e feedback são enriquecimentos opcionais.
+            }
 
-            var finalGrade    = detail?.FinalGrade;
-            var finalFeedback = !string.IsNullOrWhiteSpace(detail?.FinalFeedback) ? detail!.FinalFeedback : null;
+            var finalGrade = detail?.FinalGrade;
+            var finalFeedback = !string.IsNullOrWhiteSpace(detail?.FinalFeedback)
+                ? detail!.FinalFeedback
+                : null;
             var suggestedGrade = detail?.SuggestedGrade ?? context?.SuggestedGrade;
-            var draftFeedback  = detail?.DraftFeedback  ?? context?.DraftFeedback;
-            var maxGrade       = context?.MaxGrade       ?? 100m;
+            var draftFeedback = detail?.DraftFeedback ?? context?.DraftFeedback;
+            var maxGrade = context?.MaxGrade ?? 100m;
             var assignmentName = context?.AssignmentName;
-            var confidence     = detail?.Confidence      ?? context?.Confidence;
+            var confidence = detail?.Confidence ?? context?.Confidence;
+            var workflowState = ResolveWorkflowState(item.Status, item.ReviewStatus, item.CommitStatus);
+            var capabilities = ResolveCapabilities(workflowState);
+            var statusReason = detail?.PendingIssues.FirstOrDefault()
+                ?? detail?.PrivateNotesToTeacher;
 
             studentNameMap.TryGetValue(item.StudentId, out var studentName);
 
-            // Lazy fallback: resolve course name from context if Phase 1 didn't get it
             if (resolvedCourseName is null && context is not null)
             {
                 try
                 {
                     var course = await coursesGateway.GetMyCourseAsync(
-                        currentUser.Subject, context.CourseId, cancellationToken);
+                        currentUser.Subject,
+                        context.CourseId,
+                        cancellationToken);
                     resolvedCourseName = course?.FullName ?? course?.DisplayName;
                 }
-                catch { /* non-critical */ }
+                catch
+                {
+                    // O nome do curso é enriquecimento opcional.
+                }
             }
 
             enrichedItems.Add(new GradingReviewItem(
@@ -184,6 +206,12 @@ public sealed class MoodleGradingReviewAppTools(
                 item.Status,
                 item.ReviewStatus,
                 item.CommitStatus,
+                workflowState,
+                capabilities.CanEdit,
+                capabilities.CanSelect,
+                capabilities.CanSend,
+                statusReason,
+                detail?.DraftVersionHash,
                 finalGrade,
                 finalFeedback,
                 suggestedGrade,
@@ -201,11 +229,11 @@ public sealed class MoodleGradingReviewAppTools(
             batchStatus.BlockedItems,
             batchStatus.FailedItems,
             batchStatus.ProcessingMetrics.ProgressPercent,
+            batchStatus.Page,
+            batchStatus.PageSize,
+            batchStatus.HasMore,
             enrichedItems,
             resolvedCourseName);
-
-        // Build structured content for fallback (hosts without MCP Apps)
-        var narration = BuildReviewNarration(appData);
 
         var response = new ToolResponse<GradingReviewAppData>(
             "ok",
@@ -214,77 +242,114 @@ public sealed class MoodleGradingReviewAppTools(
             AuditId: null,
             DateTimeOffset.UtcNow);
 
-        var result = new CallToolResult
+        return new CallToolResult
         {
-            Content =
-            [
-                new TextContentBlock { Text = narration }
-            ],
+            Content = [new TextContentBlock { Text = BuildReviewNarration(appData) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             Meta = MoodleGradingReviewAppMetadata.CreateToolMeta(),
             IsError = false
         };
-
-        return result;
     }
 
-    // ============================================================
-    // HTML Template (used by MCP Resource only; data is delivered via StructuredContent)
-    // ============================================================
-
-    private static string LoadHtmlTemplate()
+    [McpServerTool(
+        Name = "consultar_estado_interface_correcao_lote",
+        Title = "Consultar Estado Interface Correcao Lote",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<GradingReviewAppData>))]
+    [Description("Retorna o snapshot autoritativo paginado usado pela interface de revisão, sem solicitar uma nova montagem do widget.")]
+    public async Task<CallToolResult> ConsultarEstadoInterfaceCorrecaoLoteAsync(
+        [Description("Identificador do lote de correção assistida.")] Guid batchJobId,
+        [Description("Página de itens, iniciando em 1.")] int pagina = 1,
+        [Description("Tamanho da página, de 1 a 100.")] int tamanhoPagina = 50,
+        CancellationToken cancellationToken = default)
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        var resourceName = assembly.GetManifestResourceNames()
-            .FirstOrDefault(n => n.EndsWith("GradingReviewApp.html", StringComparison.OrdinalIgnoreCase));
+        var rendered = await RevisarFeedbacksLoteAsync(
+            batchJobId,
+            pagina,
+            tamanhoPagina,
+            cancellationToken);
 
-        if (resourceName is null)
+        return new CallToolResult
         {
-            // Fallback: load from file system relative to assembly
-            var assemblyDir = Path.GetDirectoryName(assembly.Location) ?? ".";
-            var htmlPath = Path.Combine(assemblyDir, "Tools", "Grading", "GradingReviewApp.html");
-            if (File.Exists(htmlPath))
-            {
-                return File.ReadAllText(htmlPath, Encoding.UTF8);
-            }
+            Content = rendered.Content,
+            StructuredContent = rendered.StructuredContent,
+            IsError = rendered.IsError
+        };
+    }
 
-            return BuildMinimalFallbackHtml();
+    private static string ResolveWorkflowState(
+        string status,
+        string reviewStatus,
+        string commitStatus)
+    {
+        if (EqualsStatus(commitStatus, "Succeeded") || EqualsStatus(status, "Committed"))
+        {
+            return GradingReviewWorkflowStates.Sent;
         }
 
-        using var stream = assembly.GetManifestResourceStream(resourceName)!;
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
+        if (EqualsStatus(commitStatus, "Failed"))
+        {
+            return GradingReviewWorkflowStates.SendFailed;
+        }
+
+        if (EqualsStatus(status, "Blocked"))
+        {
+            return GradingReviewWorkflowStates.Blocked;
+        }
+
+        if (EqualsStatus(status, "Failed"))
+        {
+            return GradingReviewWorkflowStates.AnalysisFailed;
+        }
+
+        if (EqualsStatus(status, "Pending") ||
+            EqualsStatus(status, "Analyzing") ||
+            EqualsStatus(status, "AwaitingAiAnalysis"))
+        {
+            return GradingReviewWorkflowStates.Processing;
+        }
+
+        if (EqualsStatus(status, "ReadyToCommit") &&
+            EqualsStatus(reviewStatus, "Reviewed") &&
+            EqualsStatus(commitStatus, "Pending"))
+        {
+            return GradingReviewWorkflowStates.Reviewed;
+        }
+
+        return GradingReviewWorkflowStates.AwaitingReview;
     }
 
-    private static string BuildMinimalFallbackHtml()
+    private static (bool CanEdit, bool CanSelect, bool CanSend) ResolveCapabilities(string workflowState)
     {
-        return """
-            <!DOCTYPE html>
-            <html lang="pt-BR">
-            <head><meta charset="UTF-8"><title>Revisão</title></head>
-            <body style="background:#0f172a;color:#f1f5f9;font-family:system-ui;padding:24px">
-              <h2>Interface de Revisão não disponível</h2>
-              <p>O template HTML não foi encontrado. Use as tools MCP diretamente para revisar os feedbacks.</p>
-            </body>
-            </html>
-            """;
+        return workflowState switch
+        {
+            GradingReviewWorkflowStates.AwaitingReview => (true, true, false),
+            GradingReviewWorkflowStates.Reviewed => (true, true, true),
+            GradingReviewWorkflowStates.SendFailed => (true, true, false),
+            _ => (false, false, false)
+        };
     }
 
-    // ============================================================
-    // Narration (fallback for hosts without MCP Apps)
-    // ============================================================
+    private static bool EqualsStatus(string value, string expected)
+    {
+        return string.Equals(value, expected, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static string BuildReviewNarration(GradingReviewAppData data)
     {
         var sb = new StringBuilder();
         sb.AppendLine("## Revisão de Correções");
         sb.AppendLine();
-        sb.AppendLine($"**{data.Items.Count} aluno(s)** para revisão.");
+        sb.AppendLine($"**{data.Items.Count} aluno(s)** nesta página, de **{data.TotalItems}** no lote.");
         sb.AppendLine();
 
         if (data.Items.Count == 0)
         {
-            sb.AppendLine("Nenhuma correção disponível para revisão.");
+            sb.AppendLine("O lote foi carregado e não possui correções nesta página.");
             return sb.ToString();
         }
 
@@ -293,49 +358,56 @@ public sealed class MoodleGradingReviewAppTools(
             var displayName = !string.IsNullOrWhiteSpace(item.StudentName)
                 ? item.StudentName
                 : $"Aluno {item.StudentId}";
-
-            // Prioritize final over suggested
             var displayGrade = item.FinalGrade ?? item.SuggestedGrade;
             var displayFeedback = !string.IsNullOrWhiteSpace(item.FinalFeedback)
                 ? item.FinalFeedback
                 : item.DraftFeedback;
-
-            var gradeStr = displayGrade.HasValue
+            var grade = displayGrade.HasValue
                 ? $"{displayGrade.Value:F1}/{item.MaxGrade:F0}"
                 : "—";
 
-            var gradeLabel = item.FinalGrade.HasValue ? "Nota final" : "Nota sugerida";
-
-            sb.AppendLine($"---");
-            sb.AppendLine($"### {displayName} — {gradeLabel}: {gradeStr}");
+            sb.AppendLine("---");
+            sb.AppendLine($"### {displayName} — {WorkflowLabel(item.WorkflowState)} — {grade}");
             if (!string.IsNullOrWhiteSpace(item.AssignmentName))
             {
                 sb.AppendLine($"*{item.AssignmentName}*");
             }
-            sb.AppendLine();
 
             if (!string.IsNullOrWhiteSpace(displayFeedback))
             {
+                sb.AppendLine();
                 sb.AppendLine("**Feedback:**");
                 sb.AppendLine($"> {displayFeedback.Replace("\n", "\n> ")}");
             }
-            else
+
+            if (!string.IsNullOrWhiteSpace(item.StatusReason))
             {
-                sb.AppendLine("*Feedback ainda não gerado.*");
+                sb.AppendLine();
+                sb.AppendLine($"**Atenção:** {item.StatusReason}");
             }
+
             sb.AppendLine();
         }
 
         sb.AppendLine("---");
-        sb.AppendLine();
-        sb.AppendLine("Edite nota e feedback conforme necessário e confirme o envio ao Moodle.");
-
+        sb.AppendLine("A interface preserva seleções e edições temporárias, enquanto os estados acadêmicos permanecem persistidos no servidor.");
         return sb.ToString();
     }
 
-    // ============================================================
-    // Helpers
-    // ============================================================
+    private static string WorkflowLabel(string workflowState)
+    {
+        return workflowState switch
+        {
+            GradingReviewWorkflowStates.Processing => "Processando",
+            GradingReviewWorkflowStates.AwaitingReview => "Aguardando revisão",
+            GradingReviewWorkflowStates.Reviewed => "Corrigido",
+            GradingReviewWorkflowStates.Sent => "Enviado",
+            GradingReviewWorkflowStates.Blocked => "Bloqueado",
+            GradingReviewWorkflowStates.AnalysisFailed => "Falha na análise",
+            GradingReviewWorkflowStates.SendFailed => "Falha no envio",
+            _ => workflowState
+        };
+    }
 
     private static CallToolResult Error(string message)
     {
@@ -355,30 +427,22 @@ public sealed class MoodleGradingReviewAppTools(
     }
 }
 
-// ============================================================
-// MCP Resource: ui://grading-review/app.html
-// ============================================================
-
 [McpServerResourceType]
 public sealed class MoodleGradingReviewAppResources
 {
     [McpServerResource(
         UriTemplate = MoodleGradingReviewAppMetadata.ResourceUri,
-        Name = "grading-review-app",
+        Name = "grading-review-app-v2",
         Title = "Interface de Revisão de Feedbacks",
         MimeType = MoodleGradingReviewAppMetadata.ResourceMimeType)]
     [Description("Interface HTML interativa para revisar feedbacks de correção assistida.")]
     public IEnumerable<ResourceContents> GetReviewApp()
     {
-        // The resource serves the base HTML template.
-        // Actual data is delivered through window.openai.toolOutput.
-        var html = LoadResourceHtml();
-
         yield return new TextResourceContents
         {
             Uri = MoodleGradingReviewAppMetadata.ResourceUri,
             MimeType = MoodleGradingReviewAppMetadata.ResourceMimeType,
-            Text = html,
+            Text = LoadResourceHtml(),
             Meta = MoodleGradingReviewAppMetadata.CreateResourceMeta()
         };
     }
@@ -387,7 +451,7 @@ public sealed class MoodleGradingReviewAppResources
     {
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = assembly.GetManifestResourceNames()
-            .FirstOrDefault(n => n.EndsWith("GradingReviewApp.html", StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(name => name.EndsWith("GradingReviewApp.html", StringComparison.OrdinalIgnoreCase));
 
         if (resourceName is not null)
         {
@@ -398,14 +462,16 @@ public sealed class MoodleGradingReviewAppResources
 
         var assemblyDir = Path.GetDirectoryName(assembly.Location) ?? ".";
         var htmlPath = Path.Combine(assemblyDir, "Tools", "Grading", "GradingReviewApp.html");
-        return File.Exists(htmlPath) ? File.ReadAllText(htmlPath, Encoding.UTF8) : "<html><body>Template não encontrado</body></html>";
+        return File.Exists(htmlPath)
+            ? File.ReadAllText(htmlPath, Encoding.UTF8)
+            : "<html><body>Template não encontrado</body></html>";
     }
 }
 
 public static class MoodleGradingReviewAppMetadata
 {
     public const string ToolName = "revisar_feedbacks_lote";
-    public const string ResourceUri = "ui://grading-review/app.html";
+    public const string ResourceUri = "ui://grading-review/v2/app.html";
     public const string ResourceMimeType = "text/html;profile=mcp-app";
 
     public static JsonObject CreateToolMeta()
@@ -416,14 +482,15 @@ public static class MoodleGradingReviewAppMetadata
             {
                 ["resourceUri"] = ResourceUri
             },
-            ["openai/outputTemplate"] = ResourceUri
+            ["openai/outputTemplate"] = ResourceUri,
+            ["openai/toolInvocation/invoking"] = "Carregando correções…",
+            ["openai/toolInvocation/invoked"] = "Correções carregadas."
         };
     }
 
     public static JsonObject CreateResourceMeta()
     {
         var domain = ResolveWidgetDomain();
-
         return new JsonObject
         {
             ["ui"] = new JsonObject
@@ -468,9 +535,18 @@ public static class MoodleGradingReviewAppMetadata
     }
 }
 
-// ============================================================
-// DTOs
-// ============================================================
+public static class GradingReviewWorkflowStates
+{
+    public const string Processing = "processing";
+    public const string AwaitingReview = "awaiting_review";
+    public const string Reviewed = "reviewed";
+    public const string AwaitingConfirmation = "awaiting_confirmation";
+    public const string Sending = "sending";
+    public const string Sent = "sent";
+    public const string Blocked = "blocked";
+    public const string AnalysisFailed = "analysis_failed";
+    public const string SendFailed = "send_failed";
+}
 
 public sealed record GradingReviewAppData(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -480,6 +556,9 @@ public sealed record GradingReviewAppData(
     [property: JsonPropertyName("blockedItems")] int BlockedItems,
     [property: JsonPropertyName("failedItems")] int FailedItems,
     [property: JsonPropertyName("progressPercent")] int ProgressPercent,
+    [property: JsonPropertyName("page")] int Page,
+    [property: JsonPropertyName("pageSize")] int PageSize,
+    [property: JsonPropertyName("hasMore")] bool HasMore,
     [property: JsonPropertyName("items")] IReadOnlyList<GradingReviewItem> Items,
     [property: JsonPropertyName("courseName")] string? CourseName = null);
 
@@ -492,6 +571,12 @@ public sealed record GradingReviewItem(
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("reviewStatus")] string ReviewStatus,
     [property: JsonPropertyName("commitStatus")] string CommitStatus,
+    [property: JsonPropertyName("workflowState")] string WorkflowState,
+    [property: JsonPropertyName("canEdit")] bool CanEdit,
+    [property: JsonPropertyName("canSelect")] bool CanSelect,
+    [property: JsonPropertyName("canSend")] bool CanSend,
+    [property: JsonPropertyName("statusReason")] string? StatusReason,
+    [property: JsonPropertyName("draftVersionHash")] string? DraftVersionHash,
     [property: JsonPropertyName("finalGrade")] decimal? FinalGrade,
     [property: JsonPropertyName("finalFeedback")] string? FinalFeedback,
     [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
