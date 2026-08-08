@@ -16,8 +16,8 @@ public sealed class MoodleAccessMonitoringTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "listar_alunos_sem_acesso",
-        Title = "Listar Alunos Sem Acesso Recente",
+        Name = "list_students_without_recent_access",
+        Title = "List Students Without Recent Access",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -33,30 +33,6 @@ public sealed class MoodleAccessMonitoringTools(
         [Description("Máximo de estudantes para analisar. Padrão: 100.")]
         int maxStudentsToAnalyze = 100,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrão do usuário.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetAccessCoreAsync(courseId, daysWithoutAccess, maxStudentsToAnalyze, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "list_students_without_recent_access",
-        Title = "List Students Without Recent Access",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<GetStudentsWithoutRecentAccessResult>))]
-    [Description("Lists active students who have not accessed the course in the last N days. Returns a suggested recipient list for an access reminder message.")]
-    public Task<CallToolResult> ListStudentsWithoutRecentAccessAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Number of days without access to be considered inactive. Default: 7.")]
-        int daysWithoutAccess = 7,
-        [Description("Maximum students to analyze. Default: 100.")]
-        int maxStudentsToAnalyze = 100,
-        [Description("Moodle connection alias. When omitted, uses the user's default connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

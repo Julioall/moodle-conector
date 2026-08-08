@@ -1,0 +1,33 @@
+{
+  "TaskId": "courses.structure.001",
+  "Profile": {
+    "Exposure": 1,
+    "ModelName": "MockAgent-v1",
+    "UseSafeReadExecutor": true
+  },
+  "Prompt": "Quais conte\u00FAdos existem nessa turma?",
+  "Model": "MockAgent-v1",
+  "Routing": {
+    "SelectedSkill": "moodle-courses",
+    "SelectedIntent": "courses.structure",
+    "SelectedOperation": "core_course_get_contents",
+    "Arguments": {}
+  },
+  "Execution": {
+    "ConnectionId": "25425972-87a1-4c6e-8fe0-069f86ea6ee3",
+    "RegistryOperation": "core_course_get_contents",
+    "PolicyDecision": "Allowed",
+    "MoodleCalls": 1,
+    "LatencyMs": 150
+  },
+  "ResultContent": "{ \u0022items\u0022: [], \u0022truncated\u0022: false }",
+  "Scoring": {
+    "IntentAccuracy": true,
+    "RoutingAccuracy": true,
+    "ParameterAccuracy": true,
+    "ResultAccuracy": true,
+    "PaginationAwareness": true,
+    "OverallSuccess": true,
+    "FailureReason": 0
+  }
+}

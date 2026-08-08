@@ -18,8 +18,8 @@ public sealed class MoodleParticipantsTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "listar_participantes_curso",
-        Title = "Listar Participantes Curso",
+        Name = "list_course_participants",
+        Title = "List Course Participants",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -54,44 +54,8 @@ public sealed class MoodleParticipantsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_participants",
-        Title = "List Course Participants",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseParticipantsResponse>))]
-    [Description("Lists Moodle course participants with pagination and status filtering. Email is not returned by default.")]
-    public Task<CallToolResult> ListCourseParticipantsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Result page, starting at 1.")]
-        int page = 1,
-        [Description("Page size, from 1 to 50.")]
-        int pageSize = 20,
-        [Description("Status filter: active, suspended, or all.")]
-        string status = "active",
-        [Description("When true, includes email if Moodle permits it. Use only when necessary.")]
-        bool includeEmail = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListParticipantsCoreAsync(
-            courseId,
-            page,
-            pageSize,
-            status,
-            includeEmail,
-            moodleAlias,
-            studentsOnly: false,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_alunos_curso",
-        Title = "Listar Alunos Curso",
+        Name = "list_course_students",
+        Title = "List Course Students",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -126,44 +90,8 @@ public sealed class MoodleParticipantsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_students",
-        Title = "List Course Students",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseParticipantsResponse>))]
-    [Description("Lists Moodle course students with pagination and status filtering. Email is not returned by default.")]
-    public Task<CallToolResult> ListCourseStudentsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Result page, starting at 1.")]
-        int page = 1,
-        [Description("Page size, from 1 to 50.")]
-        int pageSize = 20,
-        [Description("Status filter: active, suspended, or all.")]
-        string status = "active",
-        [Description("When true, includes email if Moodle permits it. Use only when necessary.")]
-        bool includeEmail = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListParticipantsCoreAsync(
-            courseId,
-            page,
-            pageSize,
-            status,
-            includeEmail,
-            moodleAlias,
-            studentsOnly: true,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_grupos_curso",
-        Title = "Listar Grupos Curso",
+        Name = "list_course_groups",
+        Title = "List Course Groups",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -182,28 +110,8 @@ public sealed class MoodleParticipantsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_groups",
-        Title = "List Course Groups",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseGroupsResponse>))]
-    [Description("Lists groups for a Moodle course linked to the authenticated user.")]
-    public Task<CallToolResult> ListCourseGroupsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListGroupsCoreAsync(courseId, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_membros_grupo",
-        Title = "Consultar Membros Grupo",
+        Name = "get_group_members",
+        Title = "Get Group Members",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -235,44 +143,6 @@ public sealed class MoodleParticipantsTools(
             tamanhoPagina,
             status,
             incluirEmail,
-            moodleAlias,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "get_group_members",
-        Title = "Get Group Members",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseParticipantsResponse>))]
-    [Description("Lists Moodle group members with pagination. Email is not returned by default.")]
-    public Task<CallToolResult> GetGroupMembersAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Numeric Moodle group identifier.")]
-        string groupId,
-        [Description("Result page, starting at 1.")]
-        int page = 1,
-        [Description("Page size, from 1 to 50.")]
-        int pageSize = 20,
-        [Description("Status filter: active, suspended, or all.")]
-        string status = "active",
-        [Description("When true, includes email if Moodle permits it. Use only when necessary.")]
-        bool includeEmail = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListGroupMembersCoreAsync(
-            courseId,
-            groupId,
-            page,
-            pageSize,
-            status,
-            includeEmail,
             moodleAlias,
             cancellationToken);
     }

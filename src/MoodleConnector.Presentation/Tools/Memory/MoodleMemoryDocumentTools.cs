@@ -14,51 +14,8 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [McpServerTool(
-        Name = "gerenciar_documento_memoria_usuario",
-        Title = "Gerenciar documento de memoria do usuario",
-        ReadOnly = false,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<MemoryDocumentToolResponse>))]
-    [Description("Compatibilidade: salva, lista ou le documentos duraveis privados do usuario autenticado. Para remover, use remover_documento_memoria_usuario. Nunca envie segredos nem dados pessoais de alunos.")]
-    public async Task<CallToolResult> ManageAsync(
-        [Description("Acao de compatibilidade: salvar, listar ou ler. Para remover, use remover_documento_memoria_usuario.")] string action,
-        [Description("Chave curta e estavel do documento. Obrigatoria em salvar.")] string? key = null,
-        [Description("Titulo humano do documento. Obrigatorio em salvar.")] string? title = null,
-        [Description("Conteudo completo do documento. Use markdown quando possivel; html e aceito para modelos Moodle existentes.")] string? content = null,
-        [Description("Formato do conteudo: markdown, html ou text. Obrigatorio em salvar.")] string? format = null,
-        [Description("Origem: explicit ou inferred. Obrigatoria em salvar.")] string? origin = null,
-        [Description("Texto para filtrar documentos na listagem.")] string? query = null,
-        [Description("Alias Moodle opcional para escopo ou filtro.")] string? moodleAlias = null,
-        [Description("Curso opcional dentro do alias Moodle.")] string? courseId = null,
-        [Description("UUID do documento exigido para ler ou remover.")] Guid? documentId = null,
-        [Description("Maximo de documentos na listagem. Padrao: 20.")] int limit = 20,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            var data = (action ?? string.Empty).Trim().ToLowerInvariant() switch
-            {
-                "salvar" => new MemoryDocumentToolResponse("salvar", await SaveAsync(key, title, content, format, origin, moodleAlias, courseId, cancellationToken), null, null),
-                "listar" => new MemoryDocumentToolResponse("listar", null, await documentService.ListAsync(new ListUserMemoryDocumentsRequest(moodleAlias, courseId, limit, query), cancellationToken), null),
-                "ler" => new MemoryDocumentToolResponse("ler", await ReadAsync(documentId, cancellationToken), null, null),
-                "remover" => throw new ArgumentException("Use remover_documento_memoria_usuario para remover documentos de memoria.", nameof(action)),
-                _ => throw new ArgumentException("Acao invalida. Use salvar, listar ou ler. Para remover, use remover_documento_memoria_usuario.", nameof(action))
-            };
-
-            return Ok(data);
-        }
-        catch (ArgumentException exception)
-        {
-            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
-        }
-    }
-
-    [McpServerTool(
-        Name = "salvar_documento_memoria_usuario",
-        Title = "Salvar documento de memoria do usuario",
+        Name = "save_user_memory_document",
+        Title = "Save User Memory Document",
         ReadOnly = false,
         Destructive = false,
         Idempotent = true,
@@ -91,8 +48,8 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
     }
 
     [McpServerTool(
-        Name = "listar_documentos_memoria_usuario",
-        Title = "Listar documentos de memoria do usuario",
+        Name = "list_user_memory_documents",
+        Title = "List User Memory Documents",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -122,8 +79,8 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
     }
 
     [McpServerTool(
-        Name = "ler_documento_memoria_usuario",
-        Title = "Ler documento de memoria do usuario",
+        Name = "read_user_memory_document",
+        Title = "Read User Memory Document",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -146,8 +103,8 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
     }
 
     [McpServerTool(
-        Name = "remover_documento_memoria_usuario",
-        Title = "Remover documento de memoria do usuario",
+        Name = "remove_user_memory_document",
+        Title = "Remove User Memory Document",
         ReadOnly = false,
         Destructive = true,
         Idempotent = true,

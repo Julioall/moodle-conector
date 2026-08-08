@@ -22,7 +22,7 @@ public sealed class McpToolMetadataTests
             var toolName = attribute.Name ?? method.Name;
 
             Assert.False(attribute.OpenWorld, $"{toolName} deve declarar OpenWorld=false.");
-            if (toolName is "confirmar_lancamento_lote_moodle" or "confirmar_post_forum_moodle" or "confirm_forum_post" or "gerenciar_memoria_usuario" or "remover_documento_memoria_usuario")
+            if (toolName is "confirm_batch_grade_launch" or "confirm_forum_post" or "manage_user_memory" or "remove_user_memory_document")
             {
                 Assert.True(attribute.Destructive, $"{toolName} deve declarar Destructive=true.");
             }
@@ -31,37 +31,37 @@ public sealed class McpToolMetadataTests
                 Assert.False(attribute.Destructive, $"{toolName} deve declarar Destructive=false.");
             }
 
-            if (toolName is "gerenciar_memoria_usuario" or "gerenciar_documento_memoria_usuario" or "salvar_documento_memoria_usuario")
+            if (toolName is "manage_user_memory" or "save_user_memory_document")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} grava estado interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente.");
             }
-            else if (toolName == "remover_documento_memoria_usuario")
+            else if (toolName == "remove_user_memory_document")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} remove estado interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe pelo documentId.");
             }
-            else if (toolName == "criar_lote_correcao_assistida")
+            else if (toolName == "create_assisted_grading_batch")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} cria job interno e deve declarar ReadOnly=false.");
                 Assert.False(attribute.Idempotent, $"{toolName} nao deve ser idempotente sem chave de idempotencia.");
             }
-            else if (toolName is "criar_previa_lancamento_lote" or "criar_previa_post_forum" or "create_forum_post_preview")
+            else if (toolName is "create_batch_grade_launch_preview" or "create_forum_post_preview")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} cria acao pendente e deve declarar ReadOnly=false.");
                 Assert.False(attribute.Idempotent, $"{toolName} nao deve ser idempotente sem chave de idempotencia.");
             }
-            else if (toolName is "confirmar_lancamento_lote_moodle" or "confirmar_post_forum_moodle" or "confirm_forum_post")
+            else if (toolName is "confirm_batch_grade_launch" or "confirm_forum_post")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} executa escrita Moodle e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe pelo pendingActionId.");
             }
-            else if (toolName is "atualizar_rascunho_correcao" or "atualizar_rascunhos_correcao_lote" or "salvar_correcoes_ia_lote")
+            else if (toolName is "update_grading_draft" or "update_grading_drafts_batch" or "save_ai_grading_batch")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} atualiza estado interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente com payload identico.");
             }
-            else if (toolName == "cancelar_lote_correcao_assistida")
+            else if (toolName == "cancel_assisted_grading_batch")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} cancela job interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe por batchJobId.");
@@ -133,7 +133,7 @@ public sealed class McpToolMetadataTests
         Assert.Contains("window.openai?.widgetState", html);
         Assert.Contains("setWidgetState", html);
         Assert.Contains("privateContent", html);
-        Assert.Contains("consultar_estado_interface_correcao_lote", html);
+        Assert.Contains("get_batch_grading_ui_state", html);
         Assert.Contains("hydration-error", html);
         Assert.Contains("O lote não foi marcado como vazio", html);
         Assert.Contains("empty-state", html);
@@ -164,7 +164,7 @@ public sealed class McpToolMetadataTests
         var attribute = method.GetCustomAttribute<McpServerToolAttribute>();
 
         Assert.NotNull(attribute);
-        Assert.Equal("consultar_estado_interface_correcao_lote", attribute!.Name);
+        Assert.Equal("get_batch_grading_ui_state", attribute!.Name);
         Assert.True(attribute.ReadOnly);
         Assert.True(attribute.Idempotent);
         Assert.False(attribute.Destructive);

@@ -12,8 +12,8 @@ namespace MoodleConnector.Presentation.Tools.Grading;
 public sealed class MoodleGradingContextDiagnosticsTools(IMediator mediator)
 {
     [McpServerTool(
-        Name = "consultar_contexto_item_correcao_assistida",
-        Title = "Consultar Contexto Item Correcao Assistida",
+        Name = "get_grading_item_context",
+        Title = "Get Grading Item Context",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,

@@ -18,8 +18,8 @@ public sealed class DemoPendingActionTools(
     IOptions<PendingActionOptions> pendingActionOptions)
 {
     [McpServerTool(
-        Name = "preparar_acao_demo",
-        Title = "Preparar Acao Demo",
+        Name = "prepare_demo_action",
+        Title = "Prepare Demo Action",
         ReadOnly = false,
         Destructive = false,
         Idempotent = true,
@@ -63,8 +63,8 @@ public sealed class DemoPendingActionTools(
     }
 
     [McpServerTool(
-        Name = "confirmar_acao_demo",
-        Title = "Confirmar Acao Demo",
+        Name = "confirm_demo_action",
+        Title = "Confirm Demo Action",
         ReadOnly = false,
         Destructive = false,
         Idempotent = true,

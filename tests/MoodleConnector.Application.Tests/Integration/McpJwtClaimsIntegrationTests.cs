@@ -1,9 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Linq;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -109,71 +111,95 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.Contains("listar_meus_cursos", body, StringComparison.Ordinal);
-        Assert.Contains("list_courses", body, StringComparison.Ordinal);
+        Assert.Contains("list_my_courses", body, StringComparison.Ordinal);
+        Assert.Contains("list_my_courses", body, StringComparison.Ordinal);
         Assert.Contains("\"name\":\"search\"", body, StringComparison.Ordinal);
         Assert.Contains("\"name\":\"fetch\"", body, StringComparison.Ordinal);
-        Assert.Contains("buscar_cursos", body, StringComparison.Ordinal);
         Assert.Contains("search_courses", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_curso", body, StringComparison.Ordinal);
+        Assert.Contains("search_courses", body, StringComparison.Ordinal);
         Assert.Contains("get_course", body, StringComparison.Ordinal);
-        Assert.Contains("listar_participantes_curso", body, StringComparison.Ordinal);
+        Assert.Contains("get_course", body, StringComparison.Ordinal);
         Assert.Contains("list_course_participants", body, StringComparison.Ordinal);
-        Assert.Contains("listar_alunos_curso", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_participants", body, StringComparison.Ordinal);
         Assert.Contains("list_course_students", body, StringComparison.Ordinal);
-        Assert.Contains("listar_grupos_curso", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_students", body, StringComparison.Ordinal);
         Assert.Contains("list_course_groups", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_membros_grupo", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_groups", body, StringComparison.Ordinal);
         Assert.Contains("get_group_members", body, StringComparison.Ordinal);
-        Assert.Contains("listar_conteudos_curso", body, StringComparison.Ordinal);
+        Assert.Contains("get_group_members", body, StringComparison.Ordinal);
         Assert.Contains("list_course_contents", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_modulo_curso", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_contents", body, StringComparison.Ordinal);
         Assert.Contains("get_course_module", body, StringComparison.Ordinal);
-        Assert.Contains("listar_recursos_curso", body, StringComparison.Ordinal);
+        Assert.Contains("get_course_module", body, StringComparison.Ordinal);
         Assert.Contains("list_course_resources", body, StringComparison.Ordinal);
-        Assert.Contains("listar_arquivos_curso", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_resources", body, StringComparison.Ordinal);
         Assert.Contains("list_course_files", body, StringComparison.Ordinal);
-        Assert.Contains("listar_paginas_curso", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_files", body, StringComparison.Ordinal);
         Assert.Contains("list_course_pages", body, StringComparison.Ordinal);
-        Assert.Contains("listar_urls_curso", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_pages", body, StringComparison.Ordinal);
         Assert.Contains("list_course_urls", body, StringComparison.Ordinal);
-        Assert.Contains("auditar_estrutura_curso", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_urls", body, StringComparison.Ordinal);
         Assert.Contains("audit_course_structure", body, StringComparison.Ordinal);
-        Assert.Contains("listar_atividades_curso", body, StringComparison.Ordinal);
+        Assert.Contains("audit_course_structure", body, StringComparison.Ordinal);
         Assert.Contains("list_course_activities", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_atividade", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_activities", body, StringComparison.Ordinal);
         Assert.Contains("get_course_activity", body, StringComparison.Ordinal);
-        Assert.Contains("listar_tarefas_curso", body, StringComparison.Ordinal);
+        Assert.Contains("get_course_activity", body, StringComparison.Ordinal);
         Assert.Contains("list_course_assignments", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_tarefa", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_assignments", body, StringComparison.Ordinal);
         Assert.Contains("get_assignment", body, StringComparison.Ordinal);
-        Assert.Contains("listar_quizzes_curso", body, StringComparison.Ordinal);
+        Assert.Contains("get_assignment", body, StringComparison.Ordinal);
         Assert.Contains("list_course_quizzes", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_quiz", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_quizzes", body, StringComparison.Ordinal);
         Assert.Contains("get_quiz", body, StringComparison.Ordinal);
-        Assert.Contains("listar_scorms_curso", body, StringComparison.Ordinal);
+        Assert.Contains("get_quiz", body, StringComparison.Ordinal);
         Assert.Contains("list_course_scorms", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_prazos_atividades", body, StringComparison.Ordinal);
+        Assert.Contains("list_course_scorms", body, StringComparison.Ordinal);
         Assert.Contains("list_activity_deadlines", body, StringComparison.Ordinal);
-        Assert.Contains("listar_entregas_atividade", body, StringComparison.Ordinal);
+        Assert.Contains("list_activity_deadlines", body, StringComparison.Ordinal);
         Assert.Contains("list_assignment_submissions", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_entrega_aluno", body, StringComparison.Ordinal);
+        Assert.Contains("list_assignment_submissions", body, StringComparison.Ordinal);
         Assert.Contains("get_student_submission", body, StringComparison.Ordinal);
-        Assert.Contains("listar_entregas_pendentes", body, StringComparison.Ordinal);
+        Assert.Contains("get_student_submission", body, StringComparison.Ordinal);
         Assert.Contains("list_pending_submissions", body, StringComparison.Ordinal);
-        Assert.Contains("listar_entregas_atrasadas", body, StringComparison.Ordinal);
+        Assert.Contains("list_pending_submissions", body, StringComparison.Ordinal);
         Assert.Contains("list_late_submissions", body, StringComparison.Ordinal);
-        Assert.Contains("listar_entregas_aguardando_correcao", body, StringComparison.Ordinal);
+        Assert.Contains("list_late_submissions", body, StringComparison.Ordinal);
         Assert.Contains("list_submissions_awaiting_grading", body, StringComparison.Ordinal);
-        Assert.Contains("consultar_status_submissao", body, StringComparison.Ordinal);
+        Assert.Contains("list_submissions_awaiting_grading", body, StringComparison.Ordinal);
+        Assert.Contains("get_submission_status", body, StringComparison.Ordinal);
         Assert.Contains("get_submission_status", body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ProfileB_ShouldHaveSameToolsAsProfileA()
+    {
+        var toolsA = await GetToolsListAsync(_factory, "Full");
+        var toolsB = await GetToolsListAsync(_factory, "FullWithCoursesSkill");
+
+        Assert.Equal(toolsA.Count, toolsB.Count);
+        Assert.Equal(toolsA.OrderBy(name => name), toolsB.OrderBy(name => name));
+    }
+
+    [Fact]
+    public async Task ProfileC_ShouldHideCourseWrapperToolsAndRetainStructuralAndUnrelatedTools()
+    {
+        var toolsFull = await GetToolsListAsync(_factory, "Full");
+        var toolsC = await GetToolsListAsync(_factory, "SkillCoursesOptimized");
+
+        Assert.True(toolsC.Count < toolsFull.Count);
+        Assert.DoesNotContain("list_my_courses", toolsC);
+        Assert.DoesNotContain("get_course", toolsC);
+        Assert.Contains("search", toolsC);
+        Assert.Contains("audit_course_structure", toolsC);
+        Assert.Contains("create_assisted_grading_batch", toolsC);
+    }
+
     [Theory]
-    [InlineData("listar_meus_cursos", """{"limite":5,"pagina":1,"moodleAlias":"goias"}""")]
-    [InlineData("buscar_cursos", """{"termo":"32786","limite":5,"moodleAlias":"goias"}""")]
-    [InlineData("consultar_curso", """{"courseId":"32786","moodleAlias":"goias"}""")]
-    [InlineData("listar_conteudos_curso", """{"courseId":"32786","moodleAlias":"goias"}""")]
+    [InlineData("list_my_courses", """{"limite":5,"pagina":1,"moodleAlias":"goias"}""")]
+    [InlineData("search_courses", """{"termo":"32786","limite":5,"moodleAlias":"goias"}""")]
+    [InlineData("get_course", """{"courseId":"32786","moodleAlias":"goias"}""")]
+    [InlineData("list_course_contents", """{"courseId":"32786","moodleAlias":"goias"}""")]
     public async Task ToolsCall_DeveConverterFalhaDeConexaoEmErroEstruturado(
         string toolName,
         string argumentsJson)
@@ -388,7 +414,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync();
 
-        Assert.Contains("list_courses", body, StringComparison.Ordinal);
+        Assert.Contains("list_my_courses", body, StringComparison.Ordinal);
         Assert.Contains("securitySchemes", body, StringComparison.Ordinal);
         Assert.Contains("oauth2", body, StringComparison.Ordinal);
         Assert.Contains("moodle-mcp-audience", body, StringComparison.Ordinal);
@@ -541,7 +567,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
               "id": "call-auth-1",
               "method": "tools/call",
               "params": {
-                "name": "list_courses",
+                "name": "list_my_courses",
                 "arguments": {}
               }
             }
@@ -667,6 +693,107 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.Equal("goias", connection.GetProperty("alias").GetString());
         Assert.Equal("https://moodle.tests/ead", connection.GetProperty("baseUrl").GetString());
         Assert.True(connection.GetProperty("canWrite").GetBoolean());
+    }
+
+    private async Task<IReadOnlyList<string>> GetToolsListAsync(WebApplicationFactory<Program> factory, string exposureProfile)
+    {
+        var customFactory = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+            {
+                configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["MCP_EXPOSURE_PROFILE"] = exposureProfile,
+                    ["McpServerSecurity:RequireApiKey"] = "true",
+                    ["McpServerSecurity:RequireJwt"] = "false"
+                });
+            });
+        });
+
+        var client = customFactory.CreateClient();
+        var apiKey = await RegisterClientAsync(canWrite: true, customFactory);
+        client.DefaultRequestHeaders.Add("X-Mcp-Api-Key", apiKey);
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+
+        var sessionId = await InitializeMcpSessionAsync(client);
+        await NotifyInitializedAsync(client, sessionId);
+
+        var toolsClient = customFactory.CreateClient();
+        toolsClient.DefaultRequestHeaders.Add("X-Mcp-Api-Key", apiKey);
+        toolsClient.DefaultRequestHeaders.Accept.Clear();
+        toolsClient.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        toolsClient.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+
+        var payload = """
+        {
+          "jsonrpc": "2.0",
+          "id": "tools-list-profile",
+          "method": "tools/list",
+          "params": {}
+        }
+        """;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            request.Headers.Add("Mcp-Session-Id", sessionId);
+        }
+
+        var response = await toolsClient.SendAsync(request);
+        Console.WriteLine("MCP response content type: " + response.Content.Headers.ContentType?.ToString());
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+        // Avoid dumping potentially huge tool schemas to the test output; log only length for diagnostics.
+        Console.WriteLine($"MCP raw body length: {body?.Length ?? 0}");
+
+        var parsed = ParseMcpResponseBody(body);
+        var tools = parsed?["result"]?["tools"]?.AsArray();
+        if (tools == null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var list = tools.Select(t => t? ["name"]?.ToString() ?? string.Empty)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToArray();
+
+        Console.WriteLine("MCP tools result: " + string.Join(",", list));
+        return list;
+    }
+
+    private static JsonNode? ParseMcpResponseBody(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonNode.Parse(body);
+        }
+        catch (JsonException)
+        {
+            var dataLines = body
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Where(line => line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                .Select(line => line.Substring("data:".Length).Trim())
+                .Where(line => !string.IsNullOrWhiteSpace(line))
+                .ToArray();
+
+            if (dataLines.Length == 0)
+            {
+                return null;
+            }
+
+            var combined = string.Join(string.Empty, dataLines);
+            return JsonNode.Parse(combined);
+        }
     }
 
     private async Task<string> RegisterClientAsync(bool canWrite, WebApplicationFactory<Program>? factory = null)

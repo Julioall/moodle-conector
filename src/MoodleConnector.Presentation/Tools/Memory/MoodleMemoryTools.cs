@@ -14,8 +14,8 @@ public sealed class MoodleMemoryTools(IUserMemoryService memoryService)
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     [McpServerTool(
-        Name = "gerenciar_memoria_usuario",
-        Title = "Gerenciar memória do usuário",
+        Name = "manage_user_memory",
+        Title = "Manage User Memory",
         ReadOnly = false,
         Destructive = true,
         Idempotent = true,

@@ -16,8 +16,8 @@ public sealed class MoodleForumParticipationTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "listar_alunos_sem_participacao_forum",
-        Title = "Listar Alunos Sem Participacao no Forum",
+        Name = "list_students_without_forum_participation",
+        Title = "List Students Without Forum Participation",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -35,33 +35,6 @@ public sealed class MoodleForumParticipationTools(
         [Description("Máximo de discussões a escanear para identificar participantes. Padrão: 20.")]
         int maxDiscussionsToScan = 20,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrão do usuário.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetForumParticipationCoreAsync(
-            courseId, forumId, maxStudentsToAnalyze, maxDiscussionsToScan, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "list_students_without_forum_participation",
-        Title = "List Students Without Forum Participation",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<GetStudentsWithoutForumParticipationResult>))]
-    [Description("Identifies active students who have not posted in a specific forum. Scans forum discussions to collect authors and subtracts from the student list. NOTE: may be slow for forums with many discussions.")]
-    public Task<CallToolResult> ListStudentsWithoutForumParticipationAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Moodle forum identifier (instance ID).")]
-        string forumId,
-        [Description("Maximum students to analyze. Default: 100.")]
-        int maxStudentsToAnalyze = 100,
-        [Description("Maximum number of discussions to scan for participants. Default: 20.")]
-        int maxDiscussionsToScan = 20,
-        [Description("Moodle connection alias. When omitted, uses the user's default connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

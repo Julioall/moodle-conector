@@ -139,3 +139,29 @@ https://<APP_DOMAIN>/mcp
 - O schema inicial é aplicado pelo script versionado `src/MoodleConnector.Infrastructure/Database/Scripts/001_initial_schema.sql`.
 - O portal local usa cookie HttpOnly e senha mínima de 12 caracteres; em produção o cookie passa a ser `Secure` quando `OAuth__RequireHttpsMetadata=true`.
 - Não grave tokens, senhas, API keys ou secrets reais em arquivos versionados.
+
+## LiveShadow tests (executando contra um Moodle real)
+
+Alguns testes de integração da categoria `LiveShadow` executam chamadas reais contra um ambiente Moodle e precisam de credenciais válidas. Para evitar embutir credenciais no código, as credenciais são lidas de variáveis de ambiente.
+
+Nomes suportados:
+
+- `LIVE_USERNAME` — nome de usuário genérico (fallback).
+- `LIVE_PASSWORD` — senha genérica (fallback).
+- `LIVE_{ALIAS}_USERNAME` — nome de usuário específico para um alias de conexão (ex.: `LIVE_FIEG_USERNAME`).
+- `LIVE_{ALIAS}_PASSWORD` — senha específica para um alias de conexão (ex.: `LIVE_FIEG_PASSWORD`).
+
+Comportamento:
+
+- Os testes tentam primeiro `LIVE_{ALIAS}_USERNAME` / `LIVE_{ALIAS}_PASSWORD` (onde `{ALIAS}` é o alias da conexão em maiúsculas). Se não existirem, usam `LIVE_USERNAME` / `LIVE_PASSWORD`.
+- Se nenhuma variável estiver definida, o teste `LiveShadow` é pulado e escreve uma mensagem no output explicando quais variáveis faltaram.
+
+Exemplo (PowerShell):
+
+```powershell
+$env:LIVE_FIEG_USERNAME = "04112637225"
+$env:LIVE_FIEG_PASSWORD = "442ficxk"
+dotnet test tests\MoodleConnector.Application.Tests\MoodleConnector.Application.Tests.csproj --filter FullyQualifiedName~AssignmentsLiveShadowTests -v normal
+```
+
+Observação: Não coloque credenciais reais em repositórios ou em shells compartilhados. Use variáveis de ambiente temporárias em sessões de CI/CD ou runners seguros.

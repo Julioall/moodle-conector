@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -36,8 +36,8 @@ public sealed class MoodleCourseContentsTools(
     ];
 
     [McpServerTool(
-        Name = "listar_conteudos_curso",
-        Title = "Listar Conteudos Curso",
+        Name = "list_course_contents",
+        Title = "List Course Contents",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -66,38 +66,8 @@ public sealed class MoodleCourseContentsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_contents",
-        Title = "List Course Contents",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
-    [Description("Lists Moodle course sections and modules. URLs are sanitized and files are not downloaded.")]
-    public Task<CallToolResult> ListCourseContentsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Optional module type filter: resource, page, url, book, folder, label, assign, quiz, scorm, or forum.")]
-        string? moduleType = null,
-        [Description("When true, includes hidden items Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListContentsWithOptionalTypeCoreAsync(
-            courseId,
-            moduleType,
-            includeHidden,
-            onlyWithFiles: false,
-            moodleAlias,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_modulo_curso",
-        Title = "Consultar Modulo Curso",
+        Name = "get_course_module",
+        Title = "Get Course Module",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -118,30 +88,8 @@ public sealed class MoodleCourseContentsTools(
     }
 
     [McpServerTool(
-        Name = "get_course_module",
-        Title = "Get Course Module",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseModuleDetailsResponse>))]
-    [Description("Gets a course module by cmid or instance id without downloading files.")]
-    public Task<CallToolResult> GetCourseModuleAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Course module identifier. Can be cmid or instance id.")]
-        string moduleId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetModuleCoreAsync(courseId, moduleId, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_recursos_curso",
-        Title = "Listar Recursos Curso",
+        Name = "list_course_resources",
+        Title = "List Course Resources",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -162,30 +110,8 @@ public sealed class MoodleCourseContentsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_resources",
-        Title = "List Course Resources",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
-    [Description("Lists course content resources: files, pages, URLs, books, folders, and labels.")]
-    public Task<CallToolResult> ListCourseResourcesAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden items Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListContentsCoreAsync(courseId, ResourceModuleTypes, includeHidden, onlyWithFiles: false, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_arquivos_curso",
-        Title = "Listar Arquivos Curso",
+        Name = "list_course_files",
+        Title = "List Course Files",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -206,30 +132,8 @@ public sealed class MoodleCourseContentsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_files",
-        Title = "List Course Files",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
-    [Description("Lists modules that include files returned by Moodle without downloading file contents.")]
-    public Task<CallToolResult> ListCourseFilesAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden items Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListContentsCoreAsync(courseId, [], includeHidden, onlyWithFiles: true, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_paginas_curso",
-        Title = "Listar Paginas Curso",
+        Name = "list_course_pages",
+        Title = "List Course Pages",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -250,30 +154,8 @@ public sealed class MoodleCourseContentsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_pages",
-        Title = "List Course Pages",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
-    [Description("Lists Moodle pages in a course.")]
-    public Task<CallToolResult> ListCoursePagesAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden items Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListContentsCoreAsync(courseId, ["page"], includeHidden, onlyWithFiles: false, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_urls_curso",
-        Title = "Listar URLs Curso",
+        Name = "list_course_urls",
+        Title = "List Course URLs",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -294,30 +176,8 @@ public sealed class MoodleCourseContentsTools(
     }
 
     [McpServerTool(
-        Name = "list_course_urls",
-        Title = "List Course URLs",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseContentsResponse>))]
-    [Description("Lists course URL modules with sanitized links.")]
-    public Task<CallToolResult> ListCourseUrlsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden items Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListContentsCoreAsync(courseId, ["url"], includeHidden, onlyWithFiles: false, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "auditar_estrutura_curso",
-        Title = "Auditar Estrutura Curso",
+        Name = "audit_course_structure",
+        Title = "Audit Course Structure",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -335,28 +195,6 @@ public sealed class MoodleCourseContentsTools(
         CancellationToken cancellationToken = default)
     {
         return AuditCourseStructureCoreAsync(courseId, incluirOcultos, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "audit_course_structure",
-        Title = "Audit Course Structure",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseStructureAuditResponse>))]
-    [Description("Audits course structure in read-only mode, highlighting empty sections and modules without descriptions or dates.")]
-    public Task<CallToolResult> AuditCourseStructureAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden items Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return AuditCourseStructureCoreAsync(courseId, includeHidden, moodleAlias, cancellationToken);
     }
 
     private Task<CallToolResult> ListContentsWithOptionalTypeCoreAsync(

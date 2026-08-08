@@ -38,6 +38,7 @@ using MoodleConnector.Presentation.Tools.Memory;
 using MoodleConnector.Presentation.Tools.Pedagogy;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
+using System.Reflection;
 using System.Threading.RateLimiting;
 using MediatR;
 using MoodleConnector.Application.Grading;
@@ -98,6 +99,41 @@ builder.Services
     .Bind(builder.Configuration.GetSection(ConnectorRateLimitOptions.SectionName));
 
 builder.Services.AddSingleton<McpFixedWindowRateLimiter>();
+
+// Register exposure policy via factory so configuration set by test hosts (WithWebHostBuilder)
+// is respected when the DI container is built.
+builder.Services.AddSingleton<IMcpToolExposurePolicy>(sp =>
+{
+    var cfg = sp.GetRequiredService<IConfiguration>();
+    var exposureProfileString = cfg["MCP_EXPOSURE_PROFILE"] ?? "Full";
+    if (Enum.TryParse<ToolExposureProfile>(exposureProfileString, true, out var exposureProfile))
+    {
+        return new CognitiveExposurePolicy(exposureProfile);
+    }
+    return new CognitiveExposurePolicy(ToolExposureProfile.Full);
+});
+
+// Build deterministic tool metadata registry once at startup and register a pre-populated instance.
+// Avoid building a temporary ServiceProvider to prevent creating multiple DI containers
+// and duplicated singleton instances.
+var toolMetadataRegistry = new ToolMetadataRegistry();
+var initialToolContainers = new Type[]
+{
+    typeof(MoodleCoursesTools), typeof(MoodleUniversalTools), typeof(MoodleUniversalWriteTools), typeof(MoodleParticipantsTools),
+    typeof(MoodleCourseContentsTools), typeof(MoodleCourseActivitiesTools), typeof(MoodleForumTools), typeof(MoodleForumParticipationTools),
+    typeof(MoodleAssignmentSubmissionsTools), typeof(MoodlePendingSubmissionsTools), typeof(MoodleGradingTools), typeof(MoodleGradebookTools),
+    typeof(MoodleStudentPerformanceTools), typeof(MoodleCompletionTools), typeof(MoodleAccessMonitoringTools), typeof(MoodleRiskAnalysisTools),
+    typeof(MoodleGradingContextDiagnosticsTools), typeof(MoodleGradingReviewAppTools), typeof(MoodleTutorMessageTools), typeof(MoodleReportTools),
+    typeof(MoodleMonitorTools), typeof(MoodleMemoryTools), typeof(MoodleMemoryDocumentTools), typeof(MoodlePedagogyTools)
+};
+
+foreach (var t in initialToolContainers)
+{
+    try { toolMetadataRegistry.RegisterFromType(t); } catch { }
+}
+
+builder.Services.AddSingleton(toolMetadataRegistry);
+
 
 var mcpSecurityOptions = builder.Configuration
     .GetSection(McpServerSecurityOptions.SectionName)
@@ -289,6 +325,38 @@ var mcpServerBuilder = builder.Services
             }
 
             var security = request.Services.GetRequiredService<IOptions<McpServerSecurityOptions>>().Value;
+
+            // Apply exposure policy BEFORE serialization/transport so JSON vs SSE is irrelevant.
+            var policy = request.Services.GetService<IMcpToolExposurePolicy>();
+            if (policy != null)
+            {
+                var registry = request.Services.GetService<ToolMetadataRegistry>();
+
+                // Remove tools that the policy says should not be exposed.
+                // Iterate in reverse to allow removal from the collection.
+                var beforeNames = result.Tools.Select(t => t?.Name).ToList();
+
+                for (int i = result.Tools.Count - 1; i >= 0; i--)
+                {
+                    var tool = result.Tools[i];
+                    if (tool == null) continue;
+
+                    MoodleToolMetadataAttribute? metadata = null;
+                    if (registry != null)
+                    {
+                        registry.TryGet(tool.Name, out metadata);
+                    }
+
+                    var expose = policy.ShouldExpose(tool.Name ?? string.Empty, metadata);
+
+                    if (!expose)
+                    {
+                        result.Tools.RemoveAt(i);
+                    }
+                }
+            }
+
+            // Post-process remaining tools for metadata and security schemes
             foreach (var tool in result.Tools)
             {
                 AddGradingReviewToolMetadata(tool);
@@ -328,6 +396,8 @@ var mcpServerBuilder = builder.Services
     .WithTools<MoodlePedagogyTools>()
     .WithResources<MoodleGradingReviewAppResources>();
 
+// ToolMetadataRegistry was pre-populated and registered above; do not build temporary providers here.
+
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();
 if (featureOptions.DemoToolsEnabled)
 {
@@ -343,6 +413,8 @@ if (assignmentWriteOptions.AssignmentGradeWriteEnabled)
 }
 
 var app = builder.Build();
+
+// ToolMetadataRegistry is registered and pre-populated at startup.
 
 app.UseForwardedHeaders();
 
@@ -1256,6 +1328,7 @@ app.MapPost("/admin/connector-clients/register", async (
     });
 }).RequireRateLimiting(AdminApiRateLimitPolicy);
 
+app.UseMiddleware<McpToolFilterMiddleware>();
 app.MapMcp(mcpPath);
 
 app.MapFallbackToFile("index.html");

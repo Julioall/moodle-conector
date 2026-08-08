@@ -18,8 +18,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "listar_entregas_atividade",
-        Title = "Listar Entregas Atividade",
+        Name = "list_assignment_submissions",
+        Title = "List Assignment Submissions",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -70,60 +70,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
     }
 
     [McpServerTool(
-        Name = "list_assignment_submissions",
-        Title = "List Assignment Submissions",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListAssignmentSubmissionsResponse>))]
-    [Description("Lists assignment submissions with pagination. Does not download attachments or return full submission text.")]
-    public Task<CallToolResult> ListAssignmentSubmissionsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Assignment identifier. Can be cmid or instance id.")]
-        string assignmentId,
-        [Description("Result page, starting at 1.")]
-        int page = 1,
-        [Description("Page size, from 1 to 100.")]
-        int pageSize = 20,
-        [Description("Filter: all, submitted, pending, late, or awaiting_grading.")]
-        string status = "all",
-        [Description("Returns submissions modified since this date, when provided.")]
-        DateTimeOffset? since = null,
-        [Description("Returns submissions modified before this date, when provided.")]
-        DateTimeOffset? before = null,
-        [Description("When false, removes late submissions from general reports.")]
-        bool includeLate = true,
-        [Description("When false, removes ungraded submissions from general reports.")]
-        bool includeUngraded = true,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (!TryParseFilter(status, out var filter))
-        {
-            return Task.FromResult(ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Invalid status filter. Use all, submitted, pending, late, or awaiting_grading."));
-        }
-
-        return ListSubmissionsCoreAsync(
-            courseId,
-            assignmentId,
-            filter,
-            page,
-            pageSize,
-            since,
-            before,
-            includeLate,
-            includeUngraded,
-            moodleAlias,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_entrega_aluno",
-        Title = "Consultar Entrega Aluno",
+        Name = "get_student_submission",
+        Title = "Get Student Submission",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -142,28 +90,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
     }
 
     [McpServerTool(
-        Name = "get_student_submission",
-        Title = "Get Student Submission",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<StudentSubmissionResponse>))]
-    [Description("Gets one student's assignment submission status without returning full text or attachments.")]
-    public Task<CallToolResult> GetStudentSubmissionAsync(
-        string courseId,
-        string assignmentId,
-        string studentId,
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetStudentSubmissionCoreAsync(courseId, assignmentId, studentId, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_entregas_pendentes",
-        Title = "Listar Entregas Pendentes",
+        Name = "list_pending_submissions",
+        Title = "List Pending Submissions",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -196,42 +124,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
     }
 
     [McpServerTool(
-        Name = "list_pending_submissions",
-        Title = "List Pending Submissions",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListAssignmentSubmissionsResponse>))]
-    [Description("Lists active students without a submitted assignment submission.")]
-    public Task<CallToolResult> ListPendingSubmissionsAsync(
-        string courseId,
-        string assignmentId,
-        int page = 1,
-        int pageSize = 20,
-        DateTimeOffset? since = null,
-        DateTimeOffset? before = null,
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListSubmissionsCoreAsync(
-            courseId,
-            assignmentId,
-            AssignmentSubmissionFilter.NotSubmitted,
-            page,
-            pageSize,
-            since,
-            before,
-            includeLate: true,
-            includeUngraded: true,
-            moodleAlias,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_entregas_atrasadas",
-        Title = "Listar Entregas Atrasadas",
+        Name = "list_late_submissions",
+        Title = "List Late Submissions",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -264,42 +158,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
     }
 
     [McpServerTool(
-        Name = "list_late_submissions",
-        Title = "List Late Submissions",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListAssignmentSubmissionsResponse>))]
-    [Description("Lists submissions sent after the assignment deadline returned by Moodle.")]
-    public Task<CallToolResult> ListLateSubmissionsAsync(
-        string courseId,
-        string assignmentId,
-        int page = 1,
-        int pageSize = 20,
-        DateTimeOffset? since = null,
-        DateTimeOffset? before = null,
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListSubmissionsCoreAsync(
-            courseId,
-            assignmentId,
-            AssignmentSubmissionFilter.Late,
-            page,
-            pageSize,
-            since,
-            before,
-            includeLate: true,
-            includeUngraded: true,
-            moodleAlias,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_entregas_aguardando_correcao",
-        Title = "Listar Entregas Aguardando Correcao",
+        Name = "list_submissions_awaiting_grading",
+        Title = "List Submissions Awaiting Grading",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -332,60 +192,6 @@ public sealed class MoodleAssignmentSubmissionsTools(
     }
 
     [McpServerTool(
-        Name = "list_submissions_awaiting_grading",
-        Title = "List Submissions Awaiting Grading",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListAssignmentSubmissionsResponse>))]
-    [Description("Lists submitted assignments still awaiting grading according to Moodle grading status.")]
-    public Task<CallToolResult> ListSubmissionsAwaitingGradingAsync(
-        string courseId,
-        string assignmentId,
-        int page = 1,
-        int pageSize = 20,
-        DateTimeOffset? since = null,
-        DateTimeOffset? before = null,
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListSubmissionsCoreAsync(
-            courseId,
-            assignmentId,
-            AssignmentSubmissionFilter.NeedsGrading,
-            page,
-            pageSize,
-            since,
-            before,
-            includeLate: true,
-            includeUngraded: true,
-            moodleAlias,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_status_submissao",
-        Title = "Consultar Status Submissao",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<StudentSubmissionResponse>))]
-    [Description("Consulta o status de submissao de um estudante em uma tarefa Moodle.")]
-    public Task<CallToolResult> ConsultarStatusSubmissaoAsync(
-        string courseId,
-        string assignmentId,
-        string studentId,
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetStudentSubmissionCoreAsync(courseId, assignmentId, studentId, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
         Name = "get_submission_status",
         Title = "Get Submission Status",
         ReadOnly = true,
@@ -394,8 +200,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<StudentSubmissionResponse>))]
-    [Description("Gets one student's Moodle assignment submission status.")]
-    public Task<CallToolResult> GetSubmissionStatusAsync(
+    [Description("Consulta o status de submissao de um estudante em uma tarefa Moodle.")]
+    public Task<CallToolResult> ConsultarStatusSubmissaoAsync(
         string courseId,
         string assignmentId,
         string studentId,

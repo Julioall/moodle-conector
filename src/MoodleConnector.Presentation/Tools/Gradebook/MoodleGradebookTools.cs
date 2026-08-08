@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using MediatR;
 using ModelContextProtocol.Protocol;
@@ -16,8 +16,8 @@ public sealed class MoodleGradebookTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "consultar_boletim_aluno",
-        Title = "Consultar Boletim Aluno",
+        Name = "get_student_gradebook",
+        Title = "Get Student Gradebook",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -31,28 +31,6 @@ public sealed class MoodleGradebookTools(
         [Description("Identificador do estudante (ID do Moodle).")]
         string studentId,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetGradebookCoreAsync(courseId, studentId, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "get_student_gradebook",
-        Title = "Get Student Gradebook",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseGradebook>))]
-    [Description("Gets the gradebook for a student in a course. Returns grades by activity, category, and final course grade.")]
-    public Task<CallToolResult> GetStudentGradebookAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Student identifier (Moodle ID).")]
-        string studentId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

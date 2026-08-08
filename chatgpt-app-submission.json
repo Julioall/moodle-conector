@@ -8,7 +8,7 @@
     "category": "EDUCATION"
   },
   "tools": {
-    "atualizar_rascunho_correcao": {
+    "update_grading_draft": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -32,7 +32,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "auditar_estrutura_curso": {
+    "audit_course_structure": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -44,7 +44,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "buscar_cursos": {
+    "search_courses": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -56,7 +56,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "cancelar_lote_correcao_assistida": {
+    "cancel_assisted_grading_batch": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -68,7 +68,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible Moodle actions."
       }
     },
-    "confirmar_lancamento_lote_moodle": {
+    "confirm_batch_grade_launch": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -80,7 +80,7 @@
         "destructive_justification": "Commits official Moodle grade and feedback records after confirmation, which can be hard to reverse."
       }
     },
-    "consultar_atividade": {
+    "get_course_activity": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -92,7 +92,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_auditoria_correcao": {
+    "get_grading_audit": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -104,7 +104,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_auditoria_correcao_lote": {
+    "get_grading_batch_audit": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -116,7 +116,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_boletim_aluno": {
+    "get_student_gradebook": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -128,7 +128,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_contexto_item_correcao_assistida": {
+    "get_grading_item_context": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -140,7 +140,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_curso": {
+    "get_course": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -152,7 +152,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_entrega_aluno": {
+    "get_student_submission": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -164,7 +164,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_item_correcao_assistida": {
+    "get_assisted_grading_item": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -176,7 +176,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_membros_grupo": {
+    "get_group_members": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -188,7 +188,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_modulo_curso": {
+    "get_course_module": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -200,7 +200,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_orientacoes_pedagogicas": {
+    "get_pedagogical_guidelines": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -212,7 +212,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_prazos_atividades": {
+    "list_activity_deadlines": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -224,7 +224,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_progresso_aluno": {
+    "get_student_completion": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -236,7 +236,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_quiz": {
+    "get_quiz": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -248,7 +248,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_status_lote_correcao": {
+    "get_grading_batch_status": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -260,7 +260,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_status_submissao": {
+    "get_submission_status": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -272,7 +272,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "consultar_tarefa": {
+    "get_assignment": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -284,7 +284,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "criar_lote_correcao_assistida": {
+    "create_assisted_grading_batch": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -296,7 +296,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible Moodle actions."
       }
     },
-    "criar_previa_lancamento_lote": {
+    "create_batch_grade_launch_preview": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -308,7 +308,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible Moodle actions."
       }
     },
-    "descobrir_funcoes_moodle_correcao": {
+    "discover_grading_functions": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -332,7 +332,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "executar_descoberta_tecnica_correcao": {
+    "execute_grading_discovery": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -344,7 +344,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "exportar_relatorio_correcao_coordenacao": {
+    "export_grading_coordination_report": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -368,7 +368,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "gerar_relatorio_risco_estudantes": {
+    "report_students_at_risk": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -380,7 +380,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "gerenciar_memoria_usuario": {
+    "manage_user_memory": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
@@ -728,7 +728,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_alunos_curso": {
+    "list_course_students": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -740,7 +740,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_arquivos_curso": {
+    "list_course_files": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -752,7 +752,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_atividades_curso": {
+    "list_course_activities": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -764,7 +764,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_conteudos_curso": {
+    "list_course_contents": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -776,7 +776,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_entregas_aguardando_correcao": {
+    "list_submissions_awaiting_grading": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -788,7 +788,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_entregas_atividade": {
+    "list_assignment_submissions": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -800,7 +800,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_entregas_atrasadas": {
+    "list_late_submissions": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -812,7 +812,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_entregas_corrigiveis": {
+    "list_gradable_submissions": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -824,7 +824,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_entregas_pendentes": {
+    "list_pending_submissions": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -836,7 +836,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_grupos_curso": {
+    "list_course_groups": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -848,7 +848,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_meus_cursos": {
+    "list_my_courses": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -860,7 +860,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_paginas_curso": {
+    "list_course_pages": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -872,7 +872,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_participantes_curso": {
+    "list_course_participants": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -884,7 +884,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_quizzes_curso": {
+    "list_course_quizzes": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -896,7 +896,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_recursos_curso": {
+    "list_course_resources": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -908,7 +908,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_scorms_curso": {
+    "list_course_scorms": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -920,7 +920,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_tarefas_curso": {
+    "list_course_assignments": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -932,7 +932,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "listar_urls_curso": {
+    "list_course_urls": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -944,7 +944,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "preparar_correcao_entrega": {
+    "prepare_submission_grading": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -968,7 +968,7 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
     },
-    "revisar_feedbacks_lote": {
+    "review_batch_feedbacks": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -1026,7 +1026,7 @@
       "description": "Save a durable, non-sensitive preference for the authenticated user.",
       "user_prompt": "Remember that I prefer concise feedback, with category preferencia, key feedback_style, and origin explicit.",
       "file_attachment_urls": null,
-      "tools_triggered": "gerenciar_memoria_usuario",
+      "tools_triggered": "manage_user_memory",
       "expected_output": "Saves the private preference for the authenticated user and returns the stored memory without exposing another user's data.",
       "expected_output_url": null
     },
@@ -1034,7 +1034,7 @@
       "description": "Consult packaged pedagogical guidance before preparing educational feedback.",
       "user_prompt": "Find pedagogical guidance about formative feedback before I review student work.",
       "file_attachment_urls": null,
-      "tools_triggered": "consultar_orientacoes_pedagogicas",
+      "tools_triggered": "get_pedagogical_guidelines",
       "expected_output": "Returns relevant guide titles, sections, excerpts, relative paths, and relevance scores from packaged pedagogical content.",
       "expected_output_url": null
     },
@@ -1042,7 +1042,7 @@
       "description": "Prepare a human-confirmed Moodle grade and feedback launch preview.",
       "user_prompt": "Create a launch preview for reviewed feedback in assisted grading batch 00000000-0000-0000-0000-000000000001.",
       "file_attachment_urls": null,
-      "tools_triggered": "criar_previa_lancamento_lote",
+      "tools_triggered": "create_batch_grade_launch_preview",
       "expected_output": "Returns a pending action preview with ready item counts, warnings if any, and exact confirmation text required before Moodle is changed.",
       "expected_output_url": null
     }
