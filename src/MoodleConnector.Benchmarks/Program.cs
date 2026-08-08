@@ -106,10 +106,18 @@ class Program
             var profileTraces = new List<CognitiveTrace>();
 
             int successCount = 0;
+            int taskIndex = 0;
             foreach (var task in tasks)
             {
+                // Inter-task delay to respect OpenAI TPM limits (30k/min).
+                // Each task with 97 tools consumes ~13k tokens. Without delay,
+                // ~2 tasks exhaust the budget and trigger 429 errors.
+                if (taskIndex > 0)
+                    await Task.Delay(TimeSpan.FromSeconds(2));
+                taskIndex++;
+
                 Console.Write($"  [{task.Id}] {(task.IsCriticalTask ? "⚠️ " : "")}");
-                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
                 try
                 {
                     var trace = await driver.RunAsync(task, profile, cts.Token);

@@ -12,6 +12,39 @@ public static class IntentMapper
 {
     private static readonly Dictionary<string, string> _map = new(StringComparer.OrdinalIgnoreCase)
     {
+        // ---------------------------------------------------------------
+        // REAL MCP tool names (observed in benchmark traces from manifest)
+        // ---------------------------------------------------------------
+
+        // courses.list — real names
+        { "list_my_courses",                    "courses.list" },
+        { "get_my_courses",                     "courses.list" },
+        { "get_enrolled_courses",               "courses.list" },
+
+        // courses.search — real names
+        { "search_courses",                     "courses.search" },
+        { "find_course",                        "courses.search" },
+        { "search",                             "courses.search" },  // universal search tool
+        { "course_search",                      "courses.search" },
+
+        // courses.details — real names
+        // 'get_course' is used by model for both details and search tasks
+        { "get_course",                         "courses.details" },
+        { "get_course_by_id",                   "courses.details" },
+        { "get_course_info",                    "courses.details" },
+        { "course_details",                     "courses.details" },
+
+        // courses.structure — real names
+        { "list_course_contents",               "courses.structure" },
+        { "get_course_contents",                "courses.structure" },
+        { "list_course_resources",              "courses.structure" },
+        { "get_course_resources",               "courses.structure" },
+        { "course_contents",                    "courses.structure" },
+
+        // ---------------------------------------------------------------
+        // Legacy assumed names (moodle_ prefix) — kept for compatibility
+        // ---------------------------------------------------------------
+
         // courses.list
         { "moodle_list_my_courses",             "courses.list" },
         { "moodle_courses_list",                "courses.list" },
@@ -22,6 +55,7 @@ public static class IntentMapper
         { "moodle_courses_search",              "courses.search" },
         { "moodle_find_course",                 "courses.search" },
         { "moodle_course_search",               "courses.search" },
+        { "moodle_search",                      "courses.search" },
 
         // courses.details
         { "moodle_get_course_by_id",            "courses.details" },
@@ -36,9 +70,10 @@ public static class IntentMapper
         { "moodle_course_contents",             "courses.structure" },
         { "moodle_list_course_contents",        "courses.structure" },
 
-        // Generic read — intent resolved from parameters, mapped as ambiguous
+        // Generic read
         { "moodle_execute_read",                "generic.read" },
         { "moodle_read",                        "generic.read" },
+        { "fetch",                              "generic.read" },  // universal fetch tool
 
         // Discovery / core
         { "moodle_get_site_info",               "core.site_info" },
