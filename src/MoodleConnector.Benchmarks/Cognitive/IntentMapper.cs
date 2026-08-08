@@ -22,6 +22,9 @@ public static class IntentMapper
         { "moodle_courses_search",              "courses.search" },
         { "moodle_find_course",                 "courses.search" },
         { "moodle_course_search",               "courses.search" },
+        // 'search' is a manifest tool name for generic course search in some profiles
+        { "search",                             "courses.search" },
+        { "moodle_search",                      "courses.search" },
 
         // courses.details
         { "moodle_get_course_by_id",            "courses.details" },

@@ -36,7 +36,14 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     private BenchmarkScorer _scorer = new();
     private HashSet<string> _knownToolNames = new(StringComparer.OrdinalIgnoreCase);
 
+    // Tools cached after first fetch — avoids 30× redundant tools/list calls per profile
+    private JsonArray? _cachedMcpTools;
+    private List<ChatTool>? _cachedChatTools;
+    private int _cachedToolSchemaTokens;
+    private string _cachedManifestHash = string.Empty;
+
     private const string McpEndpoint = "/mcp";
+    private const int MaxRetries = 5;
     public static readonly string CommitSha = ResolveCommitSha();
     public const string BenchmarkVersion = "1.0.0";
 
@@ -162,11 +169,15 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     }
 
     // ------------------------------------------------------------------
-    // MCP tool fetch
+    // MCP tool fetch (cached per driver instance)
     // ------------------------------------------------------------------
 
     private async Task<(JsonArray tools, int schemaTokens)> FetchMcpToolsAsync(CancellationToken ct)
     {
+        // Return cached result after first successful fetch per profile
+        if (_cachedMcpTools != null)
+            return (_cachedMcpTools, _cachedToolSchemaTokens);
+
         await EnsureInitializedAsync(ct);
 
         var request = new JsonObject
@@ -189,13 +200,11 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             throw new Exception($"MCP tools/list failed: HTTP {(int)response.StatusCode} — {body}");
         }
 
-        // Handle both streaming (202 + SSE body) and direct JSON responses
         var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
 
         JsonObject? responseJson;
         if (contentType.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
         {
-            // Streamable HTTP can return SSE events — read first data event
             var streamBody = await response.Content.ReadAsStringAsync(ct);
             responseJson = ParseFirstSseJson(streamBody);
         }
@@ -206,6 +215,12 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 
         var tools = responseJson?["result"]?["tools"]?.AsArray() ?? new JsonArray();
         var schemaTokens = tools.Sum(t => EstimateTokens(t?["inputSchema"]?.ToJsonString() ?? string.Empty));
+
+        // Cache for all subsequent tasks in this profile run
+        _cachedMcpTools = tools;
+        _cachedToolSchemaTokens = schemaTokens;
+        _cachedManifestHash = ComputeManifestHash(tools);
+
         return (tools, schemaTokens);
     }
 
@@ -261,11 +276,11 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     {
         var stopwatch = Stopwatch.StartNew();
 
-        // 1. Fetch tools (initializes session on first call per driver instance)
+        // 1. Fetch tools — cached after first call, avoids 30× redundant fetches per profile
         var (mcpTools, toolSchemaTokens) = await FetchMcpToolsAsync(cancellationToken);
-        var toolManifestHash = ComputeManifestHash(mcpTools);
+        var toolManifestHash = _cachedManifestHash;
 
-        // Rebuild known tool names and scorer (first call per profile)
+        // Build known tool names and scorer once per profile
         if (_knownToolNames.Count == 0)
         {
             foreach (var t in mcpTools)
@@ -276,17 +291,20 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             _scorer = new BenchmarkScorer(_knownToolNames);
         }
 
-        // 2. Build ChatTools from MCP manifest
-        var chatTools = new List<ChatTool>();
-        foreach (var mtool in mcpTools)
+        // 2. Build ChatTools list once per profile (cached)
+        if (_cachedChatTools == null)
         {
-            var name = mtool?["name"]?.ToString() ?? string.Empty;
-            var description = mtool?["description"]?.ToString() ?? string.Empty;
-            var inputSchema = mtool?["inputSchema"]?.AsObject();
-            if (!string.IsNullOrEmpty(name) && inputSchema != null)
+            _cachedChatTools = new List<ChatTool>();
+            foreach (var mtool in mcpTools)
             {
-                var schemaBytes = JsonSerializer.SerializeToUtf8Bytes(inputSchema);
-                chatTools.Add(ChatTool.CreateFunctionTool(name, description, BinaryData.FromBytes(schemaBytes)));
+                var name = mtool?["name"]?.ToString() ?? string.Empty;
+                var description = mtool?["description"]?.ToString() ?? string.Empty;
+                var inputSchema = mtool?["inputSchema"]?.AsObject();
+                if (!string.IsNullOrEmpty(name) && inputSchema != null)
+                {
+                    var schemaBytes = JsonSerializer.SerializeToUtf8Bytes(inputSchema);
+                    _cachedChatTools.Add(ChatTool.CreateFunctionTool(name, description, BinaryData.FromBytes(schemaBytes)));
+                }
             }
         }
 
@@ -298,7 +316,7 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         };
 
         var options = new ChatCompletionOptions { Temperature = 0.0f };
-        foreach (var tool in chatTools)
+        foreach (var tool in _cachedChatTools!)
             options.Tools.Add(tool);
 
         string? selectedTool = null;
@@ -309,10 +327,12 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         var aggregatedPromptTokens = 0;
         var aggregatedCompletionTokens = 0;
 
-        // 4. Agent loop (max 5 turns)
+        // 4. Agent loop (max 5 turns) with 429 retry
         for (int i = 0; i < 5; i++)
         {
-            var completion = await _chatClient.CompleteChatAsync(messages, options, cancellationToken);
+            var completion = await RetryOnRateLimitAsync(
+                () => _chatClient.CompleteChatAsync(messages, options, cancellationToken),
+                cancellationToken);
             messages.Add(new AssistantChatMessage(completion));
 
             aggregatedPromptTokens += completion.Value.Usage?.InputTokenCount ?? 0;
@@ -394,6 +414,39 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             ResultContent: resultContent,
             Scoring: scoring
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Retry helper for 429 rate-limit responses
+    // ------------------------------------------------------------------
+
+    private static async Task<T> RetryOnRateLimitAsync<T>(Func<Task<T>> operation, CancellationToken ct)
+    {
+        var delay = TimeSpan.FromSeconds(1);
+        for (int attempt = 0; attempt < MaxRetries; attempt++)
+        {
+            try
+            {
+                return await operation();
+            }
+            catch (Exception ex) when (ex.Message.Contains("429") || ex.Message.Contains("rate_limit"))
+            {
+                if (attempt == MaxRetries - 1) throw;
+
+                // Parse "Please try again in Xms" if present
+                var match = System.Text.RegularExpressions.Regex.Match(
+                    ex.Message, @"try again in (\d+)ms");
+                var waitMs = match.Success ? int.Parse(match.Groups[1].Value) + 200 : 0;
+                var waitTime = waitMs > 0
+                    ? TimeSpan.FromMilliseconds(waitMs)
+                    : delay;
+
+                Console.Write($" [429 retry {attempt + 1}/{MaxRetries} wait {waitTime.TotalSeconds:F1}s]");
+                await Task.Delay(waitTime, ct);
+                delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds * 2, 60)); // exponential cap at 60s
+            }
+        }
+        throw new InvalidOperationException("Unreachable");
     }
 
     // ------------------------------------------------------------------
