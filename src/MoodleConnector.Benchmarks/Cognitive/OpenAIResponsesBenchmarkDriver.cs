@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
@@ -15,16 +14,29 @@ using OpenAI.Chat;
 
 namespace MoodleConnector.Benchmarks.Cognitive;
 
+/// <summary>
+/// Benchmark driver using the MCP Streamable HTTP transport (POST /mcp).
+/// The MoodleConnector server uses .WithHttpTransport() which implements
+/// the modern Streamable HTTP protocol — NOT the legacy SSE transport.
+///
+/// Protocol summary:
+///   - Initialize: POST /mcp  { jsonrpc, id, method:"initialize", params:{ ... } }
+///     → response contains { result: { ... } }
+///     → server returns Mcp-Session-Id header
+///   - Subsequent requests: POST /mcp with Mcp-Session-Id header
+///   - tools/list: POST /mcp { jsonrpc, id, method:"tools/list" }
+///   - tools/call:  POST /mcp { jsonrpc, id, method:"tools/call", params:{ name, arguments } }
+/// </summary>
 public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 {
     private readonly ChatClient _chatClient;
     private readonly HttpClient _mcpClient;
-    private string _postEndpoint = string.Empty;
-    private HttpResponseMessage? _sseResponse;
-    private StreamReader? _sseReader;
+    private string? _sessionId;
+    private bool _initialized;
     private BenchmarkScorer _scorer = new();
     private HashSet<string> _knownToolNames = new(StringComparer.OrdinalIgnoreCase);
 
+    private const string McpEndpoint = "/mcp";
     public static readonly string CommitSha = ResolveCommitSha();
     public const string BenchmarkVersion = "1.0.0";
 
@@ -34,14 +46,16 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         _mcpClient = mcpClient;
     }
 
+    // ------------------------------------------------------------------
+    // Static helpers
+    // ------------------------------------------------------------------
+
     private static string ResolveCommitSha()
     {
-        // Prefer environment variable (set by CI)
         var envSha = Environment.GetEnvironmentVariable("GIT_COMMIT_SHA")
             ?? Environment.GetEnvironmentVariable("GITHUB_SHA");
         if (!string.IsNullOrWhiteSpace(envSha)) return envSha.Trim();
 
-        // Fallback: run git locally
         try
         {
             var psi = new ProcessStartInfo("git", "rev-parse HEAD")
@@ -65,63 +79,232 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
     }
 
+    // ------------------------------------------------------------------
+    // MCP Streamable HTTP initialization
+    // ------------------------------------------------------------------
+
+    /// <summary>
+    /// Initializes the MCP session via Streamable HTTP.
+    /// After this call, _sessionId is set and all subsequent requests
+    /// include the Mcp-Session-Id header.
+    /// </summary>
+    private async Task EnsureInitializedAsync(CancellationToken ct)
+    {
+        if (_initialized) return;
+
+        var request = new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = "init-1",
+            ["method"] = "initialize",
+            ["params"] = new JsonObject
+            {
+                ["protocolVersion"] = "2024-11-05",
+                ["capabilities"] = new JsonObject
+                {
+                    ["tools"] = new JsonObject()
+                },
+                ["clientInfo"] = new JsonObject
+                {
+                    ["name"] = "MoodleBench",
+                    ["version"] = BenchmarkVersion
+                }
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, McpEndpoint)
+        {
+            Content = JsonContent.Create(request)
+        };
+
+        // Apply session ID if we have one from a previous attempt
+        if (!string.IsNullOrEmpty(_sessionId))
+            httpRequest.Headers.TryAddWithoutValidation("Mcp-Session-Id", _sessionId);
+
+        var response = await _mcpClient.SendAsync(httpRequest, ct);
+
+        // Capture session ID from response headers
+        if (response.Headers.TryGetValues("Mcp-Session-Id", out var sessionValues))
+        {
+            _sessionId = sessionValues.FirstOrDefault();
+            // Update default headers for subsequent requests
+            _mcpClient.DefaultRequestHeaders.Remove("Mcp-Session-Id");
+            if (!string.IsNullOrEmpty(_sessionId))
+                _mcpClient.DefaultRequestHeaders.TryAddWithoutValidation("Mcp-Session-Id", _sessionId);
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new Exception($"MCP initialize failed: HTTP {(int)response.StatusCode} — {body}");
+        }
+
+        // Send initialized notification
+        var notification = new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["method"] = "notifications/initialized"
+        };
+        using var notifRequest = new HttpRequestMessage(HttpMethod.Post, McpEndpoint)
+        {
+            Content = JsonContent.Create(notification)
+        };
+        // Best effort — server may return 202 Accepted or 200
+        _ = await _mcpClient.SendAsync(notifRequest, ct);
+
+        _initialized = true;
+    }
+
+    // ------------------------------------------------------------------
+    // MCP tool fetch
+    // ------------------------------------------------------------------
+
+    private async Task<(JsonArray tools, int schemaTokens)> FetchMcpToolsAsync(CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct);
+
+        var request = new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = Guid.NewGuid().ToString(),
+            ["method"] = "tools/list"
+        };
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, McpEndpoint)
+        {
+            Content = JsonContent.Create(request)
+        };
+
+        var response = await _mcpClient.SendAsync(httpRequest, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new Exception($"MCP tools/list failed: HTTP {(int)response.StatusCode} — {body}");
+        }
+
+        // Handle both streaming (202 + SSE body) and direct JSON responses
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+
+        JsonObject? responseJson;
+        if (contentType.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            // Streamable HTTP can return SSE events — read first data event
+            var streamBody = await response.Content.ReadAsStringAsync(ct);
+            responseJson = ParseFirstSseJson(streamBody);
+        }
+        else
+        {
+            responseJson = await response.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: ct);
+        }
+
+        var tools = responseJson?["result"]?["tools"]?.AsArray() ?? new JsonArray();
+        var schemaTokens = tools.Sum(t => EstimateTokens(t?["inputSchema"]?.ToJsonString() ?? string.Empty));
+        return (tools, schemaTokens);
+    }
+
+    // ------------------------------------------------------------------
+    // MCP tool call
+    // ------------------------------------------------------------------
+
+    private async Task<string> CallMcpToolAsync(string name, string argumentsJson, CancellationToken ct)
+    {
+        await EnsureInitializedAsync(ct);
+
+        var request = new JsonObject
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = Guid.NewGuid().ToString(),
+            ["method"] = "tools/call",
+            ["params"] = new JsonObject
+            {
+                ["name"] = name,
+                ["arguments"] = JsonNode.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson)
+            }
+        };
+
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, McpEndpoint)
+        {
+            Content = JsonContent.Create(request)
+        };
+
+        var response = await _mcpClient.SendAsync(httpRequest, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new Exception($"MCP tools/call failed for '{name}': HTTP {(int)response.StatusCode} — {body}");
+        }
+
+        var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+        if (contentType.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            var streamBody = await response.Content.ReadAsStringAsync(ct);
+            var parsed = ParseFirstSseJson(streamBody);
+            return parsed?.ToJsonString() ?? streamBody;
+        }
+
+        return await response.Content.ReadAsStringAsync(ct);
+    }
+
+    // ------------------------------------------------------------------
+    // Main benchmark run
+    // ------------------------------------------------------------------
+
     public async Task<CognitiveTrace> RunAsync(BenchmarkTask task, BenchmarkProfile profile, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
 
-        // 1. Fetch available tools from MCP
+        // 1. Fetch tools (initializes session on first call per driver instance)
         var (mcpTools, toolSchemaTokens) = await FetchMcpToolsAsync(cancellationToken);
         var toolManifestHash = ComputeManifestHash(mcpTools);
 
-        // Build known tool names set for hallucination detection
-        _knownToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var t in mcpTools)
+        // Rebuild known tool names and scorer (first call per profile)
+        if (_knownToolNames.Count == 0)
         {
-            var n = t?["name"]?.ToString();
-            if (!string.IsNullOrEmpty(n)) _knownToolNames.Add(n);
+            foreach (var t in mcpTools)
+            {
+                var n = t?["name"]?.ToString();
+                if (!string.IsNullOrEmpty(n)) _knownToolNames.Add(n);
+            }
+            _scorer = new BenchmarkScorer(_knownToolNames);
         }
-        _scorer = new BenchmarkScorer(_knownToolNames);
-        
+
+        // 2. Build ChatTools from MCP manifest
         var chatTools = new List<ChatTool>();
         foreach (var mtool in mcpTools)
         {
-            var name = mtool["name"]?.ToString() ?? string.Empty;
-            var description = mtool["description"]?.ToString() ?? string.Empty;
-            var inputSchema = mtool["inputSchema"]?.AsObject();
-            if (inputSchema != null)
+            var name = mtool?["name"]?.ToString() ?? string.Empty;
+            var description = mtool?["description"]?.ToString() ?? string.Empty;
+            var inputSchema = mtool?["inputSchema"]?.AsObject();
+            if (!string.IsNullOrEmpty(name) && inputSchema != null)
             {
                 var schemaBytes = JsonSerializer.SerializeToUtf8Bytes(inputSchema);
-                var functionTool = ChatTool.CreateFunctionTool(name, description, BinaryData.FromBytes(schemaBytes));
-                chatTools.Add(functionTool);
+                chatTools.Add(ChatTool.CreateFunctionTool(name, description, BinaryData.FromBytes(schemaBytes)));
             }
         }
 
-        // 2. Setup Conversation
+        // 3. Setup conversation
         var messages = new List<ChatMessage>
         {
             new SystemChatMessage("You are MoodleConnector, a helpful assistant. Use tools to interact with Moodle."),
             new UserChatMessage(task.Prompt)
         };
 
-        var options = new ChatCompletionOptions
-        {
-            Temperature = 0.0f
-        };
+        var options = new ChatCompletionOptions { Temperature = 0.0f };
         foreach (var tool in chatTools)
-        {
             options.Tools.Add(tool);
-        }
 
         string? selectedTool = null;
         string? selectedConnection = null;
-        Dictionary<string, object> arguments = new();
+        var arguments = new Dictionary<string, object>();
         string resultContent = string.Empty;
         var toolInvocations = new List<ToolInvocationTrace>();
         var aggregatedPromptTokens = 0;
         var aggregatedCompletionTokens = 0;
 
-        // 3. Agent Loop
-        for (int i = 0; i < 5; i++) // Max 5 iterations
+        // 4. Agent loop (max 5 turns)
+        for (int i = 0; i < 5; i++)
         {
             var completion = await _chatClient.CompleteChatAsync(messages, options, cancellationToken);
             messages.Add(new AssistantChatMessage(completion));
@@ -137,18 +320,16 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
                     selectedTool ??= toolCall.FunctionName;
                     var argsStr = toolCall.FunctionArguments?.ToString() ?? "{}";
                     if (arguments.Count == 0 && !string.IsNullOrWhiteSpace(argsStr))
-                    {
                         arguments = JsonSerializer.Deserialize<Dictionary<string, object>>(argsStr) ?? new();
-                    }
 
-                    selectedConnection ??= ExtractConnectionFromArguments(arguments) ?? InferConnectionFromPrompt(task.Prompt);
+                    selectedConnection ??= ExtractConnectionFromArguments(arguments)
+                        ?? InferConnectionFromPrompt(task.Prompt);
 
-                    // Invoke tool on MCP Server
                     var toolStart = Stopwatch.StartNew();
                     var toolResult = await CallMcpToolAsync(toolCall.FunctionName, argsStr, cancellationToken);
                     toolStart.Stop();
                     resultContent = toolResult;
-                    
+
                     toolInvocations.Add(new ToolInvocationTrace(
                         ToolName: toolCall.FunctionName,
                         ArgumentsJson: argsStr,
@@ -164,13 +345,13 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             }
             else
             {
-                break; // Finished
+                break;
             }
         }
 
         stopwatch.Stop();
 
-        // 4. Trace Generation
+        // 5. Build traces
         var routing = new RoutingTrace(
             SelectedSkill: "moodle-core",
             SelectedIntent: selectedTool ?? "none",
@@ -184,7 +365,7 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             ConnectionId: Guid.Empty,
             RegistryOperation: selectedTool ?? "none",
             PolicyDecision: "Allowed",
-            MoodleCalls: selectedTool != null ? toolInvocations.Count : 0,
+            MoodleCalls: toolInvocations.Count,
             LatencyMs: stopwatch.ElapsedMilliseconds,
             PromptTokens: aggregatedPromptTokens,
             CompletionTokens: aggregatedCompletionTokens,
@@ -209,167 +390,49 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         );
     }
 
+    // ------------------------------------------------------------------
+    // Static utilities
+    // ------------------------------------------------------------------
+
     public static string? ExtractConnectionFromArguments(Dictionary<string, object> arguments)
     {
-        if (arguments.TryGetValue("moodleAlias", out var alias) && alias is string aliasText && !string.IsNullOrWhiteSpace(aliasText))
+        foreach (var key in new[] { "moodleAlias", "alias", "connectionRef", "connection" })
         {
-            return aliasText;
+            if (arguments.TryGetValue(key, out var val) && val is string s && !string.IsNullOrWhiteSpace(s))
+                return s;
         }
-
-        if (arguments.TryGetValue("alias", out var alias2) && alias2 is string alias2Text && !string.IsNullOrWhiteSpace(alias2Text))
-        {
-            return alias2Text;
-        }
-
-        if (arguments.TryGetValue("connectionRef", out var connectionRef) && connectionRef is string connectionRefText && !string.IsNullOrWhiteSpace(connectionRefText))
-        {
-            return connectionRefText;
-        }
-
         return null;
     }
 
     private static string? InferConnectionFromPrompt(string prompt)
     {
-        if (prompt.Contains("SENAI", StringComparison.OrdinalIgnoreCase) || prompt.Contains("senai", StringComparison.OrdinalIgnoreCase))
-        {
-            return "senai";
-        }
-
-        if (prompt.Contains("FIEG", StringComparison.OrdinalIgnoreCase) || prompt.Contains("fieg", StringComparison.OrdinalIgnoreCase))
-        {
-            return "fieg";
-        }
-
+        if (prompt.Contains("SENAI", StringComparison.OrdinalIgnoreCase)) return "senai";
+        if (prompt.Contains("FIEG",  StringComparison.OrdinalIgnoreCase)) return "fieg";
         return null;
     }
 
-    private async Task EnsureConnectedAsync(CancellationToken ct)
+    private static int EstimateTokens(string text)
+        => string.IsNullOrWhiteSpace(text) ? 0 : Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
+
+    /// <summary>
+    /// Parses the first JSON object from a text/event-stream body.
+    /// SSE lines are: "data: {...}" or "event: message\ndata: {...}"
+    /// </summary>
+    private static JsonObject? ParseFirstSseJson(string sseBody)
     {
-        if (_postEndpoint != null) return;
-        
-        var request = new HttpRequestMessage(HttpMethod.Get, "/mcp/sse");
-        request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
-        
-        _sseResponse = await _mcpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-        try
+        foreach (var line in sseBody.Split('\n'))
         {
-            if (!_sseResponse.IsSuccessStatusCode)
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("data:", StringComparison.Ordinal))
             {
-                var body = await _sseResponse.Content.ReadAsStringAsync(ct);
-                throw new Exception($"HTTP {_sseResponse.StatusCode}: {body}");
-            }
-            _sseResponse.EnsureSuccessStatusCode();
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new Exception($"MCP Connection failed (SSE GET /mcp/sse): {ex.Message}");
-        }
-        
-        var stream = await _sseResponse.Content.ReadAsStreamAsync(ct);
-        _sseReader = new StreamReader(stream);
-        
-        while (!_sseReader.EndOfStream)
-        {
-            var line = await _sseReader.ReadLineAsync(ct);
-            Console.WriteLine($"[SSE] read line: {line}");
-            if (line != null && line.StartsWith("event: endpoint"))
-            {
-                var dataLine = await _sseReader.ReadLineAsync(ct);
-                Console.WriteLine($"[SSE] read data line: {dataLine}");
-                if (dataLine != null && dataLine.StartsWith("data: "))
+                var json = trimmed.Substring("data:".Length).Trim();
+                if (!string.IsNullOrWhiteSpace(json) && json != "[DONE]")
                 {
-                    _postEndpoint = dataLine.Substring("data: ".Length).Trim();
-                    
-                    var uri = new Uri(_postEndpoint, UriKind.RelativeOrAbsolute);
-                    var qs = System.Web.HttpUtility.ParseQueryString(uri.IsAbsoluteUri ? uri.Query : new Uri(new Uri("http://localhost"), _postEndpoint).Query);
-                    var sessionId = qs["sessionId"];
-                    Console.WriteLine($"[SSE] Endpoint: {_postEndpoint}");
-                    Console.WriteLine($"[SSE] Parsed SessionId: {sessionId}");
-                    if (!string.IsNullOrEmpty(sessionId))
-                    {
-                        _mcpClient.DefaultRequestHeaders.Remove("Mcp-Session-Id");
-                        _mcpClient.DefaultRequestHeaders.Add("Mcp-Session-Id", sessionId);
-                    }
-                    
-                    // Fire and forget a background task to consume the rest of the stream
-                    // so the server doesn't block on writing.
-                    _ = Task.Run(async () => 
-                    {
-                        try { while (!ct.IsCancellationRequested && await _sseReader.ReadLineAsync(ct) != null) { } } 
-                        catch { } 
-                    });
-                    
-                    return;
+                    try { return JsonSerializer.Deserialize<JsonObject>(json); }
+                    catch { /* try next line */ }
                 }
             }
         }
-        
-        throw new InvalidOperationException("Failed to get endpoint from MCP SSE stream.");
-    }
-
-    private static int EstimateTokens(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return 0;
-        }
-
-        return Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
-    }
-
-    private async Task<(JsonArray tools, int schemaTokens)> FetchMcpToolsAsync(CancellationToken cancellationToken)
-    {
-        await EnsureConnectedAsync(cancellationToken);
-        
-        var request = new JsonObject
-        {
-            ["jsonrpc"] = "2.0",
-            ["id"] = Guid.NewGuid().ToString(),
-            ["method"] = "tools/list"
-        };
-
-        try
-        {
-            var response = await _mcpClient.PostAsJsonAsync(_postEndpoint, request, cancellationToken);
-            response.EnsureSuccessStatusCode();
-            var responseJson = await response.Content.ReadFromJsonAsync<JsonObject>(cancellationToken: cancellationToken);
-            var tools = responseJson?["result"]?["tools"]?.AsArray() ?? new JsonArray();
-            var schemaTokens = tools.Sum(tool => EstimateTokens(tool["inputSchema"]?.ToJsonString() ?? string.Empty));
-            return (tools, schemaTokens);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new Exception($"MCP Fetch Tools failed (POST {_postEndpoint}): {ex.Message}");
-        }
-    }
-
-    private async Task<string> CallMcpToolAsync(string name, string argumentsJson, CancellationToken cancellationToken)
-    {
-        await EnsureConnectedAsync(cancellationToken);
-
-        var request = new JsonObject
-        {
-            ["jsonrpc"] = "2.0",
-            ["id"] = Guid.NewGuid().ToString(),
-            ["method"] = "tools/call",
-            ["params"] = new JsonObject
-            {
-                ["name"] = name,
-                ["arguments"] = JsonNode.Parse(argumentsJson)
-            }
-        };
-
-        try
-        {
-            var response = await _mcpClient.PostAsJsonAsync(_postEndpoint, request, cancellationToken);
-            response.EnsureSuccessStatusCode();
-            var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
-            return responseJson;
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new Exception($"MCP Tool Call failed (POST {_postEndpoint}): {ex.Message}");
-        }
+        return null;
     }
 }
