@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using MediatR;
 using ModelContextProtocol.Protocol;
@@ -16,8 +16,8 @@ public sealed class MoodleCompletionTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "consultar_progresso_aluno",
-        Title = "Consultar Progresso Aluno",
+        Name = "get_student_completion",
+        Title = "Get Student Completion",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -31,28 +31,6 @@ public sealed class MoodleCompletionTools(
         [Description("Identificador do estudante (ID do Moodle).")]
         string studentId,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetCompletionCoreAsync(courseId, studentId, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "get_student_completion",
-        Title = "Get Student Completion",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseCompletionStatus>))]
-    [Description("Gets the completion progress for a student in a course, including completed and pending activities.")]
-    public Task<CallToolResult> GetStudentCompletionAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Student identifier (Moodle ID).")]
-        string studentId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

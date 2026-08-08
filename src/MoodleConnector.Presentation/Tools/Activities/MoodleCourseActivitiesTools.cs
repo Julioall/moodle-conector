@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -18,8 +18,8 @@ public sealed class MoodleCourseActivitiesTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "listar_atividades_curso",
-        Title = "Listar Atividades Curso",
+        Name = "list_course_activities",
+        Title = "List Course Activities",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -40,30 +40,8 @@ public sealed class MoodleCourseActivitiesTools(
     }
 
     [McpServerTool(
-        Name = "list_course_activities",
-        Title = "List Course Activities",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
-    [Description("Lists Moodle course activities without fetching submissions or grades.")]
-    public Task<CallToolResult> ListCourseActivitiesAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden activities Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListActivitiesCoreAsync(courseId, CourseActivityModuleTypes.All, includeHidden, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_atividade",
-        Title = "Consultar Atividade",
+        Name = "get_course_activity",
+        Title = "Get Course Activity",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -84,30 +62,8 @@ public sealed class MoodleCourseActivitiesTools(
     }
 
     [McpServerTool(
-        Name = "get_course_activity",
-        Title = "Get Course Activity",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseActivityDetailsResponse>))]
-    [Description("Gets a course activity by cmid or instance id without fetching submissions or grades.")]
-    public Task<CallToolResult> GetCourseActivityAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Activity identifier. Can be cmid or instance id.")]
-        string activityId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetActivityCoreAsync(courseId, activityId, CourseActivityModuleTypes.All, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_tarefas_curso",
-        Title = "Listar Tarefas Curso",
+        Name = "list_course_assignments",
+        Title = "List Course Assignments",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -128,30 +84,8 @@ public sealed class MoodleCourseActivitiesTools(
     }
 
     [McpServerTool(
-        Name = "list_course_assignments",
-        Title = "List Course Assignments",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
-    [Description("Lists course assignments without fetching submissions or grades.")]
-    public Task<CallToolResult> ListCourseAssignmentsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden assignments Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListActivitiesCoreAsync(courseId, CourseActivityModuleTypes.Assignments, includeHidden, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_tarefa",
-        Title = "Consultar Tarefa",
+        Name = "get_assignment",
+        Title = "Get Assignment",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -172,30 +106,8 @@ public sealed class MoodleCourseActivitiesTools(
     }
 
     [McpServerTool(
-        Name = "get_assignment",
-        Title = "Get Assignment",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseActivityDetailsResponse>))]
-    [Description("Gets an assignment by cmid or instance id without fetching submissions or grades.")]
-    public Task<CallToolResult> GetAssignmentAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Assignment identifier. Can be cmid or instance id.")]
-        string assignmentId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetActivityCoreAsync(courseId, assignmentId, CourseActivityModuleTypes.Assignments, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_quizzes_curso",
-        Title = "Listar Quizzes Curso",
+        Name = "list_course_quizzes",
+        Title = "List Course Quizzes",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -216,30 +128,8 @@ public sealed class MoodleCourseActivitiesTools(
     }
 
     [McpServerTool(
-        Name = "list_course_quizzes",
-        Title = "List Course Quizzes",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
-    [Description("Lists course quizzes without fetching attempts or grades.")]
-    public Task<CallToolResult> ListCourseQuizzesAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden quizzes Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListActivitiesCoreAsync(courseId, CourseActivityModuleTypes.Quizzes, includeHidden, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_quiz",
-        Title = "Consultar Quiz",
+        Name = "get_quiz",
+        Title = "Get Quiz",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -260,30 +150,8 @@ public sealed class MoodleCourseActivitiesTools(
     }
 
     [McpServerTool(
-        Name = "get_quiz",
-        Title = "Get Quiz",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseActivityDetailsResponse>))]
-    [Description("Gets a quiz by cmid or instance id without fetching attempts or grades.")]
-    public Task<CallToolResult> GetQuizAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Quiz identifier. Can be cmid or instance id.")]
-        string quizId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetActivityCoreAsync(courseId, quizId, CourseActivityModuleTypes.Quizzes, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "listar_scorms_curso",
-        Title = "Listar SCORMs Curso",
+        Name = "list_course_scorms",
+        Title = "List Course SCORMs",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -304,30 +172,8 @@ public sealed class MoodleCourseActivitiesTools(
     }
 
     [McpServerTool(
-        Name = "list_course_scorms",
-        Title = "List Course SCORMs",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListCourseActivitiesResponse>))]
-    [Description("Lists course SCORMs without fetching attempts or grades.")]
-    public Task<CallToolResult> ListCourseScormsAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("When true, includes hidden SCORMs Moodle returns for the user.")]
-        bool includeHidden = false,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListActivitiesCoreAsync(courseId, CourseActivityModuleTypes.Scorms, includeHidden, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "consultar_prazos_atividades",
-        Title = "Consultar Prazos Atividades",
+        Name = "list_activity_deadlines",
+        Title = "List Activity Deadlines",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -342,25 +188,6 @@ public sealed class MoodleCourseActivitiesTools(
         CancellationToken cancellationToken = default)
     {
         return ListDeadlinesCoreAsync(courseId, CourseActivityModuleTypes.All, incluirOcultas, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "list_activity_deadlines",
-        Title = "List Activity Deadlines",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListActivityDeadlinesResponse>))]
-    [Description("Lists course activity dates and deadlines without fetching submissions, attempts, or grades.")]
-    public Task<CallToolResult> ListActivityDeadlinesAsync(
-        string courseId,
-        bool includeHidden = false,
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListDeadlinesCoreAsync(courseId, CourseActivityModuleTypes.All, includeHidden, moodleAlias, cancellationToken);
     }
 
     private async Task<CallToolResult> ListActivitiesCoreAsync(

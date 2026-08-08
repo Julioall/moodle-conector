@@ -1,0 +1,302 @@
+[
+  {
+    "id": "courses.list.001",
+    "category": "courses",
+    "prompt": "Liste meus cursos no SENAI Nacional.",
+    "expectedIntent": "courses.list",
+    "allowedOperations": [ "core_enrol_get_users_courses" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.list.002",
+    "category": "courses",
+    "prompt": "Liste meus cursos no Moodle FIEG.",
+    "expectedIntent": "courses.list",
+    "allowedOperations": [ "core_enrol_get_users_courses" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.search.001",
+    "category": "courses",
+    "prompt": "Procure o curso com ID 8887.",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.search.002",
+    "category": "courses",
+    "prompt": "Localize o curso Introducao a Qualidade e Produtividade - TEC0015.2026.1-00037 - SENAI - Porto Alegre - RS.",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.search.003",
+    "category": "courses",
+    "prompt": "No Moodle FIEG, ache o curso UC 6: Raciocínio Lógico e Análise de Dados.",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.search.004",
+    "category": "courses",
+    "prompt": "Procure o curso com código da turma 1071963.",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.search.005",
+    "category": "courses",
+    "prompt": "No SENAI, encontre a turma com ID 8887.",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.details.001",
+    "category": "courses",
+    "prompt": "Mostre os detalhes do curso com ID 33458.",
+    "expectedIntent": "courses.details",
+    "allowedOperations": [ "core_course_get_courses_by_field" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.details.002",
+    "category": "courses",
+    "prompt": "No SENAI Nacional, exiba as informações do curso 8887.",
+    "expectedIntent": "courses.details",
+    "allowedOperations": [ "core_course_get_courses_by_field" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.details.003",
+    "category": "courses",
+    "prompt": "No FIEG, mostre as informações gerais do curso UC 6: Raciocínio Lógico e Análise de Dados.",
+    "expectedIntent": "courses.details",
+    "allowedOperations": [ "core_course_get_courses_by_field" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.details.004",
+    "category": "courses",
+    "prompt": "No SENAI, qual é o nome completo do curso 8887?",
+    "expectedIntent": "courses.details",
+    "allowedOperations": [ "core_course_get_courses_by_field" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.details.005",
+    "category": "courses",
+    "prompt": "No Moodle FIEG, verifique a data de início do curso 33458.",
+    "expectedIntent": "courses.details",
+    "allowedOperations": [ "core_course_get_courses_by_field" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.structure.001",
+    "category": "courses",
+    "prompt": "Quais conteúdos existem no curso com ID 33458?",
+    "expectedIntent": "courses.structure",
+    "allowedOperations": [ "core_course_get_contents" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.structure.002",
+    "category": "courses",
+    "prompt": "Mostre todas as seções e conteúdos da UC Raciocínio Lógico e Análise de Dados.",
+    "expectedIntent": "courses.structure",
+    "allowedOperations": [ "core_course_get_courses_by_field", "core_course_get_contents" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.structure.003",
+    "category": "courses",
+    "prompt": "Liste os recursos do curso 33458 no Moodle FIEG.",
+    "expectedIntent": "courses.structure",
+    "allowedOperations": [ "core_course_get_contents" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.structure.004",
+    "category": "courses",
+    "prompt": "Quais materiais o curso 8887 do SENAI possui?",
+    "expectedIntent": "courses.structure",
+    "allowedOperations": [ "core_course_get_contents" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.structure.005",
+    "category": "courses",
+    "prompt": "No SENAI Nacional, exiba a estrutura completa do curso 8887.",
+    "expectedIntent": "courses.structure",
+    "allowedOperations": [ "core_course_get_contents" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.ambiguity.001",
+    "category": "courses",
+    "prompt": "Tenho algum curso chamado Comunicação?",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.ambiguity.002",
+    "category": "courses",
+    "prompt": "A turma de Raciocínio Lógico existe no Moodle FIEG?",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.ambiguity.003",
+    "category": "courses",
+    "prompt": "No SENAI, existe curso com idnumber 1071963?",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.ambiguity.004",
+    "category": "courses",
+    "prompt": "Estou matriculado no curso Introducao a Qualidade e Produtividade?",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.ambiguity.005",
+    "category": "courses",
+    "prompt": "No FIEG, o curso 33458 ainda está ativo?",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.pagination.001",
+    "category": "courses",
+    "prompt": "Mostre todos os meus cursos no SENAI Nacional, não apenas os primeiros.",
+    "expectedIntent": "courses.list",
+    "allowedOperations": [ "core_enrol_get_users_courses" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.pagination.002",
+    "category": "courses",
+    "prompt": "Quantos cursos eu tenho no Moodle FIEG no total?",
+    "expectedIntent": "courses.list",
+    "allowedOperations": [ "core_enrol_get_users_courses" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.pagination.003",
+    "category": "courses",
+    "prompt": "Estou matriculado em mais de 50 disciplinas no SENAI?",
+    "expectedIntent": "courses.list",
+    "allowedOperations": [ "core_enrol_get_users_courses" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.pagination.004",
+    "category": "courses",
+    "prompt": "Pagine até o fim dos meus cursos SENAI e me traga a lista final.",
+    "expectedIntent": "courses.list",
+    "allowedOperations": [ "core_enrol_get_users_courses" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.pagination.005",
+    "category": "courses",
+    "prompt": "Liste os meus últimos cursos matriculados no Moodle FIEG.",
+    "expectedIntent": "courses.list",
+    "allowedOperations": [ "core_enrol_get_users_courses" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.connection.001",
+    "category": "courses",
+    "prompt": "No SENAI Nacional, mostre os detalhes do curso com ID 8887.",
+    "expectedIntent": "courses.details",
+    "allowedOperations": [ "core_course_get_courses_by_field" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  },
+  {
+    "id": "courses.connection.002",
+    "category": "courses",
+    "prompt": "No Moodle FIEG, mostre os conteúdos do curso com ID 33458.",
+    "expectedIntent": "courses.structure",
+    "allowedOperations": [ "core_course_get_contents" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": true,
+    "expectedConnection": "fieg"
+  },
+  {
+    "id": "courses.connection.003",
+    "category": "courses",
+    "prompt": "Use a conexão SENAI para buscar o curso 8887.",
+    "expectedIntent": "courses.search",
+    "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
+    "forbiddenOperations": [],
+    "requiresCompleteDataset": false,
+    "expectedConnection": "senai"
+  }
+]

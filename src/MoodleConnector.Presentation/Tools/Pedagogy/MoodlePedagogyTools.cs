@@ -12,8 +12,8 @@ namespace MoodleConnector.Presentation.Tools.Pedagogy;
 public sealed class MoodlePedagogyTools(IPedagogicGuidanceSearch guidanceSearch)
 {
     [McpServerTool(
-        Name = "consultar_orientacoes_pedagogicas",
-        Title = "Consultar orientações pedagógicas",
+        Name = "get_pedagogical_guidelines",
+        Title = "Get Pedagogical Guidelines",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,

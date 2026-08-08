@@ -16,8 +16,8 @@ public sealed class MoodleRiskAnalysisTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "gerar_relatorio_risco_estudantes",
-        Title = "Gerar Relatorio Risco Estudantes",
+        Name = "report_students_at_risk",
+        Title = "Report Students At Risk",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -35,38 +35,6 @@ public sealed class MoodleRiskAnalysisTools(
         [Description("Nota minima esperada em porcentagem (0-100) para considerar como fator de risco. Padrao: 60.")]
         decimal minGradePercentage = 60m,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetRiskReportCoreAsync(
-            courseId,
-            maxStudentsToAnalyze,
-            inactivityThresholdDays,
-            minGradePercentage,
-            moodleAlias,
-            cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "report_students_at_risk",
-        Title = "Report Students at Risk",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<IReadOnlyList<StudentRiskReport>>))]
-    [Description("Generates a report cross-referencing inactivity, low grades, and pending progress to identify students at risk in the course.")]
-    public Task<CallToolResult> ReportStudentsAtRiskAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Maximum students to analyze (e.g. 20, 50, 100). Default: 50.")]
-        int maxStudentsToAnalyze = 50,
-        [Description("Inactivity threshold in days to consider as a risk factor. Default: 7.")]
-        int inactivityThresholdDays = 7,
-        [Description("Minimum expected grade in percentage (0-100) to consider as a risk factor. Default: 60.")]
-        decimal minGradePercentage = 60m,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

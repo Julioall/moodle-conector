@@ -22,8 +22,8 @@ public sealed class MoodleGradingReviewAppTools(
     ICurrentUserContext currentUser)
 {
     [McpServerTool(
-        Name = "revisar_feedbacks_lote",
-        Title = "Revisar Feedbacks Lote",
+        Name = "review_batch_feedbacks",
+        Title = "Review Batch Feedbacks",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -252,15 +252,15 @@ public sealed class MoodleGradingReviewAppTools(
     }
 
     [McpServerTool(
-        Name = "consultar_estado_interface_correcao_lote",
-        Title = "Consultar Estado Interface Correcao Lote",
+        Name = "get_batch_grading_ui_state",
+        Title = "Get Batch Grading UI State",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GradingReviewAppData>))]
-    [Description("Retorna o snapshot autoritativo paginado usado pela interface de revisão, sem solicitar uma nova montagem do widget.")]
+    [Description("Returns the paginated authoritative snapshot used by the review interface, without requesting a widget re-render.")]
     public async Task<CallToolResult> ConsultarEstadoInterfaceCorrecaoLoteAsync(
         [Description("Identificador do lote de correção assistida.")] Guid batchJobId,
         [Description("Página de itens, iniciando em 1.")] int pagina = 1,
@@ -470,7 +470,7 @@ public sealed class MoodleGradingReviewAppResources
 
 public static class MoodleGradingReviewAppMetadata
 {
-    public const string ToolName = "revisar_feedbacks_lote";
+    public const string ToolName = "review_batch_feedbacks";
     public const string ResourceUri = "ui://grading-review/v2/app.html";
     public const string ResourceMimeType = "text/html;profile=mcp-app";
 

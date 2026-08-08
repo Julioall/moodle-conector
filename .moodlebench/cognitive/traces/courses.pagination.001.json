@@ -1,0 +1,33 @@
+{
+  "TaskId": "courses.pagination.001",
+  "Profile": {
+    "Exposure": 1,
+    "ModelName": "MockAgent-v1",
+    "UseSafeReadExecutor": true
+  },
+  "Prompt": "Mostre todos os meus cursos, n\u00E3o apenas os primeiros.",
+  "Model": "MockAgent-v1",
+  "Routing": {
+    "SelectedSkill": "moodle-courses",
+    "SelectedIntent": "courses.list",
+    "SelectedOperation": "core_enrol_get_users_courses",
+    "Arguments": {}
+  },
+  "Execution": {
+    "ConnectionId": "1059c552-61b3-4637-9e4c-7a21886d48ca",
+    "RegistryOperation": "core_enrol_get_users_courses",
+    "PolicyDecision": "Allowed",
+    "MoodleCalls": 1,
+    "LatencyMs": 150
+  },
+  "ResultContent": "{ \u0022items\u0022: [], \u0022truncated\u0022: false }",
+  "Scoring": {
+    "IntentAccuracy": true,
+    "RoutingAccuracy": true,
+    "ParameterAccuracy": true,
+    "ResultAccuracy": true,
+    "PaginationAwareness": true,
+    "OverallSuccess": true,
+    "FailureReason": 0
+  }
+}

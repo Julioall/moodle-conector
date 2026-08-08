@@ -363,7 +363,7 @@ Contrato de ação pendente:
 {
   "status": "pending_confirmation",
   "pendingActionId": "00000000-0000-0000-0000-000000000000",
-  "toolName": "preparar_acao_demo",
+  "toolName": "prepare_demo_action",
   "riskLevel": "HumanConfirmedWrite",
   "preview": {},
   "confirmationText": "CONFIRMAR ...",
@@ -396,26 +396,26 @@ Leitura:
 | --- | --- | --- |
 | `search` | Busca cursos autorizados no formato padrão MCP connector/company knowledge. | Implementada |
 | `fetch` | Retorna um curso autorizado no formato padrão MCP connector/company knowledge. | Implementada |
-| `listar_meus_cursos` | Lista cursos vinculados ao usuário autenticado com metadados básicos. | Implementada |
-| `list_courses` | Alias em ingles de `listar_meus_cursos`. | Implementada |
-| `buscar_cursos` | Busca cursos vinculados por termo, nome, categoria, `courseId`, `shortName` ou `idNumber`. | Implementada |
-| `search_courses` | Alias em ingles de `buscar_cursos`. | Implementada |
-| `consultar_curso` | Consulta metadados básicos de um curso vinculado. | Implementada |
-| `get_course` | Alias em ingles de `consultar_curso`. | Implementada |
-| `consultar_orientacoes_pedagogicas` | Pesquisa os guias pedagógicos locais antes de tarefas educacionais. | Implementada |
+| `list_my_courses` | Lista cursos vinculados ao usuário autenticado com metadados básicos. | Implementada |
+| `list_courses` | Alias em ingles de `list_my_courses`. | Implementada |
+| `search_courses` | Busca cursos vinculados por termo, nome, categoria, `courseId`, `shortName` ou `idNumber`. | Implementada |
+| `search_courses` | Alias em ingles de `search_courses`. | Implementada |
+| `get_course` | Consulta metadados básicos de um curso vinculado. | Implementada |
+| `get_course` | Alias em ingles de `get_course`. | Implementada |
+| `get_pedagogical_guidelines` | Pesquisa os guias pedagógicos locais antes de tarefas educacionais. | Implementada |
 
 Estado interno (não altera o Moodle):
 
 | Tool | Descrição | Status |
 | --- | --- | --- |
-| `gerenciar_memoria_usuario` | Salva, lista ou remove memórias privadas e duráveis do usuário. A remoção é destrutiva para esse estado interno. | Implementada |
+| `manage_user_memory` | Salva, lista ou remove memórias privadas e duráveis do usuário. A remoção é destrutiva para esse estado interno. | Implementada |
 
 Demo de pending action:
 
 | Tool | Descrição | Status |
 | --- | --- | --- |
-| `preparar_acao_demo` | Cria ação pendente demonstrativa. Não executa escrita real no Moodle. | Implementada como demo |
-| `confirmar_acao_demo` | Confirma ação pendente demonstrativa. Não executa escrita real no Moodle. | Implementada como demo |
+| `prepare_demo_action` | Cria ação pendente demonstrativa. Não executa escrita real no Moodle. | Implementada como demo |
+| `confirm_demo_action` | Confirma ação pendente demonstrativa. Não executa escrita real no Moodle. | Implementada como demo |
 
 ## Segurança
 

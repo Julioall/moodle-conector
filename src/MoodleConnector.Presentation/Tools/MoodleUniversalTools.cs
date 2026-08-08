@@ -199,16 +199,6 @@ public sealed class MoodleUniversalTools(
         catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleFunctionDescriptor>(ex.Message); }
     }
 
-    [McpServerTool(Name = "moodle_describe_function", Title = "Descrever Funcao Moodle",
-        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
-        UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleFunctionDescriptor>))]
-    [Description("Retorna a disponibilidade e a classificação de risco local de uma função Web Service Moodle. O Moodle não fornece, por esse endpoint, um schema completo de parâmetros.")]
-    public Task<CallToolResult> DescribeFunctionAsync(
-        [Description("Nome exato da função Web Service Moodle.")] string functionName,
-        [Description("Alias opcional da conexão Moodle.")] string? moodleAlias = null,
-        CancellationToken cancellationToken = default) =>
-        CheckFunctionAsync(functionName, moodleAlias, cancellationToken);
-
     [McpServerTool(Name = "moodle_list_available_flows", Title = "Listar Fluxos Moodle Disponiveis",
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<IReadOnlyCollection<BusinessFlowAvailability>>))]

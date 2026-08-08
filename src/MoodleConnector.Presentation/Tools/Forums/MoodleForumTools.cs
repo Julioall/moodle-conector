@@ -20,8 +20,8 @@ public sealed class MoodleForumTools(
     private static readonly string[] AllowedSortBy = ["id", "timemodified", "timestart", "timeend"];
 
     [McpServerTool(
-        Name = "ler_forum",
-        Title = "Ler Forum",
+        Name = "read_forum",
+        Title = "Read Forum",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -65,53 +65,8 @@ public sealed class MoodleForumTools(
     }
 
     [McpServerTool(
-        Name = "read_forum",
-        Title = "Read Forum",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ReadForumResponse>))]
-    [Description("Reads Moodle forum discussions and posts using mod_forum_get_forum_discussions_paginated and mod_forum_get_discussion_posts.")]
-    public Task<CallToolResult> ReadForumAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Forum identifier. Can be cmid or instance id.")]
-        string forumId,
-        [Description("Discussion result page, starting at 1.")]
-        int page = 1,
-        [Description("Discussion page size, from 1 to 25.")]
-        int pageSize = 10,
-        [Description("When true, loads posts for each discussion through mod_forum_get_discussion_posts.")]
-        bool includePosts = true,
-        [Description("Maximum posts returned per discussion, from 1 to 100.")]
-        int postsPerDiscussion = 50,
-        [Description("Discussion sort field: id, timemodified, timestart, or timeend.")]
-        string sortBy = "timemodified",
-        [Description("Discussion sort direction: ASC or DESC.")]
-        string sortDirection = "DESC",
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ReadForumCoreAsync(
-            courseId,
-            forumId,
-            page,
-            pageSize,
-            includePosts,
-            postsPerDiscussion,
-            sortBy,
-            sortDirection,
-            moodleAlias,
-            cancellationToken,
-            language: "en");
-    }
-
-    [McpServerTool(
-        Name = "criar_previa_post_forum",
-        Title = "Criar Previa Post Forum",
+        Name = "create_forum_post_preview",
+        Title = "Create Forum Post Preview",
         ReadOnly = false,
         Destructive = false,
         Idempotent = false,
@@ -152,50 +107,8 @@ public sealed class MoodleForumTools(
     }
 
     [McpServerTool(
-        Name = "create_forum_post_preview",
-        Title = "Create Forum Post Preview",
-        ReadOnly = false,
-        Destructive = false,
-        Idempotent = false,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CreateForumPostPreviewResult>))]
-    [Description("Creates a pending Moodle forum post preview. The real post requires confirm_forum_post with the returned literal confirmation text.")]
-    public Task<CallToolResult> CreateForumPostPreviewAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Forum identifier. Can be cmid or instance id.")]
-        string forumId,
-        [Description("Subject for the new discussion or reply.")]
-        string subject,
-        [Description("HTML message to publish in the forum. Plain text is accepted but sent to Moodle as HTML content.")]
-        string messageHtml,
-        [Description("Discussion identifier when publishing a reply. Omit to create a new discussion.")]
-        string? discussionId = null,
-        [Description("Target post for the reply. When omitted and discussionId is provided, replies to the initial discussion post.")]
-        string? replyToPostId = null,
-        [Description("Moodle group for a new discussion. Use 0 for Moodle default behavior.")]
-        int groupId = 0,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return CreateForumPostPreviewCoreAsync(
-            courseId,
-            forumId,
-            subject,
-            messageHtml,
-            discussionId,
-            replyToPostId,
-            groupId,
-            moodleAlias,
-            cancellationToken,
-            language: "en");
-    }
-
-    [McpServerTool(
-        Name = "confirmar_post_forum_moodle",
-        Title = "Confirmar Post Forum Moodle",
+        Name = "confirm_forum_post",
+        Title = "Confirm Forum Post",
         ReadOnly = false,
         Destructive = true,
         Idempotent = true,
@@ -215,30 +128,6 @@ public sealed class MoodleForumTools(
             confirmationText,
             cancellationToken,
             language: "pt");
-    }
-
-    [McpServerTool(
-        Name = "confirm_forum_post",
-        Title = "Confirm Forum Post",
-        ReadOnly = false,
-        Destructive = true,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ConfirmForumPostResult>))]
-    [Description("Confirms and executes a pending Moodle forum post. Requires pendingActionId and the literal confirmationText from the preview.")]
-    public Task<CallToolResult> ConfirmForumPostAsync(
-        [Description("Pending action id returned by create_forum_post_preview.")]
-        Guid pendingActionId,
-        [Description("Literal confirmation text returned by the preview.")]
-        string confirmationText,
-        CancellationToken cancellationToken = default)
-    {
-        return ConfirmForumPostCoreAsync(
-            pendingActionId,
-            confirmationText,
-            cancellationToken,
-            language: "en");
     }
 
     private async Task<CallToolResult> ReadForumCoreAsync(

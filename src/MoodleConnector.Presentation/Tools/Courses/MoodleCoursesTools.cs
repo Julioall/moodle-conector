@@ -10,6 +10,7 @@ using MoodleConnector.Application.Courses;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
+using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Presentation.Tools;
 
@@ -20,9 +21,10 @@ public sealed class MoodleCoursesTools(
     IMoodleUserResolver moodleUserResolver,
     ILogger<MoodleCoursesTools>? logger = null)
 {
+    [MoodleToolMetadata(Family = "courses", Classification = "R1", Kind = "wrapper", CanonicalOperation = "core_enrol_get_users_courses", Structural = false)]
     [McpServerTool(
-        Name = "listar_meus_cursos",
-        Title = "Listar Meus Cursos",
+        Name = "list_my_courses",
+        Title = "List My Courses",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -105,31 +107,10 @@ public sealed class MoodleCoursesTools(
         };
     }
 
+    [MoodleToolMetadata(Family = "courses", Classification = "R1", Kind = "wrapper", CanonicalOperation = "core_course_get_courses_by_field", Structural = false)]
     [McpServerTool(
-        Name = "list_courses",
-        Title = "List Courses",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListMyCoursesResponse>))]
-    [Description("Lists courses linked to the authenticated Moodle user with pagination support. Use the page parameter to navigate through results.")]
-    public Task<CallToolResult> ListCoursesAsync(
-        [Description("Maximum number of courses per page (1 to 100). Default: 20.")]
-        int limit = 20,
-        [Description("Page number to return (1-based). Use to paginate and list all courses. Default: 1.")]
-        int page = 1,
-        [Description("Moodle connection alias to query, such as goias, nacional, or ctm. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return ListarMeusCursosAsync(limit, page, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "buscar_cursos",
-        Title = "Buscar Cursos",
+        Name = "search_courses",
+        Title = "Search Courses",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -149,28 +130,7 @@ public sealed class MoodleCoursesTools(
         return await SearchCoursesCoreAsync(termo, limite, moodleAlias, cancellationToken);
     }
 
-    [McpServerTool(
-        Name = "search_courses",
-        Title = "Search Courses",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListMyCoursesResponse>))]
-    [Description("Searches courses linked to the authenticated Moodle user by id, short name, idnumber, full name, or category. Searches courses only, not internal files, activities, or course materials.")]
-    public Task<CallToolResult> SearchCoursesAsync(
-        [Description("Search term. Can be courseId, shortName, idnumber, course name, or category.")]
-        string query,
-        [Description("Maximum number of courses to return (1 to 20).")]
-        int limit = 10,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return SearchCoursesCoreAsync(query, limit, moodleAlias, cancellationToken);
-    }
-
+    [MoodleToolMetadata(Family = "courses", Classification = "SKILL", Kind = "cognitive", CanonicalOperation = "search", Structural = true)]
     [McpServerTool(
         Name = "search",
         Title = "Search Moodle courses",
@@ -222,9 +182,10 @@ public sealed class MoodleCoursesTools(
         return StandardResult(response);
     }
 
+    [MoodleToolMetadata(Family = "courses", Classification = "R1", Kind = "wrapper", CanonicalOperation = "core_course_get_courses_by_field", Structural = false)]
     [McpServerTool(
-        Name = "consultar_curso",
-        Title = "Consultar Curso",
+        Name = "get_course",
+        Title = "Get Course",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -242,26 +203,7 @@ public sealed class MoodleCoursesTools(
         return await GetCourseCoreAsync(courseId, moodleAlias, cancellationToken);
     }
 
-    [McpServerTool(
-        Name = "get_course",
-        Title = "Get Course",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<CourseDetailsResponse>))]
-    [Description("Gets basic data for a course linked to the authenticated Moodle user without grades, submissions, or risk data.")]
-    public Task<CallToolResult> GetCourseAsync(
-        [Description("Course identifier. Can be courseId, shortName, or idnumber.")]
-        string courseId,
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetCourseCoreAsync(courseId, moodleAlias, cancellationToken);
-    }
-
+    [MoodleToolMetadata(Family = "courses", Classification = "SKILL", Kind = "cognitive", CanonicalOperation = "fetch", Structural = true)]
     [McpServerTool(
         Name = "fetch",
         Title = "Fetch Moodle course",

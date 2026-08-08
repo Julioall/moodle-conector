@@ -15,12 +15,11 @@ public sealed class MoodleMemoryDocumentToolsTests
         var service = new FakeDocumentService();
         var sut = new MoodleMemoryDocumentTools(service);
 
-        var result = await sut.ManageAsync("salvar", key: "cronograma", title: "Cronograma", content: "<table>...</table>", format: "html", origin: "explicit", moodleAlias: "senai", courseId: "42");
+        var result = await sut.SalvarAsync("cronograma", "Cronograma", "<table>...</table>", "html", "explicit", "senai", "42");
 
         Assert.False(result.IsError ?? false);
         Assert.Equal(new SaveUserMemoryDocumentRequest("cronograma", "Cronograma", "<table>...</table>", "html", "explicit", "senai", "42"), service.SaveRequest);
         var data = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data");
-        Assert.Equal("salvar", data.GetProperty("action").GetString());
         Assert.Equal(service.Document.Id, data.GetProperty("document").GetProperty("id").GetGuid());
         Assert.Equal("<table>...</table>", data.GetProperty("document").GetProperty("content").GetString());
     }
@@ -31,12 +30,11 @@ public sealed class MoodleMemoryDocumentToolsTests
         var service = new FakeDocumentService();
         var sut = new MoodleMemoryDocumentTools(service);
 
-        var result = await sut.ManageAsync("ler", documentId: service.Document.Id);
+        var result = await sut.LerAsync(service.Document.Id);
 
         Assert.False(result.IsError ?? false);
         Assert.Equal(service.Document.Id, service.ReadId);
         var data = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("data");
-        Assert.Equal("ler", data.GetProperty("action").GetString());
         Assert.Equal("markdown", data.GetProperty("document").GetProperty("format").GetString());
     }
 
@@ -46,7 +44,7 @@ public sealed class MoodleMemoryDocumentToolsTests
         var service = new FakeDocumentService();
         var sut = new MoodleMemoryDocumentTools(service);
 
-        var result = await sut.ManageAsync("listar", query: "cronograma", moodleAlias: "senai", courseId: "42", limit: 5);
+        var result = await sut.ListarAsync(query: "cronograma", moodleAlias: "senai", courseId: "42", limit: 5);
 
         Assert.False(result.IsError ?? false);
         Assert.Equal(new ListUserMemoryDocumentsRequest("senai", "42", 5, "cronograma"), service.ListRequest);
@@ -69,19 +67,6 @@ public sealed class MoodleMemoryDocumentToolsTests
     }
 
     [Fact]
-    public void Metadata_declara_escrita_interna_idempotente()
-    {
-        var method = typeof(MoodleMemoryDocumentTools).GetMethod(nameof(MoodleMemoryDocumentTools.ManageAsync))!;
-        var attribute = method.GetCustomAttribute<McpServerToolAttribute>()!;
-
-        Assert.False(attribute.ReadOnly);
-        Assert.False(attribute.Destructive);
-        Assert.True(attribute.Idempotent);
-        Assert.False(attribute.OpenWorld);
-        Assert.Equal(typeof(ToolResponse<MemoryDocumentToolResponse>), attribute.OutputSchemaType);
-    }
-
-    [Fact]
     public void Metadata_declara_tools_dedicadas_com_risco_por_operacao()
     {
         var salvar = typeof(MoodleMemoryDocumentTools).GetMethod(nameof(MoodleMemoryDocumentTools.SalvarAsync))!
@@ -93,51 +78,23 @@ public sealed class MoodleMemoryDocumentToolsTests
         var remover = typeof(MoodleMemoryDocumentTools).GetMethod(nameof(MoodleMemoryDocumentTools.RemoverAsync))!
             .GetCustomAttribute<McpServerToolAttribute>()!;
 
-        Assert.Equal("salvar_documento_memoria_usuario", salvar.Name);
+        Assert.Equal("save_user_memory_document", salvar.Name);
         Assert.False(salvar.ReadOnly);
         Assert.False(salvar.Destructive);
         Assert.True(salvar.Idempotent);
 
-        Assert.Equal("listar_documentos_memoria_usuario", listar.Name);
+        Assert.Equal("list_user_memory_documents", listar.Name);
         Assert.True(listar.ReadOnly);
         Assert.False(listar.Destructive);
 
-        Assert.Equal("ler_documento_memoria_usuario", ler.Name);
+        Assert.Equal("read_user_memory_document", ler.Name);
         Assert.True(ler.ReadOnly);
         Assert.False(ler.Destructive);
 
-        Assert.Equal("remover_documento_memoria_usuario", remover.Name);
+        Assert.Equal("remove_user_memory_document", remover.Name);
         Assert.False(remover.ReadOnly);
         Assert.True(remover.Destructive);
         Assert.True(remover.Idempotent);
-    }
-
-    [Fact]
-    public async Task Remover_na_tool_legada_retorna_erro_controlado_para_evitar_hint_destrutivo()
-    {
-        var sut = new MoodleMemoryDocumentTools(new FakeDocumentService());
-
-        var result = await sut.ManageAsync("remover", documentId: Guid.NewGuid());
-
-        Assert.True(result.IsError ?? false);
-        Assert.Contains("remover_documento_memoria_usuario", Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("warnings")[0].GetString(), StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("salvar")]
-    [InlineData("ler")]
-    [InlineData("remover")]
-    [InlineData("x")]
-    public async Task Validacao_retorna_erro_controlado(string action)
-    {
-        var sut = new MoodleMemoryDocumentTools(new FakeDocumentService());
-
-        var result = await sut.ManageAsync(action);
-
-        Assert.True(result.IsError ?? false);
-        var warning = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("warnings")[0].GetString();
-        Assert.False(string.IsNullOrWhiteSpace(warning));
-        Assert.DoesNotContain(" at ", warning, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class FakeDocumentService : IUserMemoryDocumentService

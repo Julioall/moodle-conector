@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -19,8 +19,8 @@ public sealed class MoodleGradingTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "descobrir_funcoes_moodle_correcao",
-        Title = "Descobrir Funcoes Moodle Correcao",
+        Name = "discover_grading_functions",
+        Title = "Discover Grading Functions",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -37,26 +37,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "discover_moodle_grading_functions",
-        Title = "Discover Moodle Grading Functions",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<DiscoverMoodleGradingFunctionsResponse>))]
-    [Description("Checks which Moodle web service functions required for assisted grading are enabled in the current service. Does not download submissions or write grades.")]
-    public Task<CallToolResult> DiscoverMoodleGradingFunctionsAsync(
-        [Description("Moodle connection alias to query. When omitted, uses the user's default Moodle connection.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return DiscoverCoreAsync(moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "executar_descoberta_tecnica_correcao",
-        Title = "Executar Descoberta Tecnica Correcao",
+        Name = "execute_grading_discovery",
+        Title = "Execute Grading Discovery",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -73,8 +55,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "listar_entregas_corrigiveis",
-        Title = "Listar Entregas Corrigiveis",
+        Name = "list_gradable_submissions",
+        Title = "List Gradable Submissions",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -114,8 +96,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "criar_lote_correcao_assistida",
-        Title = "Criar Lote Correcao Assistida",
+        Name = "create_assisted_grading_batch",
+        Title = "Create Assisted Grading Batch",
         ReadOnly = false,
         Destructive = false,
         Idempotent = false,
@@ -164,8 +146,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "consultar_status_lote_correcao",
-        Title = "Consultar Status Lote Correcao",
+        Name = "get_grading_batch_status",
+        Title = "Get Grading Batch Status",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -186,8 +168,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "exportar_relatorio_correcao_coordenacao",
-        Title = "Exportar Relatorio Correcao Coordenacao",
+        Name = "export_grading_coordination_report",
+        Title = "Export Grading Coordination Report",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -204,8 +186,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "cancelar_lote_correcao_assistida",
-        Title = "Cancelar Lote Correcao Assistida",
+        Name = "cancel_assisted_grading_batch",
+        Title = "Cancel Assisted Grading Batch",
         ReadOnly = false,
         Destructive = false,
         Idempotent = true,
@@ -222,8 +204,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "consultar_item_correcao_assistida",
-        Title = "Consultar Item Correcao Assistida",
+        Name = "get_assisted_grading_item",
+        Title = "Get Assisted Grading Item",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -242,8 +224,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "atualizar_rascunho_correcao",
-        Title = "Atualizar Rascunho Correcao",
+        Name = "update_grading_draft",
+        Title = "Update Grading Draft",
         ReadOnly = false,
         Destructive = false,
         Idempotent = true,
@@ -277,8 +259,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "atualizar_rascunhos_correcao_lote",
-        Title = "Atualizar Rascunhos Correcao Lote",
+        Name = "update_grading_drafts_batch",
+        Title = "Update Grading Drafts Batch",
         ReadOnly = false,
         Destructive = false,
         Idempotent = true,
@@ -343,8 +325,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "criar_previa_lancamento_lote",
-        Title = "Criar Previa Lancamento Lote",
+        Name = "create_batch_grade_launch_preview",
+        Title = "Create Batch Grade Launch Preview",
         ReadOnly = false,
         Destructive = false,
         Idempotent = false,
@@ -372,8 +354,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "confirmar_lancamento_lote_moodle",
-        Title = "Confirmar Lancamento Lote Moodle",
+        Name = "confirm_batch_grade_launch",
+        Title = "Confirm Batch Grade Launch",
         ReadOnly = false,
         Destructive = true,
         Idempotent = true,
@@ -392,8 +374,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "consultar_auditoria_correcao",
-        Title = "Consultar Auditoria Correcao",
+        Name = "get_grading_audit",
+        Title = "Get Grading Audit",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -414,8 +396,8 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
-        Name = "consultar_auditoria_correcao_lote",
-        Title = "Consultar Auditoria Correcao Lote",
+        Name = "get_grading_batch_audit",
+        Title = "Get Grading Batch Audit",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -440,8 +422,8 @@ public sealed class MoodleGradingTools(
     // ============================================================
 
     [McpServerTool(
-        Name = "preparar_lote_correcao_ia",
-        Title = "Preparar Lote Correcao IA",
+        Name = "prepare_ai_grading_batch",
+        Title = "Prepare AI Grading Batch",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -503,8 +485,8 @@ public sealed class MoodleGradingTools(
     // ============================================================
 
     [McpServerTool(
-        Name = "salvar_correcoes_ia_lote",
-        Title = "Salvar Correcoes IA Lote",
+        Name = "save_ai_grading_batch",
+        Title = "Save AI Grading Batch",
         ReadOnly = false,
         Destructive = false,
         Idempotent = true,
@@ -1580,8 +1562,8 @@ public sealed class MoodleGradingTools(
     // ============================================================
 
     [McpServerTool(
-        Name = "preparar_correcao_entrega",
-        Title = "Preparar Correcao Entrega",
+        Name = "prepare_submission_grading",
+        Title = "Prepare Submission Grading",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,

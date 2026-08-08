@@ -16,8 +16,8 @@ public sealed class MoodlePendingSubmissionsTools(
     IMoodleUserResolver moodleUserResolver)
 {
     [McpServerTool(
-        Name = "listar_alunos_pendentes_atividade",
-        Title = "Listar Alunos Pendentes de Atividade",
+        Name = "list_students_with_pending_submissions",
+        Title = "List Students With Pending Submissions",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -33,30 +33,6 @@ public sealed class MoodlePendingSubmissionsTools(
         [Description("Máximo de estudantes para analisar. Padrão: 100.")]
         int maxStudentsToAnalyze = 100,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrão do usuário.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetPendingSubmissionsCoreAsync(courseId, dueDaysAhead, maxStudentsToAnalyze, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "list_students_with_pending_submissions",
-        Title = "List Students With Pending Submissions",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<GetStudentsWithPendingSubmissionsResult>))]
-    [Description("Lists students who have pending (not submitted) assignments. Consolidated per student. Use DueDaysAhead=0 for all pending, or N to filter by due date window.")]
-    public Task<CallToolResult> ListStudentsWithPendingSubmissionsAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Due date window in days: 0 = all pending, N = upcoming N days or overdue. Default: 0.")]
-        int dueDaysAhead = 0,
-        [Description("Maximum students to analyze. Default: 100.")]
-        int maxStudentsToAnalyze = 100,
-        [Description("Moodle connection alias. When omitted, uses the user's default connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

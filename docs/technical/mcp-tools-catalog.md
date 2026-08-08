@@ -8,7 +8,7 @@ O servidor MCP não vê a conversa por conta própria: memórias e orientações
 consultadas ou registradas quando a IA ou o cliente chama as tools correspondentes e
 envia o contexto necessário nos argumentos.
 
-### `gerenciar_memoria_usuario`
+### `manage_user_memory`
 
 Mantém memórias duráveis privadas do usuário autenticado. Aceita `action=salvar`,
 `listar` ou `remover`; não altera o Moodle. Por remover estado interno, a tool anuncia
@@ -32,23 +32,23 @@ duráveis e reutilizáveis; automatizações podem consultar preferências antes
 mas não devem salvar inferências sensíveis nem remover memórias sem intenção explícita.
 
 Para conteudos extensos como modelos de HTML/Markdown, use
-`salvar_documento_memoria_usuario` e deixe a memoria `category=modelo` apenas como link
+`save_user_memory_document` e deixe a memoria `category=modelo` apenas como link
 semantico para o documento completo.
 
 ### Documentos de memoria do usuario
 
 Mantem documentos duraveis privados do usuario autenticado para modelos e referencias
 extensas da IA; nao altera o Moodle. A superficie recomendada usa tools dedicadas:
-`salvar_documento_memoria_usuario`, `listar_documentos_memoria_usuario`,
-`ler_documento_memoria_usuario` e `remover_documento_memoria_usuario`. Ao salvar, cria
+`save_user_memory_document`, `list_user_memory_documents`,
+`read_user_memory_document` e `remove_user_memory_document`. Ao salvar, cria
 ou atualiza tambem uma memoria curta `category=modelo` apontando para o documento
 completo.
 
 | Argumento | Uso |
 | --- | --- |
-| `key`, `title`, `content`, `format`, `origin` | Obrigatorios em `salvar_documento_memoria_usuario`; `format` e `markdown`, `html` ou `text`; `origin` e `explicit` ou `inferred`. |
-| `query`, `moodleAlias`, `courseId`, `limit` | Filtros opcionais de `listar_documentos_memoria_usuario`; `limit` padrao e 20. |
-| `documentId` | UUID obrigatorio em `ler_documento_memoria_usuario` e `remover_documento_memoria_usuario`. |
+| `key`, `title`, `content`, `format`, `origin` | Obrigatorios em `save_user_memory_document`; `format` e `markdown`, `html` ou `text`; `origin` e `explicit` ou `inferred`. |
+| `query`, `moodleAlias`, `courseId`, `limit` | Filtros opcionais de `list_user_memory_documents`; `limit` padrao e 20. |
+| `documentId` | UUID obrigatorio em `read_user_memory_document` e `remove_user_memory_document`. |
 
 A resposta estruturada segue `ToolResponse<MemoryDocumentToolResponse>`. `data.document`
 aparece em `salvar` e `ler`, `data.documents` em `listar`, e `data.removed` em
@@ -57,10 +57,10 @@ for preservar um modelo Moodle existente, como cronogramas com tabela inline.
 
 `gerenciar_documento_memoria_usuario` permanece como compatibilidade para `action=salvar`,
 `listar` e `ler`, mas nao remove documentos. A remocao destrutiva fica isolada em
-`remover_documento_memoria_usuario` para que hosts MCP/ChatGPT apliquem confirmacao e
+`remove_user_memory_document` para que hosts MCP/ChatGPT apliquem confirmacao e
 safety ao caminho correto sem bloquear salvamentos internos.
 
-### `consultar_orientacoes_pedagogicas`
+### `get_pedagogical_guidelines`
 
 Pesquisa os sete guias Markdown publicados junto da aplicação. Deve ser consultada
 antes de avaliação, feedback, planejamento, fóruns, acompanhamento de estudantes e
@@ -86,113 +86,113 @@ humana e minimização de dados.
 | `moodle_execute_read` | Executar Leitura Moodle | `ReadOnly` | Executa somente funções classificadas como leitura | Não | Implementada |
 | `moodle_prepare_write` | Preparar Escrita Moodle | `HumanConfirmedWrite` | Prévia, hash de parâmetros e ação pendente | Não | Implementada; desativada por padrão |
 | `moodle_confirm_write` | Confirmar Escrita Moodle | `HumanConfirmedWrite` | Não | Executa escrita controlada após confirmação literal | Implementada; desativada por padrão |
-| `salvar_documento_memoria_usuario` | Salvar documento de memoria do usuario | `InternalStateWrite` | Nao | Salva documento interno e link de memoria | Implementada |
-| `listar_documentos_memoria_usuario` | Listar documentos de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
-| `ler_documento_memoria_usuario` | Ler documento de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
-| `remover_documento_memoria_usuario` | Remover documento de memoria do usuario | `InternalStateWrite` | Nao | Remove documento interno e link de memoria | Implementada |
+| `save_user_memory_document` | Salvar documento de memoria do usuario | `InternalStateWrite` | Nao | Salva documento interno e link de memoria | Implementada |
+| `list_user_memory_documents` | Listar documentos de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
+| `read_user_memory_document` | Ler documento de memoria do usuario | `ReadOnly` | Sim | Nao | Implementada |
+| `remove_user_memory_document` | Remover documento de memoria do usuario | `InternalStateWrite` | Nao | Remove documento interno e link de memoria | Implementada |
 | `gerenciar_documento_memoria_usuario` | Gerenciar documento de memoria do usuario | `InternalStateWrite` | Lista/le documentos | Compatibilidade para salvar; remocao desabilitada | Implementada |
-| `consultar_orientacoes_pedagogicas` | Consultar orientações pedagógicas | `ReadOnly` | Sim | Não | Implementada |
-| `gerenciar_memoria_usuario` | Gerenciar memória do usuário | `InternalStateWrite` | Lista memórias | Salva/remove memória interna | Implementada |
-| `listar_meus_cursos` | Listar Meus Cursos | `ReadOnly` | Sim | Não | Implementada |
+| `get_pedagogical_guidelines` | Consultar orientações pedagógicas | `ReadOnly` | Sim | Não | Implementada |
+| `manage_user_memory` | Gerenciar memória do usuário | `InternalStateWrite` | Lista memórias | Salva/remove memória interna | Implementada |
+| `list_my_courses` | Listar Meus Cursos | `ReadOnly` | Sim | Não | Implementada |
 | `list_courses` | List Courses | `ReadOnly` | Sim | Não | Implementada |
 | `search` | Search Moodle courses | `ReadOnly` | Sim | Não | Implementada |
 | `fetch` | Fetch Moodle course | `ReadOnly` | Sim | Não | Implementada |
-| `buscar_cursos` | Buscar Cursos | `ReadOnly` | Sim | Não | Implementada |
+| `search_courses` | Buscar Cursos | `ReadOnly` | Sim | Não | Implementada |
 | `search_courses` | Search Courses | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_curso` | Consultar Curso | `ReadOnly` | Sim | Não | Implementada |
+| `get_course` | Consultar Curso | `ReadOnly` | Sim | Não | Implementada |
 | `get_course` | Get Course | `ReadOnly` | Sim | Não | Implementada |
-| `listar_participantes_curso` | Listar Participantes Curso | `SensitiveRead` | Sim | Não | Implementada |
+| `list_course_participants` | Listar Participantes Curso | `SensitiveRead` | Sim | Não | Implementada |
 | `list_course_participants` | List Course Participants | `SensitiveRead` | Sim | Não | Implementada |
-| `listar_alunos_curso` | Listar Alunos Curso | `SensitiveRead` | Sim | Não | Implementada |
+| `list_course_students` | Listar Alunos Curso | `SensitiveRead` | Sim | Não | Implementada |
 | `list_course_students` | List Course Students | `SensitiveRead` | Sim | Não | Implementada |
-| `listar_grupos_curso` | Listar Grupos Curso | `SensitiveRead` | Sim | Não | Implementada |
+| `list_course_groups` | Listar Grupos Curso | `SensitiveRead` | Sim | Não | Implementada |
 | `list_course_groups` | List Course Groups | `SensitiveRead` | Sim | Não | Implementada |
-| `consultar_membros_grupo` | Consultar Membros Grupo | `SensitiveRead` | Sim | Não | Implementada |
+| `get_group_members` | Consultar Membros Grupo | `SensitiveRead` | Sim | Não | Implementada |
 | `get_group_members` | Get Group Members | `SensitiveRead` | Sim | Não | Implementada |
-| `listar_conteudos_curso` | Listar Conteudos Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_contents` | Listar Conteudos Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_contents` | List Course Contents | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_modulo_curso` | Consultar Modulo Curso | `ReadOnly` | Sim | Não | Implementada |
+| `get_course_module` | Consultar Modulo Curso | `ReadOnly` | Sim | Não | Implementada |
 | `get_course_module` | Get Course Module | `ReadOnly` | Sim | Não | Implementada |
-| `listar_recursos_curso` | Listar Recursos Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_resources` | Listar Recursos Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_resources` | List Course Resources | `ReadOnly` | Sim | Não | Implementada |
-| `listar_arquivos_curso` | Listar Arquivos Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_files` | Listar Arquivos Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_files` | List Course Files | `ReadOnly` | Sim | Não | Implementada |
-| `listar_paginas_curso` | Listar Paginas Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_pages` | Listar Paginas Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_pages` | List Course Pages | `ReadOnly` | Sim | Não | Implementada |
-| `listar_urls_curso` | Listar URLs Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_urls` | Listar URLs Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_urls` | List Course URLs | `ReadOnly` | Sim | Não | Implementada |
-| `auditar_estrutura_curso` | Auditar Estrutura Curso | `ReadOnly` | Sim | Não | Implementada |
+| `audit_course_structure` | Auditar Estrutura Curso | `ReadOnly` | Sim | Não | Implementada |
 | `audit_course_structure` | Audit Course Structure | `ReadOnly` | Sim | Não | Implementada |
-| `listar_atividades_curso` | Listar Atividades Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_activities` | Listar Atividades Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_activities` | List Course Activities | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_atividade` | Consultar Atividade | `ReadOnly` | Sim | Não | Implementada |
+| `get_course_activity` | Consultar Atividade | `ReadOnly` | Sim | Não | Implementada |
 | `get_course_activity` | Get Course Activity | `ReadOnly` | Sim | Não | Implementada |
-| `listar_tarefas_curso` | Listar Tarefas Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_assignments` | Listar Tarefas Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_assignments` | List Course Assignments | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_tarefa` | Consultar Tarefa | `ReadOnly` | Sim | Não | Implementada |
+| `get_assignment` | Consultar Tarefa | `ReadOnly` | Sim | Não | Implementada |
 | `get_assignment` | Get Assignment | `ReadOnly` | Sim | Não | Implementada |
-| `ler_forum` | Ler Forum | `ReadOnly` | Sim | Não | Implementada |
+| `read_forum` | Ler Forum | `ReadOnly` | Sim | Não | Implementada |
 | `read_forum` | Read Forum | `ReadOnly` | Sim | Não | Implementada |
-| `criar_previa_post_forum` | Criar Previa Post Forum | `HumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
+| `create_forum_post_preview` | Criar Previa Post Forum | `HumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
 | `create_forum_post_preview` | Create Forum Post Preview | `HumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
-| `confirmar_post_forum_moodle` | Confirmar Post Forum Moodle | `HumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
+| `confirm_forum_post` | Confirmar Post Forum Moodle | `HumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
 | `confirm_forum_post` | Confirm Forum Post | `HumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
-| `listar_quizzes_curso` | Listar Quizzes Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_quizzes` | Listar Quizzes Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_quizzes` | List Course Quizzes | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_quiz` | Consultar Quiz | `ReadOnly` | Sim | Não | Implementada |
+| `get_quiz` | Consultar Quiz | `ReadOnly` | Sim | Não | Implementada |
 | `get_quiz` | Get Quiz | `ReadOnly` | Sim | Não | Implementada |
-| `listar_scorms_curso` | Listar SCORMs Curso | `ReadOnly` | Sim | Não | Implementada |
+| `list_course_scorms` | Listar SCORMs Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_scorms` | List Course SCORMs | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_prazos_atividades` | Consultar Prazos Atividades | `ReadOnly` | Sim | Não | Implementada |
+| `list_activity_deadlines` | Consultar Prazos Atividades | `ReadOnly` | Sim | Não | Implementada |
 | `list_activity_deadlines` | List Activity Deadlines | `ReadOnly` | Sim | Não | Implementada |
-| `listar_entregas_atividade` | Listar Entregas Atividade | `SensitiveRead` | Sim | Não | Implementada |
+| `list_assignment_submissions` | Listar Entregas Atividade | `SensitiveRead` | Sim | Não | Implementada |
 | `list_assignment_submissions` | List Assignment Submissions | `SensitiveRead` | Sim | Não | Implementada |
-| `consultar_entrega_aluno` | Consultar Entrega Aluno | `SensitiveRead` | Sim | Não | Implementada |
+| `get_student_submission` | Consultar Entrega Aluno | `SensitiveRead` | Sim | Não | Implementada |
 | `get_student_submission` | Get Student Submission | `SensitiveRead` | Sim | Não | Implementada |
-| `listar_entregas_pendentes` | Listar Entregas Pendentes | `SensitiveRead` | Sim | Não | Implementada |
+| `list_pending_submissions` | Listar Entregas Pendentes | `SensitiveRead` | Sim | Não | Implementada |
 | `list_pending_submissions` | List Pending Submissions | `SensitiveRead` | Sim | Não | Implementada |
-| `listar_entregas_atrasadas` | Listar Entregas Atrasadas | `SensitiveRead` | Sim | Não | Implementada |
+| `list_late_submissions` | Listar Entregas Atrasadas | `SensitiveRead` | Sim | Não | Implementada |
 | `list_late_submissions` | List Late Submissions | `SensitiveRead` | Sim | Não | Implementada |
-| `listar_entregas_aguardando_correcao` | Listar Entregas Aguardando Correcao | `SensitiveRead` | Sim | Não | Implementada |
+| `list_submissions_awaiting_grading` | Listar Entregas Aguardando Correcao | `SensitiveRead` | Sim | Não | Implementada |
 | `list_submissions_awaiting_grading` | List Submissions Awaiting Grading | `SensitiveRead` | Sim | Não | Implementada |
-| `consultar_status_submissao` | Consultar Status Submissao | `SensitiveRead` | Sim | Não | Implementada |
+| `get_submission_status` | Consultar Status Submissao | `SensitiveRead` | Sim | Não | Implementada |
 | `get_submission_status` | Get Submission Status | `SensitiveRead` | Sim | Não | Implementada |
-| `consultar_progresso_aluno` | Consultar Progresso Aluno | `SensitiveRead` | Sim | Não | Implementada |
+| `get_student_completion` | Consultar Progresso Aluno | `SensitiveRead` | Sim | Não | Implementada |
 | `get_student_completion` | Get Student Completion | `SensitiveRead` | Sim | Não | Implementada |
-| `consultar_boletim_aluno` | Consultar Boletim Aluno | `SensitiveRead` | Sim | Não | Implementada |
+| `get_student_gradebook` | Consultar Boletim Aluno | `SensitiveRead` | Sim | Não | Implementada |
 | `get_student_gradebook` | Get Student Gradebook | `SensitiveRead` | Sim | Não | Implementada |
-| `gerar_relatorio_risco_estudantes` | Gerar Relatorio Risco Estudantes | `SensitiveRead` | Sim | Não | Implementada |
+| `report_students_at_risk` | Gerar Relatorio Risco Estudantes | `SensitiveRead` | Sim | Não | Implementada |
 | `report_students_at_risk` | Report Students at Risk | `SensitiveRead` | Sim | Não | Implementada |
-| `descobrir_funcoes_moodle_correcao` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `discover_grading_functions` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Implementada |
-| `executar_descoberta_tecnica_correcao` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `listar_entregas_corrigiveis` | Listar Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
-| `criar_lote_correcao_assistida` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
-| `consultar_status_lote_correcao` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `exportar_relatorio_correcao_coordenacao` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Implementada |
-| `cancelar_lote_correcao_assistida` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Implementada |
-| `consultar_item_correcao_assistida` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_contexto_item_correcao_assistida` | Consultar Contexto Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
-| `atualizar_rascunho_correcao` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Implementada |
-| `preparar_correcao_entrega` | Preparar Correcao Entrega | `DraftOnly` | Não | Escrita interna | Implementada |
-| `preparar_lote_correcao_ia` | Preparar Lote Correcao IA | `ReadOnly` | Sim | Não | Implementada |
-| `salvar_correcoes_ia_lote` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Escrita interna | Implementada |
-| `revisar_feedbacks_lote` | Revisar Feedbacks Lote | `ReadOnly` | Sim | Não | Implementada |
-| `consultar_auditoria_correcao_lote` | Consultar Auditoria Correcao Lote | `ReadOnly` | Sim | Não | Implementada |
-| `criar_previa_lancamento_lote` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
-| `confirmar_lancamento_lote_moodle` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
-| `preparar_mensagem_boas_vindas` / `confirmar_mensagem_boas_vindas` | Mensagem Boas Vindas | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
-| `preparar_mensagem_cobranca_acesso` / `confirmar_mensagem_cobranca_acesso` | Mensagem Cobranca Acesso | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
-| `preparar_mensagem_cobranca_sa` / `confirmar_mensagem_cobranca_sa` | Mensagem Cobranca SA | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
-| `preparar_mensagem_recuperacao` / `confirmar_mensagem_recuperacao` | Mensagem Recuperacao | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
-| `preparar_mensagem_encerramento` / `confirmar_mensagem_encerramento` | Mensagem Encerramento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
-| `preparar_mensagem_acompanhamento` / `confirmar_mensagem_acompanhamento` | Mensagem Acompanhamento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
-| `preparar_lancamento_nota` / `prepare_individual_grade_launch` | Preparar Nota Individual | `CriticalHumanConfirmedWrite` | Nota atual/prévia | Cria ação pendente | Implementadas (aliases PT/EN) |
-| `confirmar_lancamento_nota` / `confirm_individual_grade_launch` | Confirmar Nota Individual | `CriticalHumanConfirmedWrite` | Não | Nota/feedback individual no Moodle | Implementadas (aliases PT/EN) |
-| `consultar_auditoria_correcao` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `execute_grading_discovery` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `list_gradable_submissions` | Listar Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
+| `create_assisted_grading_batch` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
+| `get_grading_batch_status` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `export_grading_coordination_report` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Implementada |
+| `cancel_assisted_grading_batch` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Implementada |
+| `get_assisted_grading_item` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
+| `get_grading_item_context` | Consultar Contexto Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
+| `update_grading_draft` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Implementada |
+| `prepare_submission_grading` | Preparar Correcao Entrega | `DraftOnly` | Não | Escrita interna | Implementada |
+| `prepare_ai_grading_batch` | Preparar Lote Correcao IA | `ReadOnly` | Sim | Não | Implementada |
+| `save_ai_grading_batch` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Escrita interna | Implementada |
+| `review_batch_feedbacks` | Revisar Feedbacks Lote | `ReadOnly` | Sim | Não | Implementada |
+| `get_grading_batch_audit` | Consultar Auditoria Correcao Lote | `ReadOnly` | Sim | Não | Implementada |
+| `create_batch_grade_launch_preview` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
+| `confirm_batch_grade_launch` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
+| `prepare_welcome_message` / `confirm_welcome_message` | Mensagem Boas Vindas | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `prepare_access_reminder` / `confirm_access_reminder` | Mensagem Cobranca Acesso | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `prepare_activity_reminder` / `confirm_activity_reminder` | Mensagem Cobranca SA | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `prepare_recovery_message` / `confirm_recovery_message` | Mensagem Recuperacao | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `prepare_closing_message` / `confirm_closing_message` | Mensagem Encerramento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `prepare_followup_message` / `confirm_followup_message` | Mensagem Acompanhamento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
+| `prepare_individual_grade_launch` / `prepare_individual_grade_launch` | Preparar Nota Individual | `CriticalHumanConfirmedWrite` | Nota atual/prévia | Cria ação pendente | Implementadas (aliases PT/EN) |
+| `confirm_individual_grade_launch` / `confirm_individual_grade_launch` | Confirmar Nota Individual | `CriticalHumanConfirmedWrite` | Não | Nota/feedback individual no Moodle | Implementadas (aliases PT/EN) |
+| `get_grading_audit` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `grading-review-app` | Grading Review App | `ReadOnly` | Sim | Não | Implementada (MCP Resource) |
-| `preparar_acao_demo` | Preparar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
-| `confirmar_acao_demo` | Confirmar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
+| `prepare_demo_action` | Preparar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
+| `confirm_demo_action` | Confirmar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
 
 ## Mensagens tipificadas do tutor
 
@@ -202,11 +202,11 @@ Limitações: são mensagens instantâneas individuais, sem broadcast atômico, 
 
 ## Nota individual confirmada
 
-`MoodleIndividualGradeTools.cs` expõe o par em português `preparar_lancamento_nota` / `confirmar_lancamento_nota` e os aliases em inglês `prepare_individual_grade_launch` / `confirm_individual_grade_launch`. A preparação recebe curso, tarefa, estudante, nota proposta, justificativa, feedback opcional e alias; consulta a nota atual e cria `PendingAction` com prévia e confirmação literal que inclui a nota. A confirmação exige `moodle.write.assignments.grade`, conexão `CanWrite=true`, `AssignmentGradeWriteEnabled=true`, pending action válida e `mod_assign_save_grade` disponível.
+`MoodleIndividualGradeTools.cs` expõe o par em português `prepare_individual_grade_launch` / `confirm_individual_grade_launch` e os aliases em inglês `prepare_individual_grade_launch` / `confirm_individual_grade_launch`. A preparação recebe curso, tarefa, estudante, nota proposta, justificativa, feedback opcional e alias; consulta a nota atual e cria `PendingAction` com prévia e confirmação literal que inclui a nota. A confirmação exige `moodle.write.assignments.grade`, conexão `CanWrite=true`, `AssignmentGradeWriteEnabled=true`, pending action válida e `mod_assign_save_grade` disponível.
 
 Limitações: a escrita é individual e imediatamente visível ao estudante; não decide nota nem substitui revisão pedagógica. No `appsettings.json` versionado atual, `AssignmentGradeWriteEnabled=true`; quando definida como `false` por ambiente, a confirmação é recusada.
 
-## `listar_meus_cursos` / `list_courses`
+## `list_my_courses` / `list_courses`
 
 Descrição:
 
@@ -273,12 +273,12 @@ Resposta estruturada:
 }
 ```
 
-## `buscar_cursos` / `search_courses`
+## `search_courses` / `search_courses`
 
 Descrição:
 
 - Busca dentro dos cursos vinculados ao usuário autenticado.
-- Usa o mesmo cache leve de `listar_meus_cursos`.
+- Usa o mesmo cache leve de `list_my_courses`.
 - Filtra por `courseId`, `idNumber`, `shortName`, nome completo, nome de exibição ou categoria.
 - Não consulta notas, entregas, conclusão ou risco.
 
@@ -292,7 +292,7 @@ Parâmetros:
 
 Resposta estruturada:
 
-- Mesmo contrato de `listar_meus_cursos` / `list_courses`.
+- Mesmo contrato de `list_my_courses` / `list_courses`.
 
 ## `search` / `fetch`
 
@@ -311,7 +311,7 @@ Parâmetros:
 | `search` | `query` | `string` | Termo de busca em cursos Moodle autorizados. |
 | `fetch` | `id` | `string` | `courseId`, `shortName` ou `idNumber` do curso. |
 
-## `consultar_curso` / `get_course`
+## `get_course` / `get_course`
 
 Descrição:
 
@@ -345,7 +345,7 @@ Resposta estruturada:
 }
 ```
 
-## `listar_participantes_curso` / `list_course_participants`
+## `list_course_participants` / `list_course_participants`
 
 Notas de diagnostico:
 
@@ -418,7 +418,7 @@ Resposta estruturada:
 }
 ```
 
-## `listar_alunos_curso` / `list_course_students`
+## `list_course_students` / `list_course_students`
 
 Fallback de classificacao:
 
@@ -432,7 +432,7 @@ Descrição:
 - Retorna apenas usuários com papel de estudante/aluno quando o Moodle retornar papeis no curso.
 - Mantém e-mail omitido por padrão.
 
-## `listar_grupos_curso` / `list_course_groups`
+## `list_course_groups` / `list_course_groups`
 
 Descrição:
 
@@ -446,7 +446,7 @@ Parâmetros:
 | `courseId` | `string` | Identificador do curso, nome curto ou idnumber. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
 
-## `consultar_membros_grupo` / `get_group_members`
+## `get_group_members` / `get_group_members`
 
 Descrição:
 
@@ -454,7 +454,7 @@ Descrição:
 - Usa paginação e o mesmo contrato de resposta de participantes.
 - Não retorna e-mail por padrão.
 
-## `listar_conteudos_curso` / `list_course_contents`
+## `list_course_contents` / `list_course_contents`
 
 Descrição:
 
@@ -473,7 +473,7 @@ Parâmetros:
 | `incluirOcultos` / `includeHidden` | `bool` | Inclui itens ocultos quando o Moodle retornar esses dados. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
 
-## `consultar_modulo_curso` / `get_course_module`
+## `get_course_module` / `get_course_module`
 
 Descrição:
 
@@ -481,32 +481,32 @@ Descrição:
 - Retorna o mesmo contrato de módulo usado na listagem de conteúdos.
 - Não baixa arquivos.
 
-## `listar_recursos_curso` / `list_course_resources`
+## `list_course_resources` / `list_course_resources`
 
 Descrição:
 
 - Lista recursos de conteúdo: `resource`, `page`, `url`, `book`, `folder` e `label`.
 
-## `listar_arquivos_curso` / `list_course_files`
+## `list_course_files` / `list_course_files`
 
 Descrição:
 
 - Lista módulos que possuem arquivos retornados pelo Moodle.
 - Retorna nome, caminho, tamanho, MIME type e URL sanitizada quando disponíveis.
 
-## `listar_paginas_curso` / `list_course_pages`
+## `list_course_pages` / `list_course_pages`
 
 Descrição:
 
 - Lista módulos `page` do curso.
 
-## `listar_urls_curso` / `list_course_urls`
+## `list_course_urls` / `list_course_urls`
 
 Descrição:
 
 - Lista módulos `url` do curso com links sanitizados.
 
-## `auditar_estrutura_curso` / `audit_course_structure`
+## `audit_course_structure` / `audit_course_structure`
 
 Descrição:
 
@@ -514,7 +514,7 @@ Descrição:
 - Aponta seções vazias, módulos sem descrição e módulos sem datas retornadas pelo Moodle.
 - Não altera conteúdo, visibilidade ou configuração da sala.
 
-## `listar_atividades_curso` / `list_course_activities`
+## `list_course_activities` / `list_course_activities`
 
 Descrição:
 
@@ -532,7 +532,7 @@ Parâmetros:
 | `incluirOcultas` / `includeHidden` | `bool` | Inclui atividades ocultas quando o Moodle retornar esses dados. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
 
-## `consultar_atividade` / `get_course_activity`
+## `get_course_activity` / `get_course_activity`
 
 Descrição:
 
@@ -540,21 +540,21 @@ Descrição:
 - Mantém o mesmo contrato de leitura de atividades.
 - Não consulta submissões, tentativas ou notas.
 
-## `listar_tarefas_curso` / `list_course_assignments`
+## `list_course_assignments` / `list_course_assignments`
 
 Descrição:
 
 - Lista módulos `assign` do curso.
 - Não consulta entregas, submissões ou notas.
 
-## `consultar_tarefa` / `get_assignment`
+## `get_assignment` / `get_assignment`
 
 Descrição:
 
 - Consulta uma tarefa por `cmid` ou `instanceId`.
 - Não consulta entregas, submissões ou notas.
 
-## `ler_forum` / `read_forum`
+## `read_forum` / `read_forum`
 
 Descrição:
 
@@ -579,7 +579,7 @@ Parâmetros:
 | `ordem` / `sortDirection` | `string` | Direção de ordenação: `ASC` ou `DESC`. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
 
-## `criar_previa_post_forum` / `create_forum_post_preview`
+## `create_forum_post_preview` / `create_forum_post_preview`
 
 Descrição:
 
@@ -603,7 +603,7 @@ Parâmetros:
 | `groupId` | `int` | Grupo Moodle para nova discussão. `0` usa o padrão do Moodle. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. Quando omitido, usa a conexão padrão. |
 
-## `confirmar_post_forum_moodle` / `confirm_forum_post`
+## `confirm_forum_post` / `confirm_forum_post`
 
 Descrição:
 
@@ -620,28 +620,28 @@ Parâmetros:
 | `pendingActionId` | `Guid` | Identificador da ação pendente. |
 | `confirmationText` | `string` | Texto literal de confirmação retornado na prévia. |
 
-## `listar_quizzes_curso` / `list_course_quizzes`
+## `list_course_quizzes` / `list_course_quizzes`
 
 Descrição:
 
 - Lista módulos `quiz` do curso.
 - Não consulta tentativas ou notas.
 
-## `consultar_quiz` / `get_quiz`
+## `get_quiz` / `get_quiz`
 
 Descrição:
 
 - Consulta um quiz por `cmid` ou `instanceId`.
 - Não consulta tentativas ou notas.
 
-## `listar_scorms_curso` / `list_course_scorms`
+## `list_course_scorms` / `list_course_scorms`
 
 Descrição:
 
 - Lista módulos `scorm` do curso.
 - Não consulta tentativas ou notas.
 
-## `consultar_prazos_atividades` / `list_activity_deadlines`
+## `list_activity_deadlines` / `list_activity_deadlines`
 
 Descrição:
 
@@ -649,7 +649,7 @@ Descrição:
 - Separa `openAt`, `dueAt` e `closeAt` quando o rótulo permite identificar.
 - Sinaliza atividades sem datas ou sem prazo de entrega/fechamento.
 
-## `listar_entregas_atividade` / `list_assignment_submissions`
+## `list_assignment_submissions` / `list_assignment_submissions`
 
 Descrição:
 
@@ -675,7 +675,7 @@ Parâmetros:
 | `incluirNaoCorrigidas` / `includeUngraded` | `bool` | Quando falso, remove itens aguardando correção de relatórios gerais. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. |
 
-## `consultar_entrega_aluno` / `get_student_submission`
+## `get_student_submission` / `get_student_submission`
 
 Descrição:
 
@@ -683,35 +683,35 @@ Descrição:
 - Retorna status, atraso, necessidade de correção, tentativa, datas e presença de arquivos/texto online.
 - Não retorna o conteúdo textual integral da entrega nem baixa anexos.
 
-## `listar_entregas_pendentes` / `list_pending_submissions`
+## `list_pending_submissions` / `list_pending_submissions`
 
 Descrição:
 
 - Lista estudantes ativos sem submissão entregue para uma tarefa.
-- Usa o mesmo contrato paginado de `listar_entregas_atividade`.
+- Usa o mesmo contrato paginado de `list_assignment_submissions`.
 
-## `listar_entregas_atrasadas` / `list_late_submissions`
+## `list_late_submissions` / `list_late_submissions`
 
 Descrição:
 
 - Lista submissões enviadas após o prazo da tarefa retornado pelo Moodle.
-- Usa o mesmo contrato paginado de `listar_entregas_atividade`.
+- Usa o mesmo contrato paginado de `list_assignment_submissions`.
 
-## `listar_entregas_aguardando_correcao` / `list_submissions_awaiting_grading`
+## `list_submissions_awaiting_grading` / `list_submissions_awaiting_grading`
 
 Descrição:
 
 - Lista submissões enviadas com status de avaliação ainda pendente.
-- Usa o mesmo contrato paginado de `listar_entregas_atividade`.
+- Usa o mesmo contrato paginado de `list_assignment_submissions`.
 
-## `consultar_status_submissao` / `get_submission_status`
+## `get_submission_status` / `get_submission_status`
 
 Descrição:
 
 - Alias de consulta individual de status da submissão por estudante.
-- Usa o mesmo contrato de `consultar_entrega_aluno`.
+- Usa o mesmo contrato de `get_student_submission`.
 
-## `descobrir_funcoes_moodle_correcao` / `discover_moodle_grading_functions`
+## `discover_grading_functions` / `discover_moodle_grading_functions`
 
 Descricao:
 
@@ -735,7 +735,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `executar_descoberta_tecnica_correcao`
+## `execute_grading_discovery`
 
 Descricao:
 
@@ -768,7 +768,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `criar_lote_correcao_assistida`
+## `create_assisted_grading_batch`
 
 Descricao:
 
@@ -801,11 +801,11 @@ Metadados MCP:
 | `Idempotent` | `false` |
 | `OpenWorld` | `false` |
 
-## `consultar_status_lote_correcao`
+## `get_grading_batch_status`
 
 Descricao:
 
-- Consulta um lote interno criado por `criar_lote_correcao_assistida`.
+- Consulta um lote interno criado por `create_assisted_grading_batch`.
 - Retorna contadores do lote e uma pagina de itens sem anexar template de UI.
 - Nao consulta o Moodle e nao executa escrita.
 
@@ -826,7 +826,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `exportar_relatorio_correcao_coordenacao`
+## `export_grading_coordination_report`
 
 Descricao:
 
@@ -840,7 +840,7 @@ Parametros:
 
 | Nome | Tipo | Descricao |
 | --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote retornado por `criar_lote_correcao_assistida`. |
+| `batchJobId` | `Guid` | Identificador do lote retornado por `create_assisted_grading_batch`. |
 
 Campos principais de resposta:
 
@@ -862,7 +862,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `cancelar_lote_correcao_assistida`
+## `cancel_assisted_grading_batch`
 
 Descricao:
 
@@ -874,7 +874,7 @@ Parametros:
 
 | Nome | Tipo | Descricao |
 | --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote retornado por `criar_lote_correcao_assistida`. |
+| `batchJobId` | `Guid` | Identificador do lote retornado por `create_assisted_grading_batch`. |
 
 Metadados MCP:
 
@@ -885,7 +885,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `consultar_item_correcao_assistida`
+## `get_assisted_grading_item`
 
 Descricao:
 
@@ -898,7 +898,7 @@ Parametros:
 
 | Nome | Tipo | Descricao |
 | --- | --- | --- |
-| `gradingItemId` | `Guid` | Identificador do item retornado por `consultar_status_lote_correcao`. |
+| `gradingItemId` | `Guid` | Identificador do item retornado por `get_grading_batch_status`. |
 
 Metadados MCP:
 
@@ -909,7 +909,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `atualizar_rascunho_correcao`
+## `update_grading_draft`
 
 Descricao:
 
@@ -938,7 +938,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `criar_previa_lancamento_lote`
+## `create_batch_grade_launch_preview`
 
 Descricao:
 
@@ -964,11 +964,11 @@ Metadados MCP:
 | `Idempotent` | `false` |
 | `OpenWorld` | `false` |
 
-## `confirmar_lancamento_lote_moodle`
+## `confirm_batch_grade_launch`
 
 Descricao:
 
-- Confirma uma acao pendente criada por `criar_previa_lancamento_lote`.
+- Confirma uma acao pendente criada por `create_batch_grade_launch_preview`.
 - Exige o texto literal de confirmacao e o escopo server-side `moodle.write`.
 - Exige `Features:AssignmentGradeWriteEnabled=true`; quando houver feedback, exige tambem `Features:AssignmentFeedbackWriteEnabled=true`.
 - Bloqueia o envio se `mod_assign_save_grade` nao estiver disponivel no catalogo de funcoes do servico Moodle autorizado.
@@ -992,7 +992,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `consultar_auditoria_correcao`
+## `get_grading_audit`
 
 Descricao:
 
@@ -1018,7 +1018,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `preparar_acao_demo`
+## `prepare_demo_action`
 
 Descrição:
 
@@ -1032,7 +1032,7 @@ Parâmetros:
 | --- | --- | --- |
 | `message` | `string` | Texto demonstrativo exibido na prévia. |
 
-## `confirmar_acao_demo`
+## `confirm_demo_action`
 
 Descrição:
 
@@ -1047,7 +1047,7 @@ Parâmetros:
 | `pendingActionId` | `Guid` | Identificador da ação pendente. |
 | `confirmationText` | `string` | Texto exato retornado na preparação. |
 
-## `consultar_progresso_aluno` / `get_student_completion`
+## `get_student_completion` / `get_student_completion`
 
 Descricao:
 
@@ -1073,7 +1073,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `consultar_boletim_aluno` / `get_student_gradebook`
+## `get_student_gradebook` / `get_student_gradebook`
 
 Descricao:
 
@@ -1098,7 +1098,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `gerar_relatorio_risco_estudantes` / `report_students_at_risk`
+## `report_students_at_risk` / `report_students_at_risk`
 
 Diagnostico do relatorio:
 
@@ -1131,12 +1131,12 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `listar_entregas_corrigiveis`
+## `list_gradable_submissions`
 
 Descricao:
 
 - Lista entregas corrigiveis de uma ou mais tarefas com contadores e paginacao agregada.
-- Usada como passo de preparo antes de `criar_lote_correcao_assistida`.
+- Usada como passo de preparo antes de `create_assisted_grading_batch`.
 - Aceita filtro por status e flag `onlyAwaitingGrading`.
 - Nao baixa anexos nem retorna conteudo integral de submissoes.
 
@@ -1162,7 +1162,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `preparar_correcao_entrega`
+## `prepare_submission_grading`
 
 Descricao:
 
@@ -1179,7 +1179,7 @@ Metadados MCP:
 | `Idempotent` | `false` |
 | `OpenWorld` | `false` |
 
-## `preparar_lote_correcao_ia`
+## `prepare_ai_grading_batch`
 
 Descricao:
 
@@ -1196,19 +1196,19 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `salvar_correcoes_ia_lote`
+## `save_ai_grading_batch`
 
 Descricao:
 
 - Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote.
 - Nao escreve no Moodle.
-- Apos salvar, o fluxo obrigatorio e chamar `revisar_feedbacks_lote` para exibir a interface de revisao humana. Nunca pular a revisao.
+- Apos salvar, o fluxo obrigatorio e chamar `review_batch_feedbacks` para exibir a interface de revisao humana. Nunca pular a revisao.
 
 Parametros:
 
 | Nome | Tipo | Descricao |
 | --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote retornado por `criar_lote_correcao_assistida`. |
+| `batchJobId` | `Guid` | Identificador do lote retornado por `create_assisted_grading_batch`. |
 | `items` | `AiGradingItemInput[]` | Array de correcoes. Cada item deve conter `gradingItemId`, nota e feedback. |
 
 Metadados MCP:
@@ -1220,12 +1220,12 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `revisar_feedbacks_lote`
+## `review_batch_feedbacks`
 
 Descricao:
 
 - Retorna a interface de revisao humana dos feedbacks gerados por IA para um lote.
-- Deve ser chamada apos `salvar_correcoes_ia_lote` e antes de `criar_previa_lancamento_lote`.
+- Deve ser chamada apos `save_ai_grading_batch` e antes de `create_batch_grade_launch_preview`.
 - Nao escreve no Moodle.
 
 Metadados MCP:
@@ -1237,7 +1237,7 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `consultar_contexto_item_correcao_assistida`
+## `get_grading_item_context`
 
 Descricao:
 
@@ -1259,12 +1259,12 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `consultar_auditoria_correcao_lote`
+## `get_grading_batch_audit`
 
 Descricao:
 
 - Consulta eventos de auditoria de um lote completo de correcao por `batchJobId`.
-- Complementa `consultar_auditoria_correcao` que busca por `auditId` individual.
+- Complementa `get_grading_audit` que busca por `auditId` individual.
 - Retorna eventos paginados vinculados ao lote.
 - Nao escreve no Moodle.
 

@@ -25,8 +25,8 @@ public sealed class MoodleIndividualGradeTools(
     // ── Preparar lançamento de nota ───────────────────────────────────────────
 
     [McpServerTool(
-        Name = "preparar_lancamento_nota",
-        Title = "Preparar Lancamento de Nota Individual",
+        Name = "prepare_individual_grade_launch",
+        Title = "Prepare Individual Grade Launch",
         ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<IndividualGradePrepareResult>))]
@@ -84,64 +84,11 @@ public sealed class MoodleIndividualGradeTools(
         };
     }
 
-    [McpServerTool(
-        Name = "prepare_individual_grade_launch",
-        Title = "Prepare Individual Grade Launch",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<IndividualGradePrepareResult>))]
-    [Description("Prepares an individual grade submission for a student on an assignment (SA). Fetches the current grade for comparison. Returns a preview with risks and exact confirmation text. CAUTION: requires AssignmentGradeWriteEnabled feature flag and moodle.write.assignments.grade scope. Use confirm_individual_grade_launch to execute after reviewing the preview.")]
-    public async Task<CallToolResult> PrepareIndividualGradeLaunchAsync(
-        [Description("Moodle course identifier.")] string courseId,
-        [Description("Moodle assignment identifier.")] string assignmentId,
-        [Description("Moodle student identifier.")] string studentId,
-        [Description("Grade to submit (decimal, e.g. 8.5).")] decimal proposedGrade,
-        [Description("Mandatory justification for the grade submission.")] string justification,
-        [Description("Optional feedback text to publish with the grade.")] string? feedbackText = null,
-        [Description("Moodle connection alias.")] string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(courseId) || string.IsNullOrWhiteSpace(assignmentId) || string.IsNullOrWhiteSpace(studentId))
-            return ToolResultHelper.Error<IndividualGradePrepareResult>("courseId, assignmentId and studentId are required.");
-        if (string.IsNullOrWhiteSpace(justification))
-            return ToolResultHelper.Error<IndividualGradePrepareResult>("A justification is required for grade submission.");
-
-        moodleSelection.Alias = moodleAlias;
-        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-        if (moodleUserId is null)
-            return ToolResultHelper.Error<IndividualGradePrepareResult>("User not authenticated.");
-
-        IndividualGradePrepareResult result;
-        try
-        {
-            result = await mediator.Send(
-                new PrepareIndividualGradeCommand(courseId, assignmentId, studentId, proposedGrade, feedbackText, justification),
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return ToolResultHelper.Error<IndividualGradePrepareResult>(ex.Message);
-        }
-
-        var response = new ToolResponse<IndividualGradePrepareResult>("pending", result, [], AuditId: null, DateTimeOffset.UtcNow);
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock
-            {
-                Text = $"Grade preview prepared for {result.Preview.StudentFullName} — assignment {assignmentId}. " +
-                       $"Proposed grade: {result.Preview.ProposedGrade:F2}. " +
-                       $"To confirm, use confirm_individual_grade_launch with id {result.PendingActionId} and text: '{result.Preview.ConfirmationText}'."
-            }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = false
-        };
-    }
-
     // ── Confirmar lançamento de nota ──────────────────────────────────────────
 
     [McpServerTool(
-        Name = "confirmar_lancamento_nota",
-        Title = "Confirmar Lancamento de Nota Individual",
+        Name = "confirm_individual_grade_launch",
+        Title = "Confirm Individual Grade Launch",
         ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<IndividualGradeSendResult>))]
@@ -191,54 +138,4 @@ public sealed class MoodleIndividualGradeTools(
         };
     }
 
-    [McpServerTool(
-        Name = "confirm_individual_grade_launch",
-        Title = "Confirm Individual Grade Launch",
-        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<IndividualGradeSendResult>))]
-    [Description("Confirms and executes the individual grade submission previously prepared. Requires the exact confirmation text (including the numeric grade) returned by prepare_individual_grade_launch. CRITICAL: irreversible — grade is immediately visible to the student in Moodle.")]
-    public async Task<CallToolResult> ConfirmIndividualGradeLaunchAsync(
-        [Description("Pending action ID returned by prepare_individual_grade_launch.")] Guid pendingActionId,
-        [Description("Exact confirmation text from the preview (e.g. 'CONFIRMAR NOTA 8.50').")] string confirmationText,
-        [Description("Moodle connection alias.")] string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(confirmationText))
-            return ToolResultHelper.Error<IndividualGradeSendResult>("Confirmation text is required.");
-
-        moodleSelection.Alias = moodleAlias;
-        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-        if (moodleUserId is null)
-            return ToolResultHelper.Error<IndividualGradeSendResult>("User not authenticated.");
-
-        IndividualGradeSendResult result;
-        try
-        {
-            result = await mediator.Send(
-                new ConfirmIndividualGradeCommand(pendingActionId, confirmationText),
-                cancellationToken);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return ToolResultHelper.Error<IndividualGradeSendResult>(ex.Message);
-        }
-
-        var isError = result.Status is "failed" or "rejected";
-        var response = new ToolResponse<IndividualGradeSendResult>(result.Status, result, [], result.AuditId, DateTimeOffset.UtcNow);
-        return new CallToolResult
-        {
-            Content = [new TextContentBlock
-            {
-                Text = result.Status switch
-                {
-                    "launched" => $"Grade {result.LaunchedGrade:F2} successfully submitted for student {result.StudentId} on assignment {result.AssignmentId}. AuditId: {result.AuditId}.",
-                    "rejected" => $"Confirmation rejected: {string.Join("; ", result.Warnings)}",
-                    _ => $"Grade launch failed: {string.Join("; ", result.Warnings)}"
-                }
-            }],
-            StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = isError
-        };
-    }
 }

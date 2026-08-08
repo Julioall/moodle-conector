@@ -1,0 +1,33 @@
+{
+  "TaskId": "courses.details.001",
+  "Profile": {
+    "Exposure": 1,
+    "ModelName": "MockAgent-v1",
+    "UseSafeReadExecutor": true
+  },
+  "Prompt": "Mostre os detalhes desse curso.",
+  "Model": "MockAgent-v1",
+  "Routing": {
+    "SelectedSkill": "moodle-courses",
+    "SelectedIntent": "courses.details",
+    "SelectedOperation": "core_course_get_courses_by_field",
+    "Arguments": {}
+  },
+  "Execution": {
+    "ConnectionId": "cecf4b57-07c3-430a-ba30-5ec8c3bf9448",
+    "RegistryOperation": "core_course_get_courses_by_field",
+    "PolicyDecision": "Allowed",
+    "MoodleCalls": 1,
+    "LatencyMs": 150
+  },
+  "ResultContent": "{ \u0022items\u0022: [], \u0022truncated\u0022: false }",
+  "Scoring": {
+    "IntentAccuracy": true,
+    "RoutingAccuracy": true,
+    "ParameterAccuracy": true,
+    "ResultAccuracy": true,
+    "PaginationAwareness": true,
+    "OverallSuccess": true,
+    "FailureReason": 0
+  }
+}

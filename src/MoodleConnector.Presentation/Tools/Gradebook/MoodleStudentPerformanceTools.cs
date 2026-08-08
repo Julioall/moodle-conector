@@ -18,8 +18,8 @@ public sealed class MoodleStudentPerformanceTools(
     // ── Desempenho por atividade ──────────────────────────────────────────────
 
     [McpServerTool(
-        Name = "consultar_desempenho_estudante_por_atividade",
-        Title = "Consultar Desempenho Estudante Por Atividade",
+        Name = "get_student_activity_grades",
+        Title = "Get Student Activity Grades",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -35,30 +35,6 @@ public sealed class MoodleStudentPerformanceTools(
         [Description("Nota mínima esperada em porcentagem (0-100). Padrão: 60.")]
         decimal minGradePercent = 60m,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrão do usuário.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetGradeItemsCoreAsync(courseId, studentId, minGradePercent, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "get_student_activity_grades",
-        Title = "Get Student Activity Grades",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<StudentGradeItemsResult>))]
-    [Description("Returns a student's grade items (assignments/SAs) with a flag for each one below the minimum grade threshold.")]
-    public Task<CallToolResult> GetStudentActivityGradesAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Student identifier (Moodle ID).")]
-        string studentId,
-        [Description("Minimum grade percentage (0-100). Default: 60.")]
-        decimal minGradePercent = 60m,
-        [Description("Moodle connection alias. When omitted, uses the user's default connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -111,8 +87,8 @@ public sealed class MoodleStudentPerformanceTools(
     // ── Alunos abaixo do mínimo ───────────────────────────────────────────────
 
     [McpServerTool(
-        Name = "listar_alunos_abaixo_minimo",
-        Title = "Listar Alunos Abaixo do Minimo",
+        Name = "list_students_below_min_grade",
+        Title = "List Students Below Min Grade",
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
@@ -128,30 +104,6 @@ public sealed class MoodleStudentPerformanceTools(
         [Description("Máximo de estudantes para analisar. Padrão: 100.")]
         int maxStudentsToAnalyze = 100,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrão do usuário.")]
-        string? moodleAlias = null,
-        CancellationToken cancellationToken = default)
-    {
-        return GetStudentsBelowMinCoreAsync(courseId, minGradePercent, maxStudentsToAnalyze, moodleAlias, cancellationToken);
-    }
-
-    [McpServerTool(
-        Name = "list_students_below_min_grade",
-        Title = "List Students Below Minimum Grade",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<GetStudentsBelowMinGradeResult>))]
-    [Description("Lists all active students with at least one assignment/SA below the minimum grade. Returns a suggested recipient list for a recovery message.")]
-    public Task<CallToolResult> ListStudentsBelowMinGradeAsync(
-        [Description("Moodle course identifier.")]
-        string courseId,
-        [Description("Minimum grade percentage (0-100). Default: 60.")]
-        decimal minGradePercent = 60m,
-        [Description("Maximum students to analyze. Default: 100.")]
-        int maxStudentsToAnalyze = 100,
-        [Description("Moodle connection alias. When omitted, uses the user's default connection.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

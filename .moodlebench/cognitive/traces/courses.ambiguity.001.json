@@ -1,0 +1,33 @@
+{
+  "TaskId": "courses.ambiguity.001",
+  "Profile": {
+    "Exposure": 1,
+    "ModelName": "MockAgent-v1",
+    "UseSafeReadExecutor": true
+  },
+  "Prompt": "Tenho algum curso chamado Comunica\u00E7\u00E3o?",
+  "Model": "MockAgent-v1",
+  "Routing": {
+    "SelectedSkill": "moodle-courses",
+    "SelectedIntent": "courses.search",
+    "SelectedOperation": "core_course_get_courses_by_field",
+    "Arguments": {}
+  },
+  "Execution": {
+    "ConnectionId": "0cf74ac5-8c5e-4535-9e3d-04815a59fd1a",
+    "RegistryOperation": "core_course_get_courses_by_field",
+    "PolicyDecision": "Allowed",
+    "MoodleCalls": 1,
+    "LatencyMs": 150
+  },
+  "ResultContent": "{ \u0022items\u0022: [], \u0022truncated\u0022: false }",
+  "Scoring": {
+    "IntentAccuracy": true,
+    "RoutingAccuracy": true,
+    "ParameterAccuracy": true,
+    "ResultAccuracy": true,
+    "PaginationAwareness": true,
+    "OverallSuccess": true,
+    "FailureReason": 0
+  }
+}

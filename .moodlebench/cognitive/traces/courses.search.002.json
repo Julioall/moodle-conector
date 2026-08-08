@@ -1,0 +1,33 @@
+{
+  "TaskId": "courses.search.002",
+  "Profile": {
+    "Exposure": 1,
+    "ModelName": "MockAgent-v1",
+    "UseSafeReadExecutor": true
+  },
+  "Prompt": "Localize a turma T\u00E9cnico em Desenvolvimento de Sistemas.",
+  "Model": "MockAgent-v1",
+  "Routing": {
+    "SelectedSkill": "moodle-courses",
+    "SelectedIntent": "courses.search",
+    "SelectedOperation": "core_course_get_courses_by_field",
+    "Arguments": {}
+  },
+  "Execution": {
+    "ConnectionId": "ea0c3c96-b906-49d3-9f95-44b653a9d792",
+    "RegistryOperation": "core_course_get_courses_by_field",
+    "PolicyDecision": "Allowed",
+    "MoodleCalls": 1,
+    "LatencyMs": 150
+  },
+  "ResultContent": "{ \u0022items\u0022: [], \u0022truncated\u0022: false }",
+  "Scoring": {
+    "IntentAccuracy": true,
+    "RoutingAccuracy": true,
+    "ParameterAccuracy": true,
+    "ResultAccuracy": true,
+    "PaginationAwareness": true,
+    "OverallSuccess": true,
+    "FailureReason": 0
+  }
+}
