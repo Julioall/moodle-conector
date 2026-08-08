@@ -7,7 +7,8 @@
     "allowedOperations": [ "core_enrol_get_users_courses" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.list.002",
@@ -17,7 +18,8 @@
     "allowedOperations": [ "core_enrol_get_users_courses" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.search.001",
@@ -27,7 +29,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.search.002",
@@ -37,7 +40,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.search.003",
@@ -47,7 +51,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.search.004",
@@ -57,7 +62,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.search.005",
@@ -67,7 +73,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.details.001",
@@ -77,7 +84,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.details.002",
@@ -87,7 +95,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.details.003",
@@ -97,7 +106,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.details.004",
@@ -107,7 +117,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.details.005",
@@ -117,7 +128,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.structure.001",
@@ -127,7 +139,8 @@
     "allowedOperations": [ "core_course_get_contents" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.structure.002",
@@ -137,7 +150,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "core_course_get_contents" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.structure.003",
@@ -147,7 +161,8 @@
     "allowedOperations": [ "core_course_get_contents" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.structure.004",
@@ -157,7 +172,8 @@
     "allowedOperations": [ "core_course_get_contents" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.structure.005",
@@ -167,7 +183,8 @@
     "allowedOperations": [ "core_course_get_contents" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.ambiguity.001",
@@ -177,7 +194,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.ambiguity.002",
@@ -187,7 +205,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.ambiguity.003",
@@ -197,7 +216,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.ambiguity.004",
@@ -207,7 +227,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": false
   },
   {
     "id": "courses.ambiguity.005",
@@ -217,7 +238,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": false
   },
   {
     "id": "courses.pagination.001",
@@ -227,7 +249,8 @@
     "allowedOperations": [ "core_enrol_get_users_courses" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": true
   },
   {
     "id": "courses.pagination.002",
@@ -237,7 +260,8 @@
     "allowedOperations": [ "core_enrol_get_users_courses" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": true
   },
   {
     "id": "courses.pagination.003",
@@ -247,7 +271,8 @@
     "allowedOperations": [ "core_enrol_get_users_courses" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": true
   },
   {
     "id": "courses.pagination.004",
@@ -257,7 +282,8 @@
     "allowedOperations": [ "core_enrol_get_users_courses" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": true
   },
   {
     "id": "courses.pagination.005",
@@ -267,7 +293,8 @@
     "allowedOperations": [ "core_enrol_get_users_courses" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": true
   },
   {
     "id": "courses.connection.001",
@@ -277,7 +304,8 @@
     "allowedOperations": [ "core_course_get_courses_by_field" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": true
   },
   {
     "id": "courses.connection.002",
@@ -287,7 +315,8 @@
     "allowedOperations": [ "core_course_get_contents" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": true,
-    "expectedConnection": "fieg"
+    "expectedConnection": "fieg",
+    "isCriticalTask": true
   },
   {
     "id": "courses.connection.003",
@@ -297,6 +326,7 @@
     "allowedOperations": [ "core_course_get_courses_by_field", "search" ],
     "forbiddenOperations": [],
     "requiresCompleteDataset": false,
-    "expectedConnection": "senai"
+    "expectedConnection": "senai",
+    "isCriticalTask": true
   }
 ]

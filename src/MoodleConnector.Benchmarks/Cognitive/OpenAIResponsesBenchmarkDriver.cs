@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -20,12 +22,47 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     private string _postEndpoint = string.Empty;
     private HttpResponseMessage? _sseResponse;
     private StreamReader? _sseReader;
-    private readonly BenchmarkScorer _scorer = new();
+    private BenchmarkScorer _scorer = new();
+    private HashSet<string> _knownToolNames = new(StringComparer.OrdinalIgnoreCase);
+
+    public static readonly string CommitSha = ResolveCommitSha();
+    public const string BenchmarkVersion = "1.0.0";
 
     public OpenAIResponsesBenchmarkDriver(ChatClient chatClient, HttpClient mcpClient)
     {
         _chatClient = chatClient;
         _mcpClient = mcpClient;
+    }
+
+    private static string ResolveCommitSha()
+    {
+        // Prefer environment variable (set by CI)
+        var envSha = Environment.GetEnvironmentVariable("GIT_COMMIT_SHA")
+            ?? Environment.GetEnvironmentVariable("GITHUB_SHA");
+        if (!string.IsNullOrWhiteSpace(envSha)) return envSha.Trim();
+
+        // Fallback: run git locally
+        try
+        {
+            var psi = new ProcessStartInfo("git", "rev-parse HEAD")
+            {
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = Process.Start(psi);
+            var sha = proc?.StandardOutput.ReadToEnd().Trim() ?? string.Empty;
+            proc?.WaitForExit();
+            return sha;
+        }
+        catch { return string.Empty; }
+    }
+
+    private static string ComputeManifestHash(JsonArray tools)
+    {
+        var json = tools.ToJsonString();
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
+        return Convert.ToHexString(bytes)[..16].ToLowerInvariant();
     }
 
     public async Task<CognitiveTrace> RunAsync(BenchmarkTask task, BenchmarkProfile profile, CancellationToken cancellationToken)
@@ -34,6 +71,16 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 
         // 1. Fetch available tools from MCP
         var (mcpTools, toolSchemaTokens) = await FetchMcpToolsAsync(cancellationToken);
+        var toolManifestHash = ComputeManifestHash(mcpTools);
+
+        // Build known tool names set for hallucination detection
+        _knownToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in mcpTools)
+        {
+            var n = t?["name"]?.ToString();
+            if (!string.IsNullOrEmpty(n)) _knownToolNames.Add(n);
+        }
+        _scorer = new BenchmarkScorer(_knownToolNames);
         
         var chatTools = new List<ChatTool>();
         foreach (var mtool in mcpTools)
@@ -142,7 +189,10 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             PromptTokens: aggregatedPromptTokens,
             CompletionTokens: aggregatedCompletionTokens,
             TotalTokens: aggregatedPromptTokens + aggregatedCompletionTokens,
-            ToolSchemaTokens: toolSchemaTokens
+            ToolSchemaTokens: toolSchemaTokens,
+            ToolManifestHash: toolManifestHash,
+            BenchmarkVersion: BenchmarkVersion,
+            CommitSha: CommitSha
         );
 
         var scoring = _scorer.Score(task, routing, execution, resultContent);

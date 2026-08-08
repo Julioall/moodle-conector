@@ -10,5 +10,6 @@ public sealed record BenchmarkTask(
     IReadOnlyList<string> AllowedOperations,
     IReadOnlyList<string> ForbiddenOperations,
     bool RequiresCompleteDataset,
-    string? ExpectedConnection = null
+    string? ExpectedConnection = null,
+    bool IsCriticalTask = false
 );

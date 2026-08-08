@@ -31,7 +31,10 @@ public sealed record ExecutionTrace(
     int PromptTokens,
     int CompletionTokens,
     int TotalTokens,
-    int ToolSchemaTokens
+    int ToolSchemaTokens,
+    string ToolManifestHash = "",
+    string BenchmarkVersion = "1.0.0",
+    string CommitSha = ""
 );
 
 public sealed record ScoringTrace(
@@ -42,7 +45,10 @@ public sealed record ScoringTrace(
     bool ResultAccuracy,
     bool PaginationAwareness,
     bool OverallSuccess,
-    FailureTaxonomy FailureReason
+    FailureTaxonomy FailureReason,
+    bool WrongConnectionDetected = false,
+    bool HallucinationDetected = false,
+    bool IsCriticalTask = false
 );
 
 public sealed record CognitiveTrace(
