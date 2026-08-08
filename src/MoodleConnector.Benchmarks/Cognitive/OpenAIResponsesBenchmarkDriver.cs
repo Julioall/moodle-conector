@@ -44,6 +44,12 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     {
         _chatClient = chatClient;
         _mcpClient = mcpClient;
+
+        // MCP Streamable HTTP requires the client to advertise both media types.
+        // Without this header the server returns 406 Not Acceptable.
+        _mcpClient.DefaultRequestHeaders.Accept.Clear();
+        _mcpClient.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        _mcpClient.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
     }
 
     // ------------------------------------------------------------------
