@@ -790,6 +790,38 @@ app.MapGet("/api/portal/tasks", async (HttpContext context, ConnectorDbContext d
     return Results.Ok(new PortalListEnvelope<PortalTaskDto>(items, new PortalListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapGet("/api/portal/agenda", async (HttpContext context, ConnectorDbContext dbContext, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var start = from ?? DateTimeOffset.UtcNow.Date;
+    var end = to ?? start.AddDays(30);
+    var events = await dbContext.PortalCalendarEvents.AsNoTracking().Where(x => x.OwnerId == identity.Id && x.StartAt >= start && x.StartAt < end).OrderBy(x => x.StartAt).Select(x => new PortalCalendarEventDto(x.Id, x.Title, x.Description, x.StartAt, x.EndAt, x.Type, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
+    return Results.Ok(new PortalEnvelope<IReadOnlyList<PortalCalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/portal/agenda", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalCalendarEventInput input, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
+    var now = DateTimeOffset.UtcNow;
+    var item = new PortalCalendarEventEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), StartAt = input.StartAt, EndAt = input.EndAt, Type = NormalizeCalendarEventType(input.Type), CreatedAt = now, UpdatedAt = now };
+    dbContext.PortalCalendarEvents.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Created($"/api/portal/agenda/{item.Id}", new PortalEnvelope<PortalCalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt), new(now, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapDelete("/api/portal/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    var item = await dbContext.PortalCalendarEvents.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
+    if (item is null) return Results.NotFound();
+    dbContext.PortalCalendarEvents.Remove(item); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapPost("/api/portal/tasks", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalTaskInput input, CancellationToken cancellationToken) =>
 {
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
@@ -1697,6 +1729,12 @@ static string NormalizeTaskPriority(string? value) => value switch
     "high" => "high",
     "urgent" => "urgent",
     _ => "medium"
+};
+
+static string NormalizeCalendarEventType(string? value) => value switch
+{
+    "meeting" or "alignment" or "delivery" or "training" or "webclass" => value,
+    _ => "other"
 };
 
 static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();

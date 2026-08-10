@@ -12,6 +12,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<ConnectorClientCredentialEntity> ConnectorClients => Set<ConnectorClientCredentialEntity>();
     public DbSet<UserAccountEntity> UserAccounts => Set<UserAccountEntity>();
     public DbSet<PortalTaskEntity> PortalTasks => Set<PortalTaskEntity>();
+    public DbSet<PortalCalendarEventEntity> PortalCalendarEvents => Set<PortalCalendarEventEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -73,6 +74,17 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         portalTask.Property(x => x.CreatedAt).IsRequired();
         portalTask.Property(x => x.UpdatedAt).IsRequired();
         portalTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
+
+        var calendarEvent = modelBuilder.Entity<PortalCalendarEventEntity>();
+        calendarEvent.ToTable("portal_calendar_events");
+        calendarEvent.HasKey(x => x.Id);
+        calendarEvent.Property(x => x.Title).HasMaxLength(240).IsRequired();
+        calendarEvent.Property(x => x.Description).HasMaxLength(4000);
+        calendarEvent.Property(x => x.Type).HasMaxLength(32).IsRequired();
+        calendarEvent.Property(x => x.StartAt).IsRequired();
+        calendarEvent.Property(x => x.CreatedAt).IsRequired();
+        calendarEvent.Property(x => x.UpdatedAt).IsRequired();
+        calendarEvent.HasIndex(x => new { x.OwnerId, x.StartAt });
 
         var pendingAction = modelBuilder.Entity<PendingMoodleAction>();
         pendingAction.ToTable("moodle_pending_actions");
