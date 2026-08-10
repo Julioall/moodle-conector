@@ -55,6 +55,7 @@ const string PortalAuthRateLimitPolicy = "portal-auth";
 const string AdminApiRateLimitPolicy = "admin-api";
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<PortalStudentService>();
 builder.Services.AddHealthChecks()
     .AddCheck<ConnectorDatabaseHealthCheck>("database", tags: ["ready"]);
 
@@ -839,6 +840,62 @@ app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/activities", async (
         .Select(activity => PortalCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray();
     return Results.Ok(new PortalListEnvelope<PortalActivityDto>(data,
         new(currentPage, size, data.Length, currentPage * size < result.Total, DateTimeOffset.UtcNow, connectionRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/students", async (
+    string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
+    ConnectorDbContext dbContext, PortalStudentService students, IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
+        return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    var rows = await students.ListAsync(identity.Id.ToString(), connectionRef, courseId, cancellationToken);
+    var data = rows.Skip((currentPage - 1) * size).Take(size)
+        .Select(row => PortalStudentContractMapper.ToDto(connectionRef, row.Participant,
+            new[] { new PortalStudentCourseDto(connectionRef, courseId, courseId, null,
+                row.Participant.Suspended == true ? "suspenso" : "ativo", null,
+                row.Participant.LastCourseAccessAt, Array.Empty<PortalStudentGradeDto>()) }))
+        .ToArray();
+    return Results.Ok(new PortalListEnvelope<PortalStudentDto>(data,
+        new(currentPage, size, data.Length, currentPage * size < rows.Count,
+            DateTimeOffset.UtcNow, connectionRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/students", async (
+    string? connectionRef, int? page, int? pageSize, string? courseId, HttpContext context,
+    ConnectorDbContext dbContext, PortalStudentService students, IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var effectiveRef = connectionRef ?? resolved.Alias;
+    var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    var rows = await students.ListAsync(identity.Id.ToString(), effectiveRef, courseId, cancellationToken);
+    var data = rows.GroupBy(row => row.Participant.UserId).Select(group => group.First())
+        .Skip((currentPage - 1) * size).Take(size)
+        .Select(row => PortalStudentContractMapper.ToDto(effectiveRef, row.Participant)).ToArray();
+    var total = rows.Select(row => row.Participant.UserId).Distinct().Count();
+    return Results.Ok(new PortalListEnvelope<PortalStudentDto>(data,
+        new(currentPage, size, data.Length, currentPage * size < total,
+            DateTimeOffset.UtcNow, effectiveRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/students/{connectionRef}/{studentId}", async (
+    string connectionRef, string studentId, HttpContext context, ConnectorDbContext dbContext,
+    PortalStudentService students, IConnectionRegistry connectionRegistry, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
+        return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var student = await students.GetAsync(identity.Id.ToString(), connectionRef, studentId, cancellationToken);
+    return student is null ? PortalErrorResults.NotFound("student_not_found", "Aluno não encontrado.")
+        : Results.Ok(new PortalEnvelope<PortalStudentDto>(student, new(DateTimeOffset.UtcNow, connectionRef)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/info", (IOptions<MoodleApiOptions> moodleOpts) => Results.Ok(new

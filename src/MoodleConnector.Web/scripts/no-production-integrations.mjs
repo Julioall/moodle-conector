@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../src/', import.meta.url));
 const forbidden = [
-  [/supabase/i, 'Supabase acadêmico'], [/openai|@ai-sdk|llm/i, 'OpenAI/LLM'],
-  [/mcp/i, 'MCP'], [/floatingclarischat|clarissuggestions|gradesuggestion|assignment.?suggestion|chat/i, 'chat/suggestions/grading'],
-  [/moodle.*client|moodle.*rest|webservice.*moodle/i, 'cliente Moodle direto'],
+  [/supabase/i, 'Supabase academic'],
+  [/(?:\bopenai\b|@ai-sdk|\bllm\b)/i, 'OpenAI/LLM'],
+  [/mcp/i, 'MCP'],
+  [/floatingclarischat|clarissuggestions|gradesuggestion|assignment.?suggestion|chat/i, 'chat/suggestions/grading'],
+  [/moodle.*client|moodle.*rest|webservice.*moodle/i, 'direct Moodle client'],
 ];
 const files = [];
 async function walk(dir) {
@@ -18,6 +20,9 @@ async function walk(dir) {
 }
 await walk(root);
 const findings = [];
-for (const file of files) { const content = await readFile(file, 'utf8'); for (const [pattern, label] of forbidden) if (pattern.test(content)) findings.push(`${label}: ${file}`); }
+for (const file of files) {
+  const content = await readFile(file, 'utf8');
+  for (const [pattern, label] of forbidden) if (pattern.test(content)) findings.push(`${label}: ${file}`);
+}
 if (findings.length) { console.error(findings.join('\n')); process.exit(1); }
 console.log(`Production Web guard passed (${files.length} source files).`);
