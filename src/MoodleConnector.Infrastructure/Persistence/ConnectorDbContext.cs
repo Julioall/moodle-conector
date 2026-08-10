@@ -13,6 +13,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<UserAccountEntity> UserAccounts => Set<UserAccountEntity>();
     public DbSet<PortalTaskEntity> PortalTasks => Set<PortalTaskEntity>();
     public DbSet<PortalCalendarEventEntity> PortalCalendarEvents => Set<PortalCalendarEventEntity>();
+    public DbSet<PortalFollowupEntity> PortalFollowups => Set<PortalFollowupEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -85,6 +86,17 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         calendarEvent.Property(x => x.CreatedAt).IsRequired();
         calendarEvent.Property(x => x.UpdatedAt).IsRequired();
         calendarEvent.HasIndex(x => new { x.OwnerId, x.StartAt });
+
+        var followup = modelBuilder.Entity<PortalFollowupEntity>();
+        followup.ToTable("portal_followups");
+        followup.HasKey(x => x.Id);
+        followup.Property(x => x.StudentRef).HasMaxLength(200).IsRequired();
+        followup.Property(x => x.CourseRef).HasMaxLength(200);
+        followup.Property(x => x.Kind).HasMaxLength(64).IsRequired();
+        followup.Property(x => x.Notes).HasMaxLength(4000).IsRequired();
+        followup.Property(x => x.OccurredAt).IsRequired();
+        followup.Property(x => x.CreatedAt).IsRequired();
+        followup.HasIndex(x => new { x.OwnerId, x.OccurredAt });
 
         var pendingAction = modelBuilder.Entity<PendingMoodleAction>();
         pendingAction.ToTable("moodle_pending_actions");

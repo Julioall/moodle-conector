@@ -800,6 +800,30 @@ app.MapGet("/api/portal/agenda", async (HttpContext context, ConnectorDbContext 
     return Results.Ok(new PortalEnvelope<IReadOnlyList<PortalCalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapGet("/api/portal/followups", async (HttpContext context, ConnectorDbContext dbContext, string? studentRef = null, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
+    var query = dbContext.PortalFollowups.AsNoTracking().Where(x => x.OwnerId == identity.Id);
+    if (!string.IsNullOrWhiteSpace(studentRef)) query = query.Where(x => x.StudentRef == studentRef);
+    var total = await query.CountAsync(cancellationToken);
+    var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new PortalFollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)).ToListAsync(cancellationToken);
+    return Results.Ok(new PortalListEnvelope<PortalFollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/portal/followups", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalFollowupInput input, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    if (string.IsNullOrWhiteSpace(input.StudentRef) || string.IsNullOrWhiteSpace(input.Notes)) return Results.BadRequest(new { error = new { code = "invalid_followup", message = "Aluno e registro são obrigatórios." } });
+    var now = DateTimeOffset.UtcNow;
+    var item = new PortalFollowupEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, StudentRef = input.StudentRef.Trim(), CourseRef = input.CourseRef?.Trim(), Kind = NormalizeFollowupKind(input.Kind), Notes = input.Notes.Trim(), OccurredAt = input.OccurredAt ?? now, CreatedAt = now };
+    dbContext.PortalFollowups.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Created($"/api/portal/followups/{item.Id}", new PortalEnvelope<PortalFollowupDto>(new(item.Id, item.StudentRef, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt), new(now, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapPost("/api/portal/agenda", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalCalendarEventInput input, CancellationToken cancellationToken) =>
 {
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
@@ -1735,6 +1759,12 @@ static string NormalizeCalendarEventType(string? value) => value switch
 {
     "meeting" or "alignment" or "delivery" or "training" or "webclass" => value,
     _ => "other"
+};
+
+static string NormalizeFollowupKind(string? value) => value switch
+{
+    "contato" or "orientacao" or "pendencia_conferida" or "ligacao" or "resposta_aluno" or "acompanhamento" => value,
+    _ => "acompanhamento"
 };
 
 static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
