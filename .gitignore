@@ -61,3 +61,4 @@ appsettings.Development.json
 !.moodlebench/cognitive/reports/20260810_030252/*
 .superpowers/
 node_modules
+src/MoodleConnector.Web/dist/
