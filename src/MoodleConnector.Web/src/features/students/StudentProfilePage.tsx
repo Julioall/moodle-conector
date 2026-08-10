@@ -7,10 +7,10 @@ import { StudentHistoryTab } from './StudentHistoryTab';
 import { studentsGateway } from './students-gateway';
 
 export function StudentProfilePage() {
-  const { connectionRef = '', studentId = '' } = useParams();
+  const { connectionRef = '', courseId = '', studentId = '' } = useParams();
   const query = useQuery({
-    queryKey: ['portal', 'student', connectionRef, studentId],
-    queryFn: () => studentsGateway.get(connectionRef, studentId),
+    queryKey: ['portal', 'student', connectionRef, courseId, studentId],
+    queryFn: () => studentsGateway.get(connectionRef, courseId, studentId),
   });
 
   return <main className="content-frame student-profile">

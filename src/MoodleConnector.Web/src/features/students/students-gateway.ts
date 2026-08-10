@@ -7,8 +7,7 @@ export type StudentList = { data: Student[]; meta: { page: number; pageSize: num
 export type StudentResponse = { data: Student; meta: { generatedAt: string; connectionRef?: string } };
 
 export const createStudentsGateway = (client = createPortalClient()) => ({
-  list: (connectionRef?: string, page = 1, pageSize = 20, courseId?: string) => client.get<StudentList>(`/api/portal/students?${new URLSearchParams({ ...(connectionRef ? { connectionRef } : {}), ...(courseId ? { courseId } : {}), page: String(page), pageSize: String(pageSize) })}`),
   byCourse: (connectionRef: string, courseId: string, page = 1, pageSize = 20) => client.get<StudentList>(`/api/portal/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/students?page=${page}&pageSize=${pageSize}`),
-  get: (connectionRef: string, studentId: string) => client.get<StudentResponse>(`/api/portal/students/${encodeURIComponent(connectionRef)}/${encodeURIComponent(studentId)}`),
+  get: (connectionRef: string, courseId: string, studentId: string) => client.get<StudentResponse>(`/api/portal/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`),
 });
 export const studentsGateway = createStudentsGateway();
