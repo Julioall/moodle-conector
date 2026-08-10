@@ -37,6 +37,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV ASPNETCORE_URLS=http://+:8080
+ENV Features__PortalV2Enabled=true
 EXPOSE 8080
 
 COPY --from=build /app/publish ./

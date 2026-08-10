@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
@@ -58,6 +59,13 @@ const string PortalAuthRateLimitPolicy = "portal-auth";
 const string AdminApiRateLimitPolicy = "admin-api";
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.Name = "XSRF-TOKEN";
+    options.Cookie.HttpOnly = false;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+});
 builder.Services.AddScoped<PortalStudentService>();
 builder.Services.AddHealthChecks()
     .AddCheck<ConnectorDatabaseHealthCheck>("database", tags: ["ready"]);
@@ -386,6 +394,7 @@ if (enabledConditionalToolContainers.Count > 0)
 }
 
 var app = builder.Build();
+var portalV2Enabled = builder.Configuration.GetValue<bool>("Features:PortalV2Enabled");
 
 // ToolMetadataRegistry is registered and pre-populated at startup.
 
@@ -750,6 +759,12 @@ app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async 
 });
 
 // ─── Portal API ────────────────────────────────────────────────────────────────
+
+app.MapGet("/api/portal/csrf", (HttpContext context, IAntiforgery antiforgery) =>
+{
+    var tokens = antiforgery.GetAndStoreTokens(context);
+    return Results.Ok(new { token = tokens.RequestToken });
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/session", async (
     HttpContext context,
@@ -1591,8 +1606,11 @@ app.MapPost("/admin/connector-clients/register", async (
 
 app.MapMcp(mcpPath);
 
-app.MapGet("/portal", () => Results.Redirect("/portal/"));
-app.MapFallbackToFile("/portal/{*path:nonfile}", "portal/index.html");
+app.MapGet("/portal", () => portalV2Enabled ? Results.Redirect("/portal/") : Results.Redirect("/"));
+if (portalV2Enabled)
+{
+    app.MapFallbackToFile("/portal/{*path:nonfile}", "portal/index.html");
+}
 app.MapFallbackToFile("index.html");
 
 app.Run();

@@ -10,4 +10,5 @@ public sealed class FeatureOptions
     public bool AssignmentGradeWriteEnabled { get; init; }
     public bool CourseContentWriteEnabled { get; init; }
     public bool DemoToolsEnabled { get; init; }
+    public bool PortalV2Enabled { get; init; }
 }
