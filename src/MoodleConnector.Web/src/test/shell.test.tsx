@@ -1,0 +1,2 @@
+import { render, screen } from '@testing-library/react'; import { MemoryRouter } from 'react-router-dom'; import { describe, expect, it } from 'vitest'; import { AppSidebar } from '../components/layout/AppSidebar';
+describe('Claris-first shell', () => { it('renders the foundation navigation', () => { render(<MemoryRouter><AppSidebar /></MemoryRouter>); expect(screen.getByText('Resumo da Semana')).toBeInTheDocument(); expect(screen.getByText('Meus Cursos')).toBeInTheDocument(); expect(screen.getByText('Alunos')).toBeInTheDocument(); }); });

@@ -743,6 +743,45 @@ app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async 
 
 // ─── Portal API ────────────────────────────────────────────────────────────────
 
+app.MapGet("/api/portal/session", async (
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null)
+    {
+        return Results.Json(new PortalEnvelope<PortalSessionDto>(
+            new(false, null), new PortalMeta(DateTimeOffset.UtcNow, null)), statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
+    if (profile is null) return Results.NotFound();
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Ok(new PortalEnvelope<PortalSessionDto>(
+        new(true, new PortalUserDto(profile.Id, profile.Name, Array.Empty<string>())),
+        new(DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/connections", async (
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
+    if (profile is null) return Results.NotFound();
+    context.Response.Headers.CacheControl = "no-store";
+    var connections = profile.MoodleConnections.Select(connection => new PortalConnectionDto(
+        connection.Id, connection.Alias, connection.BaseUrl, "online", connection.IsDefault,
+        new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), null));
+    return Results.Ok(new PortalListEnvelope<PortalConnectionDto>(
+        connections.ToArray(), new(1, connections.Count(), connections.Count(), connections.Any(), DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapGet("/api/info", (IOptions<MoodleApiOptions> moodleOpts) => Results.Ok(new
 {
     ok = true,
@@ -1301,6 +1340,8 @@ app.MapPost("/admin/connector-clients/register", async (
 
 app.MapMcp(mcpPath);
 
+app.MapGet("/portal", () => Results.Redirect("/portal/"));
+app.MapFallbackToFile("/portal/{*path:nonfile}", "portal/index.html");
 app.MapFallbackToFile("index.html");
 
 app.Run();
@@ -2092,6 +2133,13 @@ static async Task SeedChatGptOAuthClientAsync(
 }
 
 public sealed record PortalIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);
+public sealed record PortalEnvelope<T>(T Data, PortalMeta Meta);
+public sealed record PortalListEnvelope<T>(IReadOnlyList<T> Data, PortalListMeta Meta);
+public sealed record PortalMeta(DateTimeOffset GeneratedAt, string? ConnectionRef);
+public sealed record PortalListMeta(int Page, int PageSize, int Returned, bool HasMore, DateTimeOffset GeneratedAt, string? ConnectionRef);
+public sealed record PortalSessionDto(bool Authenticated, PortalUserDto? User);
+public sealed record PortalUserDto(Guid Id, string Name, IReadOnlyList<string> Roles);
+public sealed record PortalConnectionDto(string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
 
 public partial class Program;
 

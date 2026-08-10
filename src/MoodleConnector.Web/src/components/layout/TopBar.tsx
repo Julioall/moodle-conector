@@ -1,0 +1,2 @@
+import { Bell, Menu } from 'lucide-react';
+export function TopBar() { return <header className="topbar"><button className="topbar-menu" aria-label="Abrir menu"><Menu size={19} /></button><div className="topbar-actions"><span className="freshness">Portal v2 · fundação</span><button aria-label="Notificações" className="icon-button"><Bell size={18} /></button><span className="avatar">P</span></div></header>; }

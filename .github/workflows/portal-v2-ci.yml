@@ -1,0 +1,33 @@
+name: Portal v2 CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  portal-and-connector:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/MoodleConnector.Web/package-lock.json
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Verify Portal Web
+        working-directory: src/MoodleConnector.Web
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Verify Connector
+        run: |
+          dotnet restore MoodleConnector.slnx
+          dotnet build MoodleConnector.slnx --no-restore
+          dotnet test MoodleConnector.slnx --no-build --no-restore
