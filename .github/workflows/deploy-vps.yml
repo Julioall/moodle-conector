@@ -460,7 +460,7 @@ jobs:
 
           \$DOCKER compose --env-file .env.production down --remove-orphans || true
           \$DOCKER rm -f moodle-connector-app moodle-connector-caddy >/dev/null 2>&1 || true
-          \$DOCKER compose --env-file .env.production up -d --build --remove-orphans
+          timeout 900s \$DOCKER compose --env-file .env.production up -d --build --remove-orphans
           \$DOCKER compose --env-file .env.production ps
           \$DOCKER image prune -f
 
@@ -489,7 +489,7 @@ jobs:
           )"
 
           if [ "$VPS_AUTH_MODE" = "key" ]; then
-            ssh -i ~/.ssh/deploy_key -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
+            ssh -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -i ~/.ssh/deploy_key -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
           else
-            sshpass -p "$VPS_AUTH_SECRET" ssh -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
+            sshpass -p "$VPS_AUTH_SECRET" ssh -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
           fi
