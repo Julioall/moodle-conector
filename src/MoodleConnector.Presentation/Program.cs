@@ -853,6 +853,75 @@ app.MapGet("/api/portal/pending", async (
             pending.Warning is null ? null : [pending.Warning])));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapGet("/api/portal/dashboard", async (
+    string? connectionRef,
+    string? courseId,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    var generatedAt = DateTimeOffset.UtcNow;
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var effectiveConnectionRef = connectionRef ?? resolved.Alias;
+    var userId = identity.Id.ToString();
+
+    // Bounded dashboard rule: without an explicit course, only read the course list.
+    // Pending/risk indicators require a course scope and are intentionally not fanned out.
+    if (string.IsNullOrWhiteSpace(courseId))
+    {
+        var courses = await mediator.Send(new ListMyCoursesQuery(userId, PortalDashboardBudget.MaxCoursesRead, 1), cancellationToken);
+        var activeCourses = courses.Items.Count(course => course.Visible != false);
+        var warnings = new List<string>();
+        if (courses.HasNextPage) warnings.Add("O resumo de cursos está limitado a uma página para manter o orçamento de leitura.");
+        warnings.Add("Selecione um curso para consultar pendências e indicadores de risco detalhados; nenhuma consulta por aluno foi executada.");
+        return Results.Ok(new PortalEnvelope<PortalDashboardDto>(
+            new(new PortalDashboardSummaryDto(activeCourses, 0, 0, 0, 0), [], [], [], effectiveConnectionRef, warnings),
+            new(generatedAt, effectiveConnectionRef)));
+    }
+
+    var course = await mediator.Send(new GetCourseQuery(userId, courseId), cancellationToken);
+    if (course is null) return PortalErrorResults.NotFound("course_not_found", "Curso não encontrado.");
+
+    var participants = await mediator.Send(new ListCourseParticipantsQuery(
+        userId, courseId, ParticipantStatusFilter.Active, 1, PortalDashboardBudget.MaxParticipantsRead, true, false), cancellationToken);
+    if (participants is null) return PortalErrorResults.NotFound("course_not_found", "Curso não encontrado.");
+
+    var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+        courseId, 0, PortalDashboardBudget.MaxParticipantsRead), cancellationToken);
+    var pendingRows = pending.Students
+        .SelectMany(student => student.PendingAssignments.Select(activity => new PortalDashboardPriorityDto(
+            $"{effectiveConnectionRef}:{courseId}:{student.StudentId}:{activity.AssignmentId}",
+            "Entrega pendente",
+            $"{student.FullName} · {activity.AssignmentName}",
+            activity.IsOverdue ? "risk" : "attention", courseId, student.StudentId)))
+        .OrderByDescending(item => item.Level == "risk")
+        .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
+        .Take(PortalDashboardBudget.MaxPriorities)
+        .ToArray();
+    var inactive = participants.Participants.Count(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < generatedAt.AddDays(-14));
+    var dashboardWarnings = new List<string>();
+    if (participants.HasMore) dashboardWarnings.Add("O indicador de alunos está limitado ao orçamento de leitura do dashboard.");
+    if (pending.Warning is not null) dashboardWarnings.Add(pending.Warning);
+    var summary = new PortalDashboardSummaryDto(
+        course.Visible == false ? 0 : 1,
+        pending.Students.Sum(student => student.PendingAssignments.Count),
+        0,
+        inactive,
+        inactive);
+    var recent = pendingRows.Take(PortalDashboardBudget.MaxActivities)
+        .Select(item => new PortalDashboardActivityDto(item.Key, item.Title, item.Detail, null, item.CourseId, item.StudentId))
+        .ToArray();
+    return Results.Ok(new PortalEnvelope<PortalDashboardDto>(
+        new(summary, pendingRows, pendingRows, recent, effectiveConnectionRef, dashboardWarnings),
+        new(generatedAt, effectiveConnectionRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapGet("/api/portal/courses", async (
     string? connectionRef,
     int? page,
