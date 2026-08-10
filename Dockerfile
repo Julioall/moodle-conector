@@ -1,5 +1,12 @@
 # syntax=docker/dockerfile:1
 
+FROM node:22-bookworm-slim AS web-build
+WORKDIR /web
+COPY src/MoodleConnector.Web/package.json src/MoodleConnector.Web/package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY src/MoodleConnector.Web/ ./
+RUN npm run build
+
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
@@ -8,17 +15,12 @@ COPY src/MoodleConnector.Domain/MoodleConnector.Domain.csproj src/MoodleConnecto
 COPY src/MoodleConnector.Application/MoodleConnector.Application.csproj src/MoodleConnector.Application/
 COPY src/MoodleConnector.Infrastructure/MoodleConnector.Infrastructure.csproj src/MoodleConnector.Infrastructure/
 COPY src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj src/MoodleConnector.Presentation/
-COPY src/MoodleConnector.Web/package.json src/MoodleConnector.Web/package-lock.json src/MoodleConnector.Web/
-
-RUN cd src/MoodleConnector.Web && npm ci --ignore-scripts --no-audit --no-fund
-
 RUN dotnet restore src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj
 
 COPY src/ src/
 COPY public/ public/
 
-RUN cd src/MoodleConnector.Web && npm run build
-RUN mkdir -p src/MoodleConnector.Presentation/wwwroot/portal && cp -r src/MoodleConnector.Web/dist/. src/MoodleConnector.Presentation/wwwroot/portal/
+RUN mkdir -p src/MoodleConnector.Presentation/wwwroot/portal && cp -r /web/dist/. src/MoodleConnector.Presentation/wwwroot/portal/
 
 RUN dotnet publish src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj \
     --configuration Release \
