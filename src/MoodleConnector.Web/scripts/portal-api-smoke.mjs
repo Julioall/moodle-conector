@@ -41,6 +41,15 @@ if (dashboard.status !== 200 || !dashboardBody.data?.summary || !dashboardBody.m
   throw new Error(`Dashboard failed: ${dashboard.status} ${dashboard.body}`);
 }
 
+for (const path of ['/api/portal/connections', '/api/portal/courses', '/api/portal/students', '/api/portal/pending']) {
+  const response = await call('GET', path, undefined, registered.cookie);
+  const body = JSON.parse(response.body);
+  if (response.status !== 200 || !Array.isArray(body.data) || !body.meta?.generatedAt) {
+    throw new Error(`${path} failed: ${response.status} ${response.body}`);
+  }
+  console.log(`PASS ${path} ${response.status}`);
+}
+
 console.log(`PASS register ${registered.status}`);
 console.log(`PASS session ${session.status}`);
 console.log(`PASS dashboard ${dashboard.status}`);

@@ -1083,7 +1083,17 @@ app.MapGet("/api/portal/pending", async (
     var currentPage = Math.Max(page ?? 1, 1);
     var size = Math.Clamp(pageSize ?? 20, 1, 100);
     var generatedAt = DateTimeOffset.UtcNow;
-    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
+    try
+    {
+        resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    }
+    catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
+    {
+        return Results.Ok(new PortalListEnvelope<PortalPendingDto>(
+            Array.Empty<PortalPendingDto>(), new(currentPage, size, 0, false, generatedAt, null,
+                ["Nenhuma conexão Moodle foi configurada para esta conta."])));
+    }
     if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     if (string.IsNullOrWhiteSpace(courseId))
@@ -1216,10 +1226,20 @@ app.MapGet("/api/portal/courses", async (
 {
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
-    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
-    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var currentPage = Math.Max(page ?? 1, 1);
     var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
+    try
+    {
+        resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    }
+    catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
+    {
+        return Results.Ok(new PortalListEnvelope<PortalCourseDto>(
+            Array.Empty<PortalCourseDto>(), new(currentPage, size, 0, false, DateTimeOffset.UtcNow, null,
+                ["Nenhuma conexão Moodle foi configurada para esta conta."])));
+    }
+    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var data = result.Items.Select(course => PortalCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
@@ -1288,10 +1308,20 @@ app.MapGet("/api/portal/students", async (
 {
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
-    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
+    try
+    {
+        resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    }
+    catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
+    {
+        return Results.Ok(new PortalListEnvelope<PortalStudentDto>(
+            Array.Empty<PortalStudentDto>(), new(currentPage, size, 0, false, DateTimeOffset.UtcNow, null,
+                ["Nenhuma conexão Moodle foi configurada para esta conta."])));
+    }
     if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var effectiveRef = connectionRef ?? resolved.Alias;
-    var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
     var rows = await students.ListAsync(identity.Id.ToString(), effectiveRef, courseId, cancellationToken);
     var data = rows.GroupBy(row => row.Participant.UserId).Select(group => group.First())
         .Skip((currentPage - 1) * size).Take(size)
