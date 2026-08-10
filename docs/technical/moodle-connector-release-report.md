@@ -82,7 +82,7 @@ O inventário de superfície é determinístico e não depende de quota. O artef
 
 Redução determinística de C contra B: **3 tools, 7.013 bytes, 1.755 ToolSchemaTokens — 3,15%**. Isso é uma medida de superfície MCP, não uma afirmação sobre `InputTokens` reais ou qualidade cognitiva.
 
-Artefato: [schema-manifest.json](../../.moodlebench/cognitive/reports/20260810_024009/schema-manifest.json) e [schema-manifest.md](../../.moodlebench/cognitive/reports/20260810_024009/schema-manifest.md).
+Artefato: [schema-manifest.json](../../.moodlebench/cognitive/reports/20260810_024655/schema-manifest.json) e [schema-manifest.md](../../.moodlebench/cognitive/reports/20260810_024655/schema-manifest.md). O manifesto foi gerado no commit `5bb8f7c9ae2025361feca9d8fd217b7d0e104adf`.
 
 ### Surface e classificação
 

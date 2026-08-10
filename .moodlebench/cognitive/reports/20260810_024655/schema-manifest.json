@@ -1,8 +1,8 @@
 {
-  "RunId": "20260810_024009",
+  "RunId": "20260810_024655",
   "BenchmarkVersion": "1.1.0",
   "Model": "gpt-5.4-nano",
-  "CommitSha": "a692790d9145057790de0647247210505aa4ece3",
+  "CommitSha": "5bb8f7c9ae2025361feca9d8fd217b7d0e104adf",
   "Catalog": {
     "Registered": 97,
     "ProductionExposed": 95,

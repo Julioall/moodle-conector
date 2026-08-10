@@ -1,6 +1,6 @@
 # MoodleBench — schema surface
 
-RunId: `20260810_024009`
+RunId: `20260810_024655`
 Model configuration: `gpt-5.4-nano` (no model call executed)
 
 Catalog: registered `97`, Production exposed `95`, feature-gated by default `2`, hidden by exposure policy `0`.
