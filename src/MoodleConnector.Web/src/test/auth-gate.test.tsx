@@ -18,18 +18,17 @@ const renderWithQuery = (children: React.ReactNode) => render(
 describe('AuthGate', () => {
   beforeEach(() => { cleanup(); getSession.mockReset(); });
 
-  it('keeps the operational shell behind login when the session is anonymous', async () => {
+  it('keeps the operational shell behind the Claris auth page when anonymous', async () => {
     getSession.mockResolvedValue({ data: { authenticated: false }, meta: { generatedAt: new Date().toISOString() } });
     renderWithQuery(<AuthGate><h1>Resumo protegido</h1></AuthGate>);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Login necessário' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Entrar na sua conta' })).toBeInTheDocument());
     expect(screen.queryByRole('heading', { name: 'Resumo protegido' })).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Entrar no Moodle Connector' })).toHaveAttribute('href', '/auth/login?returnUrl=/');
+    expect(screen.getByRole('tab', { name: 'Criar conta' })).toBeInTheDocument();
   });
 
   it('releases the shell only after an authenticated session', async () => {
     getSession.mockResolvedValue({ data: { authenticated: true, user: { id: 'u1', name: 'Tutor', roles: ['Tutor'], permissions: ['dashboard.view'] } }, meta: { generatedAt: new Date().toISOString() } });
     renderWithQuery(<AuthGate><h1>Resumo protegido</h1></AuthGate>);
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Resumo protegido' })).toBeInTheDocument());
-    expect(screen.queryByRole('heading', { name: 'Login necessário' })).not.toBeInTheDocument();
   });
 });

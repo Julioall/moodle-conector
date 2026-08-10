@@ -1,8 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
 import { connectionsGateway, type MoodleConnection } from './connections-gateway';
+import './connections-page.css';
 
 const statusLabels: Record<string, string> = {
   active: 'Ativa',
@@ -48,10 +50,19 @@ function ConnectionCard({ connection }: { connection: MoodleConnection }) {
 }
 
 export function ConnectionsPage() {
+  const queryClient = useQueryClient();
+  const [alias, setAlias] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [isDefault, setIsDefault] = useState(true);
+  const [canWrite, setCanWrite] = useState(false);
+  const [success, setSuccess] = useState('');
   const query = useQuery({
     queryKey: ['portal', 'connections'],
     queryFn: connectionsGateway.list,
   });
+  const mutation = useMutation({ mutationFn: connectionsGateway.connect, onSuccess: () => { setSuccess('Conexão cadastrada com sucesso.'); setAlias(''); setBaseUrl(''); setUsername(''); setPassword(''); void queryClient.invalidateQueries({ queryKey: ['portal', 'connections'] }); } });
 
   return (
     <main className="content-frame connections-page">
@@ -63,6 +74,8 @@ export function ConnectionsPage() {
         </div>
         {query.data?.meta.generatedAt && <span className="freshness">{formatFreshness(query.data.meta.generatedAt)}</span>}
       </header>
+
+      <Card className="connection-management"><CardHeader><CardTitle>Adicionar conexão Moodle</CardTitle><p>Cadastre o acesso do Moodle que será usado pelo portal.</p></CardHeader><CardContent><form className="connection-form" onSubmit={event => { event.preventDefault(); setSuccess(''); mutation.mutate({ moodleAlias: alias, moodleBaseUrl: baseUrl, moodleUsername: username, moodlePassword: password, isDefault, canWrite }); }}><div className="form-grid"><label>Nome da conexão<input required value={alias} onChange={event => setAlias(event.target.value)} /></label><label>URL base do Moodle<input required type="url" placeholder="https://moodle.exemplo.com" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label><label>Usuário Moodle<input required value={username} onChange={event => setUsername(event.target.value)} /></label><label>Senha Moodle<input required type="password" value={password} onChange={event => setPassword(event.target.value)} /></label></div><div className="form-checks"><label><input type="checkbox" checked={isDefault} onChange={event => setIsDefault(event.target.checked)} /> Usar como padrão</label><label><input type="checkbox" checked={canWrite} onChange={event => setCanWrite(event.target.checked)} /> Permitir operações de escrita</label></div>{mutation.isError && <p className="auth-error" role="alert">{mutation.error instanceof Error ? mutation.error.message : 'Não foi possível cadastrar a conexão.'}</p>}<div className="form-actions"><button className="auth-submit" type="submit" disabled={mutation.isPending}>{mutation.isPending ? 'Validando…' : 'Cadastrar conexão'}</button>{success && <p className="form-success" role="status">{success}</p>}</div></form></CardContent></Card>
 
       {query.isPending && (
         <div className="connections-grid" aria-label="Carregando conexões">

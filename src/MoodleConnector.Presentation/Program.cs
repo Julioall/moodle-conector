@@ -1652,11 +1652,7 @@ app.MapDelete("/api/account", async (
 
 app.MapGet("/auth/login", (string? email, string? returnUrl) =>
 {
-    var qs = new List<string>();
-    if (!string.IsNullOrEmpty(email)) qs.Add($"email={Uri.EscapeDataString(email)}");
-    if (!string.IsNullOrEmpty(returnUrl)) qs.Add($"returnUrl={Uri.EscapeDataString(returnUrl)}");
-    var q = qs.Count > 0 ? "?" + string.Join("&", qs) : "";
-    return Results.Redirect($"/auth.html{q}");
+    return Results.Redirect("/");
 });
 
 app.MapPost("/auth/login", async (

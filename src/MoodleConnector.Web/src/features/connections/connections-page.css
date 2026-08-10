@@ -1,0 +1,12 @@
+.connection-management { margin-bottom: 24px; }
+.connection-management h2 { margin: 0; font-size: 18px; }
+.connection-management p { color: #657286; }
+.connection-form { display: grid; gap: 16px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.form-grid .wide { grid-column: 1 / -1; }
+.form-checks { display: flex; flex-wrap: wrap; gap: 18px; }
+.form-checks label { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.form-checks input { accent-color: #2459a6; }
+.form-actions { display: flex; align-items: center; gap: 14px; }
+.form-success { margin: 0; color: #287653; font-size: 13px; }
+@media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } .form-grid .wide { grid-column: auto; } }
