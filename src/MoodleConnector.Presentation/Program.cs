@@ -827,6 +827,7 @@ app.MapGet("/api/portal/reports/operational", async (HttpContext context, Connec
 
 app.MapPost("/api/portal/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, PortalMessagePrepareInput input, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.MessagesPrepare)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (!Enum.TryParse<TutorMessageType>(input.MessageType, true, out var messageType)) return Results.BadRequest(new { error = new { code = "invalid_message_type", message = "Tipo de mensagem inválido." } });
@@ -842,6 +843,7 @@ app.MapPost("/api/portal/messages/prepare", async (HttpContext context, Connecto
 
 app.MapPost("/api/portal/messages/confirm", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, IMediator mediator, PortalMessageConfirmInput input, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.MessagesPrepare)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
@@ -852,6 +854,7 @@ app.MapPost("/api/portal/messages/confirm", async (HttpContext context, Connecto
 
 app.MapPost("/api/portal/followups", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalFollowupInput input, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.StudentsFollowupWrite)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
@@ -864,6 +867,7 @@ app.MapPost("/api/portal/followups", async (HttpContext context, ConnectorDbCont
 
 app.MapPost("/api/portal/agenda", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalCalendarEventInput input, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.AgendaManage)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
@@ -876,6 +880,7 @@ app.MapPost("/api/portal/agenda", async (HttpContext context, ConnectorDbContext
 
 app.MapDelete("/api/portal/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.AgendaManage)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
@@ -886,6 +891,7 @@ app.MapDelete("/api/portal/agenda/{id:guid}", async (Guid id, HttpContext contex
 
 app.MapPost("/api/portal/tasks", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalTaskInput input, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.TasksManage)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
@@ -898,6 +904,7 @@ app.MapPost("/api/portal/tasks", async (HttpContext context, ConnectorDbContext 
 
 app.MapPatch("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalTaskInput input, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.TasksManage)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
@@ -914,6 +921,7 @@ app.MapPatch("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context,
 
 app.MapDelete("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.TasksManage)) return Results.Forbid();
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
@@ -941,8 +949,9 @@ app.MapGet("/api/portal/session", async (
     var roles = context.User.FindAll(ClaimTypes.Role).Select(x => x.Value)
         .Concat(context.User.FindAll("role").Select(x => x.Value))
         .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    if (roles.Length == 0) roles = ["Tutor"];
     return Results.Ok(new PortalEnvelope<PortalSessionDto>(
-        new(true, new PortalUserDto(profile.Id, profile.Name, roles)),
+        new(true, new PortalUserDto(profile.Id, profile.Name, roles, PortalPermissionCatalog.ForRoles(roles))),
         new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
@@ -2587,6 +2596,14 @@ static async Task SeedChatGptOAuthClientAsync(
     await manager.UpdateAsync(existing, descriptor);
 }
 
+static bool HasPortalPermission(HttpContext context, string permission)
+{
+    var roles = context.User.FindAll(ClaimTypes.Role).Select(x => x.Value)
+        .Concat(context.User.FindAll("role").Select(x => x.Value))
+        .ToArray();
+    return PortalPermissionCatalog.ForRoles(roles).Contains(permission, StringComparer.Ordinal);
+}
+
 public sealed record PortalIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);
 public sealed record PortalEnvelope<T>(T Data, PortalMeta Meta);
 public sealed record PortalListEnvelope<T>(IReadOnlyList<T> Data, PortalListMeta Meta);
@@ -2600,7 +2617,53 @@ public sealed record PortalListMeta(
     string? ConnectionRef,
     IReadOnlyList<string>? Warnings = null);
 public sealed record PortalSessionDto(bool Authenticated, PortalUserDto? User);
-public sealed record PortalUserDto(Guid Id, string Name, IReadOnlyList<string> Roles);
+public sealed record PortalUserDto(Guid Id, string Name, IReadOnlyList<string> Roles, IReadOnlyList<string> Permissions);
+
+public static class PortalPermissionCatalog
+{
+    public const string DashboardView = "dashboard.view";
+    public const string CoursesView = "courses.view";
+    public const string StudentsView = "students.view";
+    public const string StudentsFollowupWrite = "students.followup.write";
+    public const string TasksManage = "tasks.manage";
+    public const string AgendaManage = "agenda.manage";
+    public const string MessagesPrepare = "messages.prepare";
+    public const string ReportsView = "reports.view";
+    public const string ConnectionsManage = "connections.manage";
+    public const string AdminView = "admin.view";
+
+    public static IReadOnlyList<string> ForRoles(IEnumerable<string> roles)
+    {
+        var normalized = roles.Select(role => role.Trim()).Where(role => role.Length > 0)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (normalized.Count == 0) normalized.Add("Tutor");
+
+        var permissions = new HashSet<string>(StringComparer.Ordinal);
+        if (normalized.Contains("Admin"))
+        {
+            permissions.UnionWith(All);
+        }
+        else
+        {
+            permissions.UnionWith(CommonRead);
+            if (normalized.Contains("Tutor") || normalized.Contains("Monitor") || normalized.Contains("Pedagogo"))
+            {
+                permissions.Add(StudentsFollowupWrite);
+                permissions.Add(TasksManage);
+                permissions.Add(AgendaManage);
+                permissions.Add(MessagesPrepare);
+            }
+            if (normalized.Contains("Pedagogo")) permissions.Add(ReportsView);
+        }
+
+        return permissions.OrderBy(permission => permission, StringComparer.Ordinal).ToArray();
+    }
+
+    private static readonly string[] CommonRead = [DashboardView, CoursesView, StudentsView, ReportsView];
+    private static readonly string[] All = [
+        DashboardView, CoursesView, StudentsView, StudentsFollowupWrite, TasksManage,
+        AgendaManage, MessagesPrepare, ReportsView, ConnectionsManage, AdminView];
+}
 public sealed record PortalConnectionDto(string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
 
 public partial class Program;
