@@ -19,8 +19,7 @@ RUN dotnet restore src/MoodleConnector.Presentation/MoodleConnector.Presentation
 
 COPY src/ src/
 COPY public/ public/
-
-RUN mkdir -p src/MoodleConnector.Presentation/wwwroot/portal && cp -r /web/dist/. src/MoodleConnector.Presentation/wwwroot/portal/
+COPY --from=web-build /web/dist/ src/MoodleConnector.Presentation/wwwroot/portal/
 
 RUN dotnet publish src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj \
     --configuration Release \
