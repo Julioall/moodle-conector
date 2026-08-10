@@ -813,6 +813,18 @@ app.MapGet("/api/portal/followups", async (HttpContext context, ConnectorDbConte
     return Results.Ok(new PortalListEnvelope<PortalFollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapGet("/api/portal/reports/operational", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var now = DateTimeOffset.UtcNow;
+    var openTasks = await dbContext.PortalTasks.CountAsync(x => x.OwnerId == identity.Id && x.Status != "done", cancellationToken);
+    var completedTasks = await dbContext.PortalTasks.CountAsync(x => x.OwnerId == identity.Id && x.Status == "done", cancellationToken);
+    var upcomingEvents = await dbContext.PortalCalendarEvents.CountAsync(x => x.OwnerId == identity.Id && x.StartAt >= now && x.StartAt < now.AddDays(30), cancellationToken);
+    var followups = await dbContext.PortalFollowups.CountAsync(x => x.OwnerId == identity.Id, cancellationToken);
+    return Results.Ok(new PortalEnvelope<PortalOperationalReportDto>(new(openTasks, completedTasks, upcomingEvents, followups, now), new(now, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapPost("/api/portal/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, PortalMessagePrepareInput input, CancellationToken cancellationToken) =>
 {
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
