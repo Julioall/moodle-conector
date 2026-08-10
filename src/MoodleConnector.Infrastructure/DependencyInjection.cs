@@ -99,7 +99,14 @@ public static class DependencyInjection
         services.AddScoped<IMoodleFunctionExecutor, MoodleFunctionExecutor>();
         services.AddScoped<IMoodleUniversalWriteService, MoodleUniversalWriteService>();
         services.AddSingleton<IMoodleResourceResolver, MoodleResourceResolver>();
-        services.AddScoped<IMoodleCurrentUserIdGateway, MoodleCurrentUserIdGateway>();
+        if (moodleApiOptions.UseStubData)
+        {
+            services.AddScoped<IMoodleCurrentUserIdGateway, LocalStubMoodleCurrentUserIdGateway>();
+        }
+        else
+        {
+            services.AddScoped<IMoodleCurrentUserIdGateway, MoodleCurrentUserIdGateway>();
+        }
         services.AddScoped<IMcpConnectorClientResolver, DatabaseConnectorClientResolver>();
         services.AddScoped<IConnectorClientRegistrationService, DatabaseConnectorClientRegistrationService>();
         services.AddScoped<IMoodleConnectorCredentialsProvider, HttpContextMoodleConnectorCredentialsProvider>();
@@ -108,11 +115,23 @@ public static class DependencyInjection
         services.AddScoped<IMoodleReportBuilderGateway, MoodleReportBuilderGateway>();
         services.AddSingleton<IConnectorSecretProtector, AesGcmConnectorSecretProtector>();
 
-        services.AddScoped<IMoodleCoursesGateway, MoodleCoursesGateway>();
-        services.AddScoped<IMoodleParticipantsGateway, MoodleParticipantsGateway>();
-        services.AddScoped<IMoodleCourseContentsGateway, MoodleCourseContentsGateway>();
+        if (moodleApiOptions.UseStubData)
+        {
+            services.AddScoped<IMoodleCoursesGateway, LocalStubMoodleCoursesGateway>();
+            services.AddScoped<IMoodleParticipantsGateway, LocalStubMoodleParticipantsGateway>();
+            services.AddScoped<IMoodleCourseContentsGateway, LocalStubMoodleCourseContentsGateway>();
+            services.AddScoped<IMoodleAssignmentSubmissionsGateway, LocalStubMoodleAssignmentSubmissionsGateway>();
+            services.AddScoped<IMoodleGradebookGateway, LocalStubMoodleGradebookGateway>();
+        }
+        else
+        {
+            services.AddScoped<IMoodleCoursesGateway, MoodleCoursesGateway>();
+            services.AddScoped<IMoodleParticipantsGateway, MoodleParticipantsGateway>();
+            services.AddScoped<IMoodleCourseContentsGateway, MoodleCourseContentsGateway>();
+            services.AddScoped<IMoodleAssignmentSubmissionsGateway, MoodleAssignmentSubmissionsGateway>();
+            services.AddScoped<IMoodleGradebookGateway, MoodleGradebookGateway>();
+        }
         services.AddScoped<IMoodleForumGateway, MoodleForumGateway>();
-        services.AddScoped<IMoodleAssignmentSubmissionsGateway, MoodleAssignmentSubmissionsGateway>();
         services.AddScoped<IMoodleAssignmentGradingGateway, MoodleAssignmentGradingGateway>();
         services.AddScoped<IMoodleAssignmentGradeReadGateway, MoodleAssignmentGradeReadGateway>();
         services.AddScoped<IMoodleAssignmentSubmissionStatusGateway, MoodleAssignmentSubmissionStatusGateway>();
@@ -123,7 +142,6 @@ public static class DependencyInjection
             .AddMoodleResilience(moodleApiResilience);
 
         services.AddScoped<IMoodleAssignmentSettingsGateway, MoodleAssignmentSettingsGateway>();
-        services.AddScoped<IMoodleGradebookGateway, MoodleGradebookGateway>();
         services.AddScoped<IMoodleCompletionGateway, MoodleCompletionGateway>();
         services.AddScoped<IMoodleMessageGateway, MoodleMessageGateway>();
 

@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "guard": "node scripts/no-production-integrations.mjs",
     "smoke": "node scripts/portal-smoke.mjs",
-    "smoke:api": "node scripts/portal-api-smoke.mjs"
+    "smoke:api": "node scripts/portal-api-smoke.mjs",
+    "smoke:e2e": "node scripts/portal-e2e-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

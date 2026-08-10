@@ -13,6 +13,15 @@ internal sealed class MoodleCredentialValidator(
 {
     public async Task<bool> ValidateAsync(string moodleBaseUrl, string username, string password, CancellationToken cancellationToken)
     {
+        if (options.Value.UseStubData &&
+            Uri.TryCreate(moodleBaseUrl, UriKind.Absolute, out var stubUri) &&
+            stubUri.Scheme == Uri.UriSchemeHttps &&
+            (stubUri.Host.Equals("moodle.local", StringComparison.OrdinalIgnoreCase) ||
+             stubUri.Host.EndsWith(".moodle.local", StringComparison.OrdinalIgnoreCase)))
+        {
+            return !string.IsNullOrWhiteSpace(username) && !string.IsNullOrWhiteSpace(password);
+        }
+
         var serviceName = string.IsNullOrWhiteSpace(options.Value.LoginService)
             ? "moodle_mobile_app"
             : options.Value.LoginService;

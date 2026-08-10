@@ -41,13 +41,32 @@ if (dashboard.status !== 200 || !dashboardBody.data?.summary || !dashboardBody.m
   throw new Error(`Dashboard failed: ${dashboard.status} ${dashboard.body}`);
 }
 
-for (const path of ['/api/portal/connections', '/api/portal/courses', '/api/portal/students', '/api/portal/pending']) {
+for (const path of ['/api/portal/connections', '/api/portal/courses', '/api/portal/pending']) {
   const response = await call('GET', path, undefined, registered.cookie);
   const body = JSON.parse(response.body);
   if (response.status !== 200 || !Array.isArray(body.data) || !body.meta?.generatedAt) {
     throw new Error(`${path} failed: ${response.status} ${response.body}`);
   }
   console.log(`PASS ${path} ${response.status}`);
+}
+
+const courses = await call('GET', '/api/portal/courses', undefined, registered.cookie);
+const coursesBody = JSON.parse(courses.body);
+if (coursesBody.data?.[0]) {
+  const course = coursesBody.data[0];
+  const students = await call(
+    'GET',
+    `/api/portal/courses/${encodeURIComponent(course.connectionRef)}/${encodeURIComponent(course.courseId)}/students`,
+    undefined,
+    registered.cookie,
+  );
+  const studentsBody = JSON.parse(students.body);
+  if (students.status !== 200 || !Array.isArray(studentsBody.data) || !studentsBody.meta?.generatedAt) {
+    throw new Error(`/api/portal/courses/{connectionRef}/{courseId}/students failed: ${students.status} ${students.body}`);
+  }
+  console.log(`PASS scoped students ${students.status}`);
+} else {
+  console.log('PASS scoped students skipped (local account has no Moodle course)');
 }
 
 console.log(`PASS register ${registered.status}`);

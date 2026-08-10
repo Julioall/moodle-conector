@@ -18,6 +18,15 @@ O ambiente local habilita `PortalV2Enabled`, usa Postgres no próprio Compose e 
 
 O Vite usa `http://127.0.0.1:8787` como proxy padrão da API. Para outro backend local, defina `PORTAL_API_PROXY` antes de iniciar o Vite.
 
+Se a porta padrão estiver ocupada, defina `PORTAL_HTTP_PORT` antes do Compose e use a mesma porta nas URLs e no smoke:
+
+```powershell
+$env:PORTAL_HTTP_PORT = 8899
+docker compose -f docker-compose.local.yml up -d --build
+$env:PORTAL_SMOKE_URL = "http://127.0.0.1:8899"
+npm --prefix src/MoodleConnector.Web run smoke
+```
+
 ## Verificar
 
 ```powershell
@@ -26,9 +35,10 @@ Invoke-WebRequest http://127.0.0.1:8787/health/live
 Invoke-WebRequest http://127.0.0.1:8787/portal/
 
 npm --prefix src/MoodleConnector.Web run smoke:api
+npm --prefix src/MoodleConnector.Web run smoke:e2e
 ```
 
-O smoke de API cria uma conta descartável `example.test` no banco local e valida registro, sessão autenticada e Dashboard vazio. Ele recusa executar contra hosts que não sejam locais.
+Os smokes criam contas descartáveis `example.test` no banco local. `smoke:api` valida registro, sessão autenticada e estado vazio; `smoke:e2e` usa `MoodleApi__UseStubData=true` para validar conexão, cursos, curso, alunos, perfil, pendências e dashboard. Ambos recusam executar contra hosts que não sejam locais.
 
 Para parar:
 

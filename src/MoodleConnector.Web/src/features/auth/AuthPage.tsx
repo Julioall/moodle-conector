@@ -19,7 +19,8 @@ export function AuthPage() {
     try {
       if (mode === 'register') await authGateway.register(name, email, password);
       else await authGateway.login(email, password);
-      window.location.assign('/');
+      // Keep the user inside the V2 SPA after the shared account cookie is issued.
+      window.location.assign('/portal/');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível concluir a operação.');
     } finally {

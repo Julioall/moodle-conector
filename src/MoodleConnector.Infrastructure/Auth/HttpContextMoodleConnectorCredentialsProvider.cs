@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
 
@@ -14,8 +15,27 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
     IConnectorSecretProtector secretProtector,
     IMoodleConnectionSelection selection,
     IMoodleEndpointValidator endpointValidator,
+    IOptions<MoodleApiOptions> moodleApiOptions,
     ILogger<HttpContextMoodleConnectorCredentialsProvider> logger) : IMoodleConnectorCredentialsProvider
 {
+    internal HttpContextMoodleConnectorCredentialsProvider(
+        IHttpContextAccessor httpContextAccessor,
+        ConnectorDbContext dbContext,
+        IConnectorSecretProtector secretProtector,
+        IMoodleConnectionSelection selection,
+        IMoodleEndpointValidator endpointValidator,
+        ILogger<HttpContextMoodleConnectorCredentialsProvider> logger)
+        : this(
+            httpContextAccessor,
+            dbContext,
+            secretProtector,
+            selection,
+            endpointValidator,
+            Options.Create(new MoodleApiOptions()),
+            logger)
+    {
+    }
+
     private static readonly object ResolvedClientIdItemKey = new();
     private static readonly object CredentialsCacheItemKey = new();
 
@@ -151,25 +171,31 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
                 MoodleIntegrationStage.UrlValidation);
         }
 
-        try
+        var isLocalStubEndpoint = moodleApiOptions.Value.UseStubData &&
+            (baseUri.Host.Equals("moodle.local", StringComparison.OrdinalIgnoreCase) ||
+             baseUri.Host.EndsWith(".moodle.local", StringComparison.OrdinalIgnoreCase));
+        if (!isLocalStubEndpoint)
         {
-            baseUri = await endpointValidator.ValidateAsync(entity.MoodleBaseUrl, cancellationToken);
-        }
-        catch (MoodleApiException exception)
-        {
-            throw new MoodleApiException(
-                exception.ErrorCode,
-                exception.Message,
-                exception.HttpStatusCode,
-                exception,
-                exception.AuditId,
-                entity.Id,
-                MoodleConnectionAlias.Normalize(entity.MoodleAlias),
-                safeBaseUrl,
-                exception.FunctionName,
-                exception.DurationMs,
-                exception.RemoteErrorCode,
-                exception.Stage);
+            try
+            {
+                baseUri = await endpointValidator.ValidateAsync(entity.MoodleBaseUrl, cancellationToken);
+            }
+            catch (MoodleApiException exception)
+            {
+                throw new MoodleApiException(
+                    exception.ErrorCode,
+                    exception.Message,
+                    exception.HttpStatusCode,
+                    exception,
+                    exception.AuditId,
+                    entity.Id,
+                    MoodleConnectionAlias.Normalize(entity.MoodleAlias),
+                    safeBaseUrl,
+                    exception.FunctionName,
+                    exception.DurationMs,
+                    exception.RemoteErrorCode,
+                    exception.Stage);
+            }
         }
         safeBaseUrl = GetSafeBaseUrl(baseUri.AbsoluteUri);
 

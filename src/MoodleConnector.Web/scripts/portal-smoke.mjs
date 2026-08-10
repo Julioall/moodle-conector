@@ -1,7 +1,21 @@
 import { request } from 'node:http';
 
 const baseUrl = process.env.PORTAL_SMOKE_URL ?? 'http://127.0.0.1:4173';
-const paths = ['/portal/', '/portal/cursos/demo/1', '/portal/alunos', '/portal/pendencias', '/portal/conexoes', '/portal/relatorios'];
+const paths = [
+  '/portal/',
+  '/portal/meus-cursos',
+  '/portal/cursos/demo/1',
+  '/portal/alunos',
+  '/portal/pendencias',
+  '/portal/tarefas',
+  '/portal/agenda',
+  '/portal/mensagens',
+  '/portal/followup',
+  '/portal/relatorios',
+  '/portal/configuracoes',
+  '/portal/conexoes',
+  '/portal/rota-inexistente',
+];
 
 const get = (url) => new Promise((resolve, reject) => {
   const req = request(url, response => {

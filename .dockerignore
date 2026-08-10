@@ -1,5 +1,11 @@
 .git
 .github
+.agents
+.moodlebench
+docs
+scratch
+tests
+**/node_modules
 **/bin
 **/obj
 publish

@@ -1,0 +1,111 @@
+import { request } from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+
+const baseUrl = new URL(process.env.PORTAL_API_SMOKE_URL ?? 'http://127.0.0.1:8787');
+if (!['127.0.0.1', 'localhost', '::1'].includes(baseUrl.hostname)) {
+  throw new Error('Portal E2E smoke only runs against a local host.');
+}
+
+let cookie = '';
+
+const call = (method, path, body, headers = {}) => new Promise((resolve, reject) => {
+  const payload = body === undefined ? undefined : JSON.stringify(body);
+  const requestHeaders = {
+    accept: 'application/json',
+    ...(payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {}),
+    ...(cookie ? { cookie } : {}),
+    ...headers,
+  };
+  const req = request(new URL(path, baseUrl), { method, headers: requestHeaders }, response => {
+    let text = '';
+    response.setEncoding('utf8');
+    response.on('data', chunk => { text += chunk; });
+    response.on('end', () => {
+      const setCookies = response.headers['set-cookie'] ?? [];
+      if (setCookies.length > 0) {
+        const nextCookies = setCookies.map(value => value.split(';', 1)[0]);
+        const existing = cookie ? cookie.split('; ').filter(Boolean) : [];
+        const merged = new Map(existing.map(value => value.split('=', 1)[0]).map((key, index) => [key, existing[index]]));
+        nextCookies.forEach(value => merged.set(value.split('=', 1)[0], value));
+        cookie = [...merged.values()].join('; ');
+      }
+      let json;
+      if (text) {
+        try { json = JSON.parse(text); } catch { json = undefined; }
+      }
+      resolve({ status: response.statusCode ?? 0, text, json });
+    });
+  });
+  req.on('error', reject);
+  if (payload) req.write(payload);
+  req.end();
+});
+
+const expectStatus = (response, expected, label) => {
+  if (response.status !== expected) {
+    throw new Error(`${label} failed: ${response.status} ${response.text}`);
+  }
+  console.log(`PASS ${label} ${response.status}`);
+};
+
+const expectJson = (response, expected, label) => {
+  expectStatus(response, expected, label);
+  if (!response.json) throw new Error(`${label} did not return JSON.`);
+  return response.json;
+};
+
+const email = `portal-e2e-${randomUUID()}@example.test`;
+const password = 'PortalE2EFlow!2026';
+
+expectJson(await call('POST', '/api/account/register', { name: 'Portal E2E Smoke', email, password }), 200, 'register');
+const session = expectJson(await call('GET', '/api/portal/session'), 200, 'session');
+if (session.data?.authenticated !== true) throw new Error('session is not authenticated.');
+
+const csrf = expectJson(await call('GET', '/api/portal/csrf'), 200, 'csrf');
+if (!csrf.token) throw new Error('CSRF token was not issued.');
+
+const connectionPayload = {
+  moodleAlias: 'local-e2e',
+  moodleBaseUrl: 'https://moodle.local',
+  moodleUsername: 'demo',
+  moodlePassword: 'demo-password',
+  isDefault: true,
+  canWrite: false,
+};
+const missingCsrf = await call('POST', '/api/portal/connections', connectionPayload);
+expectStatus(missingCsrf, 400, 'reject missing CSRF');
+if (missingCsrf.json?.error?.code !== 'csrf_invalid') {
+  throw new Error(`missing CSRF contract is invalid: ${missingCsrf.text}`);
+}
+
+const connection = expectJson(await call('POST', '/api/portal/connections', connectionPayload, { 'x-csrf-token': csrf.token }), 200, 'connect Moodle');
+if (!connection.connectionRef || !connection.alias || connection.status !== 'unknown' || connection.apiKey || connection.password || connection.token) {
+  throw new Error(`connection contract is invalid or contains a secret: ${JSON.stringify(connection)}`);
+}
+
+const connections = expectJson(await call('GET', '/api/portal/connections'), 200, 'connections');
+const connectionRef = connections.data?.[0]?.connectionRef;
+if (!connectionRef) throw new Error('connectionRef was not returned.');
+
+const courses = expectJson(await call('GET', `/api/portal/courses?connectionRef=${encodeURIComponent(connectionRef)}`), 200, 'courses');
+const course = courses.data?.[0];
+if (!course?.courseId) throw new Error('stub course was not returned.');
+
+const coursePath = `/api/portal/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(course.courseId)}`;
+expectJson(await call('GET', coursePath), 200, 'course detail');
+const activities = expectJson(await call('GET', `${coursePath}/activities`), 200, 'activities');
+if (activities.data?.length !== 3 || activities.meta?.total !== 3) throw new Error('activity pagination contract is invalid.');
+
+const students = expectJson(await call('GET', `${coursePath}/students`), 200, 'students');
+const student = students.data?.[0];
+if (!student?.studentId || students.data.length !== 3) throw new Error('stub students were not returned.');
+expectJson(await call('GET', `${coursePath}/students/${encodeURIComponent(student.studentId)}`), 200, 'student profile');
+
+const pending = expectJson(await call('GET', `/api/portal/pending?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}&periodDays=30`), 200, 'pending');
+if (pending.meta?.total !== 3 || pending.data?.some(item => item.type !== 'pending_submission')) throw new Error('pending contract is invalid.');
+
+const dashboard = expectJson(await call('GET', `/api/portal/dashboard?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}`), 200, 'dashboard');
+if (dashboard.data?.summary?.activeCourses !== 1 || dashboard.data?.summary?.pendingDeliveries !== 3) throw new Error('dashboard stub indicators are invalid.');
+
+console.log('Portal E2E smoke passed (login → Moodle → courses → course → students → profile → pending → dashboard)');

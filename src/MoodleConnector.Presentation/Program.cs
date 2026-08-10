@@ -428,6 +428,27 @@ app.Use(async (context, next) =>
     }
     await next();
 });
+app.Use(async (context, next) =>
+{
+    try
+    {
+        await next();
+    }
+    catch (AntiforgeryValidationException) when (context.Request.Path.StartsWithSegments("/api/portal", StringComparison.OrdinalIgnoreCase))
+    {
+        if (context.Response.HasStarted) throw;
+        context.Response.Clear();
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = new
+            {
+                code = "csrf_invalid",
+                message = "Token CSRF ausente, inválido ou expirado. Atualize a página e tente novamente."
+            }
+        });
+    }
+});
 app.UseStaticFiles();
 app.UseRouting();
 
@@ -803,7 +824,7 @@ app.MapGet("/api/portal/tasks", async (HttpContext context, ConnectorDbContext d
     if (!string.IsNullOrWhiteSpace(priority)) query = query.Where(x => x.Priority == priority);
     var total = await query.CountAsync(cancellationToken);
     var items = await query.OrderBy(x => x.DueAt).ThenByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new PortalTaskDto(x.Id, x.Title, x.Description, x.Status, x.Priority, x.DueAt, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
-    return Results.Ok(new PortalListEnvelope<PortalTaskDto>(items, new PortalListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null)));
+    return Results.Ok(new PortalListEnvelope<PortalTaskDto>(items, new PortalListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/agenda", async (HttpContext context, ConnectorDbContext dbContext, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default) =>
@@ -825,7 +846,7 @@ app.MapGet("/api/portal/followups", async (HttpContext context, ConnectorDbConte
     if (!string.IsNullOrWhiteSpace(studentRef)) query = query.Where(x => x.StudentRef == studentRef);
     var total = await query.CountAsync(cancellationToken);
     var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new PortalFollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)).ToListAsync(cancellationToken);
-    return Results.Ok(new PortalListEnvelope<PortalFollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null)));
+    return Results.Ok(new PortalListEnvelope<PortalFollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/reports/operational", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
@@ -1066,10 +1087,10 @@ app.MapGet("/api/portal/connections", async (
     if (profile is null) return Results.NotFound();
     context.Response.Headers.CacheControl = "no-store";
     var connections = profile.MoodleConnections.Select(connection => new PortalConnectionDto(
-        connection.Id, connection.Alias, connection.BaseUrl, "unknown", connection.IsDefault,
+        connection.Alias, connection.Alias, connection.BaseUrl, "unknown", connection.IsDefault,
         new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), null));
     return Results.Ok(new PortalListEnvelope<PortalConnectionDto>(
-        connections.ToArray(), new(1, connections.Count(), connections.Count(), connections.Any(), DateTimeOffset.UtcNow, null)));
+        connections.ToArray(), new(1, 20, connections.Count(), false, DateTimeOffset.UtcNow, null, null, connections.Count())));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapPost("/api/portal/connections", async (
@@ -1080,6 +1101,7 @@ app.MapPost("/api/portal/connections", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
     await antiforgery.ValidateRequestAsync(context);
 
     var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
@@ -1104,7 +1126,24 @@ app.MapPost("/api/portal/connections", async (
                 input.CanWrite),
             cancellationToken);
 
-        return Results.Ok(new { ok = true, input.MoodleAlias, input.MoodleBaseUrl, input.IsDefault });
+        var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
+        var connection = profile?.MoodleConnections
+            .FirstOrDefault(item => string.Equals(item.Alias, input.MoodleAlias.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (connection is null)
+        {
+            return Results.Problem(
+                "A conexão foi registrada, mas não pôde ser relida com segurança.",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        return Results.Ok(new PortalConnectionDto(
+            connection.Alias,
+            connection.Alias,
+            connection.BaseUrl,
+            "unknown",
+            connection.IsDefault,
+            new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(),
+            null));
     }
     catch (InvalidOperationException ex)
     {
@@ -1182,7 +1221,7 @@ app.MapGet("/api/portal/pending", async (
     var items = filtered.Skip((currentPage - 1) * size).Take(size).ToArray();
     return Results.Ok(new PortalListEnvelope<PortalPendingDto>(
         items, new(currentPage, size, items.Length, currentPage * size < filtered.Length, generatedAt, effectiveConnectionRef,
-            pending.Warning is null ? null : [pending.Warning])));
+            pending.Warning is null ? null : [pending.Warning], filtered.Length)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/dashboard", async (
@@ -1294,7 +1333,7 @@ app.MapGet("/api/portal/courses", async (
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var data = result.Items.Select(course => PortalCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
     return Results.Ok(new PortalListEnvelope<PortalCourseDto>(data,
-        new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, effectiveConnectionRef)));
+        new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, effectiveConnectionRef, null, result.TotalCount)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/courses/{connectionRef}/{courseId}", async (
@@ -1326,7 +1365,7 @@ app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/activities", async (
     var data = result.Activities.Skip((currentPage - 1) * size).Take(size)
         .Select(activity => PortalCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray();
     return Results.Ok(new PortalListEnvelope<PortalActivityDto>(data,
-        new(currentPage, size, data.Length, currentPage * size < result.Total, DateTimeOffset.UtcNow, connectionRef)));
+        new(currentPage, size, data.Length, currentPage * size < result.Total, DateTimeOffset.UtcNow, connectionRef, null, result.Total)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/students", async (
@@ -2783,6 +2822,7 @@ public static class PortalPermissionCatalog
     public const string MessagesPrepare = "messages.prepare";
     public const string ReportsView = "reports.view";
     public const string ConnectionsManage = "connections.manage";
+    public const string SettingsView = "settings.view";
     public const string AdminView = "admin.view";
 
     public static IReadOnlyList<string> ForRoles(IEnumerable<string> roles)
@@ -2805,6 +2845,7 @@ public static class PortalPermissionCatalog
                 permissions.Add(TasksManage);
                 permissions.Add(AgendaManage);
                 permissions.Add(MessagesPrepare);
+                permissions.Add(ConnectionsManage);
             }
             if (normalized.Contains("Pedagogo")) permissions.Add(ReportsView);
         }
@@ -2812,10 +2853,10 @@ public static class PortalPermissionCatalog
         return permissions.OrderBy(permission => permission, StringComparer.Ordinal).ToArray();
     }
 
-    private static readonly string[] CommonRead = [DashboardView, CoursesView, StudentsView, ReportsView];
+    private static readonly string[] CommonRead = [DashboardView, CoursesView, StudentsView, ReportsView, SettingsView];
     private static readonly string[] All = [
         DashboardView, CoursesView, StudentsView, StudentsFollowupWrite, TasksManage,
-        AgendaManage, MessagesPrepare, ReportsView, ConnectionsManage, AdminView];
+        AgendaManage, MessagesPrepare, ReportsView, ConnectionsManage, SettingsView, AdminView];
 }
 public sealed record PortalConnectionDto(string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
 

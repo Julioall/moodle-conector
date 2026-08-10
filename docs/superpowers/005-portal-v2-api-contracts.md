@@ -9,7 +9,7 @@ GET /api/portal/courses
 GET /api/portal/courses/{connectionRef}/{courseId}
 GET /api/portal/courses/{connectionRef}/{courseId}/students
 GET /api/portal/courses/{connectionRef}/{courseId}/activities
-GET /api/portal/students/{connectionRef}/{studentId}
+GET /api/portal/courses/{connectionRef}/{courseId}/students/{studentId}
 GET /api/portal/pending
 GET /api/portal/dashboard
 ```
@@ -32,4 +32,4 @@ Errors use a stable code, human-safe message, and server-generated correlation I
 
 ## Contract rules
 
-DTOs are presentation contracts, not serialized domain entities. Every Moodle resource preserves `connectionRef`; list endpoints paginate; all Moodle-derived responses expose freshness; secrets are never returned. Dashboard aggregation has an operational budget and must not synchronously fan out into dozens of expensive gradebook calls. Expensive data belongs in focused endpoints or projections/cache after measurement.
+DTOs are presentation contracts, not serialized domain entities. Every Moodle resource preserves `connectionRef`; list endpoints paginate; all Moodle-derived responses expose freshness; secrets are never returned. Student resources are always course-scoped in V1; there is no global `/api/portal/students` fan-out endpoint. Dashboard aggregation has an operational budget and must not synchronously fan out into dozens of expensive gradebook calls. Expensive data belongs in focused endpoints or projections/cache after measurement.

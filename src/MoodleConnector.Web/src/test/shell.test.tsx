@@ -1,2 +1,32 @@
 import { render, screen } from '@testing-library/react'; import { MemoryRouter } from 'react-router-dom'; import { describe, expect, it } from 'vitest'; import { AppSidebar } from '../components/layout/AppSidebar';
-describe('Claris-first shell', () => { it('renders the foundation navigation', () => { render(<MemoryRouter><AppSidebar /></MemoryRouter>); expect(screen.getByText('Resumo da Semana')).toBeInTheDocument(); expect(screen.getByText('Meus Cursos')).toBeInTheDocument(); expect(screen.getByText('Alunos')).toBeInTheDocument(); }); it('exposes the v2 operational smoke path', () => { render(<MemoryRouter><AppSidebar /></MemoryRouter>); const link = (name: string, href: string) => expect(screen.getAllByRole('link', { name }).find(item => item.getAttribute('href') === href)).toBeTruthy(); link('Tarefas', '/tarefas'); link('Agenda', '/agenda'); link('Mensagens', '/mensagens'); link('Relatórios', '/relatorios'); }); });
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+import { SidebarProvider } from '../components/ui/sidebar';
+
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+const renderWithProviders = (ui: React.ReactElement) => render(
+  <QueryClientProvider client={queryClient}>
+    <SidebarProvider>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </SidebarProvider>
+  </QueryClientProvider>
+);
+
+describe('Claris-first shell', () => {
+  it('renders the foundation navigation', () => {
+    renderWithProviders(<AppSidebar />);
+    expect(screen.getByText('Resumo da Semana')).toBeInTheDocument();
+    expect(screen.getByText('Meus Cursos')).toBeInTheDocument();
+    expect(screen.getByText('Alunos')).toBeInTheDocument();
+  });
+
+  it('exposes the v2 operational smoke path', () => {
+    renderWithProviders(<AppSidebar />);
+    const link = (name: string, href: string) => expect(screen.getAllByRole('link', { name }).find(item => item.getAttribute('href') === href)).toBeTruthy();
+    link('Tarefas', '/tarefas');
+    link('Agenda', '/agenda');
+    link('Mensagens', '/mensagens');
+    link('Relatórios', '/relatorios');
+  });
+});

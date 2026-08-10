@@ -447,7 +447,7 @@ jobs:
           rm -f "$ENV_FILE"
 
       - name: Build and restart containers
-        timeout-minutes: 20
+        timeout-minutes: 35
         run: |
           REMOTE_SCRIPT="$(cat <<EOF
           set -euo pipefail
@@ -460,7 +460,7 @@ jobs:
 
           \$DOCKER compose --env-file .env.production down --remove-orphans || true
           \$DOCKER rm -f moodle-connector-app moodle-connector-caddy >/dev/null 2>&1 || true
-          timeout 900s \$DOCKER compose --env-file .env.production up -d --build --remove-orphans
+          timeout 1800s \$DOCKER compose --env-file .env.production up -d --build --remove-orphans
           \$DOCKER compose --env-file .env.production ps
           \$DOCKER image prune -f
 
