@@ -81,6 +81,20 @@ public sealed class PrepareTutorMessageCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_RejectsDuplicateOrInvalidRecipientsBeforeCreatingPendingAction()
+    {
+        var sut = CreateHandler();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.Handle(
+            new PrepareTutorMessageCommand("10", TutorMessageType.BoasVindas, ["1", "1"]),
+            CancellationToken.None));
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sut.Handle(
+            new PrepareTutorMessageCommand("10", TutorMessageType.BoasVindas, ["not-a-user-id"]),
+            CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Handle_RecoveryMessage_HasAdditionalRisk()
     {
         var sut = CreateHandler([MakeStudent("1", "Alice")]);

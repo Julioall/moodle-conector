@@ -18,7 +18,7 @@ public sealed class CapabilityLiveShadowTests : IClassFixture<LiveShadowTestFixt
     public async Task Shadow_Capabilities_ShouldCacheAndResolveCorrectly(string alias)
     {
         // Read credentials from environment variables (per-alias or fallback)
-        var envPrefix = alias?.ToUpperInvariant() ?? string.Empty;
+        var envPrefix = alias.ToUpperInvariant();
         var username = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_USERNAME")
                    ?? Environment.GetEnvironmentVariable("LIVE_USERNAME");
         var password = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_PASSWORD")
@@ -33,6 +33,7 @@ public sealed class CapabilityLiveShadowTests : IClassFixture<LiveShadowTestFixt
         var executor = _fixture.CreateSafeReadExecutor(alias, username, password);
         var conn = alias == "fieg" ? _fixture.ConnectionFieg : _fixture.ConnectionSenai;
         var token = await _fixture.GetValidTokenAsync(alias, username, password);
+        _fixture.UseCapabilityCredentials(alias, username, password);
         
         // 1. Initial snapshot fetch
         var snapshot1 = await _fixture.CapabilityRegistry.GetSnapshotAsync(conn, token, default);
@@ -62,7 +63,7 @@ public sealed class CapabilityLiveShadowTests : IClassFixture<LiveShadowTestFixt
         var conn2 = alias2 == "fieg" ? _fixture.ConnectionFieg : _fixture.ConnectionSenai;
 
         // Read credentials for alias1
-        var envPrefix1 = alias1?.ToUpperInvariant() ?? string.Empty;
+        var envPrefix1 = alias1.ToUpperInvariant();
         var user1 = Environment.GetEnvironmentVariable($"LIVE_{envPrefix1}_USERNAME")
                 ?? Environment.GetEnvironmentVariable("LIVE_USERNAME");
         var pass1 = Environment.GetEnvironmentVariable($"LIVE_{envPrefix1}_PASSWORD")
@@ -74,22 +75,29 @@ public sealed class CapabilityLiveShadowTests : IClassFixture<LiveShadowTestFixt
             return;
         }
 
-        var token1 = await _fixture.GetValidTokenAsync(alias1, user1, pass1);
+        var envPrefix2 = alias2.ToUpperInvariant();
+        var user2 = Environment.GetEnvironmentVariable($"LIVE_{envPrefix2}_USERNAME")
+                ?? Environment.GetEnvironmentVariable("LIVE_USERNAME");
+        var pass2 = Environment.GetEnvironmentVariable($"LIVE_{envPrefix2}_PASSWORD")
+                ?? Environment.GetEnvironmentVariable("LIVE_PASSWORD");
 
-        // Use distinct token string for the second connection to test isolation structurally.
-        var token2 = token1 + "_fake_diff";
-        
+        if (string.IsNullOrWhiteSpace(user2) || string.IsNullOrWhiteSpace(pass2))
+        {
+            Console.WriteLine($"Skipping multi-connection live shadow test for alias '{alias2}': environment variables not set.");
+            return;
+        }
+
+        var token1 = await _fixture.GetValidTokenAsync(alias1, user1, pass1);
+        var token2 = await _fixture.GetValidTokenAsync(alias2, user2, pass2);
+
+        _fixture.UseCapabilityCredentials(alias1, user1, pass1);
         var snapshot1 = await _fixture.CapabilityRegistry.GetSnapshotAsync(conn1, token1, default);
-        
-        try 
-        {
-            await _fixture.CapabilityRegistry.GetSnapshotAsync(conn2, token2, default);
-        }
-        catch(Exception)
-        {
-            // Expected if token2 is invalid on conn2, but we just prove they aren't crossing cache
-        }
-        
+
+        _fixture.UseCapabilityCredentials(alias2, user2, pass2);
+        var snapshot2 = await _fixture.CapabilityRegistry.GetSnapshotAsync(conn2, token2, default);
+        Assert.NotSame(snapshot1, snapshot2);
+
+        _fixture.UseCapabilityCredentials(alias1, user1, pass1);
         var snapshot1Cached = await _fixture.CapabilityRegistry.GetSnapshotAsync(conn1, token1, default);
         Assert.Same(snapshot1, snapshot1Cached);
     }

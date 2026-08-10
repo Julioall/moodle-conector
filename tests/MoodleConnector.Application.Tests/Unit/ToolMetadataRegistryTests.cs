@@ -1,11 +1,22 @@
 using Xunit;
+using ModelContextProtocol.Server;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Presentation.Configuration;
 using MoodleConnector.Presentation.Tools;
+using MoodleConnector.Presentation.Tools.Grading;
 
 namespace MoodleConnector.Application.Tests.Unit;
 
 public class ToolMetadataRegistryTests
 {
+    [Fact]
+    public void Empty_registry_does_not_scan_loaded_assemblies()
+    {
+        var reg = new ToolMetadataRegistry();
+
+        Assert.Empty(reg.Entries);
+    }
+
     [Fact]
     public void RegisterFromType_PopulatesRegistryForCourseTools()
     {
@@ -17,5 +28,115 @@ public class ToolMetadataRegistryTests
         Assert.Equal("courses", meta!.Family);
         Assert.Equal("R1", meta.Classification);
         Assert.False(meta.Structural);
+    }
+
+    [Fact]
+    public void Standard_search_and_fetch_contracts_are_registered_as_structural_tools()
+    {
+        var reg = new ToolMetadataRegistry();
+        reg.RegisterFromType(typeof(MoodleCoursesTools));
+
+        Assert.True(reg.TryGet("search", out var search));
+        Assert.Equal("courses", search!.Family);
+        Assert.Equal("R6", search.Classification);
+        Assert.Equal("search", search.CanonicalOperation);
+        Assert.True(search.Structural);
+
+        Assert.True(reg.TryGet("fetch", out var fetch));
+        Assert.Equal("courses", fetch!.Family);
+        Assert.Equal("R6", fetch.Classification);
+        Assert.Equal("fetch", fetch.CanonicalOperation);
+        Assert.True(fetch.Structural);
+
+        var searchMethod = typeof(MoodleCoursesTools).GetMethod(nameof(MoodleCoursesTools.SearchAsync));
+        var searchContract = searchMethod!.GetCustomAttributes(typeof(McpServerToolAttribute), inherit: true)
+            .Cast<McpServerToolAttribute>()
+            .Single();
+        Assert.Equal("search", searchContract.Name);
+        Assert.Equal(typeof(MoodleCoursesTools.SearchResponse), searchContract.OutputSchemaType);
+        Assert.Contains(searchMethod.GetParameters(), parameter => parameter.Name == "query");
+
+        var fetchMethod = typeof(MoodleCoursesTools).GetMethod(nameof(MoodleCoursesTools.FetchAsync));
+        var fetchContract = fetchMethod!.GetCustomAttributes(typeof(McpServerToolAttribute), inherit: true)
+            .Cast<McpServerToolAttribute>()
+            .Single();
+        Assert.Equal("fetch", fetchContract.Name);
+        Assert.Equal(typeof(MoodleCoursesTools.FetchResponse), fetchContract.OutputSchemaType);
+        Assert.Contains(fetchMethod.GetParameters(), parameter => parameter.Name == "id");
+    }
+
+    [Fact]
+    public void RegisterFromType_InfersBaselineForLegacyToolMethods()
+    {
+        var reg = new ToolMetadataRegistry();
+        reg.RegisterFromType(typeof(MoodleUniversalTools));
+
+        Assert.True(reg.TryGet("moodle_execute_read", out var meta));
+        Assert.NotNull(meta);
+        Assert.Equal("discovery", meta!.Family);
+        Assert.Equal("R6", meta.Classification);
+        Assert.True(meta.Structural);
+    }
+
+    [Fact]
+    public void Inference_UsesDomainImplementationAndMarksControlledBoundaries()
+    {
+        var reg = new ToolMetadataRegistry();
+        reg.RegisterFromType(typeof(MoodleCourseActivitiesTools));
+        reg.RegisterFromType(typeof(MoodleAssignmentSubmissionsTools));
+        reg.RegisterFromType(typeof(MoodleForumTools));
+
+        Assert.True(reg.TryGet("list_course_assignments", out var assignments));
+        Assert.Equal("assignments", assignments!.Family);
+        Assert.Equal("R4", assignments.Classification);
+        Assert.Equal("specialized", assignments.Kind);
+
+        Assert.True(reg.TryGet("list_assignment_submissions", out var submissions));
+        Assert.Equal("assignments", submissions!.Family);
+        Assert.Equal("R4", submissions.Classification);
+        Assert.Equal("specialized", submissions.Kind);
+
+        Assert.True(reg.TryGet("confirm_forum_post", out var forumWrite));
+        Assert.Equal("R5", forumWrite!.Classification);
+        Assert.Equal("controlled-write", forumWrite.Kind);
+    }
+
+    [Fact]
+    public void Registry_covers_the_complete_registered_mcp_surface()
+    {
+        var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
+
+        Assert.Equal(97, reg.Entries.Count);
+        Assert.All(reg.Entries, entry =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(entry.Key));
+            Assert.False(string.IsNullOrWhiteSpace(entry.Value.Classification));
+            Assert.Matches("^R[1-6]$", entry.Value.Classification);
+            Assert.False(string.IsNullOrWhiteSpace(entry.Value.ExposureStatus));
+            Assert.False(string.IsNullOrWhiteSpace(entry.Value.Evidence));
+        });
+
+        var inventory = new ToolSurfaceInventory(reg);
+        Assert.Equal(97, inventory.Total);
+        Assert.Equal(11, inventory.StructuralCount);
+        Assert.Equal(65, inventory.SpecializedCount);
+        Assert.Equal(22, inventory.ControlledWriteCount);
+        Assert.Equal(0, inventory.DeprecatedCount);
+    }
+
+    [Fact]
+    public void Catalog_is_the_single_source_for_conditional_mcp_registration()
+    {
+        var enabled = RegisteredMcpToolContainers.GetEnabledContainers(
+            new FeatureOptions { DemoToolsEnabled = true },
+            new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = false });
+
+        Assert.Contains(typeof(DemoPendingActionTools), enabled);
+        Assert.DoesNotContain(typeof(MoodleIndividualGradeTools), enabled);
+        Assert.Equal(
+            RegisteredMcpToolContainers.All,
+            RegisteredMcpToolContainers.AlwaysOn
+                .Concat(RegisteredMcpToolContainers.Conditional.Select(container => container.ContainerType))
+                .ToArray());
     }
 }

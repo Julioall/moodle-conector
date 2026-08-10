@@ -14,6 +14,12 @@ using OpenAI.Chat;
 
 namespace MoodleConnector.Benchmarks.Cognitive;
 
+public sealed record ToolManifestSnapshot(
+    int ToolCount,
+    int ToolSchemaTokens,
+    long ToolSchemaBytes,
+    string ManifestHash);
+
 /// <summary>
 /// Benchmark driver using the MCP Streamable HTTP transport (POST /mcp).
 /// The MoodleConnector server uses .WithHttpTransport() which implements
@@ -31,6 +37,8 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 {
     private readonly ChatClient _chatClient;
     private readonly HttpClient _mcpClient;
+    private readonly BenchmarkTelemetry? _telemetry;
+    private readonly string _runId;
     private string? _sessionId;
     private bool _initialized;
     private BenchmarkScorer _scorer = new();
@@ -43,14 +51,20 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     private string _cachedManifestHash = string.Empty;
 
     private const string McpEndpoint = "/mcp";
-    private const int MaxRetries = 5;
+    private const int MaxRetries = 7; // bounded backoff for recoverable rate limits
     public static readonly string CommitSha = ResolveCommitSha();
-    public const string BenchmarkVersion = "1.0.0";
+    public const string BenchmarkVersion = "1.1.0";
 
-    public OpenAIResponsesBenchmarkDriver(ChatClient chatClient, HttpClient mcpClient)
+    public OpenAIResponsesBenchmarkDriver(
+        ChatClient chatClient,
+        HttpClient mcpClient,
+        BenchmarkTelemetry? telemetry = null,
+        string? runId = null)
     {
         _chatClient = chatClient;
         _mcpClient = mcpClient;
+        _telemetry = telemetry;
+        _runId = runId ?? string.Empty;
 
         // MCP Streamable HTTP requires the client to advertise both media types.
         // Without this header the server returns 406 Not Acceptable.
@@ -214,7 +228,10 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         }
 
         var tools = responseJson?["result"]?["tools"]?.AsArray() ?? new JsonArray();
-        var schemaTokens = tools.Sum(t => EstimateTokens(t?["inputSchema"]?.ToJsonString() ?? string.Empty));
+        // The model receives the complete MCP tool descriptor, not only the
+        // input schema. Count name/description/schema together so the metric
+        // reflects the actual schema surface sent to the model.
+        var schemaTokens = tools.Sum(t => EstimateTokens(t?.ToJsonString() ?? string.Empty));
 
         // Cache for all subsequent tasks in this profile run
         _cachedMcpTools = tools;
@@ -222,6 +239,17 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         _cachedManifestHash = ComputeManifestHash(tools);
 
         return (tools, schemaTokens);
+    }
+
+    /// <summary>
+    /// Retrieves and measures the MCP catalog without making a model call.
+    /// This is used by the deterministic schema-surface probe.
+    /// </summary>
+    public async Task<ToolManifestSnapshot> FetchToolManifestAsync(CancellationToken cancellationToken = default)
+    {
+        var (tools, schemaTokens) = await FetchMcpToolsAsync(cancellationToken);
+        var schemaBytes = tools.Sum(t => Encoding.UTF8.GetByteCount(t?.ToJsonString() ?? string.Empty));
+        return new ToolManifestSnapshot(tools.Count, schemaTokens, schemaBytes, _cachedManifestHash);
     }
 
     // ------------------------------------------------------------------
@@ -275,6 +303,8 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     public async Task<CognitiveTrace> RunAsync(BenchmarkTask task, BenchmarkProfile profile, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
+        _telemetry?.TakeMoodleWebServiceCalls();
+        _telemetry?.TakeLastConnectionAlias();
 
         // 1. Fetch tools — cached after first call, avoids 30× redundant fetches per profile
         var (mcpTools, toolSchemaTokens) = await FetchMcpToolsAsync(cancellationToken);
@@ -311,50 +341,60 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         // 3. Setup conversation
         var messages = new List<ChatMessage>
         {
-            new SystemChatMessage("You are MoodleConnector, a helpful assistant. Use tools to interact with Moodle."),
+            new SystemChatMessage(BuildSystemPrompt(profile, task)),
             new UserChatMessage(task.Prompt)
         };
 
-        var options = new ChatCompletionOptions { Temperature = 0.0f };
+        var options = new ChatCompletionOptions { Temperature = 1.0f };
         foreach (var tool in _cachedChatTools!)
             options.Tools.Add(tool);
 
         string? selectedTool = null;
+        string? selectedOperation = null;
         string? selectedConnection = null;
+        string? executedConnection = null;
         var arguments = new Dictionary<string, object>();
         string resultContent = string.Empty;
         var toolInvocations = new List<ToolInvocationTrace>();
         var aggregatedPromptTokens = 0;
         var aggregatedCompletionTokens = 0;
+        var aggregatedCachedInputTokens = 0;
+        var aggregatedReasoningTokens = 0;
+        var modelCalls = 0;
 
         // 4. Agent loop (max 5 turns) with 429 retry
         for (int i = 0; i < 5; i++)
         {
-            var completion = await RetryOnRateLimitAsync(
+            var completionTask = RetryOnRateLimitAsync(
                 () => _chatClient.CompleteChatAsync(messages, options, cancellationToken),
                 cancellationToken);
+            var completion = await completionTask.WaitAsync(cancellationToken);
+            modelCalls++;
             messages.Add(new AssistantChatMessage(completion));
 
             aggregatedPromptTokens += completion.Value.Usage?.InputTokenCount ?? 0;
             aggregatedCompletionTokens += completion.Value.Usage?.OutputTokenCount ?? 0;
+            aggregatedCachedInputTokens += completion.Value.Usage?.InputTokenDetails?.CachedTokenCount ?? 0;
+            aggregatedReasoningTokens += completion.Value.Usage?.OutputTokenDetails?.ReasoningTokenCount ?? 0;
 
             if (completion.Value.FinishReason == ChatFinishReason.ToolCalls)
             {
-                var toolCall = completion.Value.ToolCalls.FirstOrDefault();
-                if (toolCall != null)
+                foreach (var toolCall in completion.Value.ToolCalls)
                 {
                     selectedTool ??= toolCall.FunctionName;
-                    var argsStr = toolCall.FunctionArguments?.ToString() ?? "{}";
+                    var argsStr = NormalizeConnectionInArguments(toolCall.FunctionArguments?.ToString() ?? "{}");
                     if (arguments.Count == 0 && !string.IsNullOrWhiteSpace(argsStr))
                         arguments = JsonSerializer.Deserialize<Dictionary<string, object>>(argsStr) ?? new();
 
                     selectedConnection ??= ExtractConnectionFromArguments(arguments)
                         ?? InferConnectionFromPrompt(task.Prompt);
+                    selectedOperation ??= ExtractCanonicalOperation(toolCall.FunctionName, argsStr);
 
                     var toolStart = Stopwatch.StartNew();
                     var toolResult = await CallMcpToolAsync(toolCall.FunctionName, argsStr, cancellationToken);
                     toolStart.Stop();
                     resultContent = toolResult;
+                    executedConnection ??= ExtractConnectionFromToolResult(toolResult);
 
                     toolInvocations.Add(new ToolInvocationTrace(
                         ToolName: toolCall.FunctionName,
@@ -379,9 +419,9 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 
         // 5. Build traces
         var routing = new RoutingTrace(
-            SelectedSkill: "moodle-core",
-            SelectedIntent: selectedTool ?? "none",
-            SelectedOperation: selectedTool ?? "none",
+            SelectedSkill: ResolveSkillNames(profile, task),
+            SelectedIntent: IntentMapper.ResolveOperation(selectedOperation ?? selectedTool ?? "none") ?? "unknown",
+            SelectedOperation: selectedOperation ?? selectedTool ?? "none",
             SelectedConnection: selectedConnection,
             Arguments: arguments,
             ToolInvocations: toolInvocations
@@ -389,17 +429,25 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 
         var execution = new ExecutionTrace(
             ConnectionId: Guid.Empty,
-            RegistryOperation: selectedTool ?? "none",
+            RegistryOperation: selectedOperation ?? selectedTool ?? "none",
             PolicyDecision: "Allowed",
-            MoodleCalls: toolInvocations.Count,
+            MoodleCalls: _telemetry?.TakeMoodleWebServiceCalls() ?? 0,
             LatencyMs: stopwatch.ElapsedMilliseconds,
             PromptTokens: aggregatedPromptTokens,
             CompletionTokens: aggregatedCompletionTokens,
             TotalTokens: aggregatedPromptTokens + aggregatedCompletionTokens,
             ToolSchemaTokens: toolSchemaTokens,
             ToolManifestHash: toolManifestHash,
+            SkillManifestHash: ComputeSkillManifestHash(profile, task),
             BenchmarkVersion: BenchmarkVersion,
             CommitSha: CommitSha
+            ,ModelCalls: modelCalls
+            ,McpToolCalls: toolInvocations.Count
+            ,CachedInputTokens: aggregatedCachedInputTokens
+            ,UncachedInputTokens: Math.Max(0, aggregatedPromptTokens - aggregatedCachedInputTokens)
+            ,ReasoningTokens: aggregatedReasoningTokens
+            ,ExecutedConnection: _telemetry?.TakeLastConnectionAlias() ?? executedConnection
+            ,RunId: _runId
         );
 
         var scoring = _scorer.Score(task, routing, execution, resultContent);
@@ -414,6 +462,47 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             ResultContent: resultContent,
             Scoring: scoring
         );
+    }
+
+    private static string? ExtractConnectionFromToolResult(string result)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(result);
+            return FindConnectionAlias(document.RootElement);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? FindConnectionAlias(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.NameEquals("connectionAlias") || property.NameEquals("alias"))
+                {
+                    var value = property.Value.GetString();
+                    if (!string.IsNullOrWhiteSpace(value)) return value;
+                }
+
+                var nested = FindConnectionAlias(property.Value);
+                if (!string.IsNullOrWhiteSpace(nested)) return nested;
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var nested = FindConnectionAlias(item);
+                if (!string.IsNullOrWhiteSpace(nested)) return nested;
+            }
+        }
+
+        return null;
     }
 
     // ------------------------------------------------------------------
@@ -431,15 +520,25 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             }
             catch (Exception ex) when (ex.Message.Contains("429") || ex.Message.Contains("rate_limit"))
             {
+                if (IsQuotaExhausted(ex))
+                {
+                    // Quota exhaustion is a permanent run blocker, not a
+                    // recoverable rate limit. Retrying only delays the
+                    // completeness verdict and wastes time/tokens.
+                    throw;
+                }
+
                 if (attempt == MaxRetries - 1) throw;
 
                 // Parse "Please try again in Xms" if present
                 var match = System.Text.RegularExpressions.Regex.Match(
                     ex.Message, @"try again in (\d+)ms");
                 var waitMs = match.Success ? int.Parse(match.Groups[1].Value) + 200 : 0;
-                var waitTime = waitMs > 0
-                    ? TimeSpan.FromMilliseconds(waitMs)
-                    : delay;
+
+                // OpenAI's TPM wait time is often calculated based on *requested* tokens, not total tokens!
+                // So "try again in 80ms" is wrong for our 13k token prompts.
+                // We MUST enforce the exponential delay if it's larger than OpenAI's suggestion.
+                var waitTime = TimeSpan.FromMilliseconds(Math.Max(waitMs, delay.TotalMilliseconds));
 
                 Console.Write($" [429 retry {attempt + 1}/{MaxRetries} wait {waitTime.TotalSeconds:F1}s]");
                 await Task.Delay(waitTime, ct);
@@ -447,6 +546,14 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             }
         }
         throw new InvalidOperationException("Unreachable");
+    }
+
+    private static bool IsQuotaExhausted(Exception exception)
+    {
+        var message = exception.ToString();
+        return message.Contains("insufficient_quota", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("credit_balance_exhausted", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("quota_exceeded", StringComparison.OrdinalIgnoreCase);
     }
 
     // ------------------------------------------------------------------
@@ -458,7 +565,7 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         foreach (var key in new[] { "moodleAlias", "alias", "connectionRef", "connection" })
         {
             if (arguments.TryGetValue(key, out var val) && val is string s && !string.IsNullOrWhiteSpace(s))
-                return s;
+                return NormalizeConnectionAlias(s);
         }
         return null;
     }
@@ -472,6 +579,130 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 
     private static int EstimateTokens(string text)
         => string.IsNullOrWhiteSpace(text) ? 0 : Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
+
+    private static string BuildSystemPrompt(BenchmarkProfile profile, BenchmarkTask task)
+    {
+        var prompt = "You are MoodleConnector, a helpful assistant. Use tools to interact with Moodle.";
+        if (!profile.UseSafeReadExecutor) return prompt;
+        var domainPrompt = task.Category.Equals("assignments", StringComparison.OrdinalIgnoreCase)
+            ? " For assignments, prefer list_course_assignments for activity discovery and the specialized submission tools for submissions/status."
+            : task.Category.Equals("students", StringComparison.OrdinalIgnoreCase)
+                ? " For students, prefer the specialized participant and group tools; preserve Moodle IDs and pagination."
+                : " Prefer the canonical Moodle course operations through moodle_execute_read for known course requests. " +
+                  "Use search or fetch only for discovery or when no registered Moodle operation covers the request. " +
+                  "For courses: list courses = core_enrol_get_users_courses; course details/search by id = core_course_get_courses_by_field; " +
+                  "course contents = core_course_get_contents.";
+        return prompt + domainPrompt + " Always pass the requested moodleAlias.";
+    }
+
+    private static string? ExtractCanonicalOperation(string toolName, string argumentsJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(argumentsJson);
+            var operation = FindStringProperty(document.RootElement, "functionName")
+                ?? FindStringProperty(document.RootElement, "operation")
+                ?? FindStringProperty(document.RootElement, "moodleFunction");
+            return operation ?? toolName;
+        }
+        catch { return toolName; }
+    }
+
+    private static string? FindStringProperty(JsonElement element, string name)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.NameEquals(name) && property.Value.ValueKind == JsonValueKind.String)
+                    return property.Value.GetString();
+                var nested = FindStringProperty(property.Value, name);
+                if (nested is not null) return nested;
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var nested = FindStringProperty(item, name);
+                if (nested is not null) return nested;
+            }
+        }
+        return null;
+    }
+
+    private static string NormalizeConnectionAlias(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        if (normalized.Contains("senai", StringComparison.Ordinal)) return "senai";
+        if (normalized.Contains("fieg", StringComparison.Ordinal)) return "fieg";
+        return normalized;
+    }
+
+    private static string NormalizeConnectionInArguments(string argumentsJson)
+    {
+        try
+        {
+            var node = JsonNode.Parse(argumentsJson);
+            if (node is JsonObject obj)
+            {
+                foreach (var key in new[] { "moodleAlias", "alias", "connectionRef", "connection" })
+                {
+                    if (obj[key] is JsonValue value && value.TryGetValue<string>(out var alias)
+                        && !string.IsNullOrWhiteSpace(alias))
+                    {
+                        obj[key] = NormalizeConnectionAlias(alias);
+                    }
+                }
+            }
+            return node?.ToJsonString() ?? argumentsJson;
+        }
+        catch { return argumentsJson; }
+    }
+
+    private static string ResolveSkillNames(BenchmarkProfile profile, BenchmarkTask task)
+    {
+        if (!profile.UseSafeReadExecutor) return "moodle-core";
+        return task.Category.ToLowerInvariant() switch
+        {
+            "assignments" => "moodle-core,moodle-assignments",
+            "students" => "moodle-core,moodle-students",
+            _ => "moodle-core,moodle-courses"
+        };
+    }
+
+    private static string ComputeSkillManifestHash(BenchmarkProfile profile, BenchmarkTask task)
+    {
+        var skillNames = ResolveSkillNames(profile, task).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var content = new StringBuilder();
+        var repoRoot = FindRepositoryRoot();
+        foreach (var skillName in skillNames)
+        {
+            var path = repoRoot is null
+                ? string.Empty
+                : Path.Combine(repoRoot, ".agents", "skills", skillName, "SKILL.md");
+            if (File.Exists(path)) content.AppendLine(File.ReadAllText(path));
+            else content.AppendLine(skillName);
+        }
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content.ToString()))).ToLowerInvariant();
+    }
+
+    private static string? FindRepositoryRoot()
+    {
+        var directory = new DirectoryInfo(Environment.CurrentDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "MoodleConnector.slnx")) ||
+                File.Exists(Path.Combine(directory.FullName, "MoodleConnector.sln")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Parses the first JSON object from a text/event-stream body.

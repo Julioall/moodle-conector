@@ -150,6 +150,7 @@ Nomes suportados:
 - `LIVE_PASSWORD` — senha genérica (fallback).
 - `LIVE_{ALIAS}_USERNAME` — nome de usuário específico para um alias de conexão (ex.: `LIVE_FIEG_USERNAME`).
 - `LIVE_{ALIAS}_PASSWORD` — senha específica para um alias de conexão (ex.: `LIVE_FIEG_PASSWORD`).
+- `LIVE_{ALIAS}_URL` — URL base HTTPS da conexão usada pelo MoodleBench (ex.: `LIVE_FIEG_URL`).
 
 Comportamento:
 
@@ -159,8 +160,9 @@ Comportamento:
 Exemplo (PowerShell):
 
 ```powershell
-$env:LIVE_FIEG_USERNAME = "04112637225"
-$env:LIVE_FIEG_PASSWORD = "442ficxk"
+$env:LIVE_FIEG_URL = "https://moodle.example"
+$env:LIVE_FIEG_USERNAME = "<username-from-secret-store>"
+$env:LIVE_FIEG_PASSWORD = "<password-from-secret-store>"
 dotnet test tests\MoodleConnector.Application.Tests\MoodleConnector.Application.Tests.csproj --filter FullyQualifiedName~AssignmentsLiveShadowTests -v normal
 ```
 

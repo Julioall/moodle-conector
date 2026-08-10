@@ -1,0 +1,64 @@
+{
+  "RunId": "20260810_030252",
+  "BenchmarkVersion": "1.1.0",
+  "Model": "gpt-5.4-nano",
+  "CommitSha": "ed9a437deedd572998398102f669b1632c53469e",
+  "Catalog": {
+    "Registered": 97,
+    "ProductionExposed": 95,
+    "FeatureGatedByDefault": 2,
+    "HiddenByExposurePolicy": 0,
+    "Structural": 11,
+    "Specialized": 65,
+    "Controlled": 22,
+    "Deprecated": 0
+  },
+  "Rows": [
+    {
+      "Profile": "A",
+      "ToolCount": 97,
+      "ToolSchemaTokens": 56166,
+      "ToolSchemaBytes": 224524,
+      "ToolManifestHash": "911a263d770c5ed3"
+    },
+    {
+      "Profile": "B",
+      "ToolCount": 97,
+      "ToolSchemaTokens": 56166,
+      "ToolSchemaBytes": 224524,
+      "ToolManifestHash": "911a263d770c5ed3"
+    },
+    {
+      "Profile": "Production",
+      "ToolCount": 95,
+      "ToolSchemaTokens": 55680,
+      "ToolSchemaBytes": 222585,
+      "ToolManifestHash": "6c01f6ec32d7f66e"
+    },
+    {
+      "Profile": "C",
+      "ToolCount": 94,
+      "ToolSchemaTokens": 54411,
+      "ToolSchemaBytes": 217511,
+      "ToolManifestHash": "84c572423bdc7960"
+    }
+  ],
+  "Reductions": {
+    "ProductionVsFull": {
+      "ToolCount": 2,
+      "ToolSchemaTokens": 486,
+      "ToolSchemaBytes": 1939,
+      "ToolCountPercent": 2.0618556701030926,
+      "ToolSchemaTokensPercent": 0.8652921696399958,
+      "ToolSchemaBytesPercent": 0.8636047816714472
+    },
+    "CoursesOptimizedVsB": {
+      "ToolCount": 3,
+      "ToolSchemaTokens": 1755,
+      "ToolSchemaBytes": 7013,
+      "ToolCountPercent": 3.0927835051546393,
+      "ToolSchemaTokensPercent": 3.124666168144429,
+      "ToolSchemaBytesPercent": 3.123496819939071
+    }
+  }
+}

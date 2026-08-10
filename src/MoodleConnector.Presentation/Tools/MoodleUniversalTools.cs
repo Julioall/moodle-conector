@@ -6,6 +6,8 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
+using MoodleConnector.Application.Registry;
+using MoodleConnector.Domain.Registry;
 using MoodleConnector.Application.Tools;
 using Microsoft.Extensions.Logging;
 
@@ -14,7 +16,9 @@ namespace MoodleConnector.Presentation.Tools;
 [McpServerToolType]
 public sealed class MoodleUniversalTools(
     IMoodleFunctionCatalog functionCatalog,
-    IMoodleFunctionExecutor functionExecutor,
+    ISafeReadExecutor safeReadExecutor,
+    IOperationRegistry operationRegistry,
+    IPolicyEngine policyEngine,
     IMoodleBusinessFlowRegistry businessFlows,
     IMoodleConnectorCredentialsProvider credentialsProvider,
     IMoodleConnectionSelection connectionSelection,
@@ -35,6 +39,7 @@ public sealed class MoodleUniversalTools(
         var stopwatch = Stopwatch.StartNew();
         try
         {
+            EnsureSiteInfoDiscoveryIsAllowed();
             var connection = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
             var liveSiteInfo = await restClient.CallAsync(
                 connection,
@@ -160,10 +165,17 @@ public sealed class MoodleUniversalTools(
         connectionSelection.Alias = moodleAlias;
         try
         {
+            EnsureSiteInfoDiscoveryIsAllowed();
             var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
             var functions = string.IsNullOrWhiteSpace(search)
                 ? profile.Functions
                 : profile.Functions.Where(function => function.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+            functions = functions
+                .Where(function => function.IsAvailable &&
+                    function.Risk == MoodleFunctionRisk.Read &&
+                    operationRegistry.GetOperation(function.Name) is { } operation &&
+                    policyEngine.Evaluate(operation).Decision == PolicyDecision.Allow)
+                .ToArray();
             return Success<IReadOnlyList<MoodleFunctionDescriptor>>(functions, $"{functions.Count} funcao(oes) encontrada(s).");
         }
         catch (OperationCanceledException) { throw; }
@@ -188,10 +200,19 @@ public sealed class MoodleUniversalTools(
         connectionSelection.Alias = moodleAlias;
         try
         {
+            EnsureSiteInfoDiscoveryIsAllowed();
             var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
-            var descriptor = profile.Functions.FirstOrDefault(function =>
+            var discovered = profile.Functions.FirstOrDefault(function =>
                 string.Equals(function.Name, functionName.Trim(), StringComparison.OrdinalIgnoreCase))
                 ?? new MoodleFunctionDescriptor(functionName.Trim(), MoodleFunctionRisk.Unknown, false);
+            var operation = operationRegistry.GetOperation(discovered.Name);
+            var isSafeRead = discovered.IsAvailable &&
+                discovered.Risk == MoodleFunctionRisk.Read &&
+                operation is not null &&
+                policyEngine.Evaluate(operation).Decision == PolicyDecision.Allow;
+            var descriptor = isSafeRead
+                ? discovered
+                : new MoodleFunctionDescriptor(discovered.Name, MoodleFunctionRisk.Unknown, false);
             return Success(descriptor, descriptor.IsAvailable ? "Funcao Moodle disponivel." : "Funcao Moodle nao esta disponivel para esta conexao.");
         }
         catch (OperationCanceledException) { throw; }
@@ -211,6 +232,7 @@ public sealed class MoodleUniversalTools(
         connectionSelection.Alias = moodleAlias;
         try
         {
+            EnsureSiteInfoDiscoveryIsAllowed();
             var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
             var flows = businessFlows.EvaluateAll(profile);
             return Success<IReadOnlyCollection<BusinessFlowAvailability>>(flows, $"{flows.Count(flow => flow.IsAvailable)} fluxo(s) Moodle disponível(is).");
@@ -247,7 +269,14 @@ public sealed class MoodleUniversalTools(
                 property => property.Name,
                 property => (object?)property.Value.Clone(),
                 StringComparer.Ordinal);
-            var data = await functionExecutor.ExecuteReadAsync(functionName, values, cancellationToken);
+            var normalized = await safeReadExecutor.ExecuteAsync(
+                functionName,
+                values,
+                moodleAlias,
+                new NormalizationContext(NormalizationMode.Agent),
+                cancellationToken);
+            var payload = JsonSerializer.Deserialize<JsonElement>(normalized?.ToJsonString() ?? "null");
+            var data = new MoodleFunctionResult(functionName.Trim(), payload);
             return Success(data, $"Funcao de leitura '{data.Function}' executada com sucesso.");
         }
         catch (OperationCanceledException) { throw; }
@@ -275,6 +304,17 @@ public sealed class MoodleUniversalTools(
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
+    }
+
+    private void EnsureSiteInfoDiscoveryIsAllowed()
+    {
+        var operation = operationRegistry.GetOperation("core_webservice_get_site_info");
+        var decision = policyEngine.Evaluate(operation);
+        if (decision.Decision != PolicyDecision.Allow)
+        {
+            throw new InvalidOperationException(
+                $"Policy Denied: discovery requires the registered read operation 'core_webservice_get_site_info'. {decision.Reason}");
+        }
     }
 
     private static string? SanitizeBaseUrl(string? value)

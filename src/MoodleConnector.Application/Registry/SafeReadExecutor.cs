@@ -40,15 +40,22 @@ public sealed class SafeReadExecutor : ISafeReadExecutor
         NormalizationContext? context = null,
         CancellationToken cancellationToken = default)
     {
-        // 1. Resolve Connection
+        // 1. Fetch Operation Schema before touching connection or credentials.
+        // Unknown operations must fail closed without turning the connection
+        // registry into an oracle for arbitrary function names.
+        var operation = _operationRegistry.GetOperation(operationName);
+
+        if (operation is null)
+        {
+            throw new InvalidOperationException($"Operation '{operationName}' is not registered.");
+        }
+
+        // 2. Resolve Connection
         var connectionInfo = await _connectionRegistry.ResolveConnectionAsync(moodleAlias, cancellationToken);
         if (connectionInfo == null)
         {
             throw new InvalidOperationException($"Could not resolve connection for alias '{moodleAlias}'.");
         }
-
-        // 2. Fetch Operation Schema
-        var operation = _operationRegistry.GetOperation(operationName);
 
         // 3. Evaluate Policy
         var policyResult = _policyEngine.Evaluate(operation);
@@ -99,7 +106,7 @@ public sealed class SafeReadExecutor : ISafeReadExecutor
         var rawNode = JsonNode.Parse(rawElement.GetRawText());
 
         // 7. Normalization
-        if (!string.IsNullOrEmpty(operation!.NormalizationProfile))
+        if (!string.IsNullOrEmpty(operation.NormalizationProfile))
         {
             var normalizedResponse = _responseNormalizer.Normalize(operation.NormalizationProfile, rawNode, context);
             return normalizedResponse;

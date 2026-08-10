@@ -24,6 +24,14 @@ public static class BenchmarkReportRenderer
         sb.AppendLine($"> **Generated**: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine();
 
+        sb.AppendLine("## Reproducibility");
+        sb.AppendLine();
+        sb.AppendLine($"- TaskSetHash: `{report.TaskSetHash}`");
+        sb.AppendLine($"- ToolManifestHash: `{report.ToolManifestHash}`");
+        sb.AppendLine($"- SkillManifestHash: `{report.SkillManifestHash}`");
+        sb.AppendLine($"- Skill manifest: {string.Join(", ", report.SkillManifest?.Select(skill => $"`{skill.Name}` ({skill.Version}, `{skill.Hash}`)") ?? [])}");
+        sb.AppendLine();
+
         // ----------------------------------------------------------------
         // Profile labels
         // ----------------------------------------------------------------
@@ -58,12 +66,17 @@ public static class BenchmarkReportRenderer
         // ----------------------------------------------------------------
         sb.AppendLine("## Efficiency Metrics");
         sb.AppendLine();
-        sb.AppendLine("| Métrica | Profile A | Profile B | Profile C | Δ C vs A |");
-        sb.AppendLine("|---------|-----------|-----------|-----------|----------|");
+        sb.AppendLine("| Métrica | Profile A | Profile B | Profile C | Δ B vs A | Δ C vs B |");
+        sb.AppendLine("|---------|-----------|-----------|-----------|----------|----------|");
         AppendEfficiencyRow(sb, "ToolSchemaTokens (avg)", report.ProfileA.AvgToolSchemaTokens, report.ProfileB.AvgToolSchemaTokens, report.ProfileC.AvgToolSchemaTokens);
         AppendEfficiencyRow(sb, "InputTokens (avg)", report.ProfileA.AvgInputTokens, report.ProfileB.AvgInputTokens, report.ProfileC.AvgInputTokens);
         AppendEfficiencyRow(sb, "OutputTokens (avg)", report.ProfileA.AvgOutputTokens, report.ProfileB.AvgOutputTokens, report.ProfileC.AvgOutputTokens);
         AppendEfficiencyRow(sb, "ToolCalls (avg)", report.ProfileA.AvgToolCalls, report.ProfileB.AvgToolCalls, report.ProfileC.AvgToolCalls);
+        AppendEfficiencyRow(sb, "ModelCalls (avg)", report.ProfileA.AvgModelCalls, report.ProfileB.AvgModelCalls, report.ProfileC.AvgModelCalls);
+        AppendEfficiencyRow(sb, "McpToolCalls (avg)", report.ProfileA.AvgMcpToolCalls, report.ProfileB.AvgMcpToolCalls, report.ProfileC.AvgMcpToolCalls);
+        AppendEfficiencyRow(sb, "CachedInputTokens (avg)", report.ProfileA.AvgCachedInputTokens, report.ProfileB.AvgCachedInputTokens, report.ProfileC.AvgCachedInputTokens);
+        AppendEfficiencyRow(sb, "UncachedInputTokens (avg)", report.ProfileA.AvgUncachedInputTokens, report.ProfileB.AvgUncachedInputTokens, report.ProfileC.AvgUncachedInputTokens);
+        AppendEfficiencyRow(sb, "ReasoningTokens (avg)", report.ProfileA.AvgReasoningTokens, report.ProfileB.AvgReasoningTokens, report.ProfileC.AvgReasoningTokens);
         AppendEfficiencyRow(sb, "MoodleWsCalls (avg)", report.ProfileA.AvgMoodleWsCalls, report.ProfileB.AvgMoodleWsCalls, report.ProfileC.AvgMoodleWsCalls);
         AppendEfficiencyRow(sb, "Latency p50 (ms)", report.ProfileA.LatencyP50Ms, report.ProfileB.LatencyP50Ms, report.ProfileC.LatencyP50Ms);
         AppendEfficiencyRow(sb, "Latency p95 (ms)", report.ProfileA.LatencyP95Ms, report.ProfileB.LatencyP95Ms, report.ProfileC.LatencyP95Ms);
@@ -77,7 +90,8 @@ public static class BenchmarkReportRenderer
         sb.AppendLine();
         sb.AppendLine("| Métrica | Profile A | Profile B | Profile C |");
         sb.AppendLine("|---------|-----------|-----------|-----------|");
-        sb.AppendLine($"| WrongConnectionExecutions | {report.ProfileA.WrongConnectionExecutions} | {report.ProfileB.WrongConnectionExecutions} | {report.ProfileC.WrongConnectionExecutions} |");
+        sb.AppendLine($"| WrongConnectionSelection | {report.ProfileA.WrongConnectionSelections} | {report.ProfileB.WrongConnectionSelections} | {report.ProfileC.WrongConnectionSelections} |");
+        sb.AppendLine($"| WrongConnectionExecution | {report.ProfileA.WrongConnectionExecutions} | {report.ProfileB.WrongConnectionExecutions} | {report.ProfileC.WrongConnectionExecutions} |");
         sb.AppendLine($"| UnsafeActions | {report.ProfileA.UnsafeActions} | {report.ProfileB.UnsafeActions} | {report.ProfileC.UnsafeActions} |");
         sb.AppendLine($"| HallucinationRate | {report.ProfileA.HallucinationRate:F1}% | {report.ProfileB.HallucinationRate:F1}% | {report.ProfileC.HallucinationRate:F1}% |");
         sb.AppendLine();
@@ -95,7 +109,7 @@ public static class BenchmarkReportRenderer
         // ----------------------------------------------------------------
         // Gates — Profile C
         // ----------------------------------------------------------------
-        sb.AppendLine("## Gate Evaluation — Profile C vs Baseline A");
+        sb.AppendLine("## Gate Evaluation — Profile C vs Baseline B");
         sb.AppendLine();
         RenderGates(sb, report.GatesForProfileC);
         sb.AppendLine();
@@ -130,7 +144,7 @@ public static class BenchmarkReportRenderer
             sb.AppendLine("Profile C **não** passou todos os gates. As wrappers de Courses ainda são necessárias.");
             sb.AppendLine();
             sb.AppendLine("**Próximos passos:**");
-            sb.AppendLine("1. Analisar tasks que falharam no Profile C vs A");
+            sb.AppendLine("1. Analisar tasks que falharam no Profile C vs B");
             sb.AppendLine("2. Identificar se o problema é SKILL, normalização ou paginação");
             sb.AppendLine("3. Corrigir e re-executar MoodleBench");
         }
@@ -149,14 +163,16 @@ public static class BenchmarkReportRenderer
 
     private static void AppendEfficiencyRow(StringBuilder sb, string metric, double a, double b, double c)
     {
-        double deltaC = a == 0 ? 0 : (c - a) / a * 100.0;
-        var deltaStr = deltaC >= 0 ? $"+{deltaC:F1}%" : $"{deltaC:F1}%";
-        sb.AppendLine($"| {metric} | {a:F1} | {b:F1} | {c:F1} | {deltaStr} |");
+        var deltaB = a == 0 ? 0 : (b - a) / a * 100.0;
+        var deltaC = b == 0 ? 0 : (c - b) / b * 100.0;
+        var deltaBText = deltaB >= 0 ? $"+{deltaB:F1}%" : $"{deltaB:F1}%";
+        var deltaCText = deltaC >= 0 ? $"+{deltaC:F1}%" : $"{deltaC:F1}%";
+        sb.AppendLine($"| {metric} | {a:F1} | {b:F1} | {c:F1} | {deltaBText} | {deltaCText} |");
     }
 
     private static void RenderGates(StringBuilder sb, IReadOnlyList<GateResult> gates)
     {
-        sb.AppendLine("| Gate | Threshold | Baseline A | Candidate | Result |");
+        sb.AppendLine("| Gate | Threshold | Explicit Baseline | Candidate | Result |");
         sb.AppendLine("|------|-----------|------------|-----------|--------|");
         foreach (var gate in gates)
         {
@@ -172,11 +188,11 @@ public static class BenchmarkReportRenderer
 
         sb.AppendLine($"## Falhas — Profile {profileLabel}");
         sb.AppendLine();
-        sb.AppendLine("| Task ID | Reason | Connection | Hallucination |");
-        sb.AppendLine("|---------|--------|------------|---------------|");
+        sb.AppendLine("| Task ID | Reason | Selection | Execution | Hallucination |");
+        sb.AppendLine("|---------|--------|-----------|-----------|---------------|");
         foreach (var trace in failed)
         {
-            sb.AppendLine($"| `{trace.TaskId}` | {trace.Scoring.FailureReason} | {(trace.Scoring.WrongConnectionDetected ? "❌ Wrong" : "✅ OK")} | {(trace.Scoring.HallucinationDetected ? "⚠️ Yes" : "No")} |");
+            sb.AppendLine($"| `{trace.TaskId}` | {trace.Scoring.FailureReason} | {(trace.Scoring.WrongConnectionSelectionDetected ? "❌ Wrong" : "✅ OK")} | {(trace.Scoring.WrongConnectionExecutionDetected ? "❌ Wrong" : "✅ OK")} | {(trace.Scoring.HallucinationDetected ? "⚠️ Yes" : "No")} |");
         }
         sb.AppendLine();
     }

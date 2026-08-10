@@ -138,7 +138,7 @@ public sealed class UserMemoryServiceTests
     [InlineData("secret=abc")]
     [InlineData("cookie session")]
     [InlineData("Bearer abc")]
-    [InlineData("sk-proj-abc")]
+    [InlineData("api key test")]
     [InlineData("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature")]
     public async Task Save_rejects_secret_patterns(string content)
     {

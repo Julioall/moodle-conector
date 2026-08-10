@@ -53,7 +53,7 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
             userExternalId: currentUserExternalId,
             courseId: request.CourseId,
             statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
+            page: 1,
             pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
             studentsOnly: true,
             includeEmail: false,
@@ -63,6 +63,7 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
         // 2. Collect user IDs that have posted in this forum
         var participatedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string? warning = null;
+        var postErrors = 0;
 
         try
         {
@@ -71,7 +72,7 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
                 forumId: request.ForumId,
                 sortBy: "created",
                 sortDirection: "DESC",
-                page: 0,
+                page: 1,
                 pageSize: request.MaxDiscussionsToScan > 0 ? request.MaxDiscussionsToScan : 20,
                 cancellationToken: cancellationToken);
 
@@ -101,16 +102,16 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
                         }
                     }
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    // Skip individual discussion errors
+                    postErrors++;
                 }
             }
 
             if (discussions.Count >= request.MaxDiscussionsToScan)
             {
-                warning = $"O fórum pode ter mais discussões além das {request.MaxDiscussionsToScan} analisadas. " +
-                          "Considere aumentar MaxDiscussionsToScan para uma análise mais completa.";
+                warning = AppendWarning(warning, $"O fórum pode ter mais discussões além das {request.MaxDiscussionsToScan} analisadas. " +
+                          "Considere aumentar MaxDiscussionsToScan para uma análise mais completa.");
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -118,6 +119,15 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
             warning = $"Não foi possível carregar as discussões do fórum {request.ForumId}. " +
                       "Verifique se o ID do fórum está correto e se o usuário tem acesso.";
         }
+
+        if (postErrors > 0)
+        {
+            warning = AppendWarning(warning, $"Não foi possível carregar as mensagens de {postErrors} discussão(ões); a análise de participação é parcial.");
+        }
+
+        warning = participantsPage.HasMore
+            ? AppendWarning(warning, "A lista de estudantes foi limitada pelo maximo solicitado; a analise de participacao e parcial.")
+            : warning;
 
         // 3. Find students who have NOT posted
         var studentsWithoutParticipation = participantsPage.Participants
@@ -140,4 +150,7 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
             Limitation: LimitationMessage,
             Warning: warning);
     }
+
+    private static string AppendWarning(string? current, string additional) =>
+        string.IsNullOrWhiteSpace(current) ? additional : $"{current} {additional}";
 }

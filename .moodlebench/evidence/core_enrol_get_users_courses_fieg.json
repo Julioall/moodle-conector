@@ -1,0 +1,9 @@
+{
+  "OperationName": "core_enrol_get_users_courses",
+  "ConnectionId": "d2009356-d5a5-4332-b988-d053bc110565",
+  "AliasAtValidation": "fieg",
+  "NormalizationProfile": "course-list",
+  "MoodleVersion": "unknown",
+  "SemanticParityPercent": 100,
+  "ValidatedAt": "2026-08-10T02:47:45.2876729+00:00"
+}

@@ -1,0 +1,9 @@
+{
+  "OperationName": "mod_assign_get_submissions",
+  "ConnectionId": "92a90acb-582e-4127-bbaa-27450533bf90",
+  "AliasAtValidation": "senai",
+  "NormalizationProfile": "assignment-submissions",
+  "MoodleVersion": "4.5.5 (Build: 20250609)",
+  "SemanticParityPercent": 100,
+  "ValidatedAt": "2026-08-10T02:47:43.9277806+00:00"
+}

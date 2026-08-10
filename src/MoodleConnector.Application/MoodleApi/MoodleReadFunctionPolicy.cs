@@ -251,6 +251,10 @@ public static class MoodleReadFunctionPolicy
         "core_user_update_user_preferences"
     };
 
+    public static IReadOnlyCollection<string> KnownReadFunctions => ReadFunctions;
+
+    public static IReadOnlyCollection<string> KnownControlledWriteFunctions => ControlledWriteFunctions;
+
     public static MoodleFunctionRisk Classify(string functionName)
     {
         if (ReadFunctions.Contains(functionName))

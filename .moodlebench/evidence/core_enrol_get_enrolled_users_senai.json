@@ -1,0 +1,9 @@
+{
+  "OperationName": "core_enrol_get_enrolled_users",
+  "ConnectionId": "341af572-578d-4290-8973-0ba69f38ca83",
+  "AliasAtValidation": "senai",
+  "NormalizationProfile": "course-participants",
+  "MoodleVersion": "4.5.5 (Build: 20250609)",
+  "SemanticParityPercent": 100,
+  "ValidatedAt": "2026-08-10T02:47:43.0578279+00:00"
+}

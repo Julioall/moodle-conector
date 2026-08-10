@@ -5,6 +5,7 @@ using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Memory;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
+using MoodleConnector.Application.Registry;
 using Microsoft.Extensions.Options;
 
 namespace MoodleConnector.Application;
@@ -19,6 +20,12 @@ public static class DependencyInjection
         services.AddOptions<MessageWriteFeatureOptions>();
         services.AddOptions<MoodleUniversalApiFeatureOptions>();
         services.AddSingleton<IMoodleBusinessFlowRegistry, MoodleBusinessFlowRegistry>();
+        services.AddSingleton<IOperationRegistry, OperationRegistry>();
+        services.AddScoped<IConnectionRegistry, ConnectionRegistry>();
+        services.AddScoped<ICapabilityRegistry, CapabilityRegistry>();
+        services.AddSingleton<IPolicyEngine, PolicyEngine>();
+        services.AddSingleton<IResponseNormalizer, ResponseNormalizer>();
+        services.AddScoped<ISafeReadExecutor, SafeReadExecutor>();
         services.AddOptions<GradingLimitsOptions>();
         services.AddScoped<IPendingActionService, PendingActionService>();
         services.AddScoped<IActionConfirmationService, ActionConfirmationService>();

@@ -24,7 +24,7 @@
   {
     "id": "courses.search.001",
     "category": "courses",
-    "prompt": "Procure o curso com ID 8887.",
+    "prompt": "No SENAI Nacional, procure o curso com ID 8887.",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search" ],
     "forbiddenOperations": [],
@@ -35,7 +35,7 @@
   {
     "id": "courses.search.002",
     "category": "courses",
-    "prompt": "Localize o curso Introducao a Qualidade e Produtividade - TEC0015.2026.1-00037 - SENAI - Porto Alegre - RS.",
+    "prompt": "No SENAI Nacional, localize o curso Introducao a Qualidade e Produtividade - TEC0015.2026.1-00037 - SENAI - Porto Alegre - RS.",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search" ],
     "forbiddenOperations": [],
@@ -57,7 +57,7 @@
   {
     "id": "courses.search.004",
     "category": "courses",
-    "prompt": "Procure o curso com código da turma 1071963.",
+    "prompt": "No SENAI Nacional, procure o curso com código da turma 1071963.",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search" ],
     "forbiddenOperations": [],
@@ -79,7 +79,7 @@
   {
     "id": "courses.details.001",
     "category": "courses",
-    "prompt": "Mostre os detalhes do curso com ID 33458.",
+    "prompt": "No Moodle FIEG, mostre os detalhes do curso com ID 33458.",
     "expectedIntent": "courses.details",
     "allowedOperations": [ "get_course", "get_course_by_id", "get_course_info", "search_courses" ],
     "forbiddenOperations": [],
@@ -134,7 +134,7 @@
   {
     "id": "courses.structure.001",
     "category": "courses",
-    "prompt": "Quais conteúdos existem no curso com ID 33458?",
+    "prompt": "No Moodle FIEG, quais conteúdos existem no curso com ID 33458?",
     "expectedIntent": "courses.structure",
     "allowedOperations": [ "list_course_contents", "get_course_contents", "list_course_resources", "get_course_resources" ],
     "forbiddenOperations": [],
@@ -145,7 +145,7 @@
   {
     "id": "courses.structure.002",
     "category": "courses",
-    "prompt": "Mostre todas as seções e conteúdos da UC Raciocínio Lógico e Análise de Dados.",
+    "prompt": "No Moodle FIEG, mostre todas as seções e conteúdos da UC Raciocínio Lógico e Análise de Dados.",
     "expectedIntent": "courses.structure",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "list_course_contents", "get_course_contents", "list_course_resources" ],
     "forbiddenOperations": [],
@@ -189,7 +189,7 @@
   {
     "id": "courses.ambiguity.001",
     "category": "courses",
-    "prompt": "Tenho algum curso chamado Comunicação?",
+    "prompt": "No SENAI Nacional, tenho algum curso chamado Comunicação?",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search", "list_my_courses" ],
     "forbiddenOperations": [],
@@ -222,7 +222,7 @@
   {
     "id": "courses.ambiguity.004",
     "category": "courses",
-    "prompt": "Estou matriculado no curso Introducao a Qualidade e Produtividade?",
+    "prompt": "No SENAI Nacional, estou matriculado no curso Introducao a Qualidade e Produtividade?",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search", "list_my_courses" ],
     "forbiddenOperations": [],
@@ -266,7 +266,7 @@
   {
     "id": "courses.pagination.003",
     "category": "courses",
-    "prompt": "Estou matriculado em mais de 50 disciplinas no SENAI?",
+    "prompt": "Estou matriculado em mais de 50 disciplinas no SENAI Nacional?",
     "expectedIntent": "courses.list",
     "allowedOperations": [ "list_my_courses", "get_my_courses", "get_enrolled_courses" ],
     "forbiddenOperations": [],

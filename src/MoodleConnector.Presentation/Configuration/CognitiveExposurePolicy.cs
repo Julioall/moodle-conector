@@ -2,9 +2,14 @@ namespace MoodleConnector.Presentation.Configuration;
 
 public enum ToolExposureProfile
 {
+    Production,
     Full,
     FullWithCoursesSkill,
-    SkillCoursesOptimized
+    SkillCoursesOptimized,
+    SkillCoursesHideGetCourse,
+    SkillCoursesHideSearchCourses,
+    SkillCoursesHideListMyCourses,
+    SkillCoursesHideGetAndSearchCourses
 }
 
 public sealed class CognitiveExposurePolicy : IMcpToolExposurePolicy
@@ -18,7 +23,30 @@ public sealed class CognitiveExposurePolicy : IMcpToolExposurePolicy
 
     public bool ShouldExpose(string toolName, MoodleToolMetadataAttribute? metadata)
     {
-        if (metadata == null) return true;
+        // Full profiles preserve backwards compatibility. Optimized profiles
+        // fail closed when a tool has no deterministic metadata instead of
+        // silently exposing an unclassified surface.
+        if (metadata == null)
+        {
+            return _profile is ToolExposureProfile.Full or ToolExposureProfile.FullWithCoursesSkill;
+        }
+
+        if (_profile == ToolExposureProfile.Production &&
+            (string.Equals(metadata.ExposureStatus, "ApprovedForHide", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(metadata.ExposureStatus, "Deprecated", StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        if (_profile == ToolExposureProfile.SkillCoursesHideGetCourse && toolName.Equals("get_course", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (_profile == ToolExposureProfile.SkillCoursesHideSearchCourses && toolName.Equals("search_courses", StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (_profile == ToolExposureProfile.SkillCoursesHideListMyCourses && toolName.Equals("list_my_courses", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (_profile == ToolExposureProfile.SkillCoursesHideGetAndSearchCourses &&
+            (toolName.Equals("get_course", StringComparison.OrdinalIgnoreCase) ||
+             toolName.Equals("search_courses", StringComparison.OrdinalIgnoreCase)))
+            return false;
 
         if (_profile == ToolExposureProfile.SkillCoursesOptimized)
         {

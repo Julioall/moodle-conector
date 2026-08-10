@@ -43,7 +43,7 @@ public sealed class GetStudentsWithoutRecentAccessQueryHandler(
             userExternalId: currentUserExternalId,
             courseId: request.CourseId,
             statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
+            page: 1,
             pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
             studentsOnly: true,
             includeEmail: false,
@@ -85,11 +85,13 @@ public sealed class GetStudentsWithoutRecentAccessQueryHandler(
             .ThenByDescending(s => s.DaysWithoutAccess)
             .ToList();
 
-        string? warning = null;
+        string? warning = participantsPage.HasMore
+            ? "A lista de participantes foi limitada pelo maximo solicitado; a analise de acesso e parcial. Aumente MaxStudentsToAnalyze para cobrir o conjunto completo."
+            : null;
         if (!participantsPage.Participants.Any(p => p.LastCourseAccessAt.HasValue))
         {
-            warning = "O campo 'LastCourseAccessAt' pode não estar disponível para todos os estudantes. " +
-                      "Verifique se o Moodle retorna dados de acesso por curso (campo lastcourseaccess).";
+            warning = AppendWarning(warning, "O campo 'LastCourseAccessAt' pode não estar disponível para todos os estudantes. " +
+                      "Verifique se o Moodle retorna dados de acesso por curso (campo lastcourseaccess).");
         }
 
         var suggestedRecipients = inactiveStudents.Select(s => s.StudentId).ToList();
@@ -102,4 +104,7 @@ public sealed class GetStudentsWithoutRecentAccessQueryHandler(
             SuggestedRecipientIds: suggestedRecipients,
             Warning: warning);
     }
+
+    private static string AppendWarning(string? current, string additional) =>
+        string.IsNullOrWhiteSpace(current) ? additional : $"{current} {additional}";
 }

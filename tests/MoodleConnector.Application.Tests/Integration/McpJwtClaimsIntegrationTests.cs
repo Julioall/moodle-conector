@@ -749,7 +749,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync();
         // Avoid dumping potentially huge tool schemas to the test output; log only length for diagnostics.
-        Console.WriteLine($"MCP raw body length: {body?.Length ?? 0}");
+        Console.WriteLine($"MCP raw body length: {body.Length}");
 
         var parsed = ParseMcpResponseBody(body);
         var tools = parsed?["result"]?["tools"]?.AsArray();

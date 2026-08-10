@@ -1,7 +1,13 @@
 using System.Collections.Generic;
+using System.Linq;
 using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Benchmarks.Cognitive;
+
+public sealed record SkillManifestEntry(
+    string Name,
+    string Version,
+    string Hash);
 
 /// <summary>
 /// Aggregated metrics for a single benchmark profile run.
@@ -45,6 +51,12 @@ public sealed record ProfileReport(
 {
     public double TaskSuccessRate => TotalTasks == 0 ? 0 : (double)SucceededTasks / TotalTasks * 100.0;
     public double CriticalTaskSuccessRate => CriticalTasks == 0 ? 100.0 : (double)CriticalSucceeded / CriticalTasks * 100.0;
+    public double AvgModelCalls => Traces.Count == 0 ? 0 : Traces.Average(trace => trace.Execution.ModelCalls);
+    public double AvgMcpToolCalls => Traces.Count == 0 ? 0 : Traces.Average(trace => trace.Execution.McpToolCalls);
+    public double AvgCachedInputTokens => Traces.Count == 0 ? 0 : Traces.Average(trace => trace.Execution.CachedInputTokens);
+    public double AvgUncachedInputTokens => Traces.Count == 0 ? 0 : Traces.Average(trace => trace.Execution.UncachedInputTokens);
+    public double AvgReasoningTokens => Traces.Count == 0 ? 0 : Traces.Average(trace => trace.Execution.ReasoningTokens);
+    public int WrongConnectionSelections => Traces.Count(trace => trace.Scoring.WrongConnectionSelectionDetected);
 }
 
 /// <summary>
@@ -73,5 +85,14 @@ public sealed record BenchmarkReport(
     IReadOnlyList<GateResult> GatesForProfileB,
     IReadOnlyList<GateResult> GatesForProfileC,
     bool ProfileBApproved,
-    bool ProfileCApproved
-);
+    bool ProfileCApproved,
+    string TaskSetHash = "",
+    string ToolManifestHash = "",
+    string SkillManifestHash = "",
+    string RunConfiguration = "",
+    IReadOnlyList<SkillManifestEntry>? SkillManifest = null
+)
+{
+    public bool IsValid { get; init; } = true;
+    public IReadOnlyList<string> ValidationErrors { get; init; } = [];
+}

@@ -37,6 +37,68 @@ public sealed class SafeReadExecutorTests
         Assert.True(restClient.WasCalled);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ShouldRejectUnknownOperationBeforeCapabilityCall()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ConnectionInfo(connectionId, "test-alias", "https://test.moodle");
+        var capability = new FakeCapabilityRegistry(new CapabilitySnapshot(
+            connectionId,
+            "user1",
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            DateTimeOffset.UtcNow));
+        var restClient = new FakeRestClient(JsonDocument.Parse("{}").RootElement);
+        var executor = new SafeReadExecutor(
+            new FakeConnectionRegistry(connection),
+            new NullOperationRegistry(),
+            capability,
+            new PolicyEngine(),
+            new FakeResponseNormalizer(JsonNode.Parse("{}")),
+            new FakeCredentialsProvider(new MoodleConnectorCredentials(
+                "client", connectionId.ToString(), "test-alias", "https://test.moodle", "user1", "pass", "target", false)),
+            restClient);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            executor.ExecuteAsync("unknown_function", new Dictionary<string, object?>()));
+
+        Assert.Contains("not registered", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(restClient.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRedirectControlledWrite()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ConnectionInfo(connectionId, "test-alias", "https://test.moodle");
+        var controlledWrite = new MoodleOperation(
+            "mod_assign_save_grade",
+            "assignment",
+            OperationType.ControlledWrite,
+            ToolRiskLevel.HumanConfirmedWrite,
+            OperationPolicy.Aggregated,
+            "controlled-write");
+        var restClient = new FakeRestClient(JsonDocument.Parse("{}").RootElement);
+        var executor = new SafeReadExecutor(
+            new FakeConnectionRegistry(connection),
+            new FakeOperationRegistry(controlledWrite),
+            new FakeCapabilityRegistry(new CapabilitySnapshot(
+                connectionId,
+                "user1",
+                new HashSet<string> { controlledWrite.OperationName },
+                DateTimeOffset.UtcNow)),
+            new PolicyEngine(),
+            new FakeResponseNormalizer(JsonNode.Parse("{}")),
+            new FakeCredentialsProvider(new MoodleConnectorCredentials(
+                "client", connectionId.ToString(), "test-alias", "https://test.moodle", "user1", "pass", "target", false)),
+            restClient);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            executor.ExecuteAsync(controlledWrite.OperationName, new Dictionary<string, object?>()));
+
+        Assert.Contains("redirect", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(restClient.WasCalled);
+    }
+
     private sealed class FakeConnectionRegistry(ConnectionInfo info) : IConnectionRegistry
     {
         public Task<ConnectionInfo?> ResolveConnectionAsync(string? alias, CancellationToken cancellationToken = default) => Task.FromResult<ConnectionInfo?>(info);
@@ -46,6 +108,12 @@ public sealed class SafeReadExecutorTests
     {
         public MoodleOperation? GetOperation(string operationName) => op;
         public IReadOnlyList<MoodleOperation> GetAllOperations() => [op];
+    }
+
+    private sealed class NullOperationRegistry : IOperationRegistry
+    {
+        public MoodleOperation? GetOperation(string operationName) => null;
+        public IReadOnlyList<MoodleOperation> GetAllOperations() => [];
     }
 
     private sealed class FakePolicyEngine(PolicyEvaluationResult result) : IPolicyEngine

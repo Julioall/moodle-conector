@@ -38,17 +38,27 @@ internal sealed class MoodleMessageGateway(
             throw new InvalidOperationException("A conexao Moodle atual nao permite escrita.");
         }
 
-        var formParams = new Dictionary<string, object?>();
-
-        for (int i = 0; i < recipientUserIds.Count; i++)
+        var normalizedRecipientIds = new List<string>(recipientUserIds.Count);
+        foreach (var recipientId in recipientUserIds)
         {
-            var recipientId = recipientUserIds[i];
-            if (!long.TryParse(recipientId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var userIdLong))
+            if (!long.TryParse(recipientId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var userId) || userId <= 0)
             {
-                continue;
+                return new MessageSendResult(
+                    Success: false,
+                    SentCount: 0,
+                    FailedCount: recipientUserIds.Count,
+                    FailedUserIds: recipientUserIds.ToArray(),
+                    ErrorMessage: "A lista de destinatários contém identificadores Moodle inválidos.");
             }
 
-            formParams[$"messages[{i}][touserid]"] = userIdLong.ToString(CultureInfo.InvariantCulture);
+            normalizedRecipientIds.Add(userId.ToString(CultureInfo.InvariantCulture));
+        }
+
+        var formParams = new Dictionary<string, object?>();
+
+        for (int i = 0; i < normalizedRecipientIds.Count; i++)
+        {
+            formParams[$"messages[{i}][touserid]"] = normalizedRecipientIds[i];
             formParams[$"messages[{i}][text]"] = messageText;
             formParams[$"messages[{i}][textformat]"] = "1"; // HTML
         }
