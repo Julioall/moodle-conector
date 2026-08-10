@@ -51,6 +51,7 @@ using System.Threading.RateLimiting;
 using MediatR;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Messages;
+using MoodleConnector.Application.Reports.Queries;
 using MoodleConnector.Presentation;
 using MoodleConnector.Presentation.Health;
 using MoodleConnector.Infrastructure.Reports;
@@ -823,6 +824,71 @@ app.MapGet("/api/portal/reports/operational", async (HttpContext context, Connec
     var upcomingEvents = await dbContext.PortalCalendarEvents.CountAsync(x => x.OwnerId == identity.Id && x.StartAt >= now && x.StartAt < now.AddDays(30), cancellationToken);
     var followups = await dbContext.PortalFollowups.CountAsync(x => x.OwnerId == identity.Id, cancellationToken);
     return Results.Ok(new PortalEnvelope<PortalOperationalReportDto>(new(openTasks, completedTasks, upcomingEvents, followups, now), new(now, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/reports/course-overview/{connectionRef}/{courseId}", async (
+    string connectionRef,
+    string courseId,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
+        return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var report = await mediator.Send(new GenerateCourseOverviewQuery(courseId), cancellationToken);
+    var now = DateTimeOffset.UtcNow;
+    return Results.Ok(new PortalEnvelope<PortalCourseOverviewReportDto>(
+        new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalActiveStudents, report.StudentsWhoAccessed,
+            report.StudentsNeverAccessed, report.StudentsInactiveDays, report.InactiveDaysThreshold,
+            report.TotalGradedItems, report.AverageBelowMinimumPerStudent, report.SuggestedActionsForTutor, report.Warning),
+        new(report.GeneratedAt, connectionRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/reports/weekly/{connectionRef}/{courseId}", async (
+    string connectionRef,
+    string courseId,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
+        return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var report = await mediator.Send(new GenerateWeeklyPerformanceReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
+    return Results.Ok(new PortalEnvelope<PortalWeeklyReportDto>(
+        new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.StudentsWithAttention,
+            report.StudentsAtRisk, report.MinGradePercent, report.InactiveDaysThreshold, report.Warning),
+        new(report.GeneratedAt, connectionRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/reports/completion/{connectionRef}/{courseId}", async (
+    string connectionRef,
+    string courseId,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
+        return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var report = await mediator.Send(new GeneratePostExecutionReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
+    return Results.Ok(new PortalEnvelope<PortalCompletionReportDto>(
+        new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.LikelyComplete,
+            report.PendingRecovery, report.AtRisk, report.Unknown, report.MinGradePercent, report.Disclaimer, report.Warning),
+        new(report.GeneratedAt, connectionRef)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapPost("/api/portal/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, PortalMessagePrepareInput input, CancellationToken cancellationToken) =>
