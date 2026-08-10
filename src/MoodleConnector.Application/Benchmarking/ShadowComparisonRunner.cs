@@ -82,7 +82,7 @@ public sealed class ShadowComparisonRunner : IShadowComparisonRunner
                 ValidatedAt: DateTimeOffset.UtcNow
             );
             
-            var evidenceDir = Path.Combine(Environment.CurrentDirectory, ".moodlebench", "evidence");
+            var evidenceDir = ResolveEvidenceDirectory();
             Directory.CreateDirectory(evidenceDir);
             var evidenceFile = Path.Combine(evidenceDir, $"{operationName}_{connection.Alias}.json");
             await File.WriteAllTextAsync(evidenceFile, JsonSerializer.Serialize(evidence, new JsonSerializerOptions { WriteIndented = true }));
@@ -96,5 +96,21 @@ public sealed class ShadowComparisonRunner : IShadowComparisonRunner
         if (node == null) return 0;
         // Approximation: serialize to string and get UTF8 bytes
         return System.Text.Encoding.UTF8.GetByteCount(node.ToJsonString());
+    }
+
+    private static string ResolveEvidenceDirectory()
+    {
+        var directory = new DirectoryInfo(Environment.CurrentDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "MoodleConnector.sln")))
+            {
+                return Path.Combine(directory.FullName, ".moodlebench", "evidence");
+            }
+
+            directory = directory.Parent;
+        }
+
+        return Path.Combine(Environment.CurrentDirectory, ".moodlebench", "evidence");
     }
 }

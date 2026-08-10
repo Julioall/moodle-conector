@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
@@ -116,11 +117,26 @@ public sealed class PrepareTutorMessageCommandHandler(
             throw new ArgumentException("Informe pelo menos um destinatário.");
         }
 
+        var recipientIds = request.RecipientIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .ToArray();
+        if (recipientIds.Length != request.RecipientIds.Count ||
+            recipientIds.Any(id => !long.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericId) || numericId <= 0))
+        {
+            throw new ArgumentException("Todos os destinatários devem ser identificadores numéricos positivos do Moodle.");
+        }
+
+        if (recipientIds.Distinct(StringComparer.OrdinalIgnoreCase).Count() != recipientIds.Length)
+        {
+            throw new ArgumentException("A lista de destinatários não pode conter duplicidades.");
+        }
+
         // Resolve recipient names for preview (best-effort from participants)
         var recipientPreviews = await ResolveRecipientsAsync(
             senderExternalId,
             request.CourseId,
-            request.RecipientIds,
+            recipientIds,
             cancellationToken);
 
         // Build message text
@@ -135,7 +151,7 @@ public sealed class PrepareTutorMessageCommandHandler(
             MessageType: request.MessageType.ToString(),
             CourseId: request.CourseId,
             SenderExternalId: senderExternalId,
-            RecipientIds: request.RecipientIds,
+            RecipientIds: recipientIds,
             MessageText: messageText);
 
         var preview = new TutorMessagePreview(
@@ -194,6 +210,12 @@ public sealed class PrepareTutorMessageCommandHandler(
             {
                 result.Add(new MessagePreviewRecipient(p.UserId, p.FullName));
                 recipientSet.Remove(p.UserId);
+            }
+
+            if (recipientSet.Count > 0)
+            {
+                throw new ArgumentException(
+                    $"Os destinatários não pertencem ao escopo ativo do curso ou não foram encontrados: {string.Join(", ", recipientSet)}.");
             }
         }
         catch

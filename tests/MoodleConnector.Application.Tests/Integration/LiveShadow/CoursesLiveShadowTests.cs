@@ -23,7 +23,7 @@ public sealed class CoursesLiveShadowTests : IClassFixture<LiveShadowTestFixture
     public async Task Shadow_ListCourses_ShouldHave100PercentParity(string alias)
     {
         // Read credentials from environment variables (per-alias or fallback)
-        var envPrefix = alias?.ToUpperInvariant() ?? string.Empty;
+        var envPrefix = alias.ToUpperInvariant();
         var username = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_USERNAME")
                        ?? Environment.GetEnvironmentVariable("LIVE_USERNAME");
         var password = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_PASSWORD")
@@ -72,7 +72,7 @@ public sealed class CoursesLiveShadowTests : IClassFixture<LiveShadowTestFixture
     public async Task Shadow_GetCourse_ShouldHave100PercentParity(string alias)
     {
         // Read credentials from environment variables (per-alias or fallback)
-        var envPrefix = alias?.ToUpperInvariant() ?? string.Empty;
+        var envPrefix = alias.ToUpperInvariant();
         var username = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_USERNAME")
                        ?? Environment.GetEnvironmentVariable("LIVE_USERNAME");
         var password = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_PASSWORD")

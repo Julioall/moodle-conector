@@ -1,0 +1,9 @@
+{
+  "OperationName": "core_enrol_get_enrolled_users",
+  "ConnectionId": "8318f979-c887-48f7-b5b4-eec5b1c54612",
+  "AliasAtValidation": "fieg",
+  "NormalizationProfile": "course-participants",
+  "MoodleVersion": "5.1.2 (Build: 20260209)",
+  "SemanticParityPercent": 100,
+  "ValidatedAt": "2026-08-10T02:41:55.811797+00:00"
+}

@@ -20,11 +20,12 @@ public sealed class AssignmentsLiveShadowTests : IClassFixture<LiveShadowTestFix
 
     [Theory]
     [InlineData("fieg")]
+    [InlineData("senai")]
     public async Task Shadow_GetSubmissions_ShouldHave100PercentParity(string alias)
     {
         // Read credentials from environment variables to avoid embedding secrets in source.
         // First try per-alias variables, then fallback to generic ones.
-        var envPrefix = alias?.ToUpperInvariant() ?? string.Empty;
+        var envPrefix = alias.ToUpperInvariant();
         var username = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_USERNAME")
                        ?? Environment.GetEnvironmentVariable("LIVE_USERNAME");
         var password = Environment.GetEnvironmentVariable($"LIVE_{envPrefix}_PASSWORD")
@@ -43,7 +44,13 @@ public sealed class AssignmentsLiveShadowTests : IClassFixture<LiveShadowTestFix
         
         // 1. Get user id
         var siteInfoPayload = await restClient.CallAsync(credentials, "core_webservice_get_site_info", new Dictionary<string, object?>(), default);
-        var moodleUserId = (int)JsonNode.Parse(siteInfoPayload.GetRawText())!["userid"]!;
+        var siteInfo = JsonNode.Parse(siteInfoPayload.GetRawText());
+        var moodleVersion = siteInfo?["release"]?.ToString() ?? "unknown";
+        if (!int.TryParse(siteInfo?["userid"]?.ToString(), out var moodleUserId))
+        {
+            _output.WriteLine("Moodle site info did not return a usable user id.");
+            return;
+        }
 
         // 2. Find a course with assignments to test properly
         var coursesPayload = await restClient.CallAsync(credentials, "core_enrol_get_users_courses", new Dictionary<string, object?> { ["userid"] = moodleUserId }, default);
@@ -55,39 +62,47 @@ public sealed class AssignmentsLiveShadowTests : IClassFixture<LiveShadowTestFix
             return;
         }
 
-        var courseIds = coursesArray.Select(c => (int)c!["id"]!).ToList();
-        var args = new Dictionary<string, object?> { ["courseids[0]"] = courseIds[0] };
-        
-        // Use mod_assign_get_assignments just to verify there is an assignment. But let's just test get_submissions anyway.
+        var assignmentId = (string?)null;
+        foreach (var course in coursesArray)
+        {
+            var courseId = course?["id"]?.ToString();
+            if (string.IsNullOrWhiteSpace(courseId)) continue;
+
+            var assignmentsPayload = await restClient.CallAsync(
+                credentials,
+                "mod_assign_get_assignments",
+                new Dictionary<string, object?> { ["courseids[0]"] = courseId },
+                default);
+            var assignment = JsonNode.Parse(assignmentsPayload.GetRawText())?["courses"]?
+                .AsArray()
+                .SelectMany(item => item?["assignments"]?.AsArray() ?? [])
+                .FirstOrDefault();
+            assignmentId = assignment?["id"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(assignmentId)) break;
+        }
+
+        if (string.IsNullOrWhiteSpace(assignmentId))
+        {
+            _output.WriteLine("No assignment found in the available courses to test submissions.");
+            return;
+        }
+
+        var args = new Dictionary<string, object?> { ["assignmentids[0]"] = assignmentId };
         
         async Task<JsonNode?> LegacyExecution()
         {
-            try
-            {
-                var payload = await restClient.CallAsync(credentials, "mod_assign_get_submissions", args, default);
-                return JsonNode.Parse(payload.GetRawText());
-            } 
-            catch (Exception)
-            {
-                return null;
-            }
+            var payload = await restClient.CallAsync(credentials, "mod_assign_get_submissions", args, default);
+            return JsonNode.Parse(payload.GetRawText());
         }
 
         async Task<(JsonNode?, string)> RegistryExecution()
         {
-            try
-            {
-                var context = new MoodleConnector.Domain.Registry.NormalizationContext(MoodleConnector.Domain.Registry.NormalizationMode.Shadow);
-                var result = await executor.ExecuteAsync("mod_assign_get_submissions", args, alias, context, default);
-                return (result, "Allowed");
-            }
-            catch (Exception)
-            {
-                return (null, "Allowed");
-            }
+            var context = new MoodleConnector.Domain.Registry.NormalizationContext(MoodleConnector.Domain.Registry.NormalizationMode.Shadow);
+            var result = await executor.ExecuteAsync("mod_assign_get_submissions", args, alias, context, default);
+            return (result, "Allowed");
         }
 
-        var result = await _fixture.Runner.RunComparisonAsync("mod_assign_get_submissions", conn, "unknown", "assignment-submissions", LegacyExecution, RegistryExecution);
+        var result = await _fixture.Runner.RunComparisonAsync("mod_assign_get_submissions", conn, moodleVersion, "assignment-submissions", LegacyExecution, RegistryExecution);
 
         LogResult("mod_assign_get_submissions", result);
 

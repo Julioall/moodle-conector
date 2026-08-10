@@ -17,9 +17,10 @@ public sealed class GetStudentsWithoutRecentAccessQueryHandlerTests
             Roles: [], Groups: []);
 
     private static GetStudentsWithoutRecentAccessQueryHandler CreateHandler(
-        IReadOnlyList<CourseParticipantSummary> students)
+        IReadOnlyList<CourseParticipantSummary> students,
+        bool hasMore = false)
     {
-        var participants = new FakeParticipantsGateway(students);
+        var participants = new FakeParticipantsGateway(students, hasMore);
         var currentUser = new FakeCurrentUserGateway();
         return new GetStudentsWithoutRecentAccessQueryHandler(participants, currentUser);
     }
@@ -115,9 +116,27 @@ public sealed class GetStudentsWithoutRecentAccessQueryHandlerTests
         Assert.Equal("1", result.Students[1].StudentId);
     }
 
+    [Fact]
+    public async Task Handle_DeclaresPartialAnalysisWhenParticipantPageHasMore()
+    {
+        var sut = CreateHandler(
+            [MakeStudent("1", "Aluno", Now.AddDays(-10))],
+            hasMore: true);
+
+        var result = await sut.Handle(
+            new GetStudentsWithoutRecentAccessQuery("10", DaysWithoutAccess: 7, MaxStudentsToAnalyze: 1),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Warning);
+        Assert.Contains("parcial", result.Warning, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MaxStudentsToAnalyze", result.Warning, StringComparison.Ordinal);
+    }
+
     // ── Fakes ─────────────────────────────────────────────────────────────────
 
-    private sealed class FakeParticipantsGateway(IReadOnlyList<CourseParticipantSummary> students)
+    private sealed class FakeParticipantsGateway(
+        IReadOnlyList<CourseParticipantSummary> students,
+        bool hasMore)
         : IMoodleParticipantsGateway
     {
         public Task<CourseParticipantsPage> GetCourseParticipantsAsync(
@@ -125,7 +144,7 @@ public sealed class GetStudentsWithoutRecentAccessQueryHandlerTests
             int page, int pageSize, bool studentsOnly, bool includeEmail, string? groupId,
             CancellationToken cancellationToken) =>
             Task.FromResult(new CourseParticipantsPage(courseId, page, pageSize,
-                statusFilter, studentsOnly, includeEmail, HasMore: false, students));
+                statusFilter, studentsOnly, includeEmail, HasMore: hasMore, students));
 
         public Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(
             string userExternalId, string courseId, CancellationToken cancellationToken) =>

@@ -1,0 +1,9 @@
+{
+  "OperationName": "core_course_get_courses_by_field",
+  "ConnectionId": "7fe7ae45-2ee7-45de-88bc-9c04c480b7f3",
+  "AliasAtValidation": "fieg",
+  "NormalizationProfile": "course-list",
+  "MoodleVersion": "unknown",
+  "SemanticParityPercent": 100,
+  "ValidatedAt": "2026-08-10T02:41:55.7905542+00:00"
+}

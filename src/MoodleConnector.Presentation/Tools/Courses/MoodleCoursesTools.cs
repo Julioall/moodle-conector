@@ -130,7 +130,7 @@ public sealed class MoodleCoursesTools(
         return await SearchCoursesCoreAsync(termo, limite, moodleAlias, cancellationToken);
     }
 
-    [MoodleToolMetadata(Family = "courses", Classification = "SKILL", Kind = "cognitive", CanonicalOperation = "search", Structural = true)]
+    [MoodleToolMetadata(Family = "courses", Classification = "R6", Kind = "cognitive", CanonicalOperation = "search", Structural = true)]
     [McpServerTool(
         Name = "search",
         Title = "Search Moodle courses",
@@ -203,7 +203,7 @@ public sealed class MoodleCoursesTools(
         return await GetCourseCoreAsync(courseId, moodleAlias, cancellationToken);
     }
 
-    [MoodleToolMetadata(Family = "courses", Classification = "SKILL", Kind = "cognitive", CanonicalOperation = "fetch", Structural = true)]
+    [MoodleToolMetadata(Family = "courses", Classification = "R6", Kind = "cognitive", CanonicalOperation = "fetch", Structural = true)]
     [McpServerTool(
         Name = "fetch",
         Title = "Fetch Moodle course",

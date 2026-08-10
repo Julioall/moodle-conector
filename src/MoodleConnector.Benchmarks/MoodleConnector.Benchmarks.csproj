@@ -17,6 +17,12 @@
     <Content Include="Cognitive\Tasks\Courses\CoursesTasks.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Cognitive\Tasks\Assignments\AssignmentsTasks.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Cognitive\Tasks\Students\StudentsTasks.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <PropertyGroup>

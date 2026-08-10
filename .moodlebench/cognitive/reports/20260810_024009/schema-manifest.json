@@ -1,0 +1,46 @@
+{
+  "RunId": "20260810_024009",
+  "BenchmarkVersion": "1.1.0",
+  "Model": "gpt-5.4-nano",
+  "CommitSha": "a692790d9145057790de0647247210505aa4ece3",
+  "Catalog": {
+    "Registered": 97,
+    "ProductionExposed": 95,
+    "FeatureGatedByDefault": 2,
+    "HiddenByExposurePolicy": 0,
+    "Structural": 11,
+    "Specialized": 65,
+    "Controlled": 22,
+    "Deprecated": 0
+  },
+  "Rows": [
+    {
+      "Profile": "A",
+      "ToolCount": 95,
+      "ToolSchemaTokens": 55680,
+      "ToolSchemaBytes": 222585,
+      "ToolManifestHash": "6c01f6ec32d7f66e"
+    },
+    {
+      "Profile": "B",
+      "ToolCount": 95,
+      "ToolSchemaTokens": 55680,
+      "ToolSchemaBytes": 222585,
+      "ToolManifestHash": "6c01f6ec32d7f66e"
+    },
+    {
+      "Profile": "Production",
+      "ToolCount": 95,
+      "ToolSchemaTokens": 55680,
+      "ToolSchemaBytes": 222585,
+      "ToolManifestHash": "6c01f6ec32d7f66e"
+    },
+    {
+      "Profile": "C",
+      "ToolCount": 92,
+      "ToolSchemaTokens": 53925,
+      "ToolSchemaBytes": 215572,
+      "ToolManifestHash": "257ba4c7b9f49939"
+    }
+  ]
+}

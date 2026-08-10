@@ -10,7 +10,8 @@ namespace MoodleConnector.Infrastructure.MoodleApi;
 internal sealed class MoodleRestClient(
     HttpClient httpClient,
     IMoodleAccessTokenProvider tokenProvider,
-    ILogger<MoodleRestClient> logger) : IMoodleRestClient
+    ILogger<MoodleRestClient> logger,
+    IMoodleCallTelemetry? telemetry = null) : IMoodleRestClient
 {
     public Task<JsonElement> CallAsync(
         MoodleConnectorCredentials connection,
@@ -32,6 +33,7 @@ internal sealed class MoodleRestClient(
         }
 
         var normalizedFunction = functionName.Trim();
+        telemetry?.RecordMoodleWebServiceCall(connection.Alias);
         _ = allowServiceToken; // Tenant-scoped reads always use the selected connection credentials.
         var endpoint = BuildEndpoint(connection);
         var auditId = Guid.NewGuid().ToString("N");

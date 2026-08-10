@@ -60,24 +60,16 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         var registry = customFactoryC.Services.GetService<ToolMetadataRegistry>();
         Assert.NotNull(registry);
 
-        // Access private _map via reflection to enumerate registered tools
-        var field = typeof(ToolMetadataRegistry).GetField("_map", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        Assert.NotNull(field);
-
-        var map = field.GetValue(registry) as System.Collections.IDictionary;
-        Assert.NotNull(map);
-
         var expectedHidden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (System.Collections.DictionaryEntry entry in map)
+        foreach (var entry in registry!.Entries)
         {
-            if (entry.Key is string name && entry.Value is MoodleToolMetadataAttribute md)
+            var name = entry.Key;
+            var md = entry.Value;
+            if (string.Equals(md.Family, "courses", StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(md.Classification, "R1", StringComparison.OrdinalIgnoreCase) || string.Equals(md.Classification, "R2", StringComparison.OrdinalIgnoreCase))
+                && md.Structural == false)
             {
-                if (string.Equals(md.Family, "courses", StringComparison.OrdinalIgnoreCase)
-                    && (string.Equals(md.Classification, "R1", StringComparison.OrdinalIgnoreCase) || string.Equals(md.Classification, "R2", StringComparison.OrdinalIgnoreCase))
-                    && md.Structural == false)
-                {
-                    expectedHidden.Add(name);
-                }
+                expectedHidden.Add(name);
             }
         }
 
@@ -85,6 +77,22 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
 
         // Assert the removed set exactly matches the metadata-driven expected set
         Assert.Equal(expectedHidden.OrderBy(x => x), removed.OrderBy(x => x));
+    }
+
+    [Fact]
+    public async Task Production_exposes_only_the_registered_surface_and_keeps_controlled_writes_explicit()
+    {
+        var tools = await GetToolsListAsync(_factory, "Production");
+
+        Assert.Equal(95, tools.Count);
+        Assert.Contains("moodle_execute_read", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("moodle_prepare_write", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("moodle_confirm_write", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("search", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("fetch", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prepare_demo_action", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("confirm_demo_action", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("future_unregistered_tool", tools, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<IReadOnlyList<string>> GetToolsListAsync(WebApplicationFactory<Program> factory, string exposureProfile)

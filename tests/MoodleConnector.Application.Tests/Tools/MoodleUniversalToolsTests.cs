@@ -2,6 +2,9 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
+using MoodleConnector.Application.Registry;
+using MoodleConnector.Domain.Registry;
+using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
 using MoodleConnector.Presentation.Tools;
 
@@ -84,13 +87,52 @@ public sealed class MoodleUniversalToolsTests
         Assert.False(data.GetProperty("authenticationSucceeded").GetBoolean());
     }
 
+    [Fact]
+    public async Task ListFunctionsAsync_NaoExponeFuncoesControladasOuDesconhecidas()
+    {
+        var sut = CreateSut(
+            new FakeCredentialsProvider(Connection()),
+            new FakeRestClient(SiteInfo()),
+            [
+                new MoodleFunctionDescriptor("core_course_get_courses_by_field", MoodleFunctionRisk.Read, true),
+                new MoodleFunctionDescriptor("mod_assign_save_grade", MoodleFunctionRisk.ControlledWrite, true),
+                new MoodleFunctionDescriptor("local_plugin_secret", MoodleFunctionRisk.Unknown, true)
+            ]);
+
+        var result = await sut.ListFunctionsAsync();
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.True(structured.TryGetProperty("data", out var data), structured.GetRawText());
+        Assert.Equal(1, data.GetArrayLength());
+        Assert.Equal("core_course_get_courses_by_field", data[0].GetProperty("Name").GetString());
+    }
+
+    [Fact]
+    public async Task CheckFunctionAsync_ReturnsUnavailableForControlledFunction()
+    {
+        var sut = CreateSut(
+            new FakeCredentialsProvider(Connection()),
+            new FakeRestClient(SiteInfo()),
+            [new MoodleFunctionDescriptor("mod_assign_save_grade", MoodleFunctionRisk.ControlledWrite, true)]);
+
+        var result = await sut.CheckFunctionAsync("mod_assign_save_grade");
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.True(structured.TryGetProperty("data", out var data), structured.GetRawText());
+        Assert.Equal((int)MoodleFunctionRisk.Unknown, data.GetProperty("Risk").GetInt32());
+        Assert.False(data.GetProperty("IsAvailable").GetBoolean());
+    }
+
     private static MoodleUniversalTools CreateSut(
         IMoodleConnectorCredentialsProvider credentialsProvider,
-        FakeRestClient restClient)
+        FakeRestClient restClient,
+        IReadOnlyList<MoodleFunctionDescriptor>? descriptors = null)
     {
         return new MoodleUniversalTools(
-            new FakeCatalog(),
-            new FakeExecutor(),
+            new FakeCatalog(descriptors),
+            new FakeSafeReadExecutor(),
+            new OperationRegistry(),
+            new PolicyEngine(),
             new MoodleBusinessFlowRegistry(),
             credentialsProvider,
             new MoodleConnectionSelection(),
@@ -157,7 +199,7 @@ public sealed class MoodleUniversalToolsTests
         }
     }
 
-    private sealed class FakeCatalog : IMoodleFunctionCatalog
+    private sealed class FakeCatalog(IReadOnlyList<MoodleFunctionDescriptor>? descriptors = null) : IMoodleFunctionCatalog
     {
         public Task<MoodleFunctionProfile> GetCurrentAsync(
             bool forceRefresh,
@@ -167,6 +209,7 @@ public sealed class MoodleUniversalToolsTests
             "Moodle Goias",
             "5.0.1",
             847,
+            descriptors ??
             [
                 new MoodleFunctionDescriptor(
                     "core_webservice_get_site_info",
@@ -180,12 +223,14 @@ public sealed class MoodleUniversalToolsTests
             DateTimeOffset.UtcNow));
     }
 
-    private sealed class FakeExecutor : IMoodleFunctionExecutor
+    private sealed class FakeSafeReadExecutor : ISafeReadExecutor
     {
-        public Task<MoodleFunctionResult> ExecuteReadAsync(
+        public Task<System.Text.Json.Nodes.JsonNode?> ExecuteAsync(
             string functionName,
-            IReadOnlyDictionary<string, object?> parameters,
-            CancellationToken cancellationToken) =>
+            Dictionary<string, object?> parameters,
+            string? moodleAlias = null,
+            NormalizationContext? context = null,
+            CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 }

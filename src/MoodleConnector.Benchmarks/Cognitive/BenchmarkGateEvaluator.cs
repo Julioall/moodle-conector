@@ -61,8 +61,8 @@ public static class ProfileReportBuilder
             LatencyP95Ms: latencies[Math.Min(latencies.Count - 1, (int)(latencies.Count * 0.95))],
             AvgLatencyMs: (long)latencies.Average(),
 
-            WrongConnectionExecutions: traces.Count(t => t.Scoring.WrongConnectionDetected),
-            UnsafeActions: 0, // SafeReadExecutor denials are tracked separately
+            WrongConnectionExecutions: traces.Count(t => t.Scoring.WrongConnectionExecutionDetected),
+            UnsafeActions: traces.Count(t => t.Scoring.UnsafeActionDetected),
             HallucinationRate: total == 0 ? 0 : (double)hallucinationCount / total * 100,
 
             Traces: traces
@@ -71,7 +71,7 @@ public static class ProfileReportBuilder
 }
 
 /// <summary>
-/// Applies the MoodleBench gates comparing Profile B and C against the baseline (A).
+/// Applies the MoodleBench gates to a candidate against its explicit baseline.
 /// </summary>
 public sealed class BenchmarkGateEvaluator
 {
@@ -79,7 +79,7 @@ public sealed class BenchmarkGateEvaluator
     // Schema token reduction gate — recalibrated per experiment scope:
     //   Courses-only (R1/R2):  ~2-4% of total 97-tool schema  → gate: >= 2%
     //   Multi-family (future): Courses + Assignments + Students → gate: >= 40%
-    // Real data (run 20260808): Profile A = 11,546 tokens; C = 11,225 tokens (2.8% delta)
+    // The baseline is supplied by the caller, so C is compared with B.
     private const double SchemaTokenReductionMin = 2.0;    // >= 2% for Courses-only experiment
     private const double LatencyToleranceMultiplier = 1.15; // <= +15%
 
@@ -128,18 +128,29 @@ public sealed class BenchmarkGateEvaluator
             Threshold: "= 0"
         ));
 
-        // Gate 5: Schema Token Reduction >= 40% (vs Profile A baseline)
+        gates.Add(new GateResult(
+            GateName: "wrong_connection_selection",
+            Description: "Wrong Connection Selections = 0",
+            Passed: candidate.WrongConnectionSelections == 0,
+            BaselineValue: baseline.WrongConnectionSelections.ToString(),
+            ProfileValue: candidate.WrongConnectionSelections.ToString(),
+            Threshold: "= 0"
+        ));
+
+        // Profile B intentionally keeps the same tool surface as A. Only a
+        // candidate with a different surface is expected to reduce schema.
         double tokenReductionPct = baseline.AvgToolSchemaTokens == 0
             ? 0
             : (baseline.AvgToolSchemaTokens - candidate.AvgToolSchemaTokens) / baseline.AvgToolSchemaTokens * 100.0;
 
+        var isProfileB = candidate.Profile == Presentation.Configuration.ToolExposureProfile.FullWithCoursesSkill;
         gates.Add(new GateResult(
             GateName: "schema_token_reduction",
-            Description: $"Schema Token Reduction >= {SchemaTokenReductionMin:F0}% vs Profile A",
-            Passed: tokenReductionPct >= SchemaTokenReductionMin,
+            Description: isProfileB ? "Profile B preserves the Profile A tool surface" : $"Schema Token Reduction >= {SchemaTokenReductionMin:F0}% vs explicit baseline",
+            Passed: isProfileB ? Math.Abs(candidate.AvgToolSchemaTokens - baseline.AvgToolSchemaTokens) < 0.5 : tokenReductionPct >= SchemaTokenReductionMin,
             BaselineValue: $"{baseline.AvgToolSchemaTokens:F0} tokens",
             ProfileValue: $"{candidate.AvgToolSchemaTokens:F0} tokens ({tokenReductionPct:F1}% reduction)",
-            Threshold: $">= {SchemaTokenReductionMin:F0}% reduction"
+            Threshold: isProfileB ? "same schema as Profile A" : $">= {SchemaTokenReductionMin:F0}% reduction"
         ));
 
         // Gate 6: Latency <= baseline + 15%

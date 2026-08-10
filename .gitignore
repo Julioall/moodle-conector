@@ -51,3 +51,11 @@ appsettings.Development.json
 *.log
 ~$*
 *~
+
+## MoodleBench generated traces/reports (keep only selected release evidence)
+.moodlebench/cognitive/traces/
+.moodlebench/cognitive/reports/*
+!.moodlebench/cognitive/reports/20260810_020821/
+!.moodlebench/cognitive/reports/20260810_020821/*
+!.moodlebench/cognitive/reports/20260810_024009/
+!.moodlebench/cognitive/reports/20260810_024009/*

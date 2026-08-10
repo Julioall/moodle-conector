@@ -20,6 +20,8 @@ public sealed class LiveShadowTestFixture
     
     public ConnectionInfo ConnectionFieg { get; }
     public ConnectionInfo ConnectionSenai { get; }
+
+    private readonly MutableCredentialsProvider _capabilityCredentialsProvider = new();
     
     public LiveShadowTestFixture()
     {
@@ -32,12 +34,13 @@ public sealed class LiveShadowTestFixture
         PolicyEngine = new PolicyEngine();
         ResponseNormalizer = new ResponseNormalizer();
         
-        CapabilityRegistry = new CapabilityRegistry(CreateLiveRestClient());
+        CapabilityRegistry = new CapabilityRegistry(CreateLiveRestClient(), _capabilityCredentialsProvider);
 
         var profiles = new IShadowComparisonProfile[]
         {
             new CourseComparisonProfile(),
-            new AssignmentComparisonProfile()
+            new AssignmentComparisonProfile(),
+            new ParticipantComparisonProfile()
         };
         Runner = new ShadowComparisonRunner(profiles);
     }
@@ -63,15 +66,30 @@ public sealed class LiveShadowTestFixture
         
         var credsProvider = new FakeCredentialsProvider(creds);
         var restClient = CreateLiveRestClient();
+        var capabilityRegistry = new CapabilityRegistry(restClient, credsProvider);
 
         return new SafeReadExecutor(
             ConnectionRegistry,
             OperationRegistry,
-            CapabilityRegistry,
+            capabilityRegistry,
             PolicyEngine,
             ResponseNormalizer,
             credsProvider,
             restClient);
+    }
+
+    public void UseCapabilityCredentials(string alias, string username, string password)
+    {
+        var conn = alias == "fieg" ? ConnectionFieg : ConnectionSenai;
+        _capabilityCredentialsProvider.Set(new MoodleConnectorCredentials(
+            "live-tests",
+            conn.ConnectionId.ToString(),
+            conn.Alias,
+            conn.BaseUrl,
+            username,
+            password,
+            "moodle",
+            false));
     }
 
     private sealed class FakeConnectionRegistry(ConnectionInfo fieg, ConnectionInfo senai) : IConnectionRegistry
@@ -87,6 +105,20 @@ public sealed class LiveShadowTestFixture
     private sealed class FakeCredentialsProvider(MoodleConnectorCredentials creds) : IMoodleConnectorCredentialsProvider
     {
         public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken) => Task.FromResult(creds);
+    }
+
+    private sealed class MutableCredentialsProvider : IMoodleConnectorCredentialsProvider
+    {
+        private MoodleConnectorCredentials? _current;
+
+        public void Set(MoodleConnectorCredentials credentials) => _current = credentials;
+
+        public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken)
+        {
+            return _current is null
+                ? Task.FromException<MoodleConnectorCredentials>(new InvalidOperationException("Live shadow credentials were not selected."))
+                : Task.FromResult(_current);
+        }
     }
 
     private sealed class FakeTokenProvider : MoodleConnector.Infrastructure.IMoodleAccessTokenProvider

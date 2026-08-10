@@ -28,6 +28,7 @@ internal sealed class MoodleFunctionExecutor(
         var startedAt = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
         MoodleConnectorCredentials? connection = null;
+        var executionParameters = new Dictionary<string, object?>(parameters, StringComparer.Ordinal);
         try
         {
             connection = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
@@ -46,16 +47,23 @@ internal sealed class MoodleFunctionExecutor(
                     "A funcao solicitada nao esta classificada explicitamente como leitura segura.");
             }
 
+            if (string.Equals(descriptor.Name, "core_enrol_get_users_courses", StringComparison.OrdinalIgnoreCase)
+                && !executionParameters.ContainsKey("userid")
+                && profile.MoodleUserId is { } profileUserId)
+            {
+                executionParameters["userid"] = profileUserId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
             var payload = await restClient.CallAsync(
                 connection,
                 descriptor.Name,
-                parameters,
+                executionParameters,
                 allowServiceToken: true,
                 cancellationToken);
             await RecordAuditAsync(
                 connection,
                 descriptor.Name,
-                parameters,
+                executionParameters,
                 "read_executed",
                 payload.GetRawText().Length,
                 startedAt,
@@ -90,7 +98,7 @@ internal sealed class MoodleFunctionExecutor(
                     await RecordAuditAsync(
                         connection,
                         normalizedName,
-                        parameters,
+                        executionParameters,
                         "read_failed",
                         0,
                         startedAt,

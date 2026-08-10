@@ -105,34 +105,21 @@ builder.Services.AddSingleton<McpFixedWindowRateLimiter>();
 builder.Services.AddSingleton<IMcpToolExposurePolicy>(sp =>
 {
     var cfg = sp.GetRequiredService<IConfiguration>();
-    var exposureProfileString = cfg["MCP_EXPOSURE_PROFILE"] ?? "Full";
+    var exposureProfileString = cfg["MCP_EXPOSURE_PROFILE"] ?? "Production";
     if (Enum.TryParse<ToolExposureProfile>(exposureProfileString, true, out var exposureProfile))
     {
         return new CognitiveExposurePolicy(exposureProfile);
     }
-    return new CognitiveExposurePolicy(ToolExposureProfile.Full);
+    return new CognitiveExposurePolicy(ToolExposureProfile.Production);
 });
 
 // Build deterministic tool metadata registry once at startup and register a pre-populated instance.
 // Avoid building a temporary ServiceProvider to prevent creating multiple DI containers
 // and duplicated singleton instances.
-var toolMetadataRegistry = new ToolMetadataRegistry();
-var initialToolContainers = new Type[]
-{
-    typeof(MoodleCoursesTools), typeof(MoodleUniversalTools), typeof(MoodleUniversalWriteTools), typeof(MoodleParticipantsTools),
-    typeof(MoodleCourseContentsTools), typeof(MoodleCourseActivitiesTools), typeof(MoodleForumTools), typeof(MoodleForumParticipationTools),
-    typeof(MoodleAssignmentSubmissionsTools), typeof(MoodlePendingSubmissionsTools), typeof(MoodleGradingTools), typeof(MoodleGradebookTools),
-    typeof(MoodleStudentPerformanceTools), typeof(MoodleCompletionTools), typeof(MoodleAccessMonitoringTools), typeof(MoodleRiskAnalysisTools),
-    typeof(MoodleGradingContextDiagnosticsTools), typeof(MoodleGradingReviewAppTools), typeof(MoodleTutorMessageTools), typeof(MoodleReportTools),
-    typeof(MoodleMonitorTools), typeof(MoodleMemoryTools), typeof(MoodleMemoryDocumentTools), typeof(MoodlePedagogyTools)
-};
-
-foreach (var t in initialToolContainers)
-{
-    try { toolMetadataRegistry.RegisterFromType(t); } catch { }
-}
+var toolMetadataRegistry = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
 
 builder.Services.AddSingleton(toolMetadataRegistry);
+builder.Services.AddSingleton<ToolSurfaceInventory>();
 
 
 var mcpSecurityOptions = builder.Configuration
@@ -334,8 +321,6 @@ var mcpServerBuilder = builder.Services
 
                 // Remove tools that the policy says should not be exposed.
                 // Iterate in reverse to allow removal from the collection.
-                var beforeNames = result.Tools.Select(t => t?.Name).ToList();
-
                 for (int i = result.Tools.Count - 1; i >= 0; i--)
                 {
                     var tool = result.Tools[i];
@@ -369,47 +354,27 @@ var mcpServerBuilder = builder.Services
 
             return result;
         });
-    })
-    .WithTools<MoodleCoursesTools>()
-    .WithTools<MoodleUniversalTools>()
-    .WithTools<MoodleUniversalWriteTools>()
-    .WithTools<MoodleParticipantsTools>()
-    .WithTools<MoodleCourseContentsTools>()
-    .WithTools<MoodleCourseActivitiesTools>()
-    .WithTools<MoodleForumTools>()
-    .WithTools<MoodleForumParticipationTools>()
-    .WithTools<MoodleAssignmentSubmissionsTools>()
-    .WithTools<MoodlePendingSubmissionsTools>()
-    .WithTools<MoodleGradingTools>()
-    .WithTools<MoodleGradebookTools>()
-    .WithTools<MoodleStudentPerformanceTools>()
-    .WithTools<MoodleCompletionTools>()
-    .WithTools<MoodleAccessMonitoringTools>()
-    .WithTools<MoodleRiskAnalysisTools>()
-    .WithTools<MoodleGradingContextDiagnosticsTools>()
-    .WithTools<MoodleGradingReviewAppTools>()
-    .WithTools<MoodleTutorMessageTools>()
-    .WithTools<MoodleReportTools>()
-    .WithTools<MoodleMonitorTools>()
-    .WithTools<MoodleMemoryTools>()
-    .WithTools<MoodleMemoryDocumentTools>()
-    .WithTools<MoodlePedagogyTools>()
+    });
+
+// The same explicit catalog drives MCP registration and metadata registration.
+mcpServerBuilder
+    .WithTools((IEnumerable<Type>)RegisteredMcpToolContainers.AlwaysOn, JsonSerializerOptions.Default)
     .WithResources<MoodleGradingReviewAppResources>();
 
 // ToolMetadataRegistry was pre-populated and registered above; do not build temporary providers here.
 
 var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();
-if (featureOptions.DemoToolsEnabled)
-{
-    mcpServerBuilder.WithTools<DemoPendingActionTools>();
-}
-
 var assignmentWriteOptions = builder.Configuration
     .GetSection(AssignmentWriteFeatureOptions.SectionName)
     .Get<AssignmentWriteFeatureOptions>() ?? new AssignmentWriteFeatureOptions();
-if (assignmentWriteOptions.AssignmentGradeWriteEnabled)
+var enabledConditionalToolContainers = RegisteredMcpToolContainers.GetEnabledContainers(
+    featureOptions,
+    assignmentWriteOptions);
+if (enabledConditionalToolContainers.Count > 0)
 {
-    mcpServerBuilder.WithTools<MoodleIndividualGradeTools>();
+    mcpServerBuilder.WithTools(
+        (IEnumerable<Type>)enabledConditionalToolContainers,
+        JsonSerializerOptions.Default);
 }
 
 var app = builder.Build();
@@ -666,13 +631,19 @@ app.MapGet("/api/status", (
     IOptions<McpServerSecurityOptions> security,
     IOptions<OAuthBrokerOptions> oauth,
     IOptions<AssignmentWriteFeatureOptions> assignmentWrites,
-    IOptions<FeatureOptions> features) =>
+    IOptions<FeatureOptions> features,
+    ToolSurfaceInventory inventory) =>
 {
     var publicBaseUrl = GetPublicBaseUrl(context);
     var gitCommit = builder.Configuration["GIT_COMMIT"] ?? "unknown";
     var buildDate = builder.Configuration["BUILD_DATE"] ?? "unknown";
-    var toolsCount = 137 + (assignmentWrites.Value.AssignmentGradeWriteEnabled ? 4 : 0) +
-                     (features.Value.DemoToolsEnabled ? 2 : 0);
+    var demoToolCount = inventory.Entries.Count(entry =>
+        entry.Family.Equals("demopendingaction", StringComparison.OrdinalIgnoreCase));
+    var individualGradeToolCount = inventory.Entries.Count(entry =>
+        entry.Family.Contains("individualgrade", StringComparison.OrdinalIgnoreCase));
+    var toolsCount = inventory.Total -
+                     (features.Value.DemoToolsEnabled ? 0 : demoToolCount) -
+                     (assignmentWrites.Value.AssignmentGradeWriteEnabled ? 0 : individualGradeToolCount);
     return Results.Ok(new
     {
         ok = true,
@@ -1328,7 +1299,6 @@ app.MapPost("/admin/connector-clients/register", async (
     });
 }).RequireRateLimiting(AdminApiRateLimitPolicy);
 
-app.UseMiddleware<McpToolFilterMiddleware>();
 app.MapMcp(mcpPath);
 
 app.MapFallbackToFile("index.html");

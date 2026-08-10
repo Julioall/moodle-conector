@@ -79,6 +79,25 @@ public static class IntentMapper
         { "moodle_get_site_info",               "core.site_info" },
         { "moodle_list_capabilities",           "core.capabilities" },
         { "moodle_get_capabilities",            "core.capabilities" },
+
+        // assignments
+        { "list_course_assignments",            "assignments.activities" },
+        { "list_course_activities",             "assignments.activities" },
+        { "get_assignment",                     "assignments.activities" },
+        { "list_assignment_submissions",        "assignments.submissions" },
+        { "get_student_submission",             "assignments.submissions" },
+        { "list_pending_submissions",           "assignments.submissions" },
+        { "list_late_submissions",              "assignments.submissions" },
+        { "list_submissions_awaiting_grading",  "assignments.submissions" },
+        { "get_submission_status",              "assignments.submissions" },
+        { "list_students_with_pending_submissions", "assignments.followup" },
+
+        // students / participants
+        { "list_course_participants",            "students.list" },
+        { "list_course_students",                "students.list" },
+        { "list_course_groups",                  "students.groups" },
+        { "get_group_members",                   "students.groups" },
+        { "list_students_without_recent_access", "students.activity" },
     };
 
     /// <summary>
@@ -103,6 +122,15 @@ public static class IntentMapper
             toolName.Contains("course_structure", StringComparison.OrdinalIgnoreCase))
             return "courses.structure";
 
+        if (toolName.Contains("submission", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("assignment", StringComparison.OrdinalIgnoreCase))
+            return "assignments.submissions";
+
+        if (toolName.Contains("student", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("participant", StringComparison.OrdinalIgnoreCase) ||
+            toolName.Contains("group", StringComparison.OrdinalIgnoreCase))
+            return "students.list";
+
         return null; // Unknown — may be hallucination
     }
 
@@ -110,6 +138,18 @@ public static class IntentMapper
     /// Returns true if the tool name is known in any profile's tool manifest.
     /// Tools returning null from Resolve are candidates for HallucinationDetected.
     /// </summary>
+    public static string? ResolveOperation(string operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation)) return null;
+        if (operation.StartsWith("core_enrol_get_users_courses", StringComparison.OrdinalIgnoreCase)) return "courses.list";
+        if (operation.StartsWith("core_course_get_courses_by_field", StringComparison.OrdinalIgnoreCase)) return "courses.details";
+        if (operation.StartsWith("core_course_get_contents", StringComparison.OrdinalIgnoreCase)) return "courses.structure";
+        if (operation.StartsWith("mod_assign_", StringComparison.OrdinalIgnoreCase)) return "assignments.submissions";
+        if (operation.StartsWith("core_enrol_get_enrolled_users", StringComparison.OrdinalIgnoreCase) ||
+            operation.StartsWith("core_group_", StringComparison.OrdinalIgnoreCase)) return "students.list";
+        return Resolve(operation);
+    }
+
     public static bool IsKnownTool(string toolName)
         => Resolve(toolName) != null;
 }

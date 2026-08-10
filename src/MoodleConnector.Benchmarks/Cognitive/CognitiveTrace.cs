@@ -33,8 +33,16 @@ public sealed record ExecutionTrace(
     int TotalTokens,
     int ToolSchemaTokens,
     string ToolManifestHash = "",
-    string BenchmarkVersion = "1.0.0",
-    string CommitSha = ""
+    string SkillManifestHash = "",
+    string BenchmarkVersion = "1.1.0",
+    string CommitSha = "",
+    int ModelCalls = 0,
+    int McpToolCalls = 0,
+    int CachedInputTokens = 0,
+    int UncachedInputTokens = 0,
+    int ReasoningTokens = 0,
+    string? ExecutedConnection = null,
+    string RunId = ""
 );
 
 public sealed record ScoringTrace(
@@ -48,7 +56,10 @@ public sealed record ScoringTrace(
     FailureTaxonomy FailureReason,
     bool WrongConnectionDetected = false,
     bool HallucinationDetected = false,
-    bool IsCriticalTask = false
+    bool IsCriticalTask = false,
+    bool WrongConnectionSelectionDetected = false,
+    bool WrongConnectionExecutionDetected = false,
+    bool UnsafeActionDetected = false
 );
 
 public sealed record CognitiveTrace(
