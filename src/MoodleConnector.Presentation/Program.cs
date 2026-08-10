@@ -826,6 +826,25 @@ app.MapGet("/api/portal/reports/operational", async (HttpContext context, Connec
     return Results.Ok(new PortalEnvelope<PortalOperationalReportDto>(new(openTasks, completedTasks, upcomingEvents, followups, now), new(now, null)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapGet("/api/portal/reports/audit", async (
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var generatedAt = DateTimeOffset.UtcNow;
+    var actor = identity.Id.ToString();
+    var query = dbContext.MoodleAuditLogs.AsNoTracking().Where(log => log.ActorSubject == actor);
+    var total = await query.CountAsync(cancellationToken);
+    var completed = await query.CountAsync(log => log.Status == "success" || log.Status == "completed", cancellationToken);
+    var failed = await query.CountAsync(log => log.Status == "failed" || log.Status == "error", cancellationToken);
+    var confirmed = await query.CountAsync(log => log.PendingActionId != null, cancellationToken);
+    return Results.Ok(new PortalEnvelope<PortalAuditReportDto>(
+        new(total, completed, failed, confirmed, generatedAt), new(generatedAt, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapGet("/api/portal/reports/course-overview/{connectionRef}/{courseId}", async (
     string connectionRef,
     string courseId,

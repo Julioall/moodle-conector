@@ -1,6 +1,7 @@
 namespace MoodleConnector.Presentation;
 
 public sealed record PortalOperationalReportDto(int OpenTasks, int CompletedTasks, int UpcomingEvents, int FollowupsRecorded, DateTimeOffset GeneratedAt);
+public sealed record PortalAuditReportDto(int TotalActions, int CompletedActions, int FailedActions, int ConfirmedActions, DateTimeOffset GeneratedAt);
 
 public sealed record PortalCourseOverviewReportDto(
     string ConnectionRef, string CourseId, DateTimeOffset GeneratedAt, int TotalActiveStudents,
