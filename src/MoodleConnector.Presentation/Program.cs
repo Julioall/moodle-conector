@@ -1138,7 +1138,17 @@ app.MapGet("/api/portal/dashboard", async (
     if (identity is null) return Results.Unauthorized();
 
     var generatedAt = DateTimeOffset.UtcNow;
-    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
+    try
+    {
+        resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    }
+    catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
+    {
+        return Results.Ok(new PortalEnvelope<PortalDashboardDto>(
+            PortalDashboardContractMapper.Empty(null, ["Nenhuma conexão Moodle foi configurada para esta conta."]),
+            new(generatedAt, null)));
+    }
     if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var userId = identity.Id.ToString();
