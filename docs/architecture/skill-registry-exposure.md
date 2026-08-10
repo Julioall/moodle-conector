@@ -27,7 +27,7 @@ prompt
 - O catálogo de containers é declarado em `RegisteredMcpToolContainers`; não existe varredura global de assemblies. Reflection é usada somente uma vez, sobre tipos explicitamente registrados durante o startup.
 - As funções de leitura conhecidas pela `MoodleReadFunctionPolicy` são registradas no `OperationRegistry`; funções não registradas não são executáveis pelo `SafeReadExecutor`.
 - As funções de escrita controlada são registradas como `ControlledWrite` e não passam pelo executor genérico.
-- O perfil padrão é `Production`: apenas metadata registrada é exposta, itens `Deprecated` são ocultados e metadata ausente falha fechado. `Full` e os perfis incrementais são ferramentas de diagnóstico/benchmark.
+- O perfil padrão é `Production`: apenas metadata registrada é exposta, itens `Deprecated` são ocultados e metadata ausente falha fechado. `Full` e os perfis incrementais são ferramentas de diagnóstico/benchmark; o inventário schema-only habilita explicitamente flags condicionais em Full para medir as 97 entradas do catálogo, enquanto Production mede as 95 expostas.
 - `list_my_courses`, `search_courses` e `get_course` permanecem expostas nesta release. A evidência histórica é preservada, mas nenhuma delas é `ApprovedForHide` ou `Deprecated`.
 
 ## Writes

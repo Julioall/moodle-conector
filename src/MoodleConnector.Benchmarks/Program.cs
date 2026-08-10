@@ -690,6 +690,14 @@ class Program
         int Controlled,
         int Deprecated);
 
+    private sealed record SchemaReduction(
+        int ToolCount,
+        int ToolSchemaTokens,
+        long ToolSchemaBytes,
+        double ToolCountPercent,
+        double ToolSchemaTokensPercent,
+        double ToolSchemaBytesPercent);
+
     private static async Task RunSchemaInventoryAsync()
     {
         var model = Environment.GetEnvironmentVariable("MOODLEBENCH_MODEL") ?? "gpt-5.4-nano";
@@ -708,16 +716,41 @@ class Program
 
         foreach (var exposure in profiles)
         {
-            using var factory = BuildFactory(new BenchmarkProfile(exposure, model, exposure != ToolExposureProfile.Full));
-            var mcpClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-            await SeedBenchmarkConnectionsAsync(factory.Services);
-            mcpClient.DefaultRequestHeaders.Add("X-Mcp-Api-Key", "test-key");
+            var includeAllCatalogTools = exposure is
+                ToolExposureProfile.Full or
+                ToolExposureProfile.FullWithCoursesSkill or
+                ToolExposureProfile.SkillCoursesOptimized;
+            var previousDemoFlag = Environment.GetEnvironmentVariable("Features__DemoToolsEnabled");
+            var previousGradeFlag = Environment.GetEnvironmentVariable("Features__AssignmentGradeWriteEnabled");
+            try
+            {
+                // Environment variables are a higher-priority configuration source
+                // in WebApplicationFactory. Set both flags explicitly so Full is
+                // truly the complete declared catalog while Production remains
+                // the default 95-tool surface.
+                Environment.SetEnvironmentVariable(
+                    "Features__DemoToolsEnabled",
+                    includeAllCatalogTools ? "true" : "false");
+                Environment.SetEnvironmentVariable("Features__AssignmentGradeWriteEnabled", "true");
 
-            var driver = new OpenAIResponsesBenchmarkDriver(
-                new ChatClient(model, new ApiKeyCredential("schema-only")),
-                mcpClient);
-            var manifest = await driver.FetchToolManifestAsync();
-            rows.Add(new SchemaManifestRow(ProfileLabel(exposure), manifest.ToolCount, manifest.ToolSchemaTokens, manifest.ToolSchemaBytes, manifest.ManifestHash));
+                using var factory = BuildFactory(
+                    new BenchmarkProfile(exposure, model, exposure != ToolExposureProfile.Full),
+                    includeAllCatalogTools);
+                var mcpClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+                await SeedBenchmarkConnectionsAsync(factory.Services);
+                mcpClient.DefaultRequestHeaders.Add("X-Mcp-Api-Key", "test-key");
+
+                var driver = new OpenAIResponsesBenchmarkDriver(
+                    new ChatClient(model, new ApiKeyCredential("schema-only")),
+                    mcpClient);
+                var manifest = await driver.FetchToolManifestAsync();
+                rows.Add(new SchemaManifestRow(ProfileLabel(exposure), manifest.ToolCount, manifest.ToolSchemaTokens, manifest.ToolSchemaBytes, manifest.ManifestHash));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("Features__DemoToolsEnabled", previousDemoFlag);
+                Environment.SetEnvironmentVariable("Features__AssignmentGradeWriteEnabled", previousGradeFlag);
+            }
         }
 
         var catalogInventory = new ToolSurfaceInventory(
@@ -735,6 +768,28 @@ class Program
             catalogInventory.SpecializedCount,
             catalogInventory.ControlledWriteCount,
             catalogInventory.DeprecatedCount);
+        var fullRow = rows.Single(row => row.Profile.Equals("A", StringComparison.OrdinalIgnoreCase));
+        var coursesSkillRow = rows.Single(row => row.Profile.Equals("B", StringComparison.OrdinalIgnoreCase));
+        var productionReduction = CalculateSchemaReduction(fullRow, productionRow);
+        var optimizedRow = rows.Single(row => row.Profile.Equals("C", StringComparison.OrdinalIgnoreCase));
+        var coursesReduction = CalculateSchemaReduction(coursesSkillRow, optimizedRow);
+
+        if (fullRow != coursesSkillRow)
+        {
+            throw new InvalidOperationException("Full and FullWithCoursesSkill must expose the same deterministic MCP surface.");
+        }
+
+        if (fullRow.ToolCount != catalog.Registered)
+        {
+            throw new InvalidOperationException(
+                $"Full schema surface mismatch: catalog has {catalog.Registered} tools, manifest has {fullRow.ToolCount}.");
+        }
+
+        if (productionRow.ToolCount != catalog.ProductionExposed)
+        {
+            throw new InvalidOperationException(
+                $"Production schema surface mismatch: inventory has {catalog.ProductionExposed} tools, manifest has {productionRow.ToolCount}.");
+        }
 
         var artifact = new
         {
@@ -743,7 +798,12 @@ class Program
             Model = model,
             CommitSha = OpenAIResponsesBenchmarkDriver.CommitSha,
             Catalog = catalog,
-            Rows = rows
+            Rows = rows,
+            Reductions = new
+            {
+                ProductionVsFull = productionReduction,
+                CoursesOptimizedVsB = coursesReduction
+            }
         };
         var jsonPath = Path.Combine(reportsDir, "schema-manifest.json");
         await File.WriteAllTextAsync(jsonPath, JsonSerializer.Serialize(artifact, new JsonSerializerOptions { WriteIndented = true }));
@@ -756,6 +816,8 @@ class Program
             .AppendLine()
             .AppendLine($"Catalog: registered `{catalog.Registered}`, Production exposed `{catalog.ProductionExposed}`, feature-gated by default `{catalog.FeatureGatedByDefault}`, hidden by exposure policy `{catalog.HiddenByExposurePolicy}`.")
             .AppendLine($"Classification: structural `{catalog.Structural}`, specialized `{catalog.Specialized}`, controlled `{catalog.Controlled}`, deprecated `{catalog.Deprecated}`.")
+            .AppendLine($"Production reduction vs Full: `{productionReduction.ToolCount}` tools, `{productionReduction.ToolSchemaBytes}` bytes, `{productionReduction.ToolSchemaTokens}` ToolSchemaTokens.")
+            .AppendLine($"Courses optimized reduction vs B: `{coursesReduction.ToolCount}` tools, `{coursesReduction.ToolSchemaBytes}` bytes, `{coursesReduction.ToolSchemaTokens}` ToolSchemaTokens.")
             .AppendLine()
             .AppendLine("| Profile | Tools | ToolSchemaBytes | ToolSchemaTokens | ToolManifestHash |")
             .AppendLine("|---|---:|---:|---:|---|")
@@ -765,6 +827,22 @@ class Program
         var markdownPath = Path.Combine(reportsDir, "schema-manifest.md");
         await File.WriteAllTextAsync(markdownPath, markdown);
         Console.WriteLine($"Schema manifest → {markdownPath}");
+    }
+
+    private static SchemaReduction CalculateSchemaReduction(
+        SchemaManifestRow baseline,
+        SchemaManifestRow candidate)
+    {
+        static double ReductionPercent(long baselineValue, long candidateValue) =>
+            baselineValue == 0 ? 0 : (baselineValue - candidateValue) * 100d / baselineValue;
+
+        return new SchemaReduction(
+            baseline.ToolCount - candidate.ToolCount,
+            baseline.ToolSchemaTokens - candidate.ToolSchemaTokens,
+            baseline.ToolSchemaBytes - candidate.ToolSchemaBytes,
+            ReductionPercent(baseline.ToolCount, candidate.ToolCount),
+            ReductionPercent(baseline.ToolSchemaTokens, candidate.ToolSchemaTokens),
+            ReductionPercent(baseline.ToolSchemaBytes, candidate.ToolSchemaBytes));
     }
 
     private static string ProfileLabel(ToolExposureProfile p) => p switch
@@ -908,7 +986,9 @@ class Program
         return Path.Combine(Environment.CurrentDirectory, relative);
     }
 
-    private static WebApplicationFactory<global::Program> BuildFactory(BenchmarkProfile profile)
+    private static WebApplicationFactory<global::Program> BuildFactory(
+        BenchmarkProfile profile,
+        bool includeAllCatalogTools = false)
     {
         return new WebApplicationFactory<global::Program>()
             .WithWebHostBuilder(builder =>
@@ -934,7 +1014,9 @@ class Program
                         { "MCP_EXPOSURE_PROFILE", profile.Exposure.ToString() },
                         { "McpServerSecurity:RequireApiKey", "true" },
                         { "McpServerSecurity:RequireJwt", "false" },
-                        { "ConnectorSecrets:EncryptionKeyBase64", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=" }
+                        { "ConnectorSecrets:EncryptionKeyBase64", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=" },
+                        { "Features:DemoToolsEnabled", includeAllCatalogTools ? "true" : "false" },
+                        { "Features:AssignmentGradeWriteEnabled", "true" }
                     });
                 });
 

@@ -75,14 +75,16 @@ O inventário de superfície é determinístico e não depende de quota. O artef
 
 | Superfície | Tools | ToolSchemaBytes | ToolSchemaTokens | ManifestHash |
 |---|---:|---:|---:|---|
-| Full (A) | 95 | 222585 | 55680 | `6c01f6ec32d7f66e` |
-| Full + Courses SKILL (B) | 95 | 222585 | 55680 | `6c01f6ec32d7f66e` |
+| Full (A) | 97 | 224524 | 56166 | `911a263d770c5ed3` |
+| Full + Courses SKILL (B) | 97 | 224524 | 56166 | `911a263d770c5ed3` |
 | Production | 95 | 222585 | 55680 | `6c01f6ec32d7f66e` |
-| Courses optimized (C) | 92 | 215572 | 53925 | `257ba4c7b9f49939` |
+| Courses optimized (C) | 94 | 217511 | 54411 | `84c572423bdc7960` |
 
-Redução determinística de C contra B: **3 tools, 7.013 bytes, 1.755 ToolSchemaTokens — 3,15%**. Isso é uma medida de superfície MCP, não uma afirmação sobre `InputTokens` reais ou qualidade cognitiva.
+Redução determinística de Production contra Full: **2 tools, 1.939 bytes, 486 ToolSchemaTokens** — 2,06% em contagem, 0,86% em bytes e 0,87% em schema tokens. A redução de C contra B é **3 tools, 7.013 bytes, 1.755 ToolSchemaTokens** — 3,09% em contagem, 3,12% em bytes e 3,12% em schema tokens. Isso é uma medida de superfície MCP, não uma afirmação sobre `InputTokens` reais ou qualidade cognitiva.
 
-Artefato: [schema-manifest.json](../../.moodlebench/cognitive/reports/20260810_024655/schema-manifest.json) e [schema-manifest.md](../../.moodlebench/cognitive/reports/20260810_024655/schema-manifest.md). O manifesto foi gerado no commit `5bb8f7c9ae2025361feca9d8fd217b7d0e104adf`.
+O snapshot `Full` habilita explicitamente os dois tools demo feature-gated para medir o catálogo completo; `Production` mantém esses dois tools fora do descriptor. O probe valida deterministicamente que Full corresponde às 97 entradas catalogadas e Production às 95 expostas.
+
+Artefato: [schema-manifest.json](../../.moodlebench/cognitive/reports/20260810_025534/schema-manifest.json) e [schema-manifest.md](../../.moodlebench/cognitive/reports/20260810_025534/schema-manifest.md). O manifesto foi gerado no commit `8871a9a09351d657999ff6c4c918aced886fcb6a`.
 
 ### Surface e classificação
 

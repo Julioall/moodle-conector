@@ -40,3 +40,12 @@ Uma wrapper só vira `ApprovedForHide` se o coorte relevante não regredir em Ta
 ## Release
 
 O benchmark completo deve ser executado apenas no fechamento da wave ou antes de release. Use o modelo de certificação configurado para a release, registre `TaskSetHash`, `ToolManifestHash`, `SkillManifestHash`, commit e configuração do run, e guarde o relatório JSON/Markdown. Uma falha de coorte mantém a wrapper exposta; não é motivo para apagar a implementação.
+
+Para auditar a superfície sem quota OpenAI, execute o probe determinístico:
+
+```powershell
+$env:MOODLEBENCH_SCHEMA_ONLY = 'true'
+dotnet run --project src/MoodleConnector.Benchmarks/MoodleConnector.Benchmarks.csproj --no-build
+```
+
+Esse probe não chama o modelo. Ele mede Full (97), Production (95), hashes e schemas completos, e falha se o catálogo/manifesto divergirem.
