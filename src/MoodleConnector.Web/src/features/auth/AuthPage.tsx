@@ -5,11 +5,12 @@ import './auth-page.css';
 type Mode = 'login' | 'register';
 
 export function AuthPage() {
-  const [mode, setMode] = useState<Mode>('login');
+  const initialParams = new URLSearchParams(window.location.search);
+  const [mode, setMode] = useState<Mode>(initialParams.get('tab') === 'register' ? 'register' : 'login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialParams.get('error') ?? '');
   const [pending, setPending] = useState(false);
 
   const submit = async (event: FormEvent) => {

@@ -404,7 +404,6 @@ var portalV2Enabled = builder.Configuration.GetValue<bool>("Features:PortalV2Ena
 
 app.UseForwardedHeaders();
 
-app.UseDefaultFiles();
 app.Use(async (context, next) =>
 {
     var correlationId = context.Request.Headers["X-Correlation-ID"].ToString();
@@ -1741,8 +1740,7 @@ app.MapPost("/auth/login", async (
         if (!string.IsNullOrEmpty(email)) qs.Add($"email={Uri.EscapeDataString(email)}");
         if (!string.IsNullOrEmpty(returnUrl)) qs.Add($"returnUrl={Uri.EscapeDataString(returnUrl)}");
         qs.Add("error=" + Uri.EscapeDataString("E-mail ou senha invalidos."));
-        var q = qs.Count > 0 ? "?" + string.Join("&", qs) : "";
-        return Results.Redirect($"/auth.html{q}");
+        return Results.Redirect($"/portal/?{string.Join("&", qs)}");
     }
 
     await SignInPortalAccountAsync(context, account.Id, account.Name, account.Email);
@@ -1965,12 +1963,37 @@ app.MapPost("/admin/connector-clients/register", async (
 
 app.MapMcp(mcpPath);
 
-app.MapGet("/portal", () => portalV2Enabled ? Results.Redirect("/portal/") : Results.Redirect("/"));
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.Value?.Equals("/portal", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        if (!portalV2Enabled)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
+        context.Response.Redirect("/portal/");
+        return;
+    }
+
+    await next();
+});
+
+app.MapGet("/", () => portalV2Enabled ? Results.Redirect("/portal/") : Results.NotFound());
+app.MapGet("/app.html", () => portalV2Enabled ? Results.Redirect("/portal/") : Results.NotFound());
+app.MapGet("/auth.html", (string? tab, string? error) =>
+{
+    if (!portalV2Enabled) return Results.NotFound();
+    var query = new List<string>();
+    if (string.Equals(tab, "register", StringComparison.OrdinalIgnoreCase)) query.Add("tab=register");
+    if (!string.IsNullOrWhiteSpace(error)) query.Add($"error={Uri.EscapeDataString(error)}");
+    return Results.Redirect($"/portal/{(query.Count > 0 ? $"?{string.Join("&", query)}" : string.Empty)}");
+});
 if (portalV2Enabled)
 {
     app.MapFallbackToFile("/portal/{*path:nonfile}", "portal/index.html");
 }
-app.MapFallbackToFile("index.html");
 
 app.Run();
 

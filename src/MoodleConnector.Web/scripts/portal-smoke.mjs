@@ -22,7 +22,7 @@ const get = (url) => new Promise((resolve, reject) => {
     let body = '';
     response.setEncoding('utf8');
     response.on('data', chunk => { body += chunk; });
-    response.on('end', () => resolve({ status: response.statusCode ?? 0, body }));
+    response.on('end', () => resolve({ status: response.statusCode ?? 0, body, headers: response.headers }));
   });
   req.on('error', reject);
   req.end();
@@ -36,4 +36,12 @@ for (const path of paths) {
   console.log(`PASS ${path} ${response.status}`);
 }
 
-console.log(`Portal smoke passed (${paths.length} SPA routes)`);
+for (const path of ['/', '/app.html', '/auth.html']) {
+  const response = await get(`${baseUrl}${path}`);
+  if (response.status < 300 || response.status >= 400 || response.headers?.location !== '/portal/') {
+    throw new Error(`Legacy redirect failed for ${path}: status=${response.status}`);
+  }
+  console.log(`PASS legacy redirect ${path} ${response.status}`);
+}
+
+console.log(`Portal smoke passed (${paths.length} SPA routes + 3 legacy redirects)`);
