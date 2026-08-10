@@ -36,11 +36,13 @@ export function createPortalClient(fetchImpl: typeof fetch = fetch, timeoutMs = 
     headers.set('Accept', 'application/json');
     headers.set('X-Correlation-ID', correlationId);
     if (mutatingMethods.has(method)) {
-      let csrf = readCsrfToken();
-      if (!csrf) {
-        await fetchImpl('/api/portal/csrf', { method: 'GET', credentials: 'same-origin' });
-        csrf = readCsrfToken();
-      }
+      // Always issue a fresh token before a mutation. A token left in the
+      // browser cookie can be stale after a deploy, restart or long-lived tab.
+      // The endpoint also returns the token in JSON, which is more reliable
+      // than depending only on Set-Cookie being observed by the browser.
+      const csrfResponse = await fetchImpl('/api/portal/csrf', { method: 'GET', credentials: 'same-origin', cache: 'no-store' });
+      const csrfBody = await csrfResponse.json() as { token?: string };
+      const csrf = csrfBody.token ?? readCsrfToken();
       if (!csrf) throw new PortalHttpError(400, 'CSRF token is required for this operation', correlationId, { error: { code: 'csrf_missing' } });
       headers.set('X-CSRF-TOKEN', csrf);
     }
