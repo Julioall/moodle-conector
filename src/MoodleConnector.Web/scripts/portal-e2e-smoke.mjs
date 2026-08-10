@@ -57,6 +57,10 @@ const expectJson = (response, expected, label) => {
 
 const email = `portal-e2e-${randomUUID()}@example.test`;
 const password = 'PortalE2EFlow!2026';
+const moodleAlias = process.env.PORTAL_E2E_MOODLE_ALIAS ?? 'local-e2e';
+const moodleBaseUrl = process.env.PORTAL_E2E_MOODLE_URL ?? 'https://moodle.local';
+const moodleUsername = process.env.PORTAL_E2E_MOODLE_USERNAME ?? 'demo';
+const moodlePassword = process.env.PORTAL_E2E_MOODLE_PASSWORD ?? 'demo-password';
 
 expectJson(await call('POST', '/api/account/register', { name: 'Portal E2E Smoke', email, password }), 200, 'register');
 const session = expectJson(await call('GET', '/api/portal/session'), 200, 'session');
@@ -66,10 +70,10 @@ const csrf = expectJson(await call('GET', '/api/portal/csrf'), 200, 'csrf');
 if (!csrf.token) throw new Error('CSRF token was not issued.');
 
 const connectionPayload = {
-  moodleAlias: 'local-e2e',
-  moodleBaseUrl: 'https://moodle.local',
-  moodleUsername: 'demo',
-  moodlePassword: 'demo-password',
+  moodleAlias,
+  moodleBaseUrl,
+  moodleUsername,
+  moodlePassword,
   isDefault: true,
   canWrite: false,
 };
