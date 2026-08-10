@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Builder;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Claims;
 using System.Text;
@@ -405,11 +407,19 @@ app.UseForwardedHeaders();
 app.UseDefaultFiles();
 app.Use(async (context, next) =>
 {
+    var correlationId = context.Request.Headers["X-Correlation-ID"].ToString();
+    if (string.IsNullOrWhiteSpace(correlationId) || correlationId.Length > 100)
+    {
+        correlationId = Guid.NewGuid().ToString();
+    }
+    context.TraceIdentifier = correlationId;
+
     if (context.Request.Path.StartsWithSegments("/portal", StringComparison.OrdinalIgnoreCase) ||
         context.Request.Path.StartsWithSegments("/api/portal", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.OnStarting(() =>
         {
+            context.Response.Headers["X-Correlation-ID"] = correlationId;
             context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'";
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
             context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
@@ -1056,10 +1066,50 @@ app.MapGet("/api/portal/connections", async (
     if (profile is null) return Results.NotFound();
     context.Response.Headers.CacheControl = "no-store";
     var connections = profile.MoodleConnections.Select(connection => new PortalConnectionDto(
-        connection.Id, connection.Alias, connection.BaseUrl, "online", connection.IsDefault,
+        connection.Id, connection.Alias, connection.BaseUrl, "unknown", connection.IsDefault,
         new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), null));
     return Results.Ok(new PortalListEnvelope<PortalConnectionDto>(
         connections.ToArray(), new(1, connections.Count(), connections.Count(), connections.Any(), DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/portal/connections", async (
+    ConnectMoodleInput input,
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken) =>
+{
+    await antiforgery.ValidateRequestAsync(context);
+
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(input.MoodleAlias) ||
+        string.IsNullOrWhiteSpace(input.MoodleBaseUrl) ||
+        string.IsNullOrWhiteSpace(input.MoodleUsername) ||
+        string.IsNullOrWhiteSpace(input.MoodlePassword))
+        return Results.BadRequest(new { ok = false, error = "Preencha alias, URL, usuario e senha do Moodle." });
+
+    try
+    {
+        await accountService.ConnectMoodleAsync(
+            new ConnectMoodleAccountRequest(
+                identity.Id,
+                input.MoodleAlias,
+                input.MoodleBaseUrl,
+                input.MoodleUsername,
+                input.MoodlePassword,
+                input.IsDefault,
+                input.CanWrite),
+            cancellationToken);
+
+        return Results.Ok(new { ok = true, input.MoodleAlias, input.MoodleBaseUrl, input.IsDefault });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/pending", async (
@@ -2740,7 +2790,8 @@ public sealed record PortalListMeta(
     bool HasMore,
     DateTimeOffset GeneratedAt,
     string? ConnectionRef,
-    IReadOnlyList<string>? Warnings = null);
+    IReadOnlyList<string>? Warnings = null,
+    int? Total = null);
 public sealed record PortalSessionDto(bool Authenticated, PortalUserDto? User);
 public sealed record PortalUserDto(Guid Id, string Name, IReadOnlyList<string> Roles, IReadOnlyList<string> Permissions);
 

@@ -1,4 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { NotFound } from './NotFound';
 import { AppLayout } from '../components/layout/AppLayout';
 import { AuthGate } from '../features/auth/AuthGate';
 import { ConnectionsPage } from '../features/connections/ConnectionsPage';
@@ -16,5 +17,5 @@ import { ReportsPage } from '../features/reports/ReportsPage';
 import { SettingsPage } from '../features/settings/SettingsPage';
 
 export function App() {
-  return <BrowserRouter><AuthGate><Routes><Route element={<AppLayout />}><Route path="/" element={<DashboardPage />} /><Route path="/conexoes" element={<ConnectionsPage />} /><Route path="/meus-cursos" element={<MyCoursesPage />} /><Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} /><Route path="/alunos" element={<StudentsPage />} /><Route path="/alunos/:connectionRef/:studentId" element={<StudentProfilePage />} /><Route path="/pendencias" element={<PendingPage />} /><Route path="/tarefas" element={<TasksPage />} /><Route path="/agenda" element={<AgendaPage />} /><Route path="/followup" element={<FollowupPage />} /><Route path="/mensagens" element={<MessagesPage />} /><Route path="/relatorios" element={<ReportsPage />} /><Route path="/configuracoes" element={<SettingsPage />} /><Route path="*" element={<DashboardPage />} /></Route></Routes></AuthGate></BrowserRouter>;
+  return <BrowserRouter basename="/portal"><AuthGate><Routes><Route element={<AppLayout />}><Route path="/" element={<DashboardPage />} /><Route path="/conexoes" element={<ConnectionsPage />} /><Route path="/meus-cursos" element={<MyCoursesPage />} /><Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} /><Route path="/alunos" element={<StudentsPage />} /><Route path="/alunos/:connectionRef/:studentId" element={<StudentProfilePage />} /><Route path="/pendencias" element={<PendingPage />} /><Route path="/tarefas" element={<TasksPage />} /><Route path="/agenda" element={<AgendaPage />} /><Route path="/followup" element={<FollowupPage />} /><Route path="/mensagens" element={<MessagesPage />} /><Route path="/relatorios" element={<ReportsPage />} /><Route path="/configuracoes" element={<SettingsPage />} /><Route path="*" element={<NotFound />} /></Route></Routes></AuthGate></BrowserRouter>;
 }

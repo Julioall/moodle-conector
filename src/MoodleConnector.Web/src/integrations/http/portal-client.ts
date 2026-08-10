@@ -36,7 +36,11 @@ export function createPortalClient(fetchImpl: typeof fetch = fetch, timeoutMs = 
     headers.set('Accept', 'application/json');
     headers.set('X-Correlation-ID', correlationId);
     if (mutatingMethods.has(method)) {
-      const csrf = readCsrfToken();
+      let csrf = readCsrfToken();
+      if (!csrf) {
+        await fetchImpl('/api/portal/csrf', { method: 'GET', credentials: 'same-origin' });
+        csrf = readCsrfToken();
+      }
       if (!csrf) throw new PortalHttpError(400, 'CSRF token is required for this operation', correlationId, { error: { code: 'csrf_missing' } });
       headers.set('X-CSRF-TOKEN', csrf);
     }
