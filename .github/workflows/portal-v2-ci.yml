@@ -31,3 +31,5 @@ jobs:
           dotnet restore MoodleConnector.slnx
           dotnet build MoodleConnector.slnx --no-restore
           dotnet test MoodleConnector.slnx --no-build --no-restore
+      - name: Verify Production Container
+        run: docker build --tag moodle-connector-portal-v2-ci .
