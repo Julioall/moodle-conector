@@ -50,6 +50,7 @@ using System.Reflection;
 using System.Threading.RateLimiting;
 using MediatR;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.Messages;
 using MoodleConnector.Presentation;
 using MoodleConnector.Presentation.Health;
 using MoodleConnector.Infrastructure.Reports;
@@ -810,6 +811,31 @@ app.MapGet("/api/portal/followups", async (HttpContext context, ConnectorDbConte
     var total = await query.CountAsync(cancellationToken);
     var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new PortalFollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)).ToListAsync(cancellationToken);
     return Results.Ok(new PortalListEnvelope<PortalFollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/portal/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, PortalMessagePrepareInput input, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (!Enum.TryParse<TutorMessageType>(input.MessageType, true, out var messageType)) return Results.BadRequest(new { error = new { code = "invalid_message_type", message = "Tipo de mensagem inválido." } });
+    if (input.RecipientIds is null || input.RecipientIds.Count == 0 || input.RecipientIds.Count > 100) return Results.BadRequest(new { error = new { code = "invalid_recipients", message = "Informe de 1 a 100 destinatários explícitos." } });
+    try
+    {
+        var preview = await mediator.Send(new PrepareTutorMessageCommand(input.CourseId, messageType, input.RecipientIds, input.CustomText), cancellationToken);
+        return Results.Ok(new PortalEnvelope<TutorMessagePreview>(preview, new(DateTimeOffset.UtcNow, null)));
+    }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = new { code = "invalid_message", message = ex.Message } }); }
+    catch (InvalidOperationException ex) { return Results.Conflict(new { error = new { code = "message_disabled", message = ex.Message } }); }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/portal/messages/confirm", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, IMediator mediator, PortalMessageConfirmInput input, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText)) return Results.BadRequest(new { error = new { code = "invalid_confirmation", message = "Confirmação explícita é obrigatória." } });
+    var result = await mediator.Send(new ConfirmTutorMessageCommand(input.PendingActionId, input.ConfirmationText), cancellationToken);
+    return Results.Ok(new PortalEnvelope<TutorMessageSendResult>(result, new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapPost("/api/portal/followups", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalFollowupInput input, CancellationToken cancellationToken) =>

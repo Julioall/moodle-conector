@@ -49,7 +49,8 @@ public sealed record TutorMessagePreview(
     [property: JsonPropertyName("selectionCriteria")] string SelectionCriteria,
     [property: JsonPropertyName("confirmationText")] string ConfirmationText,
     [property: JsonPropertyName("expiresAt")] DateTimeOffset ExpiresAt,
-    [property: JsonPropertyName("risks")] IReadOnlyList<string> Risks);
+    [property: JsonPropertyName("risks")] IReadOnlyList<string> Risks,
+    [property: JsonPropertyName("pendingActionId")] Guid? PendingActionId = null);
 
 // ── Pending payload (stored in DB) ──────────────────────────────────────────
 
@@ -170,7 +171,7 @@ public sealed class PrepareTutorMessageCommandHandler(
             courseIdLong = 0;
         }
 
-        await pendingActions.CreatePendingActionAsync(
+        var pending = await pendingActions.CreatePendingActionAsync(
             toolName: $"preparar_mensagem_{request.MessageType.ToString().ToLowerInvariant()}",
             riskLevel: ToolRiskLevel.HumanConfirmedWrite,
             payload: payload,
@@ -180,7 +181,7 @@ public sealed class PrepareTutorMessageCommandHandler(
             courseId: courseIdLong > 0 ? courseIdLong : null,
             cancellationToken: cancellationToken);
 
-        return preview;
+        return preview with { PendingActionId = pending.PendingActionId };
     }
 
     private async Task<IReadOnlyList<MessagePreviewRecipient>> ResolveRecipientsAsync(

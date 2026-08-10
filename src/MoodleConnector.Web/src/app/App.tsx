@@ -11,7 +11,8 @@ import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { TasksPage } from '../features/tasks/TasksPage';
 import { AgendaPage } from '../features/agenda/AgendaPage';
 import { FollowupPage } from '../features/followup/FollowupPage';
+import { MessagesPage } from '../features/messages/MessagesPage';
 
 export function App() {
-  return <BrowserRouter><AuthGate><Routes><Route element={<AppLayout />}><Route path="/" element={<DashboardPage />} /><Route path="/conexoes" element={<ConnectionsPage />} /><Route path="/meus-cursos" element={<MyCoursesPage />} /><Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} /><Route path="/alunos" element={<StudentsPage />} /><Route path="/alunos/:connectionRef/:studentId" element={<StudentProfilePage />} /><Route path="/pendencias" element={<PendingPage />} /><Route path="/tarefas" element={<TasksPage />} /><Route path="/agenda" element={<AgendaPage />} /><Route path="/followup" element={<FollowupPage />} /><Route path="*" element={<DashboardPage />} /></Route></Routes></AuthGate></BrowserRouter>;
+  return <BrowserRouter><AuthGate><Routes><Route element={<AppLayout />}><Route path="/" element={<DashboardPage />} /><Route path="/conexoes" element={<ConnectionsPage />} /><Route path="/meus-cursos" element={<MyCoursesPage />} /><Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} /><Route path="/alunos" element={<StudentsPage />} /><Route path="/alunos/:connectionRef/:studentId" element={<StudentProfilePage />} /><Route path="/pendencias" element={<PendingPage />} /><Route path="/tarefas" element={<TasksPage />} /><Route path="/agenda" element={<AgendaPage />} /><Route path="/followup" element={<FollowupPage />} /><Route path="/mensagens" element={<MessagesPage />} /><Route path="*" element={<DashboardPage />} /></Route></Routes></AuthGate></BrowserRouter>;
 }
