@@ -938,8 +938,11 @@ app.MapGet("/api/portal/session", async (
     var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
     if (profile is null) return Results.NotFound();
     context.Response.Headers.CacheControl = "no-store";
+    var roles = context.User.FindAll(ClaimTypes.Role).Select(x => x.Value)
+        .Concat(context.User.FindAll("role").Select(x => x.Value))
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     return Results.Ok(new PortalEnvelope<PortalSessionDto>(
-        new(true, new PortalUserDto(profile.Id, profile.Name, Array.Empty<string>())),
+        new(true, new PortalUserDto(profile.Id, profile.Name, roles)),
         new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
