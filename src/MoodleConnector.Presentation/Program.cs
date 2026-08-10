@@ -21,6 +21,10 @@ using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
+using MoodleConnector.Application.Registry;
+using MoodleConnector.Application.Courses;
+using MoodleConnector.Application.Activities;
+using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
 using MoodleConnector.Presentation.Configuration;
 using MoodleConnector.Presentation.Security;
@@ -780,6 +784,61 @@ app.MapGet("/api/portal/connections", async (
         new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), null));
     return Results.Ok(new PortalListEnvelope<PortalConnectionDto>(
         connections.ToArray(), new(1, connections.Count(), connections.Count(), connections.Any(), DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/courses", async (
+    string? connectionRef,
+    int? page,
+    int? pageSize,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
+    var effectiveConnectionRef = connectionRef ?? resolved.Alias;
+    var data = result.Items.Select(course => PortalCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
+    return Results.Ok(new PortalListEnvelope<PortalCourseDto>(data,
+        new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, effectiveConnectionRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/courses/{connectionRef}/{courseId}", async (
+    string connectionRef, string courseId, HttpContext context, ConnectorDbContext dbContext,
+    IMediator mediator, IConnectionRegistry connectionRegistry, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var course = await mediator.Send(new GetCourseQuery(identity.Id.ToString(), courseId), cancellationToken);
+    return course is null
+        ? PortalErrorResults.NotFound("course_not_found", "Curso não encontrado.")
+        : Results.Ok(new PortalEnvelope<PortalCourseDto>(PortalCourseContractMapper.ToDto(course, connectionRef), new(DateTimeOffset.UtcNow, connectionRef)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/activities", async (
+    string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
+    ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var result = await mediator.Send(new ListCourseActivitiesQuery(identity.Id.ToString(), courseId, CourseActivityModuleTypes.All, false), cancellationToken);
+    if (result is null) return PortalErrorResults.NotFound("course_not_found", "Curso não encontrado.");
+    var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    var data = result.Activities.Skip((currentPage - 1) * size).Take(size)
+        .Select(activity => PortalCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray();
+    return Results.Ok(new PortalListEnvelope<PortalActivityDto>(data,
+        new(currentPage, size, data.Length, currentPage * size < result.Total, DateTimeOffset.UtcNow, connectionRef)));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/info", (IOptions<MoodleApiOptions> moodleOpts) => Results.Ok(new
