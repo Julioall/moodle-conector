@@ -24,6 +24,9 @@ using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Registry;
 using MoodleConnector.Application.Courses;
 using MoodleConnector.Application.Activities;
+using MoodleConnector.Application.Risk.Queries;
+using MoodleConnector.Application.Participants;
+using MoodleConnector.Application.Submissions.Queries;
 using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
 using MoodleConnector.Presentation.Configuration;
@@ -785,6 +788,69 @@ app.MapGet("/api/portal/connections", async (
         new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), null));
     return Results.Ok(new PortalListEnvelope<PortalConnectionDto>(
         connections.ToArray(), new(1, connections.Count(), connections.Count(), connections.Any(), DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/pending", async (
+    string? connectionRef,
+    string? courseId,
+    string? type,
+    string? level,
+    string? studentId,
+    int? periodDays,
+    int? page,
+    int? pageSize,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    var generatedAt = DateTimeOffset.UtcNow;
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var effectiveConnectionRef = connectionRef ?? resolved.Alias;
+    if (string.IsNullOrWhiteSpace(courseId))
+    {
+        return Results.Ok(new PortalListEnvelope<PortalPendingDto>(
+            Array.Empty<PortalPendingDto>(), new(currentPage, size, 0, false, generatedAt, effectiveConnectionRef,
+                ["Selecione um curso para consultar pendências; nenhuma consulta agregada foi executada."])));
+    }
+
+    var userId = identity.Id.ToString();
+    var participants = await mediator.Send(new ListCourseParticipantsQuery(
+        userId, courseId, ParticipantStatusFilter.Active, 1, 100, true, false), cancellationToken);
+    if (participants is null) return PortalErrorResults.NotFound("course_not_found", "Curso não encontrado.");
+
+    var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(courseId, 0, 100), cancellationToken);
+    var inactivityDays = Math.Clamp(periodDays ?? 14, 1, 3650);
+    var cutoff = generatedAt.AddDays(-inactivityDays);
+    var accessRows = participants.Participants
+        .Where(student => string.IsNullOrWhiteSpace(studentId) || student.UserId == studentId)
+        .Where(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < cutoff)
+        .Select(student => new PortalPendingAccessRow(student.UserId, student.FullName, student.LastCourseAccessAt));
+    var submissionRows = pending.Students
+        .Where(student => string.IsNullOrWhiteSpace(studentId) || student.StudentId == studentId)
+        .SelectMany(student => student.PendingAssignments.Select(activity => new PortalPendingSourceRow(
+            student.StudentId, student.FullName, student.LastCourseAccessAt,
+            activity.AssignmentId, activity.AssignmentName, "pending_submission", activity.DueDate,
+            activity.IsOverdue, false)));
+
+    var allItems = PortalPendingContractMapper.Build(effectiveConnectionRef, courseId, submissionRows, accessRows, generatedAt);
+    var requestedLevel = level?.Trim().ToLowerInvariant();
+    var requestedType = type?.Trim().ToLowerInvariant();
+    var filtered = allItems
+        .Where(item => string.IsNullOrWhiteSpace(requestedType) || item.Type == requestedType)
+        .Where(item => string.IsNullOrWhiteSpace(requestedLevel) || item.Level == requestedLevel)
+        .ToArray();
+    var items = filtered.Skip((currentPage - 1) * size).Take(size).ToArray();
+    return Results.Ok(new PortalListEnvelope<PortalPendingDto>(
+        items, new(currentPage, size, items.Length, currentPage * size < filtered.Length, generatedAt, effectiveConnectionRef,
+            pending.Warning is null ? null : [pending.Warning])));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
 app.MapGet("/api/portal/courses", async (
@@ -2252,7 +2318,14 @@ public sealed record PortalIdentity(Guid Id, string Name, string Email, string? 
 public sealed record PortalEnvelope<T>(T Data, PortalMeta Meta);
 public sealed record PortalListEnvelope<T>(IReadOnlyList<T> Data, PortalListMeta Meta);
 public sealed record PortalMeta(DateTimeOffset GeneratedAt, string? ConnectionRef);
-public sealed record PortalListMeta(int Page, int PageSize, int Returned, bool HasMore, DateTimeOffset GeneratedAt, string? ConnectionRef);
+public sealed record PortalListMeta(
+    int Page,
+    int PageSize,
+    int Returned,
+    bool HasMore,
+    DateTimeOffset GeneratedAt,
+    string? ConnectionRef,
+    IReadOnlyList<string>? Warnings = null);
 public sealed record PortalSessionDto(bool Authenticated, PortalUserDto? User);
 public sealed record PortalUserDto(Guid Id, string Name, IReadOnlyList<string> Roles);
 public sealed record PortalConnectionDto(string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
