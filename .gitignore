@@ -57,5 +57,5 @@ appsettings.Development.json
 .moodlebench/cognitive/reports/*
 !.moodlebench/cognitive/reports/20260810_020821/
 !.moodlebench/cognitive/reports/20260810_020821/*
-!.moodlebench/cognitive/reports/20260810_025534/
-!.moodlebench/cognitive/reports/20260810_025534/*
+!.moodlebench/cognitive/reports/20260810_030252/
+!.moodlebench/cognitive/reports/20260810_030252/*

@@ -84,7 +84,7 @@ Redução determinística de Production contra Full: **2 tools, 1.939 bytes, 486
 
 O snapshot `Full` habilita explicitamente os dois tools demo feature-gated para medir o catálogo completo; `Production` mantém esses dois tools fora do descriptor. O probe valida deterministicamente que Full corresponde às 97 entradas catalogadas e Production às 95 expostas.
 
-Artefato: [schema-manifest.json](../../.moodlebench/cognitive/reports/20260810_025534/schema-manifest.json) e [schema-manifest.md](../../.moodlebench/cognitive/reports/20260810_025534/schema-manifest.md). O manifesto foi gerado no commit `8871a9a09351d657999ff6c4c918aced886fcb6a`.
+Artefato: [schema-manifest.json](../../.moodlebench/cognitive/reports/20260810_030252/schema-manifest.json) e [schema-manifest.md](../../.moodlebench/cognitive/reports/20260810_030252/schema-manifest.md). O manifesto foi gerado no commit `ed9a437deedd572998398102f669b1632c53469e`.
 
 ### Surface e classificação
 
