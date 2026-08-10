@@ -4,13 +4,37 @@
 
 # Moodle Connector MCP
 
+[![CI](https://github.com/Julioall/moodle-conector/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Julioall/moodle-conector/actions/workflows/ci.yml)
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
+
 Conector MCP não oficial para Moodle, criado para conectar o ChatGPT diretamente a vários ambientes Moodle. A ideia é permitir que professores, tutores, monitores e equipes acadêmicas consultem cursos, alunos, notas, pendências e informações operacionais sem precisar alternar entre várias telas e vários AVAs.
 
-Este projeto ainda está em construção e aceita contribuições. Sugestões, melhorias, correções, novas tools, testes e revisões de segurança são bem-vindos.
+**Status: Release Candidate**
 
-O conector já possui escritas confirmadas e limitadas, como publicação em fórum, mensagens individuais e nota/feedback de tarefa. Esses fluxos usam `PendingAction`, confirmação literal, escopo de escrita, conexão `CanWrite` e auditoria; a permissão Moodle contextual continua obrigatória. As flags versionadas para mensagens e notas individuais agora iniciam desabilitadas. Escrita geral de conteúdo, broadcast e agendamento não estão implementados.
+- Operações de leitura: estáveis e cobertas por testes.
+- Escritas controladas: disponíveis atrás de feature flags, confirmação humana e auditoria.
+- Arquitetura SKILL/Registry/Exposure: pronta para evolução funcional.
+- Otimização cognitiva da superfície MCP: experimental e deferida enquanto não houver quota de certificação.
+
+O projeto aceita contribuições, melhorias, correções, novas tools, testes e revisões de segurança.
+
+O conector já possui escritas confirmadas e limitadas, como publicação em fórum, mensagens individuais e nota/feedback de tarefa. Esses fluxos usam `PendingAction`, confirmação literal, escopo de escrita, conexão `CanWrite` e auditoria; a permissão Moodle contextual continua obrigatória. As flags de escrita são configuráveis por ambiente e devem ser revisadas conforme a política de menor privilégio. Escrita geral de conteúdo, broadcast e agendamento não estão implementados.
 
 > Este projeto não é oficial do Moodle HQ. Ele é uma integração independente baseada em MCP, ASP.NET Core, OAuth e APIs WebService do Moodle.
+
+## Em 20 segundos
+
+O Moodle Connector transforma o ChatGPT em uma interface operacional para Moodle:
+
+**Professor:** “Quais atividades ainda preciso corrigir?”
+
+**Moodle Connector:** identifica seus cursos, consulta assignments, encontra submissões pendentes e organiza o resultado por turma e prazo.
+
+**Professor:** “Avise os alunos que ainda não entregaram.”
+
+**Moodle Connector:** encontra a atividade, resolve os alunos pendentes, prepara as mensagens, solicita confirmação explícita e só então envia.
+
+Fluxos de acompanhamento, risco, mensagens, correção e relatórios seguem o mesmo princípio: contexto Moodle primeiro, ação sensível somente após revisão humana.
 
 ## Objetivo
 
@@ -175,7 +199,7 @@ envia o contexto necessário nos argumentos.
 
 ### 5. Sobre escrita e ações sensíveis
 
-As ferramentas de escrita ainda estão em desenvolvimento e devem seguir um fluxo seguro:
+As escritas controladas já estão disponíveis para fluxos específicos e devem seguir um fluxo seguro:
 
 1. a IA prepara uma prévia da ação;
 2. o professor ou usuário responsável revisa;
