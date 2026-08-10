@@ -2,8 +2,6 @@
   <img src="public/logo.png" alt="Moodle Connector" width="720">
 </p>
 
-# Moodle Connector MCP
-
 [![CI](https://github.com/Julioall/moodle-conector/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Julioall/moodle-conector/actions/workflows/ci.yml)
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 
