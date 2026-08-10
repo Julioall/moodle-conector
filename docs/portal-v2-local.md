@@ -21,7 +21,11 @@ O ambiente local habilita `PortalV2Enabled`, usa Postgres no próprio Compose e 
 docker compose -f docker-compose.local.yml ps
 Invoke-WebRequest http://127.0.0.1:8787/health/live
 Invoke-WebRequest http://127.0.0.1:8787/portal/
+
+npm --prefix src/MoodleConnector.Web run smoke:api
 ```
+
+O smoke de API cria uma conta descartável `example.test` no banco local e valida registro, sessão autenticada e Dashboard vazio. Ele recusa executar contra hosts que não sejam locais.
 
 Para parar:
 
