@@ -774,7 +774,10 @@ class Program
         var optimizedRow = rows.Single(row => row.Profile.Equals("C", StringComparison.OrdinalIgnoreCase));
         var coursesReduction = CalculateSchemaReduction(coursesSkillRow, optimizedRow);
 
-        if (fullRow != coursesSkillRow)
+        if (fullRow.ToolCount != coursesSkillRow.ToolCount
+            || fullRow.ToolSchemaTokens != coursesSkillRow.ToolSchemaTokens
+            || fullRow.ToolSchemaBytes != coursesSkillRow.ToolSchemaBytes
+            || !string.Equals(fullRow.ToolManifestHash, coursesSkillRow.ToolManifestHash, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Full and FullWithCoursesSkill must expose the same deterministic MCP surface.");
         }
