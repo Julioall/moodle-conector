@@ -777,6 +777,57 @@ app.MapGet("/api/portal/csrf", (HttpContext context, IAntiforgery antiforgery) =
     return Results.Ok(new { token = tokens.RequestToken });
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
 
+app.MapGet("/api/portal/tasks", async (HttpContext context, ConnectorDbContext dbContext, int page = 1, int pageSize = 20, string? status = null, string? priority = null, CancellationToken cancellationToken = default) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
+    var query = dbContext.PortalTasks.AsNoTracking().Where(x => x.OwnerId == identity.Id);
+    if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status);
+    if (!string.IsNullOrWhiteSpace(priority)) query = query.Where(x => x.Priority == priority);
+    var total = await query.CountAsync(cancellationToken);
+    var items = await query.OrderBy(x => x.DueAt).ThenByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new PortalTaskDto(x.Id, x.Title, x.Description, x.Status, x.Priority, x.DueAt, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
+    return Results.Ok(new PortalListEnvelope<PortalTaskDto>(items, new PortalListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/portal/tasks", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalTaskInput input, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
+    var now = DateTimeOffset.UtcNow;
+    var task = new PortalTaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), Status = NormalizeTaskStatus(input.Status), Priority = NormalizeTaskPriority(input.Priority), DueAt = input.DueAt, CreatedAt = now, UpdatedAt = now };
+    dbContext.PortalTasks.Add(task); await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Created($"/api/portal/tasks/{task.Id}", new PortalEnvelope<PortalTaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(now, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPatch("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, PortalTaskInput input, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    var task = await dbContext.PortalTasks.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
+    if (task is null) return Results.NotFound();
+    if (!string.IsNullOrWhiteSpace(input.Title)) task.Title = input.Title.Trim();
+    if (input.Description is not null) task.Description = input.Description.Trim();
+    if (input.Status is not null) task.Status = NormalizeTaskStatus(input.Status);
+    if (input.Priority is not null) task.Priority = NormalizeTaskPriority(input.Priority);
+    if (input.DueAt is not null) task.DueAt = input.DueAt;
+    task.UpdatedAt = DateTimeOffset.UtcNow; await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new PortalEnvelope<PortalTaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(task.UpdatedAt, null)));
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapDelete("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
+{
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    var task = await dbContext.PortalTasks.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
+    if (task is null) return Results.NotFound();
+    dbContext.PortalTasks.Remove(task); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
 app.MapGet("/api/portal/session", async (
     HttpContext context,
     IAccountService accountService,
@@ -1632,6 +1683,21 @@ static bool ConstantTimeEquals(string provided, string expected)
     var expectedBytes = Encoding.UTF8.GetBytes(expected);
     return CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes);
 }
+
+static string NormalizeTaskStatus(string? value) => value switch
+{
+    "in_progress" => "in_progress",
+    "done" => "done",
+    _ => "todo"
+};
+
+static string NormalizeTaskPriority(string? value) => value switch
+{
+    "low" => "low",
+    "high" => "high",
+    "urgent" => "urgent",
+    _ => "medium"
+};
 
 static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
 

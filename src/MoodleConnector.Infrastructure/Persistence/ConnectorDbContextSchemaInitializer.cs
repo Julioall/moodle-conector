@@ -13,6 +13,7 @@ public static class ConnectorDbContextSchemaInitializer
         new(Path.Combine("Database", "Scripts", "005_user_memories.sql"), true),
         new(Path.Combine("Database", "Scripts", "006_user_memory_documents.sql"), true),
         new(Path.Combine("Database", "Scripts", "007_universal_moodle_audit_fields.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "008_portal_tasks.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

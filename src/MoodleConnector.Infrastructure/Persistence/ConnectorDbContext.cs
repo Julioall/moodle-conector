@@ -11,6 +11,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
 {
     public DbSet<ConnectorClientCredentialEntity> ConnectorClients => Set<ConnectorClientCredentialEntity>();
     public DbSet<UserAccountEntity> UserAccounts => Set<UserAccountEntity>();
+    public DbSet<PortalTaskEntity> PortalTasks => Set<PortalTaskEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -61,6 +62,17 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         userEntity.Property(x => x.CreatedAtUtc).IsRequired();
         userEntity.Property(x => x.UpdatedAtUtc).IsRequired();
         userEntity.HasIndex(x => x.Email).IsUnique();
+
+        var portalTask = modelBuilder.Entity<PortalTaskEntity>();
+        portalTask.ToTable("portal_tasks");
+        portalTask.HasKey(x => x.Id);
+        portalTask.Property(x => x.Title).HasMaxLength(240).IsRequired();
+        portalTask.Property(x => x.Description).HasMaxLength(4000);
+        portalTask.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        portalTask.Property(x => x.Priority).HasMaxLength(32).IsRequired();
+        portalTask.Property(x => x.CreatedAt).IsRequired();
+        portalTask.Property(x => x.UpdatedAt).IsRequired();
+        portalTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
 
         var pendingAction = modelBuilder.Entity<PendingMoodleAction>();
         pendingAction.ToTable("moodle_pending_actions");
