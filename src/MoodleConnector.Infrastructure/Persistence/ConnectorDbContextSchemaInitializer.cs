@@ -20,6 +20,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "012_team_scoped_access.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "013_platform_permission_groups.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "014_backfill_platform_tool_permissions.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "015_grant_all_platform_permissions.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

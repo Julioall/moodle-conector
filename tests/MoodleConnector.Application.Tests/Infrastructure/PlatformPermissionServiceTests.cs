@@ -25,6 +25,22 @@ public sealed class PlatformPermissionServiceTests
     }
 
     [Fact]
+    public async Task NewUserReceivesAllPlatformPermissions()
+    {
+        await using var dbContext = CreateContext();
+        var userId = Guid.NewGuid();
+        var sut = new PlatformPermissionService(dbContext);
+
+        await sut.EnsureDefaultPermissionsAsync(userId, CancellationToken.None);
+
+        var permissions = await sut.GetEffectivePermissionsAsync(userId, CancellationToken.None);
+
+        Assert.Equal(
+            PlatformPermissionCatalog.All.OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase),
+            permissions);
+    }
+
+    [Fact]
     public async Task InvalidPermissionIsRejected()
     {
         await using var dbContext = CreateContext();
