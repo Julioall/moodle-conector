@@ -2033,9 +2033,7 @@ app.MapPost("/auth/login", async (
 
 app.MapGet("/auth/logout", () =>
 {
-    return Results.SignOut(
-        new AuthenticationProperties { RedirectUri = "/?loggedOut=1" },
-        authenticationSchemes: new[] { CookieAuthenticationDefaults.AuthenticationScheme });
+    return Results.SignOut(authenticationSchemes: new[] { CookieAuthenticationDefaults.AuthenticationScheme });
 });
 
 app.MapGet("/api/grading/batches", async (

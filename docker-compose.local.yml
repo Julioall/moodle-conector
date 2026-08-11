@@ -11,8 +11,6 @@
       Features__AppV2Enabled: "true"
       Postgres__ConnectionString: Host=postgres;Database=moodle_connector;Username=moodle_connector;Password=app-local-only
       ConnectorSecrets__EncryptionKeyBase64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-      MoodleApi__UseStubData: "true"
-      MoodleProxy__UseStubData: "true"
     ports:
       - "${APP_HTTP_PORT:-8787}:8080"
     volumes:
