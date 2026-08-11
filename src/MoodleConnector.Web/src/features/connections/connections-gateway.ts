@@ -1,4 +1,4 @@
-﻿import { createAppClient } from '../../integrations/http-client';
+﻿import { createAppClient } from '../../integrations/http/api-client';
 
 export type MoodleConnection = {
   connectionId?: string;
@@ -35,4 +35,5 @@ export const connectionsGateway = {
   dataSummary: async (connectionId: string) => createAppClient().get<{ memories: number; documents: number; moodleUserLinks: number; auditLogsRetained: number }>(`/api/connections/${encodeURIComponent(connectionId)}/data-summary`),
   remove: async (connectionId: string, deleteLinkedData: boolean, confirmationText?: string) => createAppClient().request<{ ok: boolean }>(`/api/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deleteLinkedData, confirmationText }) }),
 };
+
 

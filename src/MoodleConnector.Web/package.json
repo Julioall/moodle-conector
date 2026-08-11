@@ -10,9 +10,9 @@
     "test": "vitest run && npm run guard",
     "lint": "eslint .",
     "guard": "node scripts/no-production-integrations.mjs",
-    "smoke": "node scripts-smoke.mjs",
-    "smoke:api": "node scripts-api-smoke.mjs",
-    "smoke:e2e": "node scripts-e2e-smoke.mjs"
+    "smoke": "node scripts/app-smoke.mjs",
+    "smoke:api": "node scripts/app-api-smoke.mjs",
+    "smoke:e2e": "node scripts/app-e2e-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
@@ -92,4 +92,5 @@
     "vitest": "^3.2.4"
   }
 }
+
 

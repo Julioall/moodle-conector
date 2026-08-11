@@ -1,4 +1,4 @@
-﻿import { describe, expect, it, vi } from 'vitest'; import { createAppClient, AppHttpError } from '../integrations/http-client';
+﻿import { describe, expect, it, vi } from 'vitest'; import { createAppClient, AppHttpError } from '../integrations/http/api-client';
 describe('app client', () => { it('uses same-origin credentials and parses JSON', async () => { const fetcher=vi.fn().mockResolvedValue(new Response('{"ok":true}',{status:200})); await expect(createAppClient(fetcher).get('/api/session')).resolves.toEqual({ok:true}); expect(fetcher).toHaveBeenCalledWith('/api/session',expect.objectContaining({credentials:'same-origin',method:'GET'})); }); it('normalizes HTTP failures', async () => { const fetcher=vi.fn().mockResolvedValue(new Response('',{status:401})); await expect(createAppClient(fetcher).get('/api/session')).rejects.toMatchObject({status:401} satisfies Partial<AppHttpError>); }); it('uses the CSRF token returned by the endpoint for mutations', async () => { const fetcher=vi.fn().mockImplementation((path: string) => path === '/api/csrf' ? Promise.resolve(new Response('{"token":"fresh-token"}', { status: 200 })) : Promise.resolve(new Response('{"ok":true}', { status: 200 }))); await expect(createAppClient(fetcher).request('/api/connections', { method: 'POST' })).resolves.toEqual({ ok: true }); const mutationCall = fetcher.mock.calls.at(-1); expect((mutationCall?.[1] as RequestInit).headers).toBeInstanceOf(Headers); expect(((mutationCall?.[1] as RequestInit).headers as Headers).get('X-CSRF-TOKEN')).toBe('fresh-token'); }); });
 
 describe('app Wave B contracts', () => {
@@ -7,4 +7,5 @@ describe('app Wave B contracts', () => {
     await expect(createAppClient(fetcher).get('/api/session')).resolves.toMatchObject({ data: { authenticated: true }, meta: { generatedAt: expect.any(String) } });
   });
 });
+
 

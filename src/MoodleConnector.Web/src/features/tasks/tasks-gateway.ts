@@ -1,4 +1,4 @@
-﻿import { createAppClient, type AppClient } from '../../integrations/http-client';
+﻿import { createAppClient, type AppClient } from '../../integrations/http/api-client';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type Task = { id: string; title: string; description?: string; status: TaskStatus; priority: TaskPriority; dueAt?: string; createdAt: string; updatedAt: string };
@@ -12,5 +12,6 @@ export const createTasksGateway = (client: AppClient = createAppClient()) => ({
   remove: async (id: string) => { await client.get('/api/csrf'); return client.request<void>(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }); },
 });
 export const tasksGateway = createTasksGateway();
+
 
 

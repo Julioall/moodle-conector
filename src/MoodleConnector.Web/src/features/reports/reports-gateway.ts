@@ -1,4 +1,4 @@
-﻿import { createAppClient, type AppClient } from '../../integrations/http-client';
+﻿import { createAppClient, type AppClient } from '../../integrations/http/api-client';
 
 export type OperationalReport = { data: { openTasks: number; completedTasks: number; upcomingEvents: number; followupsRecorded: number; generatedAt: string }; meta: { generatedAt: string } };
 export type CourseOverviewReport = { data: { totalActiveStudents: number; studentsInactiveDays: number }; meta: { generatedAt: string } };
@@ -15,4 +15,5 @@ export const createReportsGateway = (client: AppClient = createAppClient()) => (
 });
 
 export const reportsGateway = createReportsGateway();
+
 

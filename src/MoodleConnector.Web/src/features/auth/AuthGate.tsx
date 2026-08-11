@@ -1,7 +1,7 @@
 ﻿import { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { sessionGateway } from '../../integrations/auth/session-gateway';
-import { AppHttpError } from '../../integrations/http-client';
+import { AppHttpError } from '../../integrations/http/api-client';
 import { AuthPage } from './AuthPage';
 
 export function AuthGate({ children }: { children: ReactNode }) {
@@ -11,4 +11,5 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (!session.data?.data.authenticated) return <AuthPage />;
   return <>{children}</>;
 }
+
 

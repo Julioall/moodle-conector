@@ -1,4 +1,4 @@
-﻿import { createAppClient } from '../../integrations/http-client';
+﻿import { createAppClient } from '../../integrations/http/api-client';
 
 type AccountResponse = { ok?: boolean; error?: string };
 
@@ -16,4 +16,5 @@ export const authGateway = {
   login: (email: string, password: string) => accountRequest('/api/account/login', { email, password }),
   register: (name: string, email: string, password: string) => accountRequest('/api/account/register', { name, email, password }),
 };
+
 

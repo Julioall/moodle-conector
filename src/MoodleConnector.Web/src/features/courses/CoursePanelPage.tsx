@@ -79,7 +79,7 @@ export function CoursePanelPage() {
             </TabsContent>
 
             <TabsContent value="students">
-              <Card><CardHeader><CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> Alunos do curso</CardTitle><CardDescription>Participantes limitados ao curso e Ã  conexÃ£o atuais.</CardDescription></CardHeader><CardContent>
+              <Card><CardHeader><CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> Alunos do curso</CardTitle><CardDescription>Participantes limitados ao curso e Ã  conexÃ£o atuais.</CardDescription></CardHeader><CardContent>
                 {students.isPending && <div className="space-y-3"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>}
                 {students.isError && <p role="alert" className="text-destructive">NÃ£o foi possÃ­vel carregar os alunos.</p>}
                 {students.isSuccess && students.data.data.length === 0 && <p className="text-sm text-muted-foreground">Nenhum aluno encontrado.</p>}
@@ -101,4 +101,5 @@ export function CoursePanelPage() {
     </main>
   );
 }
+
 

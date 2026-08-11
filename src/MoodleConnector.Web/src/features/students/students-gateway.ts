@@ -1,4 +1,4 @@
-﻿import { createAppClient } from '../../integrations/http-client';
+﻿import { createAppClient } from '../../integrations/http/api-client';
 
 export type StudentGrade = { itemId: string; name: string; grade?: number; maximum?: number; percentage?: number; feedback?: string; readOnly: boolean };
 export type StudentCourse = { connectionRef: string; courseId: string; name: string; url?: string; enrollmentStatus: string; progress?: number; lastCourseAccessAt?: string; grades: StudentGrade[] };
@@ -11,4 +11,5 @@ export const createStudentsGateway = (client = createAppClient()) => ({
   get: (connectionRef: string, courseId: string, studentId: string) => client.get<StudentResponse>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`),
 });
 export const studentsGateway = createStudentsGateway();
+
 
