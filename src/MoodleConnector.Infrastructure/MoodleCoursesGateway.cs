@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
@@ -19,9 +20,10 @@ internal sealed class MoodleCoursesGateway(
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMoodleBusinessFlowRegistry businessFlows,
     IMoodleResourceResolver resourceResolver,
-    ILogger<MoodleCoursesGateway> logger) : IMoodleCoursesGateway
+    ILogger<MoodleCoursesGateway>? logger = null) : IMoodleCoursesGateway
 {
     private readonly MoodleApiOptions _options = options.Value;
+    private readonly ILogger<MoodleCoursesGateway> _logger = logger ?? NullLogger<MoodleCoursesGateway>.Instance;
     private static readonly TimeSpan CourseListCacheDuration = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan CategoryCacheDuration = TimeSpan.FromMinutes(30);
 
@@ -160,7 +162,7 @@ internal sealed class MoodleCoursesGateway(
 
                 var moodleCourses = await GetCoursesAsync(credentials, moodleUserId, cancellationToken);
                 var categories = await GetCategoryPathsAsync(credentials, cancellationToken);
-                logger.LogInformation("Moodle courses loaded: {CourseCount}, categories: {CategoryCount}", moodleCourses.Count, categories.Count);
+                _logger.LogInformation("Moodle courses loaded: {CourseCount}, categories: {CategoryCount}", moodleCourses.Count, categories.Count);
                 return moodleCourses
                     .Select(course => new CourseSummary(
                         course.Id.ToString(CultureInfo.InvariantCulture),
@@ -198,11 +200,11 @@ internal sealed class MoodleCoursesGateway(
             }
             catch (MoodleApiException exception)
             {
-                logger.LogWarning(exception, "Moodle categories unavailable; courses will remain without category paths.");
+                _logger.LogWarning(exception, "Moodle categories unavailable; courses will remain without category paths.");
                 return new Dictionary<long, string>();
             }
             var categories = JsonSerializer.Deserialize<IReadOnlyList<CategoryDto>>(payload.GetRawText()) ?? [];
-            logger.LogInformation("Moodle categories loaded: {CategoryCount}", categories.Count);
+            _logger.LogInformation("Moodle categories loaded: {CategoryCount}", categories.Count);
             var byId = categories.ToDictionary(category => category.Id);
             var paths = new Dictionary<long, string>();
             string BuildPath(long id)
@@ -277,7 +279,7 @@ internal sealed class MoodleCoursesGateway(
             }
             catch (MoodleApiException exception)
             {
-                logger.LogWarning(exception, "Moodle enrolled courses fallback unavailable; keeping timeline courses.");
+                _logger.LogWarning(exception, "Moodle enrolled courses fallback unavailable; keeping timeline courses.");
             }
 
             return timelineCourses;
