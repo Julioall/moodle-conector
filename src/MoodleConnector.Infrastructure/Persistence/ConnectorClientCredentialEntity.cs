@@ -24,6 +24,10 @@ public sealed class ConnectorClientCredentialEntity
 
     public bool IsActive { get; set; } = true;
 
+    public string ValidationStatus { get; set; } = "unknown";
+
+    public DateTimeOffset? LastValidatedAtUtc { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;

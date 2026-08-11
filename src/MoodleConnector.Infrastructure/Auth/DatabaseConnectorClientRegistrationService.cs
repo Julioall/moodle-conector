@@ -35,7 +35,8 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         var now = DateTimeOffset.UtcNow;
         var clientId = request.ClientId.Trim();
         var alias = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleAlias);
-        var connectionId = BuildConnectionId(clientId, alias);
+        var normalizedBaseUrl = NormalizeBaseUrl(moodleBaseUri);
+        var connectionId = string.Empty;
 
         var existingConnections = await dbContext.ConnectorClients
             .Where(client => client.ClientId == clientId)
@@ -55,12 +56,19 @@ internal sealed class DatabaseConnectorClientRegistrationService(
             entity = canonicalMatches.SingleOrDefault();
         }
 
+        var duplicateUrl = existingConnections.FirstOrDefault(client =>
+            client.IsActive &&
+            string.Equals(NormalizeBaseUrl(new Uri(client.MoodleBaseUrl)), normalizedBaseUrl, StringComparison.OrdinalIgnoreCase) &&
+            (entity is null || client.Id != entity.Id));
+        if (duplicateUrl is not null)
+            throw new InvalidOperationException("Já existe uma conexão Moodle com esta URL nesta conta.");
+
         var replaced = entity is not null;
         if (entity is null)
         {
             entity = new ConnectorClientCredentialEntity
             {
-                Id = connectionId,
+                Id = Guid.NewGuid().ToString("N"),
                 ClientId = clientId,
                 CreatedAtUtc = now
             };
@@ -73,7 +81,7 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         entity.ApiKeyHash = hasExistingApiKey ? entity.ApiKeyHash : apiKeyHash;
         entity.ClientId = clientId;
         entity.MoodleAlias = alias;
-        entity.MoodleBaseUrl = NormalizeBaseUrl(moodleBaseUri);
+        entity.MoodleBaseUrl = normalizedBaseUrl;
         entity.MoodleUsernameEncrypted = secretProtector.Protect(request.MoodleUsername.Trim());
         entity.MoodlePasswordEncrypted = secretProtector.Protect(request.MoodlePassword);
         entity.MoodleTarget = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleTarget);
@@ -110,9 +118,4 @@ internal sealed class DatabaseConnectorClientRegistrationService(
         return builder.Uri.AbsoluteUri.TrimEnd('/');
     }
 
-    private static string BuildConnectionId(string clientId, string alias)
-    {
-        var id = $"{clientId}:{alias}";
-        return id.Length <= 64 ? id : $"{clientId[..Math.Min(clientId.Length, 36)]}:{alias[..Math.Min(alias.Length, 26)]}";
-    }
 }

@@ -84,7 +84,9 @@ internal sealed class AccountService(
                 client.MoodleAlias,
                 client.MoodleBaseUrl,
                 client.IsDefault,
-                client.CanWrite))
+                client.CanWrite,
+                client.ValidationStatus,
+                client.LastValidatedAtUtc))
             .ToArrayAsync(cancellationToken);
 
         return new AccountProfileDto(entity.Id, entity.Name, entity.Email, connections.Length > 0, apiKey, connections);
@@ -127,6 +129,11 @@ internal sealed class AccountService(
                 request.CanWrite),
             cancellationToken);
 
+        var connection = await dbContext.ConnectorClients
+            .SingleAsync(client => client.Id == result.ConnectionId && client.ClientId == clientId, cancellationToken);
+        connection.ValidationStatus = "active";
+        connection.LastValidatedAtUtc = DateTimeOffset.UtcNow;
+
         entity.ConnectorClientId = clientId;
         if (!string.IsNullOrWhiteSpace(result.ApiKey))
         {
@@ -142,6 +149,58 @@ internal sealed class AccountService(
                 : secretProtector.Unprotect(entity.ApiKeyEncrypted);
     }
 
+    public async Task<MoodleConnectionValidationDto> ValidateMoodleAsync(Guid userId, string moodleId, CancellationToken cancellationToken)
+    {
+        var account = await dbContext.UserAccounts
+            .FindAsync([userId], cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+
+        var clientId = account.ConnectorClientId ?? account.Id.ToString();
+        var connection = await dbContext.ConnectorClients
+            .FirstOrDefaultAsync(client => client.Id == moodleId && client.ClientId == clientId && client.IsActive, cancellationToken)
+            ?? throw new InvalidOperationException("Moodle não encontrado ou acesso negado.");
+
+        var status = "inactive";
+        var validatedAt = DateTimeOffset.UtcNow;
+        try
+        {
+            var username = secretProtector.Unprotect(connection.MoodleUsernameEncrypted);
+            var password = secretProtector.Unprotect(connection.MoodlePasswordEncrypted);
+            if (await moodleValidator.ValidateAsync(connection.MoodleBaseUrl, username, password, cancellationToken))
+                status = "active";
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            status = "inactive";
+        }
+
+        connection.ValidationStatus = status;
+        connection.LastValidatedAtUtc = validatedAt;
+        connection.UpdatedAtUtc = validatedAt;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new MoodleConnectionValidationDto(status, validatedAt);
+    }
+
+    public async Task<MoodleConnectionDataSummaryDto> GetMoodleDataSummaryAsync(Guid userId, string moodleId, CancellationToken cancellationToken)
+    {
+        var account = await dbContext.UserAccounts.FindAsync([userId], cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+        var clientId = account.ConnectorClientId ?? account.Id.ToString();
+        var connection = await dbContext.ConnectorClients.AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == moodleId && item.ClientId == clientId, cancellationToken)
+            ?? throw new InvalidOperationException("Moodle não encontrado ou acesso negado.");
+        var alias = connection.MoodleAlias;
+        var memories = await dbContext.UserMemories.CountAsync(item => item.OwnerSubject == clientId && item.MoodleAlias == alias, cancellationToken);
+        var documents = await dbContext.UserMemoryDocuments.CountAsync(item => item.OwnerSubject == clientId && item.MoodleAlias == alias, cancellationToken);
+        var links = await dbContext.MoodleUserLinks.CountAsync(item => item.Subject == clientId && item.MoodleAlias == alias, cancellationToken);
+        var audits = await dbContext.MoodleAuditLogs.CountAsync(item => item.ActorSubject == clientId && (item.MoodleConnectionId == moodleId || item.MoodleConnectionAlias == alias), cancellationToken);
+        return new MoodleConnectionDataSummaryDto(memories, documents, links, audits);
+    }
+
     public async Task UpdateMoodleAsync(UpdateMoodleAccountRequest request, CancellationToken cancellationToken)
     {
         var entity = await dbContext.UserAccounts
@@ -155,20 +214,34 @@ internal sealed class AccountService(
             ?? throw new InvalidOperationException("Moodle não encontrado ou acesso negado.");
 
         var moodleBaseUrl = NormalizeMoodleBaseUrl(request.MoodleBaseUrl);
-
-        if (!string.IsNullOrWhiteSpace(request.MoodleUsername) && !string.IsNullOrWhiteSpace(request.MoodlePassword))
+        var urlAlreadyUsed = await dbContext.ConnectorClients
+            .AsNoTracking()
+            .AnyAsync(c => c.ClientId == clientId && c.Id != clientEntity.Id && c.IsActive && c.MoodleBaseUrl == moodleBaseUrl, cancellationToken);
+        if (urlAlreadyUsed)
         {
+            throw new InvalidOperationException("Já existe uma conexão Moodle com esta URL nesta conta.");
+        }
+
+        var urlChanged = !string.Equals(clientEntity.MoodleBaseUrl, moodleBaseUrl, StringComparison.OrdinalIgnoreCase);
+        var credentialsUpdated = !string.IsNullOrWhiteSpace(request.MoodleUsername) && !string.IsNullOrWhiteSpace(request.MoodlePassword);
+
+        if (credentialsUpdated)
+        {
+            var username = request.MoodleUsername!.Trim();
+            var password = request.MoodlePassword!;
             var isValid = await moodleValidator.ValidateAsync(
                 moodleBaseUrl,
-                request.MoodleUsername.Trim(),
-                request.MoodlePassword,
+                username,
+                password,
                 cancellationToken);
 
             if (!isValid)
                 throw new InvalidOperationException("Credenciais do Moodle inválidas. Verifique seu usuário e senha.");
             
-            clientEntity.MoodleUsernameEncrypted = secretProtector.Protect(request.MoodleUsername.Trim());
-            clientEntity.MoodlePasswordEncrypted = secretProtector.Protect(request.MoodlePassword);
+            clientEntity.MoodleUsernameEncrypted = secretProtector.Protect(username);
+            clientEntity.MoodlePasswordEncrypted = secretProtector.Protect(password);
+            clientEntity.ValidationStatus = "active";
+            clientEntity.LastValidatedAtUtc = DateTimeOffset.UtcNow;
         }
 
         var normalizedAlias = MoodleConnectionAlias.NormalizeOrDefault(request.MoodleAlias);
@@ -191,6 +264,11 @@ internal sealed class AccountService(
         clientEntity.MoodleBaseUrl = moodleBaseUrl;
         clientEntity.CanWrite = request.CanWrite;
         clientEntity.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        if (urlChanged && !credentialsUpdated)
+        {
+            clientEntity.ValidationStatus = "unknown";
+            clientEntity.LastValidatedAtUtc = null;
+        }
 
         if (request.IsDefault)
         {
@@ -257,6 +335,9 @@ internal sealed class AccountService(
     }
 
     public async Task DeleteMoodleAsync(Guid userId, string moodleId, CancellationToken cancellationToken)
+        => await DeleteMoodleAsync(userId, moodleId, false, null, cancellationToken);
+
+    public async Task DeleteMoodleAsync(Guid userId, string moodleId, bool deleteLinkedData, string? confirmationText, CancellationToken cancellationToken)
     {
         var entity = await dbContext.UserAccounts
             .FindAsync([userId], cancellationToken)
@@ -267,6 +348,17 @@ internal sealed class AccountService(
         var clientEntity = await dbContext.ConnectorClients
             .FirstOrDefaultAsync(c => c.Id == moodleId && c.ClientId == clientId, cancellationToken)
             ?? throw new InvalidOperationException("Moodle não encontrado ou acesso negado.");
+
+        if (deleteLinkedData && !string.Equals(confirmationText?.Trim(), "EXCLUIR CONEXÃO E DADOS", StringComparison.Ordinal))
+            throw new InvalidOperationException("Digite EXCLUIR CONEXÃO E DADOS para confirmar a exclusão dos dados associados.");
+
+        if (deleteLinkedData)
+        {
+            await dbContext.UserMemories.Where(item => item.OwnerSubject == clientId && item.MoodleAlias == clientEntity.MoodleAlias).ExecuteDeleteAsync(cancellationToken);
+            await dbContext.UserMemoryDocuments.Where(item => item.OwnerSubject == clientId && item.MoodleAlias == clientEntity.MoodleAlias).ExecuteDeleteAsync(cancellationToken);
+            await dbContext.MoodleUserLinks.Where(item => item.Subject == clientId && item.MoodleAlias == clientEntity.MoodleAlias).ExecuteDeleteAsync(cancellationToken);
+            // Audit logs are retained for accountability and are never deleted here.
+        }
 
         dbContext.ConnectorClients.Remove(clientEntity);
 
