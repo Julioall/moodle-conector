@@ -1779,6 +1779,18 @@ app.MapGet("/api/permission-groups", async (
     return Results.Ok(new { ok = true, groups });
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
+app.MapGet("/api/permission-catalog", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    if (await ResolveAppIdentityAsync(context, dbContext, cancellationToken) is null) return Results.Unauthorized();
+    return Results.Ok(new
+    {
+        ok = true,
+        permissions = PlatformPermissionCatalog.All
+            .OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase)
+            .ToArray()
+    });
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
 app.MapPost("/api/permission-groups", async (
     CreatePermissionGroupInput input,
     HttpContext context,
