@@ -1,4 +1,4 @@
-﻿import {
+import {
   BookOpen,
   CalendarDays,
   CheckSquare,
@@ -52,7 +52,7 @@ const communicationItems: SidebarNavItem[] = [
 ];
 
 const managementItems: SidebarNavItem[] = [
-  { title: 'RelatÃ³rios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
+  { title: 'Relatórios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
   { title: 'ConexÃµes Moodle', url: '/conexoes', icon: Plug, permission: APP_PERMISSIONS.SERVICES_VIEW },
 ];
 
