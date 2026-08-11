@@ -6,12 +6,9 @@ namespace MoodleConnector.Infrastructure;
 
 internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : IPlatformPermissionService
 {
-    private static readonly string[] DefaultPermissions =
-    [
-        "tool.assignments.view", "tool.messages.view", "tool.reports.view", "tool.courses.view",
-        "tool.students.view", "tool.classroom.view", "tool.followup.view", "tool.forums.view",
-        "tool.connections.manage", "tool.pedagogy.view"
-    ];
+    // Temporariamente, todos os usuários recebem o catálogo completo para manter
+    // os fluxos do conector operacionais enquanto o RBAC ainda está sendo validado.
+    private static readonly string[] DefaultPermissions = PlatformPermissionCatalog.All;
 
     public async Task EnsureDefaultPermissionsAsync(Guid userId, CancellationToken cancellationToken)
     {
