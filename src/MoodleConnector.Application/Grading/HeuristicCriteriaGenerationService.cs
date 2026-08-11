@@ -565,7 +565,7 @@ public sealed partial class HeuristicCriteriaGenerationService : ICriteriaGenera
     [GeneratedRegex(@"(?i)\b(?:crit[eé]rio(?:s)?\s+(?:de\s+)?avalia[cç][aã]o)\s*:\s*(?<content>.+?)(?:\n\s*\n|Produto\s+esperado|Entrega|Prazo|$)", RegexOptions.Singleline)]
     private static partial Regex CriteriosAvaliacaoRegex();
 
-    [GeneratedRegex(@"^\s*(?:[-*•]|\d+[\.)]|[a-zA-Z][\.)])\s*")]
+    [GeneratedRegex(@"^\s*(?:[-*.]|\d+[\.)]|[a-zA-Z][\.)])\s*")]
     private static partial Regex CriteriaPrefixRegex();
 
     [GeneratedRegex(@"(?i)\b(?:elabora[cç][aã]o|indica[cç][aã]o|apresenta[cç][aã]o|descri[cç][aã]o|compara[cç][aã]o|justifica[cç][aã]o|justificativa|aplica[cç][aã]o|adequa[cç][aã]o|identifica[cç][aã]o|an[aá]lise|rela[cç][aã]o|proposi[cç][aã]o|proposta|planejamento|demonstra[cç][aã]o|avalia[cç][aã]o|explica[cç][aã]o|classifica[cç][aã]o|defini[cç][aã]o|organiza[cç][aã]o|formula[cç][aã]o|cria[cç][aã]o|resposta|estrutura[cç][aã]o)\b")]

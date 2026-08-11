@@ -1,4 +1,4 @@
-﻿using MoodleConnector.Domain;
+using MoodleConnector.Domain;
 using MoodleConnector.Application.Risk.Queries;
 
 namespace MoodleConnector.Presentation;

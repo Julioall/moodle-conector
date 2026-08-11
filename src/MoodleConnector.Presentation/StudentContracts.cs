@@ -1,4 +1,4 @@
-﻿using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Gradebook.Queries;
 using MoodleConnector.Domain;
 
@@ -35,7 +35,7 @@ public static class StudentContractMapper
         else if ((DateTimeOffset.UtcNow - participant.LastCourseAccessAt.Value).TotalDays >= 14)
         {
             risk = "atencao";
-            factors.Add("Sem acesso ao curso hÃ¡ 14 dias ou mais");
+            factors.Add("Sem acesso ao curso há 14 dias ou mais");
         }
 
         return new(new(connectionRef, participant.UserId), connectionRef, participant.UserId,

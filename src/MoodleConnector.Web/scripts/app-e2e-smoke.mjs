@@ -1,4 +1,4 @@
-﻿import { request } from 'node:http';
+import { request } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 

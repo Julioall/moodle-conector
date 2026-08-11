@@ -183,7 +183,7 @@ public sealed partial class GradingContextBuilder(
 
                     // NÃO usar texto bruto do enunciado como critério direto.
                     // Quando ExtractCriteria retorna null e não há rubrica, o campo criteria
-                    // fica null — o HeuristicCriteriaGenerationService abaixo tenta gerar
+                    // fica null - o HeuristicCriteriaGenerationService abaixo tenta gerar
                     // critérios semânticos, e o StructuredGradingAnalysisService usa o
                     // assignmentStatement como contexto pedagógico (não como critérios).
                 }
@@ -455,6 +455,6 @@ public sealed partial class GradingContextBuilder(
     [GeneratedRegex(@"(?i)\b(?:entrega|prazo|observa[cç][oõ]es?|formato|refer[eê]ncias?|produto\s+esperado)\b")]
     private static partial Regex StopCriteriaRegex();
 
-    [GeneratedRegex(@"^\s*(?:[-*•]|\d+[\.)]|[a-zA-Z][\.)])\s*")]
+    [GeneratedRegex(@"^\s*(?:[-*.]|\d+[\.)]|[a-zA-Z][\.)])\s*")]
     private static partial Regex CriteriaPrefixRegex();
 }

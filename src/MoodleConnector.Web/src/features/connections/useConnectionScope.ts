@@ -1,4 +1,4 @@
-﻿import { useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { connectionsGateway, type MoodleConnection } from './connections-gateway';
@@ -60,6 +60,6 @@ export function useConnectionScope() {
 }
 
 export function connectionDisplayName(connection?: MoodleConnection) {
-  return connection?.alias || connection?.connectionRef || 'Moodle padrÃ£o';
+  return connection?.alias || connection?.connectionRef || 'Moodle padrão';
 }
 

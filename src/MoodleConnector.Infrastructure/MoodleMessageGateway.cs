@@ -72,7 +72,7 @@ internal sealed class MoodleMessageGateway(
         if (string.IsNullOrWhiteSpace(payload) ||
             string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
         {
-            // Empty response → assume all sent (some Moodle versions return null on success)
+            // Empty response ? assume all sent (some Moodle versions return null on success)
             return new MessageSendResult(true, requested.Count, 0, [], null);
         }
 
@@ -126,7 +126,7 @@ internal sealed class MoodleMessageGateway(
 
         if (sent == 0 && failed.Count == 0)
         {
-            // Couldn't parse — assume success
+            // Couldn't parse - assume success
             return new MessageSendResult(true, requested.Count, 0, [], null);
         }
 

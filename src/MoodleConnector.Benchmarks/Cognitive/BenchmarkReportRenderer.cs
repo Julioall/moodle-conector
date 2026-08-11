@@ -39,7 +39,7 @@ public static class BenchmarkReportRenderer
         sb.AppendLine();
         sb.AppendLine("| Profile | Exposure | Description |");
         sb.AppendLine("|---------|----------|-------------|");
-        sb.AppendLine("| **A** | Full (97 tools) | Baseline — todas as wrappers expostas |");
+        sb.AppendLine("| **A** | Full (97 tools) | Baseline - todas as wrappers expostas |");
         sb.AppendLine("| **B** | Full + courses SKILL | Baseline + SKILL hint, wrappers ainda visíveis |");
         sb.AppendLine("| **C** | SKILL focused | Wrappers R1/R2 de Courses escondidas |");
         sb.AppendLine();
@@ -97,19 +97,19 @@ public static class BenchmarkReportRenderer
         sb.AppendLine();
 
         // ----------------------------------------------------------------
-        // Gates — Profile B
+        // Gates - Profile B
         // ----------------------------------------------------------------
-        sb.AppendLine("## Gate Evaluation — Profile B vs Baseline A");
+        sb.AppendLine("## Gate Evaluation - Profile B vs Baseline A");
         sb.AppendLine();
         RenderGates(sb, report.GatesForProfileB);
         sb.AppendLine();
-        sb.AppendLine($"### Veredicto Profile B: **{(report.ProfileBApproved ? "✅ APPROVED" : "❌ REJECTED")}**");
+        sb.AppendLine($"### Veredicto Profile B: **{(report.ProfileBApproved ? "? APPROVED" : "? REJECTED")}**");
         sb.AppendLine();
 
         // ----------------------------------------------------------------
-        // Gates — Profile C
+        // Gates - Profile C
         // ----------------------------------------------------------------
-        sb.AppendLine("## Gate Evaluation — Profile C vs Baseline B");
+        sb.AppendLine("## Gate Evaluation - Profile C vs Baseline B");
         sb.AppendLine();
         RenderGates(sb, report.GatesForProfileC);
         sb.AppendLine();
@@ -176,7 +176,7 @@ public static class BenchmarkReportRenderer
         sb.AppendLine("|------|-----------|------------|-----------|--------|");
         foreach (var gate in gates)
         {
-            var icon = gate.Passed ? "✅" : "❌";
+            var icon = gate.Passed ? "?" : "?";
             sb.AppendLine($"| {gate.Description} | {gate.Threshold} | {gate.BaselineValue} | {gate.ProfileValue} | {icon} |");
         }
     }
@@ -186,13 +186,13 @@ public static class BenchmarkReportRenderer
         var failed = traces.Where(t => !t.Scoring.OverallSuccess).ToList();
         if (failed.Count == 0) return;
 
-        sb.AppendLine($"## Falhas — Profile {profileLabel}");
+        sb.AppendLine($"## Falhas - Profile {profileLabel}");
         sb.AppendLine();
         sb.AppendLine("| Task ID | Reason | Selection | Execution | Hallucination |");
         sb.AppendLine("|---------|--------|-----------|-----------|---------------|");
         foreach (var trace in failed)
         {
-            sb.AppendLine($"| `{trace.TaskId}` | {trace.Scoring.FailureReason} | {(trace.Scoring.WrongConnectionSelectionDetected ? "❌ Wrong" : "✅ OK")} | {(trace.Scoring.WrongConnectionExecutionDetected ? "❌ Wrong" : "✅ OK")} | {(trace.Scoring.HallucinationDetected ? "⚠️ Yes" : "No")} |");
+            sb.AppendLine($"| `{trace.TaskId}` | {trace.Scoring.FailureReason} | {(trace.Scoring.WrongConnectionSelectionDetected ? "? Wrong" : "? OK")} | {(trace.Scoring.WrongConnectionExecutionDetected ? "? Wrong" : "? OK")} | {(trace.Scoring.HallucinationDetected ? "?? Yes" : "No")} |");
         }
         sb.AppendLine();
     }
