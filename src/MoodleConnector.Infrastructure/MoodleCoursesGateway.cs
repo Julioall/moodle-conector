@@ -27,11 +27,32 @@ internal sealed class MoodleCoursesGateway(
         int limit,
         int page,
         CancellationToken cancellationToken)
+        => await GetMyCoursesAsync(userExternalId, limit, page, false, cancellationToken);
+
+    public async Task<PagedCourses> GetMyCoursesAsync(
+        string userExternalId,
+        int limit,
+        int page,
+        bool activeOnly,
+        CancellationToken cancellationToken)
     {
         var courses = await GetCachedCoursesAsync(userExternalId, cancellationToken);
+        if (activeOnly)
+        {
+            courses = courses.Where(IsInProgress).ToArray();
+        }
+
         var skip = (page - 1) * limit;
         var items = courses.Skip(skip).Take(limit).ToArray();
         return new PagedCourses(items, courses.Count, page, limit);
+    }
+
+    private static bool IsInProgress(CourseSummary course)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return course.Visible != false &&
+            (!course.StartDate.HasValue || course.StartDate.Value <= now) &&
+            (!course.EndDate.HasValue || course.EndDate.Value > now);
     }
 
     public async Task<IReadOnlyList<CourseSummary>> SearchMyCoursesAsync(

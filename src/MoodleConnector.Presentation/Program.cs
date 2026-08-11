@@ -1373,6 +1373,7 @@ app.MapGet("/api/portal/dashboard", async (
 
 app.MapGet("/api/portal/courses", async (
     string? connectionRef,
+    string? scope,
     int? page,
     int? pageSize,
     HttpContext context,
@@ -1397,7 +1398,8 @@ app.MapGet("/api/portal/courses", async (
                 ["Nenhuma conexão Moodle foi configurada para esta conta."])));
     }
     if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
+    var activeOnly = !string.Equals(scope, "all", StringComparison.OrdinalIgnoreCase);
+    var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage, activeOnly), cancellationToken);
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var data = result.Items.Select(course => PortalCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
     return Results.Ok(new PortalListEnvelope<PortalCourseDto>(data,

@@ -10,6 +10,14 @@ public interface IMoodleCoursesGateway
         int page,
         CancellationToken cancellationToken);
 
+    Task<PagedCourses> GetMyCoursesAsync(
+        string userExternalId,
+        int limit,
+        int page,
+        bool activeOnly,
+        CancellationToken cancellationToken) =>
+        GetMyCoursesAsync(userExternalId, limit, page, cancellationToken);
+
     Task<IReadOnlyList<CourseSummary>> SearchMyCoursesAsync(
         string userExternalId,
         string query,
