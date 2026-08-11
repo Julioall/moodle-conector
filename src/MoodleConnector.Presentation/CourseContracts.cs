@@ -1,6 +1,7 @@
 ﻿using MoodleConnector.Domain;
 
 public sealed record AppCourseRef(string ConnectionRef, string CourseId);
+public sealed record AppCourseHierarchyNodeDto(string Path, string Name, int Level, int CourseCount);
 public sealed record AppCourseDto(
     string ConnectionRef, string CourseId, string? IdNumber, string? ShortName,
     string FullName, string? DisplayName, string? CategoryName,

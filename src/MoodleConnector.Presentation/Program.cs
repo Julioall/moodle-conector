@@ -1422,6 +1422,44 @@ app.MapGet("/api/dashboard", async (
         new(generatedAt, effectiveConnectionRef)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
+app.MapGet("/api/schools", async (
+    string? connectionRef,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleCoursesGateway coursesGateway,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var nodes = await coursesGateway.GetMyCourseHierarchyAsync(identity.Id.ToString(), cancellationToken);
+    return Results.Ok(new { data = nodes, meta = new { generatedAt = DateTimeOffset.UtcNow, connectionRef = resolved.Alias } });
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/schools/courses", async (
+    string categoryPath,
+    string? connectionRef,
+    int? page,
+    int? pageSize,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleCoursesGateway coursesGateway,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 50, 1, 100);
+    var result = await coursesGateway.GetMyCoursesByCategoryAsync(identity.Id.ToString(), categoryPath, size, currentPage, cancellationToken);
+    var data = result.Items.Select(course => AppCourseContractMapper.ToDto(course, resolved.Alias)).ToArray();
+    return Results.Ok(new AppListEnvelope<AppCourseDto>(data, new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, resolved.Alias, null, result.TotalCount)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
 app.MapGet("/api/courses", async (
     string? connectionRef,
     int? page,
@@ -2271,7 +2309,7 @@ app.MapGet("/auth.html", (string? tab, string? error) =>
 });
 if (appV2Enabled)
 {
-    app.MapFallbackToFile("/{*path:nonfile}", "app/index.html");
+    app.MapFallbackToFile("/{*path:nonfile}", "index.html");
 }
 
 app.Run();

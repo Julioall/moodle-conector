@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
@@ -17,10 +18,40 @@ internal sealed class MoodleCoursesGateway(
     IMoodleFunctionCatalog functionCatalog,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMoodleBusinessFlowRegistry businessFlows,
-    IMoodleResourceResolver resourceResolver) : IMoodleCoursesGateway
+    IMoodleResourceResolver resourceResolver,
+    ILogger<MoodleCoursesGateway> logger) : IMoodleCoursesGateway
 {
     private readonly MoodleApiOptions _options = options.Value;
     private static readonly TimeSpan CourseListCacheDuration = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan CategoryCacheDuration = TimeSpan.FromMinutes(30);
+
+    public async Task<IReadOnlyList<CourseHierarchyNode>> GetMyCourseHierarchyAsync(string userExternalId, CancellationToken cancellationToken)
+    {
+        var courses = await GetCachedCoursesAsync(userExternalId, cancellationToken);
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var course in courses)
+        {
+            var parts = (course.CategoryName ?? "Sem categoria").Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            for (var length = 1; length <= parts.Length; length++)
+            {
+                var path = string.Join(" > ", parts.Take(length));
+                counts[path] = counts.TryGetValue(path, out var count) ? count + 1 : 1;
+            }
+        }
+
+        return counts
+            .Select(item => new CourseHierarchyNode(item.Key, item.Key.Split('>').Last().Trim(), item.Key.Count(character => character == '>'), item.Value))
+            .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    public async Task<PagedCourses> GetMyCoursesByCategoryAsync(string userExternalId, string categoryPath, int limit, int page, CancellationToken cancellationToken)
+    {
+        var courses = await GetCachedCoursesAsync(userExternalId, cancellationToken);
+        var filtered = courses.Where(course => string.Equals(course.CategoryName ?? "Sem categoria", categoryPath.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
+        var skip = (page - 1) * limit;
+        return new PagedCourses(filtered.Skip(skip).Take(limit).ToArray(), filtered.Length, page, limit);
+    }
 
     public async Task<PagedCourses> GetMyCoursesAsync(
         string userExternalId,
@@ -128,6 +159,8 @@ internal sealed class MoodleCoursesGateway(
                 entry.SlidingExpiration = TimeSpan.FromMinutes(3);
 
                 var moodleCourses = await GetCoursesAsync(credentials, moodleUserId, cancellationToken);
+                var categories = await GetCategoryPathsAsync(credentials, cancellationToken);
+                logger.LogInformation("Moodle courses loaded: {CourseCount}, categories: {CategoryCount}", moodleCourses.Count, categories.Count);
                 return moodleCourses
                     .Select(course => new CourseSummary(
                         course.Id.ToString(CultureInfo.InvariantCulture),
@@ -135,8 +168,8 @@ internal sealed class MoodleCoursesGateway(
                         course.ShortName,
                         course.FullName,
                         course.DisplayName,
-                        course.CategoryId,
-                        course.CategoryName,
+                        course.CategoryId ?? course.Category,
+                        course.CategoryName ?? ((course.CategoryId ?? course.Category) is long categoryId && categories.TryGetValue(categoryId, out var categoryPath) ? categoryPath : null),
                         ToDateTimeOffset(course.StartDate),
                         ToDateTimeOffset(course.EndDate),
                         ToBool(course.Visible),
@@ -148,6 +181,58 @@ internal sealed class MoodleCoursesGateway(
                         ToDateTimeOffset(course.TimeAccess)))
                     .ToArray();
             }) ?? [];
+    }
+
+    private async Task<IReadOnlyDictionary<long, string>> GetCategoryPathsAsync(
+        MoodleConnectorCredentials credentials,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = $"moodle:course-categories:{credentials.ConnectionId}";
+        return await cache.GetOrCreateAsync(cacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = CategoryCacheDuration;
+            JsonElement payload;
+            try
+            {
+                payload = await restClient.CallAsync(credentials, "core_course_get_categories", new Dictionary<string, object?>(), cancellationToken);
+            }
+            catch (MoodleApiException exception)
+            {
+                logger.LogWarning(exception, "Moodle categories unavailable; courses will remain without category paths.");
+                return new Dictionary<long, string>();
+            }
+            var categories = JsonSerializer.Deserialize<IReadOnlyList<CategoryDto>>(payload.GetRawText()) ?? [];
+            logger.LogInformation("Moodle categories loaded: {CategoryCount}", categories.Count);
+            var byId = categories.ToDictionary(category => category.Id);
+            var paths = new Dictionary<long, string>();
+            string BuildPath(long id)
+            {
+                if (paths.TryGetValue(id, out var cached)) return cached;
+                if (!byId.TryGetValue(id, out var category)) return string.Empty;
+
+                if (!string.IsNullOrWhiteSpace(category.Path))
+                {
+                    var pathNames = category.Path
+                        .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(value => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pathId) && byId.TryGetValue(pathId, out var pathCategory) ? pathCategory.Name.Trim() : string.Empty)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .ToArray();
+                    if (pathNames.Length > 0)
+                    {
+                        var resolvedPath = string.Join(" > ", pathNames);
+                        paths[id] = resolvedPath;
+                        return resolvedPath;
+                    }
+                }
+
+                var parent = category.Parent > 0 ? BuildPath(category.Parent) : string.Empty;
+                var path = string.IsNullOrWhiteSpace(parent) ? category.Name : $"{parent} > {category.Name}";
+                paths[id] = path;
+                return path;
+            }
+            foreach (var category in categories) _ = BuildPath(category.Id);
+            return paths;
+        }) ?? new Dictionary<long, string>();
     }
 
     private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(MoodleConnectorCredentials credentials, long moodleUserId, CancellationToken cancellationToken)
@@ -168,7 +253,34 @@ internal sealed class MoodleCoursesGateway(
                 },
                 cancellationToken);
             var timeline = JsonSerializer.Deserialize<TimelineCoursesResponseDto>(timelinePayload.GetRawText());
-            return timeline?.Courses ?? [];
+            var timelineCourses = timeline?.Courses ?? [];
+            if (timelineCourses.Count > 0 && timelineCourses.All(course => course.CategoryId is not null))
+            {
+                return timelineCourses;
+            }
+
+            try
+            {
+                var enrolledPayload = await restClient.CallAsync(
+                    credentials,
+                    "core_enrol_get_users_courses",
+                    new Dictionary<string, object?>
+                    {
+                        ["userid"] = moodleUserId.ToString(CultureInfo.InvariantCulture)
+                    },
+                    cancellationToken);
+                var enrolledCourses = JsonSerializer.Deserialize<IReadOnlyList<CourseDto>>(enrolledPayload.GetRawText()) ?? [];
+                if (enrolledCourses.Count > 0)
+                {
+                    return enrolledCourses;
+                }
+            }
+            catch (MoodleApiException exception)
+            {
+                logger.LogWarning(exception, "Moodle enrolled courses fallback unavailable; keeping timeline courses.");
+            }
+
+            return timelineCourses;
         }
 
         if (strategy?.StrategyName != "enrolled_courses_fallback")
@@ -355,6 +467,9 @@ internal sealed class MoodleCoursesGateway(
         [JsonPropertyName("categoryid")]
         public long? CategoryId { get; init; }
 
+        [JsonPropertyName("category")]
+        public long? Category { get; init; }
+
         [JsonPropertyName("categoryname")]
         public string? CategoryName { get; init; }
 
@@ -384,6 +499,21 @@ internal sealed class MoodleCoursesGateway(
 
         [JsonPropertyName("timeaccess")]
         public JsonElement TimeAccess { get; init; }
+    }
+
+    private sealed class CategoryDto
+    {
+        [JsonPropertyName("id")]
+        public long Id { get; init; }
+
+        [JsonPropertyName("name")]
+        public string Name { get; init; } = string.Empty;
+
+        [JsonPropertyName("parent")]
+        public long Parent { get; init; }
+
+        [JsonPropertyName("path")]
+        public string? Path { get; init; }
     }
 
     private sealed class CoursesByFieldResponseDto

@@ -134,6 +134,20 @@ internal static class LocalStubMoodleData
 
 internal sealed class LocalStubMoodleCoursesGateway : IMoodleCoursesGateway
 {
+    public Task<IReadOnlyList<CourseHierarchyNode>> GetMyCourseHierarchyAsync(string userExternalId, CancellationToken cancellationToken)
+    {
+        var path = LocalStubMoodleData.Course.CategoryName ?? "Sem categoria";
+        return Task.FromResult<IReadOnlyList<CourseHierarchyNode>>([new(path, path, 0, 1)]);
+    }
+
+    public Task<PagedCourses> GetMyCoursesByCategoryAsync(string userExternalId, string categoryPath, int limit, int page, CancellationToken cancellationToken)
+    {
+        var course = LocalStubMoodleData.Course;
+        var matches = string.Equals(course.CategoryName ?? "Sem categoria", categoryPath.Trim(), StringComparison.OrdinalIgnoreCase);
+        var items = matches && page == 1 ? new[] { course }.Take(Math.Max(limit, 1)).ToArray() : Array.Empty<CourseSummary>();
+        return Task.FromResult(new PagedCourses(items, matches ? 1 : 0, page, Math.Max(limit, 1)));
+    }
+
     public Task<PagedCourses> GetMyCoursesAsync(string userExternalId, int limit, int page, CancellationToken cancellationToken)
     {
         var safePage = Math.Max(page, 1);
