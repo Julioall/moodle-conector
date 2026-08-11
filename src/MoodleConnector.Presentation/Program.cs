@@ -1086,8 +1086,8 @@ app.MapGet("/api/portal/connections", async (
     if (profile is null) return Results.NotFound();
     context.Response.Headers.CacheControl = "no-store";
     var connections = profile.MoodleConnections.Select(connection => new PortalConnectionDto(
-        connection.Alias, connection.Alias, connection.BaseUrl, "unknown", connection.IsDefault,
-        new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), null));
+        connection.Id, connection.Alias, connection.Alias, connection.BaseUrl, connection.Status, connection.IsDefault,
+        new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), connection.LastValidatedAt));
     return Results.Ok(new PortalListEnvelope<PortalConnectionDto>(
         connections.ToArray(), new(1, 20, connections.Count(), false, DateTimeOffset.UtcNow, null, null, connections.Count())));
 }).RequireRateLimiting(PortalAuthRateLimitPolicy);
@@ -1136,13 +1136,82 @@ app.MapPost("/api/portal/connections", async (
         }
 
         return Results.Ok(new PortalConnectionDto(
+            connection.Id,
             connection.Alias,
             connection.Alias,
             connection.BaseUrl,
-            "unknown",
+            connection.Status,
             connection.IsDefault,
             new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(),
-            null));
+            connection.LastValidatedAt));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPut("/api/portal/connections/{id}", async (
+    string id,
+    UpdateMoodleInput input,
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    await antiforgery.ValidateRequestAsync(context);
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(input.MoodleAlias) || string.IsNullOrWhiteSpace(input.MoodleBaseUrl))
+        return Results.BadRequest(new { ok = false, error = "Preencha alias e URL do Moodle." });
+    try
+    {
+        await accountService.UpdateMoodleAsync(new UpdateMoodleAccountRequest(identity.Id, id, input.MoodleAlias, input.MoodleBaseUrl, input.MoodleUsername, input.MoodlePassword, input.IsDefault, input.CanWrite), cancellationToken);
+        var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
+        var connection = profile?.MoodleConnections.FirstOrDefault(item => item.Id == id);
+        return connection is null ? Results.NotFound() : Results.Ok(new PortalConnectionDto(connection.Id, connection.Alias, connection.Alias, connection.BaseUrl, connection.Status, connection.IsDefault, new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), connection.LastValidatedAt));
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapGet("/api/portal/connections/{id}/data-summary", async (string id, HttpContext context, IAccountService accountService, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    try { return Results.Ok(await accountService.GetMoodleDataSummaryAsync(identity.Id, id, cancellationToken)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapDelete("/api/portal/connections/{id}", async (string id, [FromBody] PortalDeleteConnectionInput input, HttpContext context, IAccountService accountService, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    await antiforgery.ValidateRequestAsync(context);
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    try { await accountService.DeleteMoodleAsync(identity.Id, id, input.DeleteLinkedData, input.ConfirmationText, cancellationToken); return Results.Ok(new { ok = true }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+
+app.MapPost("/api/portal/connections/{id}/validate", async (
+    string id,
+    HttpContext context,
+    IAccountService accountService,
+    ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    await antiforgery.ValidateRequestAsync(context);
+    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    try
+    {
+        var validation = await accountService.ValidateMoodleAsync(identity.Id, id, cancellationToken);
+        return Results.Ok(new { status = validation.Status, lastValidatedAt = validation.LastValidatedAt });
     }
     catch (InvalidOperationException ex)
     {
@@ -2881,7 +2950,8 @@ public static class PortalPermissionCatalog
         DashboardView, CoursesView, StudentsView, StudentsFollowupWrite, TasksManage,
         AgendaManage, MessagesPrepare, ReportsView, ConnectionsManage, SettingsView, AdminView];
 }
-public sealed record PortalConnectionDto(string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
+public sealed record PortalConnectionDto(string ConnectionId, string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
+public sealed record PortalDeleteConnectionInput(bool DeleteLinkedData, string? ConfirmationText);
 
 public partial class Program;
 

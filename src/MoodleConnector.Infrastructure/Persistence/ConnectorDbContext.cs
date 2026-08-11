@@ -47,6 +47,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         entity.Property(x => x.IsDefault).IsRequired();
         entity.Property(x => x.IsActive).IsRequired();
         entity.Property(x => x.CanWrite).IsRequired();
+        entity.Property(x => x.ValidationStatus).HasMaxLength(32).IsRequired();
+        entity.Property(x => x.LastValidatedAtUtc);
         entity.Property(x => x.CreatedAtUtc).IsRequired();
         entity.Property(x => x.UpdatedAtUtc).IsRequired();
 

@@ -57,6 +57,7 @@ env:
   POSTGRES_DB: ${{ vars.POSTGRES_DB || 'moodle_connector' }}
   POSTGRES_USER: ${{ vars.POSTGRES_USER || 'moodle_connector' }}
   COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME || 'moodle-connector' }}
+  RESET_DATABASE_ON_DEPLOY: ${{ vars.RESET_DATABASE_ON_DEPLOY || 'true' }}
   VPS_AUTH_SECRET: ${{ secrets.VPS_SSH_KEY }}
 
 jobs:
@@ -140,6 +141,7 @@ jobs:
 
           require_bool MCP_REQUIRE_JWT "$MCP_REQUIRE_JWT"
           require_bool MCP_REQUIRE_API_KEY "$MCP_REQUIRE_API_KEY"
+          require_bool RESET_DATABASE_ON_DEPLOY "$RESET_DATABASE_ON_DEPLOY"
           require_bool OAUTH_REQUIRE_HTTPS_METADATA "$OAUTH_REQUIRE_HTTPS_METADATA"
           require_int_range APP_PORT "$APP_PORT" 1 65535
           require_int_range VPS_SSH_PORT "$VPS_SSH_PORT" 1 65535
@@ -459,6 +461,16 @@ jobs:
           fi
 
           \$DOCKER compose --env-file .env.production down --remove-orphans || true
+          if [ '$RESET_DATABASE_ON_DEPLOY' = 'true' ]; then
+            echo 'Development data policy: resetting the PostgreSQL volume before deploy.'
+            DB_VOLUMES="\$(\$DOCKER volume ls -q --filter label=com.docker.compose.project='$COMPOSE_PROJECT_NAME' --filter label=com.docker.compose.volume=postgres-data)"
+            if [ -z "\$DB_VOLUMES" ]; then
+              DB_VOLUMES="'$COMPOSE_PROJECT_NAME'_postgres-data"
+            fi
+            for DB_VOLUME in \$DB_VOLUMES; do
+              \$DOCKER volume rm "\$DB_VOLUME" >/dev/null 2>&1 || true
+            done
+          fi
           \$DOCKER rm -f moodle-connector-app moodle-connector-caddy >/dev/null 2>&1 || true
           timeout 1800s \$DOCKER compose --env-file .env.production up -d --build --remove-orphans
           \$DOCKER compose --env-file .env.production ps

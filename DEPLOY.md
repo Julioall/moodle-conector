@@ -126,6 +126,7 @@ Variables opcionais:
 - `POSTGRES_DB` - padrão `moodle_connector`
 - `POSTGRES_USER` - padrão `moodle_connector`
 - `COMPOSE_PROJECT_NAME` - padrão `moodle-connector`
+- `RESET_DATABASE_ON_DEPLOY` - padrão `true` durante o desenvolvimento; quando `true`, o deploy remove somente o volume PostgreSQL remoto antes de subir a aplicação.
 
 O workflow sincroniza o código para a VPS, escreve `.env.production` remoto e executa:
 
@@ -143,7 +144,11 @@ Antes do deploy, o workflow valida:
 - `CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64` decodificando para exatamente 32 bytes;
 - ausência de quebras de linha em secrets e variáveis que são gravadas no `.env.production`.
 
-Para migrar de uma stack de desenvolvimento anterior, rode o cleanup destrutivo uma vez ou valide manualmente se o schema existente é compatível antes do primeiro deploy desta versão. A aplicação aplica o baseline versionado `Database/Scripts/001_initial_schema.sql`, que cria as tabelas da aplicação e do OpenIddict de forma idempotente.
+Enquanto a VPS estiver sendo usada somente para desenvolvimento, `RESET_DATABASE_ON_DEPLOY=true` limpa o volume do PostgreSQL em cada deploy da `main`. Isso apaga usuários, conexões, memórias, auditorias, tarefas e demais registros do banco. O CI de PR não toca na VPS.
+
+Essa política não deve ser usada em produção. Antes de preservar dados, altere a variável de ambiente do GitHub para `RESET_DATABASE_ON_DEPLOY=false` e valide o procedimento de backup/rollback.
+
+Como o banco de desenvolvimento é recriado a cada deploy, não criamos migrations evolutivas neste momento. O schema continua sendo aplicado pelos scripts versionados em `src/MoodleConnector.Infrastructure/Database/Scripts/`, de forma idempotente. Quando houver dados que precisem ser preservados, a política deverá mudar primeiro e só então migrations/alterações compatíveis deverão ser introduzidas.
 
 ## Cleanup Da VPS
 
