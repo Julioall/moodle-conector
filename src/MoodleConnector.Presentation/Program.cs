@@ -1636,6 +1636,7 @@ app.MapPost("/api/account/register", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IAccountService accountService,
+    IPlatformPermissionService platformPermissionService,
     CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(input.Name) ||
@@ -1651,7 +1652,7 @@ app.MapPost("/api/account/register", async (
         var account = await accountService.RegisterAsync(
             new RegisterAccountRequest(input.Name, input.Email, input.Password),
             cancellationToken);
-        await SignInAppAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
+        await SignInAppAccountAsync(context, dbContext, platformPermissionService, account.Id, account.Name, account.Email, cancellationToken);
 
         return Results.Ok(new
         {
@@ -1674,6 +1675,7 @@ app.MapPost("/api/account/login", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IAccountService accountService,
+    IPlatformPermissionService platformPermissionService,
     CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(input.Email) ||
@@ -1693,7 +1695,7 @@ app.MapPost("/api/account/login", async (
             statusCode: StatusCodes.Status401Unauthorized);
     }
 
-    await SignInAppAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
+    await SignInAppAccountAsync(context, dbContext, platformPermissionService, account.Id, account.Name, account.Email, cancellationToken);
     return Results.Ok(new
     {
         ok = true,
@@ -2045,6 +2047,7 @@ app.MapPost("/auth/login", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IAccountService accountService,
+    IPlatformPermissionService platformPermissionService,
     CancellationToken cancellationToken) =>
 {
     var form = await context.Request.ReadFormAsync(cancellationToken);
@@ -2065,7 +2068,7 @@ app.MapPost("/auth/login", async (
         return Results.Redirect($"/?{string.Join("&", qs)}");
     }
 
-    await SignInAppAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
+    await SignInAppAccountAsync(context, dbContext, platformPermissionService, account.Id, account.Name, account.Email, cancellationToken);
     return Results.Redirect(IsLocalReturnUrl(returnUrl) ? returnUrl : "/");
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -3039,8 +3042,12 @@ static async Task<AppIdentity?> ResolveAppIdentityAsync(
     return null;
 }
 
-static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext dbContext, Guid id, string name, string email, CancellationToken cancellationToken)
+static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext dbContext, IPlatformPermissionService platformPermissionService, Guid id, string name, string email, CancellationToken cancellationToken)
 {
+    // Existing accounts may predate the platform-permission groups. Reconcile the
+    // defaults before issuing claims so MCP tools do not receive a stale/empty set.
+    await platformPermissionService.EnsureDefaultPermissionsAsync(id, cancellationToken);
+
     var claims = new List<Claim>
     {
         new(ClaimTypes.NameIdentifier, id.ToString()),
