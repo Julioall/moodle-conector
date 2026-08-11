@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Building2, Search } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { connectionDisplayName, useConnectionScope } from '../connections/useConnectionScope';

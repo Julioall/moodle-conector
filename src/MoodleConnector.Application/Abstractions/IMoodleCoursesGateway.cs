@@ -4,9 +4,11 @@ namespace MoodleConnector.Application.Abstractions;
 
 public interface IMoodleCoursesGateway
 {
-    Task<IReadOnlyList<CourseHierarchyNode>> GetMyCourseHierarchyAsync(string userExternalId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<CourseHierarchyNode>> GetMyCourseHierarchyAsync(string userExternalId, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<CourseHierarchyNode>>([]);
 
-    Task<PagedCourses> GetMyCoursesByCategoryAsync(string userExternalId, string categoryPath, int limit, int page, CancellationToken cancellationToken);
+    Task<PagedCourses> GetMyCoursesByCategoryAsync(string userExternalId, string categoryPath, int limit, int page, CancellationToken cancellationToken) =>
+        Task.FromResult(new PagedCourses([], 0, page, limit));
 
     Task<PagedCourses> GetMyCoursesAsync(
         string userExternalId,
