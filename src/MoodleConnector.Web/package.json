@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "moodle-connector-web",
   "private": true,
   "version": "0.1.0",
@@ -10,9 +10,9 @@
     "test": "vitest run && npm run guard",
     "lint": "eslint .",
     "guard": "node scripts/no-production-integrations.mjs",
-    "smoke": "node scripts/portal-smoke.mjs",
-    "smoke:api": "node scripts/portal-api-smoke.mjs",
-    "smoke:e2e": "node scripts/portal-e2e-smoke.mjs"
+    "smoke": "node scripts-smoke.mjs",
+    "smoke:api": "node scripts-api-smoke.mjs",
+    "smoke:e2e": "node scripts-e2e-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
@@ -92,3 +92,4 @@
     "vitest": "^3.2.4"
   }
 }
+

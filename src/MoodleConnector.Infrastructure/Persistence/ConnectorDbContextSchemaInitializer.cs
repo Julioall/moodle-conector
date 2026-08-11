@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -13,9 +13,9 @@ public static class ConnectorDbContextSchemaInitializer
         new(Path.Combine("Database", "Scripts", "005_user_memories.sql"), true),
         new(Path.Combine("Database", "Scripts", "006_user_memory_documents.sql"), true),
         new(Path.Combine("Database", "Scripts", "007_universal_moodle_audit_fields.sql"), true)
-        ,new(Path.Combine("Database", "Scripts", "008_portal_tasks.sql"), true)
-        ,new(Path.Combine("Database", "Scripts", "009_portal_calendar_events.sql"), true)
-        ,new(Path.Combine("Database", "Scripts", "010_portal_followups.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "008_app_tasks.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "009_app_calendar_events.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "010_app_followups.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "011_moodle_connection_validation.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "012_team_scoped_access.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "013_platform_permission_groups.sql"), true)
@@ -46,3 +46,4 @@ public static class ConnectorDbContextSchemaInitializer
 
     private sealed record SchemaScriptPath(string RelativePath, bool Required);
 }
+

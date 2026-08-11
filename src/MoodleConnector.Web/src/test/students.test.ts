@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+﻿import { describe, expect, it, vi } from 'vitest';
 import { createStudentsGateway } from '../features/students/students-gateway';
 
 describe('Students gateway', () => {
@@ -8,7 +8,7 @@ describe('Students gateway', () => {
 
     await gateway.byCourse('senai-goias', 'course-1', 2);
 
-    expect(client.get).toHaveBeenCalledWith('/api/portal/courses/senai-goias/course-1/students?page=2&pageSize=20');
+    expect(client.get).toHaveBeenCalledWith('/api/courses/senai-goias/course-1/students?page=2&pageSize=20');
   });
 
   it('loads a read-only student profile using connectionRef and studentId', async () => {
@@ -17,7 +17,8 @@ describe('Students gateway', () => {
 
     const response = await gateway.get('senai/goias', 'course-1', 'student/42');
 
-    expect(client.get).toHaveBeenCalledWith('/api/portal/courses/senai%2Fgoias/course-1/students/student%2F42');
+    expect(client.get).toHaveBeenCalledWith('/api/courses/senai%2Fgoias/course-1/students/student%2F42');
     expect(response.data).toMatchObject({ connectionRef: 'senai-goias', studentId: '42', risk: 'normal' });
   });
 });
+

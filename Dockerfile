@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+﻿# syntax=docker/dockerfile:1
 
 FROM node:22-bookworm-slim AS web-build
 WORKDIR /web
@@ -19,7 +19,7 @@ RUN dotnet restore src/MoodleConnector.Presentation/MoodleConnector.Presentation
 
 COPY src/ src/
 COPY public/ public/
-COPY --from=web-build /web/dist/ src/MoodleConnector.Presentation/wwwroot/portal/
+COPY --from=web-build /web/dist/ src/MoodleConnector.Presentation/wwwroot/
 
 RUN dotnet publish src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj \
     --configuration Release \
@@ -38,9 +38,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV ASPNETCORE_URLS=http://+:8080
-ENV Features__PortalV2Enabled=true
+ENV Features__AppV2Enabled=true
 EXPOSE 8080
 
 COPY --from=build /app/publish ./
 
 ENTRYPOINT ["dotnet", "MoodleConnector.Presentation.dll"]
+

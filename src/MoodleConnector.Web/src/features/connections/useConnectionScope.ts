@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { connectionsGateway, type MoodleConnection } from './connections-gateway';
 
-const SELECTED_CONNECTION_KEY = 'portal:selected-connection';
+const SELECTED_CONNECTION_KEY = 'app:selected-connection';
 
 function readStoredConnection(): string | undefined {
   if (typeof window === 'undefined') return undefined;
@@ -12,7 +12,7 @@ function readStoredConnection(): string | undefined {
 
 export function useMoodleConnections() {
   return useQuery({
-    queryKey: ['portal', 'connections'],
+    queryKey: ['app', 'connections'],
     queryFn: connectionsGateway.list,
     staleTime: 60_000,
   });
@@ -60,5 +60,6 @@ export function useConnectionScope() {
 }
 
 export function connectionDisplayName(connection?: MoodleConnection) {
-  return connection?.alias || connection?.connectionRef || 'Moodle padrão';
+  return connection?.alias || connection?.connectionRef || 'Moodle padrÃ£o';
 }
+

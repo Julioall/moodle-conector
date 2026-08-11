@@ -60,7 +60,7 @@ using MoodleConnector.Presentation.Health;
 using MoodleConnector.Infrastructure.Reports;
 
 var builder = WebApplication.CreateBuilder(args);
-const string PortalAuthRateLimitPolicy = "portal-auth";
+const string AppAuthRateLimitPolicy = "app-auth";
 const string AdminApiRateLimitPolicy = "admin-api";
 
 builder.Services.AddHttpContextAccessor();
@@ -154,12 +154,12 @@ var rateLimitWindow = TimeSpan.FromSeconds(Math.Clamp(rateLimitOptions.WindowSec
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy(PortalAuthRateLimitPolicy, context =>
+    options.AddPolicy(AppAuthRateLimitPolicy, context =>
         RateLimitPartition.GetFixedWindowLimiter(
             GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = Math.Clamp(rateLimitOptions.PortalAuthPermitLimit, 1, 1000),
+                PermitLimit = Math.Clamp(rateLimitOptions.AppAuthPermitLimit, 1, 1000),
                 Window = rateLimitWindow,
                 QueueLimit = 0,
                 AutoReplenishment = true
@@ -225,7 +225,7 @@ builder.Services
     })
     .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
     {
-        options.Cookie.Name = "moodle-connector-portal";
+        options.Cookie.Name = "moodle-connector-app";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Lax;
         options.Cookie.SecurePolicy = requireHttpsMetadata
@@ -416,7 +416,7 @@ if (enabledConditionalToolContainers.Count > 0)
 }
 
 var app = builder.Build();
-var portalV2Enabled = builder.Configuration.GetValue<bool>("Features:PortalV2Enabled");
+var appV2Enabled = builder.Configuration.GetValue<bool>("Features:AppV2Enabled");
 
 // ToolMetadataRegistry is registered and pre-populated at startup.
 
@@ -431,8 +431,8 @@ app.Use(async (context, next) =>
     }
     context.TraceIdentifier = correlationId;
 
-    if (context.Request.Path.StartsWithSegments("/portal", StringComparison.OrdinalIgnoreCase) ||
-        context.Request.Path.StartsWithSegments("/api/portal", StringComparison.OrdinalIgnoreCase))
+    if (context.Request.Path.StartsWithSegments("", StringComparison.OrdinalIgnoreCase) ||
+        context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
     {
         context.Response.OnStarting(() =>
         {
@@ -451,7 +451,7 @@ app.Use(async (context, next) =>
     {
         await next();
     }
-    catch (AntiforgeryValidationException) when (context.Request.Path.StartsWithSegments("/api/portal", StringComparison.OrdinalIgnoreCase))
+    catch (AntiforgeryValidationException) when (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
     {
         if (context.Response.HasStarted) throw;
         context.Response.Clear();
@@ -524,9 +524,9 @@ app.Use(async (context, next) =>
                 claims.Add(new("scope", "moodle.write"));
             }
 
-            // API keys represent connector clients, not portal users. Keep their
+            // API keys represent connector clients, not app users. Keep their
             // explicit legacy read/write contract visible to the same central
-            // platform-permission gate used by JWT and portal identities.
+            // platform-permission gate used by JWT and app identities.
             foreach (var permission in PlatformPermissionCatalog.AllRead)
             {
                 claims.Add(new Claim("platform_permission", permission));
@@ -796,7 +796,7 @@ app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async 
         return Results.Redirect($"/auth/login?returnUrl={Uri.EscapeDataString(returnUrl)}");
     }
 
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null)
     {
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
@@ -838,17 +838,17 @@ app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async 
         authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
 
-// â”€â”€â”€ Portal API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ App API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-app.MapGet("/api/portal/csrf", (HttpContext context, IAntiforgery antiforgery) =>
+app.MapGet("/api/csrf", (HttpContext context, IAntiforgery antiforgery) =>
 {
     var tokens = antiforgery.GetAndStoreTokens(context);
     return Results.Ok(new { token = tokens.RequestToken });
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/tasks", async (HttpContext context, ConnectorDbContext dbContext, int page = 1, int pageSize = 20, string? status = null, string? priority = null, CancellationToken cancellationToken = default) =>
+app.MapGet("/api/tasks", async (HttpContext context, ConnectorDbContext dbContext, int page = 1, int pageSize = 20, string? status = null, string? priority = null, CancellationToken cancellationToken = default) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
     var query = dbContext.Tasks.AsNoTracking().Where(x => x.OwnerId == identity.Id);
@@ -856,50 +856,50 @@ app.MapGet("/api/portal/tasks", async (HttpContext context, ConnectorDbContext d
     if (!string.IsNullOrWhiteSpace(priority)) query = query.Where(x => x.Priority == priority);
     var total = await query.CountAsync(cancellationToken);
     var items = await query.OrderBy(x => x.DueAt).ThenByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new TaskDto(x.Id, x.Title, x.Description, x.Status, x.Priority, x.DueAt, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
-    return Results.Ok(new PortalListEnvelope<TaskDto>(items, new PortalListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Ok(new AppListEnvelope<TaskDto>(items, new AppListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/agenda", async (HttpContext context, ConnectorDbContext dbContext, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default) =>
+app.MapGet("/api/agenda", async (HttpContext context, ConnectorDbContext dbContext, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var start = from ?? DateTimeOffset.UtcNow.Date;
     var end = to ?? start.AddDays(30);
     var events = await dbContext.CalendarEvents.AsNoTracking().Where(x => x.OwnerId == identity.Id && x.StartAt >= start && x.StartAt < end).OrderBy(x => x.StartAt).Select(x => new CalendarEventDto(x.Id, x.Title, x.Description, x.StartAt, x.EndAt, x.Type, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
-    return Results.Ok(new PortalEnvelope<IReadOnlyList<CalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Ok(new AppEnvelope<IReadOnlyList<CalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/followups", async (HttpContext context, ConnectorDbContext dbContext, string? studentRef = null, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default) =>
+app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbContext, string? studentRef = null, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
     var query = dbContext.Followups.AsNoTracking().Where(x => x.OwnerId == identity.Id);
     if (!string.IsNullOrWhiteSpace(studentRef)) query = query.Where(x => x.StudentRef == studentRef);
     var total = await query.CountAsync(cancellationToken);
     var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new FollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)).ToListAsync(cancellationToken);
-    return Results.Ok(new PortalListEnvelope<FollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/reports/operational", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
+app.MapGet("/api/reports/operational", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var now = DateTimeOffset.UtcNow;
     var openTasks = await dbContext.Tasks.CountAsync(x => x.OwnerId == identity.Id && x.Status != "done", cancellationToken);
     var completedTasks = await dbContext.Tasks.CountAsync(x => x.OwnerId == identity.Id && x.Status == "done", cancellationToken);
     var upcomingEvents = await dbContext.CalendarEvents.CountAsync(x => x.OwnerId == identity.Id && x.StartAt >= now && x.StartAt < now.AddDays(30), cancellationToken);
     var followups = await dbContext.Followups.CountAsync(x => x.OwnerId == identity.Id, cancellationToken);
-    return Results.Ok(new PortalEnvelope<PortalOperationalReportDto>(new(openTasks, completedTasks, upcomingEvents, followups, now), new(now, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Ok(new AppEnvelope<AppOperationalReportDto>(new(openTasks, completedTasks, upcomingEvents, followups, now), new(now, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/reports/audit", async (
+app.MapGet("/api/reports/audit", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var generatedAt = DateTimeOffset.UtcNow;
     var actor = identity.Id.ToString();
@@ -908,11 +908,11 @@ app.MapGet("/api/portal/reports/audit", async (
     var completed = await query.CountAsync(log => log.Status == "success" || log.Status == "completed", cancellationToken);
     var failed = await query.CountAsync(log => log.Status == "failed" || log.Status == "error", cancellationToken);
     var confirmed = await query.CountAsync(log => log.PendingActionId != null, cancellationToken);
-    return Results.Ok(new PortalEnvelope<PortalAuditReportDto>(
+    return Results.Ok(new AppEnvelope<AppAuditReportDto>(
         new(total, completed, failed, confirmed, generatedAt), new(generatedAt, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/reports/course-overview/{connectionRef}/{courseId}", async (
+app.MapGet("/api/reports/course-overview/{connectionRef}/{courseId}", async (
     string connectionRef,
     string courseId,
     HttpContext context,
@@ -921,21 +921,21 @@ app.MapGet("/api/portal/reports/course-overview/{connectionRef}/{courseId}", asy
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var report = await mediator.Send(new GenerateCourseOverviewQuery(courseId), cancellationToken);
     var now = DateTimeOffset.UtcNow;
-    return Results.Ok(new PortalEnvelope<PortalCourseOverviewReportDto>(
+    return Results.Ok(new AppEnvelope<AppCourseOverviewReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalActiveStudents, report.StudentsWhoAccessed,
             report.StudentsNeverAccessed, report.StudentsInactiveDays, report.InactiveDaysThreshold,
             report.TotalGradedItems, report.AverageBelowMinimumPerStudent, report.SuggestedActionsForTutor, report.Warning),
         new(report.GeneratedAt, connectionRef)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/reports/weekly/{connectionRef}/{courseId}", async (
+app.MapGet("/api/reports/weekly/{connectionRef}/{courseId}", async (
     string connectionRef,
     string courseId,
     HttpContext context,
@@ -944,19 +944,19 @@ app.MapGet("/api/portal/reports/weekly/{connectionRef}/{courseId}", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var report = await mediator.Send(new GenerateWeeklyPerformanceReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
-    return Results.Ok(new PortalEnvelope<PortalWeeklyReportDto>(
+    return Results.Ok(new AppEnvelope<AppWeeklyReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.StudentsWithAttention,
             report.StudentsAtRisk, report.MinGradePercent, report.InactiveDaysThreshold, report.Warning),
         new(report.GeneratedAt, connectionRef)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/reports/completion/{connectionRef}/{courseId}", async (
+app.MapGet("/api/reports/completion/{connectionRef}/{courseId}", async (
     string connectionRef,
     string courseId,
     HttpContext context,
@@ -965,99 +965,99 @@ app.MapGet("/api/portal/reports/completion/{connectionRef}/{courseId}", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ReportsView)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var report = await mediator.Send(new GeneratePostExecutionReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
-    return Results.Ok(new PortalEnvelope<PortalCompletionReportDto>(
+    return Results.Ok(new AppEnvelope<AppCompletionReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.LikelyComplete,
             report.PendingRecovery, report.AtRisk, report.Unknown, report.MinGradePercent, report.Disclaimer, report.Warning),
         new(report.GeneratedAt, connectionRef)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/portal/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, PortalMessagePrepareInput input, CancellationToken cancellationToken) =>
+app.MapPost("/api/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, AppMessagePrepareInput input, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.MessagesPrepare)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (!Enum.TryParse<TutorMessageType>(input.MessageType, true, out var messageType)) return Results.BadRequest(new { error = new { code = "invalid_message_type", message = "Tipo de mensagem invÃ¡lido." } });
     if (input.RecipientIds is null || input.RecipientIds.Count == 0 || input.RecipientIds.Count > 100) return Results.BadRequest(new { error = new { code = "invalid_recipients", message = "Informe de 1 a 100 destinatÃ¡rios explÃ­citos." } });
     try
     {
         var preview = await mediator.Send(new PrepareTutorMessageCommand(input.CourseId, messageType, input.RecipientIds, input.CustomText), cancellationToken);
-        return Results.Ok(new PortalEnvelope<TutorMessagePreview>(preview, new(DateTimeOffset.UtcNow, null)));
+        return Results.Ok(new AppEnvelope<TutorMessagePreview>(preview, new(DateTimeOffset.UtcNow, null)));
     }
     catch (ArgumentException ex) { return Results.BadRequest(new { error = new { code = "invalid_message", message = ex.Message } }); }
     catch (InvalidOperationException ex) { return Results.Conflict(new { error = new { code = "message_disabled", message = ex.Message } }); }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/portal/messages/confirm", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, IMediator mediator, PortalMessageConfirmInput input, CancellationToken cancellationToken) =>
+app.MapPost("/api/messages/confirm", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, IMediator mediator, AppMessageConfirmInput input, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.MessagesPrepare)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText)) return Results.BadRequest(new { error = new { code = "invalid_confirmation", message = "ConfirmaÃ§Ã£o explÃ­cita Ã© obrigatÃ³ria." } });
     var result = await mediator.Send(new ConfirmTutorMessageCommand(input.PendingActionId, input.ConfirmationText), cancellationToken);
-    return Results.Ok(new PortalEnvelope<TutorMessageSendResult>(result, new(DateTimeOffset.UtcNow, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Ok(new AppEnvelope<TutorMessageSendResult>(result, new(DateTimeOffset.UtcNow, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/portal/followups", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, FollowupInput input, CancellationToken cancellationToken) =>
+app.MapPost("/api/followups", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, FollowupInput input, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.StudentsFollowupWrite)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.StudentsFollowupWrite)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.StudentRef) || string.IsNullOrWhiteSpace(input.Notes)) return Results.BadRequest(new { error = new { code = "invalid_followup", message = "Aluno e registro sÃ£o obrigatÃ³rios." } });
     var now = DateTimeOffset.UtcNow;
     var item = new FollowupEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, StudentRef = input.StudentRef.Trim(), CourseRef = input.CourseRef?.Trim(), Kind = NormalizeFollowupKind(input.Kind), Notes = input.Notes.Trim(), OccurredAt = input.OccurredAt ?? now, CreatedAt = now };
     dbContext.Followups.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/portal/followups/{item.Id}", new PortalEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt), new(now, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Created($"/api/followups/{item.Id}", new AppEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt), new(now, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/portal/agenda", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CalendarEventInput input, CancellationToken cancellationToken) =>
+app.MapPost("/api/agenda", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CalendarEventInput input, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.AgendaManage)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.AgendaManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "TÃ­tulo Ã© obrigatÃ³rio." } });
     var now = DateTimeOffset.UtcNow;
     var item = new CalendarEventEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), StartAt = input.StartAt, EndAt = input.EndAt, Type = NormalizeCalendarEventType(input.Type), CreatedAt = now, UpdatedAt = now };
     dbContext.CalendarEvents.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/portal/agenda/{item.Id}", new PortalEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt), new(now, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Created($"/api/agenda/{item.Id}", new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt), new(now, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapDelete("/api/portal/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
+app.MapDelete("/api/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.AgendaManage)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.AgendaManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     var item = await dbContext.CalendarEvents.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
     if (item is null) return Results.NotFound();
     dbContext.CalendarEvents.Remove(item); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/portal/tasks", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
+app.MapPost("/api/tasks", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.TasksManage)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.TasksManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "TÃ­tulo Ã© obrigatÃ³rio." } });
     var now = DateTimeOffset.UtcNow;
     var task = new TaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), Status = NormalizeTaskStatus(input.Status), Priority = NormalizeTaskPriority(input.Priority), DueAt = input.DueAt, CreatedAt = now, UpdatedAt = now };
     dbContext.Tasks.Add(task); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/portal/tasks/{task.Id}", new PortalEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(now, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Created($"/api/tasks/{task.Id}", new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(now, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPatch("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
+app.MapPatch("/api/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.TasksManage)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.TasksManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     var task = await dbContext.Tasks.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
@@ -1068,31 +1068,31 @@ app.MapPatch("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context,
     if (input.Priority is not null) task.Priority = NormalizeTaskPriority(input.Priority);
     if (input.DueAt is not null) task.DueAt = input.DueAt;
     task.UpdatedAt = DateTimeOffset.UtcNow; await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Ok(new PortalEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(task.UpdatedAt, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Ok(new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(task.UpdatedAt, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapDelete("/api/portal/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
+app.MapDelete("/api/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.TasksManage)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.TasksManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     var task = await dbContext.Tasks.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
     if (task is null) return Results.NotFound();
     dbContext.Tasks.Remove(task); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/session", async (
+app.MapGet("/api/session", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null)
     {
-        return Results.Json(new PortalEnvelope<PortalSessionDto>(
-            new(false, null), new PortalMeta(DateTimeOffset.UtcNow, null)), statusCode: StatusCodes.Status401Unauthorized);
+        return Results.Json(new AppEnvelope<AppSessionDto>(
+            new(false, null), new AppMeta(DateTimeOffset.UtcNow, null)), statusCode: StatusCodes.Status401Unauthorized);
     }
 
     var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
@@ -1107,30 +1107,30 @@ app.MapGet("/api/portal/session", async (
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase)
         .ToArray();
-    return Results.Ok(new PortalEnvelope<PortalSessionDto>(
-        new(true, new PortalUserDto(profile.Id, profile.Name, roles, permissions)),
+    return Results.Ok(new AppEnvelope<AppSessionDto>(
+        new(true, new AppUserDto(profile.Id, profile.Name, roles, permissions)),
         new(DateTimeOffset.UtcNow, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/connections", async (
+app.MapGet("/api/connections", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
     if (profile is null) return Results.NotFound();
     context.Response.Headers.CacheControl = "no-store";
-    var connections = profile.MoodleConnections.Select(connection => new PortalConnectionDto(
+    var connections = profile.MoodleConnections.Select(connection => new AppConnectionDto(
         connection.Id, connection.Alias, connection.Alias, connection.BaseUrl, connection.Status, connection.IsDefault,
         new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), connection.LastValidatedAt));
-    return Results.Ok(new PortalListEnvelope<PortalConnectionDto>(
+    return Results.Ok(new AppListEnvelope<AppConnectionDto>(
         connections.ToArray(), new(1, 20, connections.Count(), false, DateTimeOffset.UtcNow, null, null, connections.Count())));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/portal/connections", async (
+app.MapPost("/api/connections", async (
     ConnectMoodleInput input,
     HttpContext context,
     IAccountService accountService,
@@ -1138,10 +1138,10 @@ app.MapPost("/api/portal/connections", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    if (!HasAppPermission(context, AppPermissionCatalog.ConnectionsManage)) return Results.Forbid();
     await antiforgery.ValidateRequestAsync(context);
 
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     if (string.IsNullOrWhiteSpace(input.MoodleAlias) ||
@@ -1173,7 +1173,7 @@ app.MapPost("/api/portal/connections", async (
                 statusCode: StatusCodes.Status500InternalServerError);
         }
 
-        return Results.Ok(new PortalConnectionDto(
+        return Results.Ok(new AppConnectionDto(
             connection.Id,
             connection.Alias,
             connection.Alias,
@@ -1187,9 +1187,9 @@ app.MapPost("/api/portal/connections", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPut("/api/portal/connections/{id}", async (
+app.MapPut("/api/connections/{id}", async (
     string id,
     UpdateMoodleInput input,
     HttpContext context,
@@ -1198,9 +1198,9 @@ app.MapPut("/api/portal/connections/{id}", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    if (!HasAppPermission(context, AppPermissionCatalog.ConnectionsManage)) return Results.Forbid();
     await antiforgery.ValidateRequestAsync(context);
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(input.MoodleAlias) || string.IsNullOrWhiteSpace(input.MoodleBaseUrl))
         return Results.BadRequest(new { ok = false, error = "Preencha alias e URL do Moodle." });
@@ -1209,31 +1209,31 @@ app.MapPut("/api/portal/connections/{id}", async (
         await accountService.UpdateMoodleAsync(new UpdateMoodleAccountRequest(identity.Id, id, input.MoodleAlias, input.MoodleBaseUrl, input.MoodleUsername, input.MoodlePassword, input.IsDefault, input.CanWrite), cancellationToken);
         var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
         var connection = profile?.MoodleConnections.FirstOrDefault(item => item.Id == id);
-        return connection is null ? Results.NotFound() : Results.Ok(new PortalConnectionDto(connection.Id, connection.Alias, connection.Alias, connection.BaseUrl, connection.Status, connection.IsDefault, new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), connection.LastValidatedAt));
+        return connection is null ? Results.NotFound() : Results.Ok(new AppConnectionDto(connection.Id, connection.Alias, connection.Alias, connection.BaseUrl, connection.Status, connection.IsDefault, new[] { "read" }.Concat(connection.CanWrite ? new[] { "write" } : Array.Empty<string>()).ToArray(), connection.LastValidatedAt));
     }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/connections/{id}/data-summary", async (string id, HttpContext context, IAccountService accountService, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
+app.MapGet("/api/connections/{id}/data-summary", async (string id, HttpContext context, IAccountService accountService, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    if (!HasAppPermission(context, AppPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     try { return Results.Ok(await accountService.GetMoodleDataSummaryAsync(identity.Id, id, cancellationToken)); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapDelete("/api/portal/connections/{id}", async (string id, [FromBody] PortalDeleteConnectionInput input, HttpContext context, IAccountService accountService, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
+app.MapDelete("/api/connections/{id}", async (string id, [FromBody] AppDeleteConnectionInput input, HttpContext context, IAccountService accountService, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    if (!HasAppPermission(context, AppPermissionCatalog.ConnectionsManage)) return Results.Forbid();
     await antiforgery.ValidateRequestAsync(context);
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     try { await accountService.DeleteMoodleAsync(identity.Id, id, input.DeleteLinkedData, input.ConfirmationText, cancellationToken); return Results.Ok(new { ok = true }); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/portal/connections/{id}/validate", async (
+app.MapPost("/api/connections/{id}/validate", async (
     string id,
     HttpContext context,
     IAccountService accountService,
@@ -1241,9 +1241,9 @@ app.MapPost("/api/portal/connections/{id}/validate", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
-    if (!HasPortalPermission(context, PortalPermissionCatalog.ConnectionsManage)) return Results.Forbid();
+    if (!HasAppPermission(context, AppPermissionCatalog.ConnectionsManage)) return Results.Forbid();
     await antiforgery.ValidateRequestAsync(context);
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     try
@@ -1255,9 +1255,9 @@ app.MapPost("/api/portal/connections/{id}/validate", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/pending", async (
+app.MapGet("/api/pending", async (
     string? connectionRef,
     string? courseId,
     string? type,
@@ -1272,7 +1272,7 @@ app.MapGet("/api/portal/pending", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     var currentPage = Math.Max(page ?? 1, 1);
@@ -1285,23 +1285,23 @@ app.MapGet("/api/portal/pending", async (
     }
     catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
     {
-        return Results.Ok(new PortalListEnvelope<PortalPendingDto>(
-            Array.Empty<PortalPendingDto>(), new(currentPage, size, 0, false, generatedAt, null,
+        return Results.Ok(new AppListEnvelope<AppPendingDto>(
+            Array.Empty<AppPendingDto>(), new(currentPage, size, 0, false, generatedAt, null,
                 ["Nenhuma conexÃ£o Moodle foi configurada para esta conta."])));
     }
-    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     if (string.IsNullOrWhiteSpace(courseId))
     {
-        return Results.Ok(new PortalListEnvelope<PortalPendingDto>(
-            Array.Empty<PortalPendingDto>(), new(currentPage, size, 0, false, generatedAt, effectiveConnectionRef,
+        return Results.Ok(new AppListEnvelope<AppPendingDto>(
+            Array.Empty<AppPendingDto>(), new(currentPage, size, 0, false, generatedAt, effectiveConnectionRef,
                 ["Selecione um curso para consultar pendÃªncias; nenhuma consulta agregada foi executada."])));
     }
 
     var userId = identity.Id.ToString();
     var participants = await mediator.Send(new ListCourseParticipantsQuery(
         userId, courseId, ParticipantStatusFilter.Active, 1, 100, true, false), cancellationToken);
-    if (participants is null) return PortalErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
 
     var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(courseId, 0, 100), cancellationToken);
     var inactivityDays = Math.Clamp(periodDays ?? 14, 1, 3650);
@@ -1309,15 +1309,15 @@ app.MapGet("/api/portal/pending", async (
     var accessRows = participants.Participants
         .Where(student => string.IsNullOrWhiteSpace(studentId) || student.UserId == studentId)
         .Where(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < cutoff)
-        .Select(student => new PortalPendingAccessRow(student.UserId, student.FullName, student.LastCourseAccessAt));
+        .Select(student => new AppPendingAccessRow(student.UserId, student.FullName, student.LastCourseAccessAt));
     var submissionRows = pending.Students
         .Where(student => string.IsNullOrWhiteSpace(studentId) || student.StudentId == studentId)
-        .SelectMany(student => student.PendingAssignments.Select(activity => new PortalPendingSourceRow(
+        .SelectMany(student => student.PendingAssignments.Select(activity => new AppPendingSourceRow(
             student.StudentId, student.FullName, student.LastCourseAccessAt,
             activity.AssignmentId, activity.AssignmentName, "pending_submission", activity.DueDate,
             activity.IsOverdue, false)));
 
-    var allItems = PortalPendingContractMapper.Build(effectiveConnectionRef, courseId, submissionRows, accessRows, generatedAt);
+    var allItems = AppPendingContractMapper.Build(effectiveConnectionRef, courseId, submissionRows, accessRows, generatedAt);
     var requestedLevel = level?.Trim().ToLowerInvariant();
     var requestedType = type?.Trim().ToLowerInvariant();
     var filtered = allItems
@@ -1325,12 +1325,12 @@ app.MapGet("/api/portal/pending", async (
         .Where(item => string.IsNullOrWhiteSpace(requestedLevel) || item.Level == requestedLevel)
         .ToArray();
     var items = filtered.Skip((currentPage - 1) * size).Take(size).ToArray();
-    return Results.Ok(new PortalListEnvelope<PortalPendingDto>(
+    return Results.Ok(new AppListEnvelope<AppPendingDto>(
         items, new(currentPage, size, items.Length, currentPage * size < filtered.Length, generatedAt, effectiveConnectionRef,
             pending.Warning is null ? null : [pending.Warning], filtered.Length)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/dashboard", async (
+app.MapGet("/api/dashboard", async (
     string? connectionRef,
     string? courseId,
     HttpContext context,
@@ -1339,7 +1339,7 @@ app.MapGet("/api/portal/dashboard", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     var generatedAt = DateTimeOffset.UtcNow;
@@ -1350,11 +1350,11 @@ app.MapGet("/api/portal/dashboard", async (
     }
     catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
     {
-        return Results.Ok(new PortalEnvelope<PortalDashboardDto>(
-            PortalDashboardContractMapper.Empty(null, ["Nenhuma conexÃ£o Moodle foi configurada para esta conta."]),
+        return Results.Ok(new AppEnvelope<AppDashboardDto>(
+            AppDashboardContractMapper.Empty(null, ["Nenhuma conexÃ£o Moodle foi configurada para esta conta."]),
             new(generatedAt, null)));
     }
-    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var userId = identity.Id.ToString();
 
@@ -1362,54 +1362,54 @@ app.MapGet("/api/portal/dashboard", async (
     // Pending/risk indicators require a course scope and are intentionally not fanned out.
     if (string.IsNullOrWhiteSpace(courseId))
     {
-        var courses = await mediator.Send(new ListMyCoursesQuery(userId, PortalDashboardBudget.MaxCoursesRead, 1), cancellationToken);
+        var courses = await mediator.Send(new ListMyCoursesQuery(userId, AppDashboardBudget.MaxCoursesRead, 1), cancellationToken);
         var activeCourses = courses.Items.Count(course => course.Visible != false);
         var warnings = new List<string>();
         if (courses.HasNextPage) warnings.Add("O resumo de cursos estÃ¡ limitado a uma pÃ¡gina para manter o orÃ§amento de leitura.");
         warnings.Add("Selecione um curso para consultar pendÃªncias e indicadores de risco detalhados; nenhuma consulta por aluno foi executada.");
-        return Results.Ok(new PortalEnvelope<PortalDashboardDto>(
-            new(new PortalDashboardSummaryDto(activeCourses, 0, 0, 0, 0), [], [], [], effectiveConnectionRef, warnings),
+        return Results.Ok(new AppEnvelope<AppDashboardDto>(
+            new(new AppDashboardSummaryDto(activeCourses, 0, 0, 0, 0), [], [], [], effectiveConnectionRef, warnings),
             new(generatedAt, effectiveConnectionRef)));
     }
 
     var course = await mediator.Send(new GetCourseQuery(userId, courseId), cancellationToken);
-    if (course is null) return PortalErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (course is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
 
     var participants = await mediator.Send(new ListCourseParticipantsQuery(
-        userId, courseId, ParticipantStatusFilter.Active, 1, PortalDashboardBudget.MaxParticipantsRead, true, false), cancellationToken);
-    if (participants is null) return PortalErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+        userId, courseId, ParticipantStatusFilter.Active, 1, AppDashboardBudget.MaxParticipantsRead, true, false), cancellationToken);
+    if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
 
     var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
-        courseId, 0, PortalDashboardBudget.MaxParticipantsRead), cancellationToken);
+        courseId, 0, AppDashboardBudget.MaxParticipantsRead), cancellationToken);
     var pendingRows = pending.Students
-        .SelectMany(student => student.PendingAssignments.Select(activity => new PortalDashboardPriorityDto(
+        .SelectMany(student => student.PendingAssignments.Select(activity => new AppDashboardPriorityDto(
             $"{effectiveConnectionRef}:{courseId}:{student.StudentId}:{activity.AssignmentId}",
             "Entrega pendente",
             $"{student.FullName} Â· {activity.AssignmentName}",
             activity.IsOverdue ? "risk" : "attention", courseId, student.StudentId)))
         .OrderByDescending(item => item.Level == "risk")
         .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
-        .Take(PortalDashboardBudget.MaxPriorities)
+        .Take(AppDashboardBudget.MaxPriorities)
         .ToArray();
     var inactive = participants.Participants.Count(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < generatedAt.AddDays(-14));
     var dashboardWarnings = new List<string>();
     if (participants.HasMore) dashboardWarnings.Add("O indicador de alunos estÃ¡ limitado ao orÃ§amento de leitura do dashboard.");
     if (pending.Warning is not null) dashboardWarnings.Add(pending.Warning);
-    var summary = new PortalDashboardSummaryDto(
+    var summary = new AppDashboardSummaryDto(
         course.Visible == false ? 0 : 1,
         pending.Students.Sum(student => student.PendingAssignments.Count),
         0,
         inactive,
         inactive);
-    var recent = pendingRows.Take(PortalDashboardBudget.MaxActivities)
-        .Select(item => new PortalDashboardActivityDto(item.Key, item.Title, item.Detail, null, item.CourseId, item.StudentId))
+    var recent = pendingRows.Take(AppDashboardBudget.MaxActivities)
+        .Select(item => new AppDashboardActivityDto(item.Key, item.Title, item.Detail, null, item.CourseId, item.StudentId))
         .ToArray();
-    return Results.Ok(new PortalEnvelope<PortalDashboardDto>(
+    return Results.Ok(new AppEnvelope<AppDashboardDto>(
         new(summary, pendingRows, pendingRows, recent, effectiveConnectionRef, dashboardWarnings),
         new(generatedAt, effectiveConnectionRef)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/courses", async (
+app.MapGet("/api/courses", async (
     string? connectionRef,
     int? page,
     int? pageSize,
@@ -1419,7 +1419,7 @@ app.MapGet("/api/portal/courses", async (
     IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var currentPage = Math.Max(page ?? 1, 1);
     var size = Math.Clamp(pageSize ?? 20, 1, 100);
@@ -1430,92 +1430,92 @@ app.MapGet("/api/portal/courses", async (
     }
     catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
     {
-        return Results.Ok(new PortalListEnvelope<PortalCourseDto>(
-            Array.Empty<PortalCourseDto>(), new(currentPage, size, 0, false, DateTimeOffset.UtcNow, null,
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            Array.Empty<AppCourseDto>(), new(currentPage, size, 0, false, DateTimeOffset.UtcNow, null,
                 ["Nenhuma conexÃ£o Moodle foi configurada para esta conta."])));
     }
-    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
-    var data = result.Items.Select(course => PortalCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
-    return Results.Ok(new PortalListEnvelope<PortalCourseDto>(data,
+    var data = result.Items.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
+    return Results.Ok(new AppListEnvelope<AppCourseDto>(data,
         new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, effectiveConnectionRef, null, result.TotalCount)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/courses/{connectionRef}/{courseId}", async (
+app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
     string connectionRef, string courseId, HttpContext context, ConnectorDbContext dbContext,
     IMediator mediator, IConnectionRegistry connectionRegistry, CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
-    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var course = await mediator.Send(new GetCourseQuery(identity.Id.ToString(), courseId), cancellationToken);
     return course is null
-        ? PortalErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.")
-        : Results.Ok(new PortalEnvelope<PortalCourseDto>(PortalCourseContractMapper.ToDto(course, connectionRef), new(DateTimeOffset.UtcNow, connectionRef)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+        ? AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.")
+        : Results.Ok(new AppEnvelope<AppCourseDto>(AppCourseContractMapper.ToDto(course, connectionRef), new(DateTimeOffset.UtcNow, connectionRef)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/activities", async (
+app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
     string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
-    if (resolved is null) return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var result = await mediator.Send(new ListCourseActivitiesQuery(identity.Id.ToString(), courseId, CourseActivityModuleTypes.All, false), cancellationToken);
-    if (result is null) return PortalErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (result is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
     var data = result.Activities.Skip((currentPage - 1) * size).Take(size)
-        .Select(activity => PortalCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray();
-    return Results.Ok(new PortalListEnvelope<PortalActivityDto>(data,
+        .Select(activity => AppCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray();
+    return Results.Ok(new AppListEnvelope<AppActivityDto>(data,
         new(currentPage, size, data.Length, currentPage * size < result.Total, DateTimeOffset.UtcNow, connectionRef, null, result.Total)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/students", async (
+app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
     string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
     var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, currentPage, size, true, true), cancellationToken);
-    if (paged is null) return PortalErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (paged is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
     var data = paged.Participants
         .Select(participant => StudentContractMapper.ToDto(connectionRef, participant,
             new[] { new StudentCourseDto(connectionRef, courseId, courseId, null,
                 participant.Suspended == true ? "suspenso" : "ativo", null,
                 participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) }))
         .ToArray();
-    return Results.Ok(new PortalListEnvelope<StudentDto>(data,
+    return Results.Ok(new AppListEnvelope<StudentDto>(data,
         new(currentPage, size, data.Length, paged.HasMore,
             DateTimeOffset.UtcNow, connectionRef, null, null)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/portal/courses/{connectionRef}/{courseId}/students/{studentId}", async (
+app.MapGet("/api/courses/{connectionRef}/{courseId}/students/{studentId}", async (
     string connectionRef, string courseId, string studentId, HttpContext context, ConnectorDbContext dbContext,
     IMediator mediator, IConnectionRegistry connectionRegistry, CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return PortalErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
     var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, 1, 1000, true, true), cancellationToken);
     var participant = paged?.Participants.FirstOrDefault(p => p.UserId == studentId);
-    if (participant is null) return PortalErrorResults.NotFound("student_not_found", "Aluno nÃ£o encontrado neste curso.");
+    if (participant is null) return AppErrorResults.NotFound("student_not_found", "Aluno nÃ£o encontrado neste curso.");
     var gradeItems = await mediator.Send(new GetStudentGradeItemsQuery(courseId, studentId), cancellationToken);
     var courseDtos = new[] { new StudentCourseDto(connectionRef, courseId, courseId, null,
         participant.Suspended == true ? "suspenso" : "ativo", null,
         participant.LastCourseAccessAt,
         gradeItems?.Items.Select(StudentContractMapper.ToGradeDto).ToArray() ?? Array.Empty<StudentGradeDto>()) };
     var studentDto = StudentContractMapper.ToDto(connectionRef, participant, courseDtos);
-    return Results.Ok(new PortalEnvelope<StudentDto>(studentDto, new(DateTimeOffset.UtcNow, connectionRef)));
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+    return Results.Ok(new AppEnvelope<StudentDto>(studentDto, new(DateTimeOffset.UtcNow, connectionRef)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/info", (IOptions<MoodleApiOptions> moodleOpts) => Results.Ok(new
 {
@@ -1600,7 +1600,7 @@ app.MapPost("/api/account/register", async (
         var account = await accountService.RegisterAsync(
             new RegisterAccountRequest(input.Name, input.Email, input.Password),
             cancellationToken);
-        await SignInPortalAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
+        await SignInAppAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
 
         return Results.Ok(new
         {
@@ -1616,7 +1616,7 @@ app.MapPost("/api/account/register", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/account/login", async (
     LoginInput input,
@@ -1642,7 +1642,7 @@ app.MapPost("/api/account/login", async (
             statusCode: StatusCodes.Status401Unauthorized);
     }
 
-    await SignInPortalAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
+    await SignInAppAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
     return Results.Ok(new
     {
         ok = true,
@@ -1651,7 +1651,7 @@ app.MapPost("/api/account/login", async (
         account.Email,
         account.HasMoodleConnected
     });
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/account/me", async (
     HttpContext context,
@@ -1659,7 +1659,7 @@ app.MapGet("/api/account/me", async (
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     context.Response.Headers.CacheControl = "no-store";
@@ -1678,7 +1678,7 @@ app.MapGet("/api/account/me", async (
         hasApiKey = !string.IsNullOrWhiteSpace(profile.ApiKey),
         profile.MoodleConnections
     });
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/teams", async (
     HttpContext context,
@@ -1686,12 +1686,12 @@ app.MapGet("/api/teams", async (
     ITeamAccessService teamAccessService,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     var teams = await teamAccessService.GetTeamsAsync(identity.Id, cancellationToken);
     return Results.Ok(new { ok = true, teams });
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/teams/{teamId:guid}/invitations", async (
     Guid teamId,
@@ -1702,7 +1702,7 @@ app.MapPost("/api/teams/{teamId:guid}/invitations", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
 
@@ -1730,7 +1730,7 @@ app.MapPost("/api/teams/{teamId:guid}/invitations", async (
     {
         return Results.Forbid();
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/team-invitations/accept", async (
     TeamInvitationAcceptInput input,
@@ -1739,7 +1739,7 @@ app.MapPost("/api/team-invitations/accept", async (
     ITeamAccessService teamAccessService,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(input.Token))
         return Results.BadRequest(new { ok = false, error = "Informe o token do convite." });
@@ -1753,7 +1753,7 @@ app.MapPost("/api/team-invitations/accept", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/permission-groups", async (
     HttpContext context,
@@ -1761,11 +1761,11 @@ app.MapGet("/api/permission-groups", async (
     IPlatformPermissionService permissionService,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var groups = await permissionService.GetGroupsAsync(identity.Id, cancellationToken);
     return Results.Ok(new { ok = true, groups });
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/permission-groups", async (
     CreatePermissionGroupInput input,
@@ -1775,7 +1775,7 @@ app.MapPost("/api/permission-groups", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     try
@@ -1786,7 +1786,7 @@ app.MapPost("/api/permission-groups", async (
     }
     catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
     catch (InvalidOperationException) { return Results.Forbid(); }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/permission-groups/{groupId:guid}/members", async (
     Guid groupId,
@@ -1797,7 +1797,7 @@ app.MapPost("/api/permission-groups/{groupId:guid}/members", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     try
@@ -1806,7 +1806,7 @@ app.MapPost("/api/permission-groups/{groupId:guid}/members", async (
         return Results.Ok(new { ok = true });
     }
     catch (InvalidOperationException) { return Results.Forbid(); }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPut("/api/users/{userId:guid}/platform-permissions", async (
     Guid userId,
@@ -1817,7 +1817,7 @@ app.MapPut("/api/users/{userId:guid}/platform-permissions", async (
     IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
     try
@@ -1827,7 +1827,7 @@ app.MapPut("/api/users/{userId:guid}/platform-permissions", async (
     }
     catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
     catch (InvalidOperationException) { return Results.Forbid(); }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/account/api-key/rotate", async (
     HttpContext context,
@@ -1835,7 +1835,7 @@ app.MapPost("/api/account/api-key/rotate", async (
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     context.Response.Headers.CacheControl = "no-store";
@@ -1853,7 +1853,7 @@ app.MapPost("/api/account/api-key/rotate", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/account/connect-moodle", async (
     ConnectMoodleInput input,
@@ -1862,7 +1862,7 @@ app.MapPost("/api/account/connect-moodle", async (
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     if (string.IsNullOrWhiteSpace(input.MoodleAlias) ||
@@ -1890,7 +1890,7 @@ app.MapPost("/api/account/connect-moodle", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPut("/api/account/moodle/{id}", async (
     string id,
@@ -1900,7 +1900,7 @@ app.MapPut("/api/account/moodle/{id}", async (
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     if (string.IsNullOrWhiteSpace(input.MoodleAlias) || string.IsNullOrWhiteSpace(input.MoodleBaseUrl))
@@ -1926,7 +1926,7 @@ app.MapPut("/api/account/moodle/{id}", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapDelete("/api/account/moodle/{id}", async (
     string id,
@@ -1935,7 +1935,7 @@ app.MapDelete("/api/account/moodle/{id}", async (
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     try
@@ -1947,7 +1947,7 @@ app.MapDelete("/api/account/moodle/{id}", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapDelete("/api/account", async (
     [FromBody] DeleteAccountInput input,
@@ -1956,7 +1956,7 @@ app.MapDelete("/api/account", async (
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     try
@@ -1971,7 +1971,7 @@ app.MapDelete("/api/account", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/auth/login", (string? email, string? returnUrl) =>
 {
@@ -1999,19 +1999,19 @@ app.MapPost("/auth/login", async (
         if (!string.IsNullOrEmpty(email)) qs.Add($"email={Uri.EscapeDataString(email)}");
         if (!string.IsNullOrEmpty(returnUrl)) qs.Add($"returnUrl={Uri.EscapeDataString(returnUrl)}");
         qs.Add("error=" + Uri.EscapeDataString("E-mail ou senha invalidos."));
-        return Results.Redirect($"/portal/?{string.Join("&", qs)}");
+        return Results.Redirect($"/?{string.Join("&", qs)}");
     }
 
-    await SignInPortalAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
+    await SignInAppAccountAsync(context, dbContext, account.Id, account.Name, account.Email, cancellationToken);
     return Results.Redirect(IsLocalReturnUrl(returnUrl) ? returnUrl : "/");
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/auth/logout", () =>
 {
     return Results.SignOut(authenticationSchemes: new[] { CookieAuthenticationDefaults.AuthenticationScheme });
 });
 
-// â”€â”€â”€ Grading Portal API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â”€â”€â”€ Grading App API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.MapGet("/api/grading/batches", async (
     HttpContext context,
@@ -2019,7 +2019,7 @@ app.MapGet("/api/grading/batches", async (
     IGradingReviewRepository gradingRepository,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     var batches = await gradingRepository.ListBatchesByCreatorAsync(
@@ -2037,7 +2037,7 @@ app.MapGet("/api/grading/batches", async (
         failedItems = b.FailedItems,
         createdAt = b.CreatedAt
     }).ToArray());
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/grading/batches/{id:guid}", async (
     Guid id,
@@ -2046,7 +2046,7 @@ app.MapGet("/api/grading/batches/{id:guid}", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     try
@@ -2059,7 +2059,7 @@ app.MapGet("/api/grading/batches/{id:guid}", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/grading/items/{id:guid}", async (
     Guid id,
@@ -2068,7 +2068,7 @@ app.MapGet("/api/grading/items/{id:guid}", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     try
@@ -2081,7 +2081,7 @@ app.MapGet("/api/grading/items/{id:guid}", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPut("/api/grading/items/{id:guid}/review", async (
     Guid id,
@@ -2091,7 +2091,7 @@ app.MapPut("/api/grading/items/{id:guid}/review", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     try
@@ -2111,7 +2111,7 @@ app.MapPut("/api/grading/items/{id:guid}/review", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/grading/batches/{id:guid}/preview", async (
     Guid id,
@@ -2121,7 +2121,7 @@ app.MapPost("/api/grading/batches/{id:guid}/preview", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     try
@@ -2139,7 +2139,7 @@ app.MapPost("/api/grading/batches/{id:guid}/preview", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/grading/batches/{id:guid}/confirm", async (
     Guid id,
@@ -2149,7 +2149,7 @@ app.MapPost("/api/grading/batches/{id:guid}/confirm", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
-    var identity = await ResolvePortalIdentityAsync(context, dbContext, cancellationToken);
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
     if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText))
@@ -2170,7 +2170,7 @@ app.MapPost("/api/grading/batches/{id:guid}/confirm", async (
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
     }
-}).RequireRateLimiting(PortalAuthRateLimitPolicy);
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 // â”€â”€â”€ Admin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -2224,34 +2224,34 @@ app.MapMcp(mcpPath);
 
 app.Use(async (context, next) =>
 {
-    if (context.Request.Path.Value?.Equals("/portal", StringComparison.OrdinalIgnoreCase) == true)
+    if (context.Request.Path.Value?.Equals("", StringComparison.OrdinalIgnoreCase) == true)
     {
-        if (!portalV2Enabled)
+        if (!appV2Enabled)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             return;
         }
 
-        context.Response.Redirect("/portal/");
+        context.Response.Redirect("/");
         return;
     }
 
     await next();
 });
 
-app.MapGet("/", () => portalV2Enabled ? Results.Redirect("/portal/") : Results.NotFound());
-app.MapGet("/app.html", () => portalV2Enabled ? Results.Redirect("/portal/") : Results.NotFound());
+app.MapGet("/", () => appV2Enabled ? Results.Redirect("/") : Results.NotFound());
+app.MapGet("/app.html", () => appV2Enabled ? Results.Redirect("/") : Results.NotFound());
 app.MapGet("/auth.html", (string? tab, string? error) =>
 {
-    if (!portalV2Enabled) return Results.NotFound();
+    if (!appV2Enabled) return Results.NotFound();
     var query = new List<string>();
     if (string.Equals(tab, "register", StringComparison.OrdinalIgnoreCase)) query.Add("tab=register");
     if (!string.IsNullOrWhiteSpace(error)) query.Add($"error={Uri.EscapeDataString(error)}");
-    return Results.Redirect($"/portal/{(query.Count > 0 ? $"?{string.Join("&", query)}" : string.Empty)}");
+    return Results.Redirect($"/{(query.Count > 0 ? $"?{string.Join("&", query)}" : string.Empty)}");
 });
-if (portalV2Enabled)
+if (appV2Enabled)
 {
-    app.MapFallbackToFile("/portal/{*path:nonfile}", "portal/index.html");
+    app.MapFallbackToFile("/{*path:nonfile}", "app/index.html");
 }
 
 app.Run();
@@ -2921,7 +2921,7 @@ static async Task EnrichMcpPrincipalFromLocalAccountAsync(HttpContext context, C
     }
 }
 
-static async Task<PortalIdentity?> ResolvePortalIdentityAsync(
+static async Task<AppIdentity?> ResolveAppIdentityAsync(
     HttpContext context,
     ConnectorDbContext dbContext,
     CancellationToken cancellationToken)
@@ -2946,7 +2946,7 @@ static async Task<PortalIdentity?> ResolvePortalIdentityAsync(
             var accountById = await dbContext.UserAccounts.FindAsync([userId], cancellationToken);
             if (accountById is not null)
             {
-                return new PortalIdentity(
+                return new AppIdentity(
                     accountById.Id,
                     accountById.Name,
                     accountById.Email,
@@ -2969,7 +2969,7 @@ static async Task<PortalIdentity?> ResolvePortalIdentityAsync(
                     await dbContext.SaveChangesAsync(cancellationToken);
                 }
 
-                return new PortalIdentity(
+                return new AppIdentity(
                     accountByEmail.Id,
                     accountByEmail.Name,
                     accountByEmail.Email,
@@ -2981,7 +2981,7 @@ static async Task<PortalIdentity?> ResolvePortalIdentityAsync(
     return null;
 }
 
-static async Task SignInPortalAccountAsync(HttpContext context, ConnectorDbContext dbContext, Guid id, string name, string email, CancellationToken cancellationToken)
+static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext dbContext, Guid id, string name, string email, CancellationToken cancellationToken)
 {
     var claims = new List<Claim>
     {
@@ -3109,7 +3109,7 @@ static async Task SeedChatGptOAuthClientAsync(
     await manager.UpdateAsync(existing, descriptor);
 }
 
-static bool HasPortalPermission(HttpContext context, string permission)
+static bool HasAppPermission(HttpContext context, string permission)
 {
     if (context.User.FindAll("platform_permission_deny").Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase)))
         return false;
@@ -3126,11 +3126,11 @@ static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permiss
         .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase));
 }
 
-public sealed record PortalIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);
-public sealed record PortalEnvelope<T>(T Data, PortalMeta Meta);
-public sealed record PortalListEnvelope<T>(IReadOnlyList<T> Data, PortalListMeta Meta);
-public sealed record PortalMeta(DateTimeOffset GeneratedAt, string? ConnectionRef);
-public sealed record PortalListMeta(
+public sealed record AppIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);
+public sealed record AppEnvelope<T>(T Data, AppMeta Meta);
+public sealed record AppListEnvelope<T>(IReadOnlyList<T> Data, AppListMeta Meta);
+public sealed record AppMeta(DateTimeOffset GeneratedAt, string? ConnectionRef);
+public sealed record AppListMeta(
     int Page,
     int PageSize,
     int Returned,
@@ -3139,10 +3139,10 @@ public sealed record PortalListMeta(
     string? ConnectionRef,
     IReadOnlyList<string>? Warnings = null,
     int? Total = null);
-public sealed record PortalSessionDto(bool Authenticated, PortalUserDto? User);
-public sealed record PortalUserDto(Guid Id, string Name, IReadOnlyList<string> Roles, IReadOnlyList<string> Permissions);
+public sealed record AppSessionDto(bool Authenticated, AppUserDto? User);
+public sealed record AppUserDto(Guid Id, string Name, IReadOnlyList<string> Roles, IReadOnlyList<string> Permissions);
 
-public static class PortalPermissionCatalog
+public static class AppPermissionCatalog
 {
     public const string DashboardView = "dashboard.view";
     public const string CoursesView = "courses.view";
@@ -3160,8 +3160,8 @@ public static class PortalPermissionCatalog
         DashboardView, CoursesView, StudentsView, StudentsFollowupWrite, TasksManage,
         AgendaManage, MessagesPrepare, ReportsView, ConnectionsManage, SettingsView, AdminView];
 }
-public sealed record PortalConnectionDto(string ConnectionId, string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
-public sealed record PortalDeleteConnectionInput(bool DeleteLinkedData, string? ConfirmationText);
+public sealed record AppConnectionDto(string ConnectionId, string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
+public sealed record AppDeleteConnectionInput(bool DeleteLinkedData, string? ConfirmationText);
 
 public partial class Program;
 
@@ -3192,4 +3192,5 @@ public sealed record PreviewGradingBatchInput(
     bool OnlyReviewed = true,
     bool AllowOverwriteExisting = false);
 public sealed record ConfirmGradingBatchInput(Guid PendingActionId, string ConfirmationText);
+
 

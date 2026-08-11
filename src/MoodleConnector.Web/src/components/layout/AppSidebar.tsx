@@ -1,4 +1,4 @@
-import {
+﻿import {
   BookOpen,
   CalendarDays,
   CheckSquare,
@@ -42,7 +42,7 @@ const operationalItems: SidebarNavItem[] = [
   { title: 'Resumo da Semana', url: '/', icon: LayoutDashboard, permission: APP_PERMISSIONS.DASHBOARD_VIEW },
   { title: 'Meus Cursos', url: '/meus-cursos', icon: BookOpen, permission: APP_PERMISSIONS.COURSES_CATALOG_VIEW },
   { title: 'Alunos', url: '/alunos', icon: Users, permission: APP_PERMISSIONS.STUDENTS_VIEW },
-  { title: 'Pendências', url: '/pendencias', icon: CheckSquare, permission: APP_PERMISSIONS.STUDENTS_VIEW },
+  { title: 'PendÃªncias', url: '/pendencias', icon: CheckSquare, permission: APP_PERMISSIONS.STUDENTS_VIEW },
   { title: 'Tarefas', url: '/tarefas', icon: CheckSquare, permission: APP_PERMISSIONS.TASKS_VIEW },
   { title: 'Agenda', url: '/agenda', icon: CalendarDays, permission: APP_PERMISSIONS.AGENDA_VIEW },
 ];
@@ -52,12 +52,12 @@ const communicationItems: SidebarNavItem[] = [
 ];
 
 const managementItems: SidebarNavItem[] = [
-  { title: 'Relatórios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
-  { title: 'Conexões Moodle', url: '/conexoes', icon: Plug, permission: APP_PERMISSIONS.SERVICES_VIEW },
+  { title: 'RelatÃ³rios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
+  { title: 'ConexÃµes Moodle', url: '/conexoes', icon: Plug, permission: APP_PERMISSIONS.SERVICES_VIEW },
 ];
 
 const settingsItems: SidebarNavItem[] = [
-  { title: 'Configurações', url: '/configuracoes', icon: Settings, permission: APP_PERMISSIONS.SETTINGS_VIEW },
+  { title: 'ConfiguraÃ§Ãµes', url: '/configuracoes', icon: Settings, permission: APP_PERMISSIONS.SETTINGS_VIEW },
 ];
 
 export function AppSidebar() {
@@ -110,7 +110,7 @@ export function AppSidebar() {
           {!isCollapsed && (
             <div className="flex min-w-0 flex-col">
               <span className="truncate font-semibold text-sidebar-foreground">Moodle Connector</span>
-              <span className="text-xs text-sidebar-foreground/60">Portal acadêmico</span>
+              <span className="text-xs text-sidebar-foreground/60">App acadÃªmico</span>
             </div>
           )}
         </div>
@@ -119,10 +119,10 @@ export function AppSidebar() {
       <SidebarContent>
         {renderGroup('Operacional', operationalItems)}
         <Separator className="my-2 bg-sidebar-border" />
-        {renderGroup('Comunicação', communicationItems)}
-        {renderGroup('Gestão', managementItems)}
+        {renderGroup('ComunicaÃ§Ã£o', communicationItems)}
+        {renderGroup('GestÃ£o', managementItems)}
         <Separator className="my-2 bg-sidebar-border" />
-        {renderGroup('Configurações', settingsItems)}
+        {renderGroup('ConfiguraÃ§Ãµes', settingsItems)}
       </SidebarContent>
 
       <SidebarFooter className="p-4">
@@ -134,7 +134,7 @@ export function AppSidebar() {
             {!isCollapsed && (
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-sidebar-foreground">{user.name}</p>
-                <p className="truncate text-xs text-sidebar-foreground/60">{user.roles?.[0] || 'Usuário'}</p>
+                <p className="truncate text-xs text-sidebar-foreground/60">{user.roles?.[0] || 'UsuÃ¡rio'}</p>
               </div>
             )}
             <Button
@@ -152,3 +152,4 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+

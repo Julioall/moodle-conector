@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using OpenIddict.EntityFrameworkCore.Models;
 using System.Text.Json;
@@ -136,19 +136,19 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         userOverride.Property(x => x.ChangedByUserId).IsRequired();
         userOverride.HasIndex(x => new { x.UserId, x.Permission }).IsUnique();
 
-        var portalTask = modelBuilder.Entity<TaskEntity>();
-        portalTask.ToTable("portal_tasks");
-        portalTask.HasKey(x => x.Id);
-        portalTask.Property(x => x.Title).HasMaxLength(240).IsRequired();
-        portalTask.Property(x => x.Description).HasMaxLength(4000);
-        portalTask.Property(x => x.Status).HasMaxLength(32).IsRequired();
-        portalTask.Property(x => x.Priority).HasMaxLength(32).IsRequired();
-        portalTask.Property(x => x.CreatedAt).IsRequired();
-        portalTask.Property(x => x.UpdatedAt).IsRequired();
-        portalTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
+        var appTask = modelBuilder.Entity<TaskEntity>();
+        appTask.ToTable("app_tasks");
+        appTask.HasKey(x => x.Id);
+        appTask.Property(x => x.Title).HasMaxLength(240).IsRequired();
+        appTask.Property(x => x.Description).HasMaxLength(4000);
+        appTask.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        appTask.Property(x => x.Priority).HasMaxLength(32).IsRequired();
+        appTask.Property(x => x.CreatedAt).IsRequired();
+        appTask.Property(x => x.UpdatedAt).IsRequired();
+        appTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
 
         var calendarEvent = modelBuilder.Entity<CalendarEventEntity>();
-        calendarEvent.ToTable("portal_calendar_events");
+        calendarEvent.ToTable("app_calendar_events");
         calendarEvent.HasKey(x => x.Id);
         calendarEvent.Property(x => x.Title).HasMaxLength(240).IsRequired();
         calendarEvent.Property(x => x.Description).HasMaxLength(4000);
@@ -159,7 +159,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         calendarEvent.HasIndex(x => new { x.OwnerId, x.StartAt });
 
         var followup = modelBuilder.Entity<FollowupEntity>();
-        followup.ToTable("portal_followups");
+        followup.ToTable("app_followups");
         followup.HasKey(x => x.Id);
         followup.Property(x => x.StudentRef).HasMaxLength(200).IsRequired();
         followup.Property(x => x.CourseRef).HasMaxLength(200);
@@ -337,3 +337,4 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         evidence.HasIndex(x => x.GradingItemId);
     }
 }
+

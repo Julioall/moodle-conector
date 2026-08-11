@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query';
+﻿import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ const statusLabels: Record<string, string> = {
   online: 'Online',
   inactive: 'Inativa',
   offline: 'Offline',
-  needs_reauth: 'Reautenticação necessária',
+  needs_reauth: 'ReautenticaÃ§Ã£o necessÃ¡ria',
   unknown: 'Status desconhecido',
 };
 
@@ -42,14 +42,14 @@ export function TopBar() {
         >
           <SelectTrigger id="global-moodle-selector" aria-label="Selecionar Moodle" className="h-9 w-[170px] gap-2 text-xs sm:w-[220px]">
             <MoodleIcon className="h-4 w-4 shrink-0" />
-            <SelectValue placeholder={connections.isPending ? 'Carregando Moodles…' : 'Selecionar Moodle'} />
+            <SelectValue placeholder={connections.isPending ? 'Carregando Moodlesâ€¦' : 'Selecionar Moodle'} />
           </SelectTrigger>
           <SelectContent>
             {connections.data?.data.map((connection) => (
               <SelectItem key={connection.connectionRef} value={connection.connectionRef}>
                 <span className="flex items-center gap-2">
                   <span>{connection.alias}</span>
-                  {connection.isDefault && <span className="text-[10px] text-muted-foreground">padrão</span>}
+                  {connection.isDefault && <span className="text-[10px] text-muted-foreground">padrÃ£o</span>}
                 </span>
               </SelectItem>
             ))}
@@ -59,9 +59,9 @@ export function TopBar() {
           variant="ghost"
           size="icon"
           className="h-9 w-9"
-          title="Atualizar conexões"
-          aria-label="Atualizar conexões"
-          onClick={() => void queryClient.invalidateQueries({ queryKey: ['portal', 'connections'] })}
+          title="Atualizar conexÃµes"
+          aria-label="Atualizar conexÃµes"
+          onClick={() => void queryClient.invalidateQueries({ queryKey: ['app', 'connections'] })}
         >
           <RefreshCw className={`h-4 w-4 ${connections.isFetching ? 'animate-spin' : ''}`} />
         </Button>
@@ -69,3 +69,4 @@ export function TopBar() {
     </header>
   );
 }
+

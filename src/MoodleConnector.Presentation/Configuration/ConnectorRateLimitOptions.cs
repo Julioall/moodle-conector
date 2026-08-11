@@ -1,4 +1,4 @@
-namespace MoodleConnector.Presentation.Configuration;
+﻿namespace MoodleConnector.Presentation.Configuration;
 
 public sealed class ConnectorRateLimitOptions
 {
@@ -6,9 +6,10 @@ public sealed class ConnectorRateLimitOptions
 
     public int WindowSeconds { get; init; } = 60;
 
-    public int PortalAuthPermitLimit { get; init; } = 12;
+    public int AppAuthPermitLimit { get; init; } = 12;
 
     public int AdminApiPermitLimit { get; init; } = 30;
 
     public int McpPermitLimit { get; init; } = 120;
 }
+

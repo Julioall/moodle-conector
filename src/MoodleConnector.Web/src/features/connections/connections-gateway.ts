@@ -1,4 +1,4 @@
-import { createPortalClient } from '../../integrations/http/portal-client';
+﻿import { createAppClient } from '../../integrations/http-client';
 
 export type MoodleConnection = {
   connectionId?: string;
@@ -20,18 +20,19 @@ export type ConnectionsResponse = {
 
 export const connectionsGateway = {
   list: (): Promise<ConnectionsResponse> =>
-    createPortalClient().get<ConnectionsResponse>('/api/portal/connections'),
+    createAppClient().get<ConnectionsResponse>('/api/connections'),
   connect: async (input: { moodleAlias: string; moodleBaseUrl: string; moodleUsername: string; moodlePassword: string; isDefault: boolean; canWrite: boolean }) => {
-    return createPortalClient().request<{ error?: string }>('/api/portal/connections', {
+    return createAppClient().request<{ error?: string }>('/api/connections', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     });
   },
   validate: async (connectionId: string) =>
-    createPortalClient().request<{ status: string; lastValidatedAt?: string }>(`/api/portal/connections/${encodeURIComponent(connectionId)}/validate`, { method: 'POST' }),
+    createAppClient().request<{ status: string; lastValidatedAt?: string }>(`/api/connections/${encodeURIComponent(connectionId)}/validate`, { method: 'POST' }),
   update: async (connectionId: string, input: { moodleAlias: string; moodleBaseUrl: string; moodleUsername?: string; moodlePassword?: string; isDefault: boolean; canWrite: boolean }) =>
-    createPortalClient().request<MoodleConnection>(`/api/portal/connections/${encodeURIComponent(connectionId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }),
-  dataSummary: async (connectionId: string) => createPortalClient().get<{ memories: number; documents: number; moodleUserLinks: number; auditLogsRetained: number }>(`/api/portal/connections/${encodeURIComponent(connectionId)}/data-summary`),
-  remove: async (connectionId: string, deleteLinkedData: boolean, confirmationText?: string) => createPortalClient().request<{ ok: boolean }>(`/api/portal/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deleteLinkedData, confirmationText }) }),
+    createAppClient().request<MoodleConnection>(`/api/connections/${encodeURIComponent(connectionId)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }),
+  dataSummary: async (connectionId: string) => createAppClient().get<{ memories: number; documents: number; moodleUserLinks: number; auditLogsRetained: number }>(`/api/connections/${encodeURIComponent(connectionId)}/data-summary`),
+  remove: async (connectionId: string, deleteLinkedData: boolean, confirmationText?: string) => createAppClient().request<{ ok: boolean }>(`/api/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deleteLinkedData, confirmationText }) }),
 };
+

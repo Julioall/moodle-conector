@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+﻿import { FormEvent, useState } from 'react';
 import { authGateway } from './auth-gateway';
 import './auth-page.css';
 
@@ -21,9 +21,9 @@ export function AuthPage() {
       if (mode === 'register') await authGateway.register(name, email, password);
       else await authGateway.login(email, password);
       // Keep the user inside the V2 SPA after the shared account cookie is issued.
-      window.location.assign('/portal/');
+      window.location.assign('/');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Não foi possível concluir a operação.');
+      setError(cause instanceof Error ? cause.message : 'NÃ£o foi possÃ­vel concluir a operaÃ§Ã£o.');
     } finally {
       setPending(false);
     }
@@ -34,25 +34,26 @@ export function AuthPage() {
       <div className="brand-mark">M</div>
       <p className="auth-kicker">Moodle Connector</p>
       <h1>Central de tutoria</h1>
-      <p>Organize cursos, alunos e acompanhamentos em um espaço operacional simples.</p>
+      <p>Organize cursos, alunos e acompanhamentos em um espaÃ§o operacional simples.</p>
     </section>
     <section className="auth-card" aria-labelledby="auth-title">
       <div className="auth-card-header">
-        <span className="auth-label">Portal operacional</span>
+        <span className="auth-label">App operacional</span>
         <h2 id="auth-title">{mode === 'login' ? 'Entrar na sua conta' : 'Criar sua conta'}</h2>
-        <p>{mode === 'login' ? 'Acesse seu espaço de acompanhamento.' : 'Comece a configurar seu espaço Moodle Connector.'}</p>
+        <p>{mode === 'login' ? 'Acesse seu espaÃ§o de acompanhamento.' : 'Comece a configurar seu espaÃ§o Moodle Connector.'}</p>
       </div>
-      <div className="auth-tabs" role="tablist" aria-label="Autenticação">
+      <div className="auth-tabs" role="tablist" aria-label="AutenticaÃ§Ã£o">
         <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setError(''); }}>Entrar</button>
         <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setError(''); }}>Criar conta</button>
       </div>
       <form className="auth-form" onSubmit={submit}>
         {mode === 'register' && <label>Nome<input required value={name} onChange={event => setName(event.target.value)} autoComplete="name" /></label>}
         <label>E-mail<input required type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></label>
-        <label>Senha<input required minLength={12} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /><small>Mínimo de 12 caracteres.</small></label>
+        <label>Senha<input required minLength={12} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /><small>MÃ­nimo de 12 caracteres.</small></label>
         {error && <p className="auth-error" role="alert">{error}</p>}
-        <button className="auth-submit" type="submit" disabled={pending}>{pending ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
+        <button className="auth-submit" type="submit" disabled={pending}>{pending ? 'Aguardeâ€¦' : mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
       </form>
     </section>
   </main>;
 }
+
