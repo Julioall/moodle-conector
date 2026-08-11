@@ -1,6 +1,6 @@
 namespace MoodleConnector.Infrastructure;
 
-public sealed class PortalTaskEntity
+public sealed class TaskEntity
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }

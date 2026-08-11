@@ -17,6 +17,9 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "009_portal_calendar_events.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "010_portal_followups.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "011_moodle_connection_validation.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "012_team_scoped_access.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "013_platform_permission_groups.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "014_backfill_platform_tool_permissions.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

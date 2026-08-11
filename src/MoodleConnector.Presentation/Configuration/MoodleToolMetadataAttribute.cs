@@ -13,4 +13,5 @@ public sealed class MoodleToolMetadataAttribute : Attribute
     public string ExposureStatus { get; set; } = "Keep";
     public string ExposureReason { get; set; } = string.Empty;
     public string Evidence { get; set; } = string.Empty;
+    public string RequiredPlatformPermission { get; set; } = string.Empty;
 }

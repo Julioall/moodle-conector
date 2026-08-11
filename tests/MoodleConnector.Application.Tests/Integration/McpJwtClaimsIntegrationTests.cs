@@ -855,7 +855,20 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         var claims = new List<Claim>
         {
             new("sub", "jwt-user-1"),
-            new("scope", "openid profile email moodle-mcp-audience")
+            new("scope", "openid profile email moodle-mcp-audience"),
+            new("platform_permission", "tool.assignments.view"),
+            new("platform_permission", "tool.assignments.grade"),
+            new("platform_permission", "tool.messages.view"),
+            new("platform_permission", "tool.messages.send"),
+            new("platform_permission", "tool.reports.view"),
+            new("platform_permission", "tool.courses.view"),
+            new("platform_permission", "tool.students.view"),
+            new("platform_permission", "tool.classroom.view"),
+            new("platform_permission", "tool.followup.view"),
+            new("platform_permission", "tool.forums.view"),
+            new("platform_permission", "tool.connections.manage"),
+            new("platform_permission", "tool.memory.manage"),
+            new("platform_permission", "tool.pedagogy.view")
         };
 
         if (includeEmail)
