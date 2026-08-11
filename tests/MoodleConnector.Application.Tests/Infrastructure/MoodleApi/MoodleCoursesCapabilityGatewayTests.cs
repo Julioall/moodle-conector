@@ -30,7 +30,8 @@ public sealed class MoodleCoursesCapabilityGatewayTests
         var page = await gateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None);
 
         Assert.Single(page.Items);
-        Assert.Equal(expectedFunction, Assert.Single(restClient.Calls));
+        Assert.Equal(expectedFunction, restClient.Calls[0]);
+        Assert.Equal("core_course_get_categories", restClient.Calls[^1]);
     }
 
     [Fact]
