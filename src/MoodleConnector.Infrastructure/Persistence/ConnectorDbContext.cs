@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using OpenIddict.EntityFrameworkCore.Models;
 using System.Text.Json;
@@ -11,9 +11,16 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
 {
     public DbSet<ConnectorClientCredentialEntity> ConnectorClients => Set<ConnectorClientCredentialEntity>();
     public DbSet<UserAccountEntity> UserAccounts => Set<UserAccountEntity>();
-    public DbSet<PortalTaskEntity> PortalTasks => Set<PortalTaskEntity>();
-    public DbSet<PortalCalendarEventEntity> PortalCalendarEvents => Set<PortalCalendarEventEntity>();
-    public DbSet<PortalFollowupEntity> PortalFollowups => Set<PortalFollowupEntity>();
+    public DbSet<TeamEntity> Teams => Set<TeamEntity>();
+    public DbSet<TeamMembershipEntity> TeamMemberships => Set<TeamMembershipEntity>();
+    public DbSet<TeamInvitationEntity> TeamInvitations => Set<TeamInvitationEntity>();
+    public DbSet<PermissionGroupEntity> PermissionGroups => Set<PermissionGroupEntity>();
+    public DbSet<PermissionGroupPermissionEntity> PermissionGroupPermissions => Set<PermissionGroupPermissionEntity>();
+    public DbSet<PermissionGroupMembershipEntity> PermissionGroupMemberships => Set<PermissionGroupMembershipEntity>();
+    public DbSet<UserPermissionOverrideEntity> UserPermissionOverrides => Set<UserPermissionOverrideEntity>();
+    public DbSet<TaskEntity> Tasks => Set<TaskEntity>();
+    public DbSet<CalendarEventEntity> CalendarEvents => Set<CalendarEventEntity>();
+    public DbSet<FollowupEntity> Followups => Set<FollowupEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -67,19 +74,81 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         userEntity.Property(x => x.UpdatedAtUtc).IsRequired();
         userEntity.HasIndex(x => x.Email).IsUnique();
 
-        var portalTask = modelBuilder.Entity<PortalTaskEntity>();
-        portalTask.ToTable("portal_tasks");
-        portalTask.HasKey(x => x.Id);
-        portalTask.Property(x => x.Title).HasMaxLength(240).IsRequired();
-        portalTask.Property(x => x.Description).HasMaxLength(4000);
-        portalTask.Property(x => x.Status).HasMaxLength(32).IsRequired();
-        portalTask.Property(x => x.Priority).HasMaxLength(32).IsRequired();
-        portalTask.Property(x => x.CreatedAt).IsRequired();
-        portalTask.Property(x => x.UpdatedAt).IsRequired();
-        portalTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
+        var team = modelBuilder.Entity<TeamEntity>();
+        team.ToTable("teams");
+        team.HasKey(x => x.Id);
+        team.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        team.Property(x => x.CreatedByUserId).IsRequired();
+        team.Property(x => x.IsPersonal).IsRequired();
+        team.Property(x => x.CreatedAtUtc).IsRequired();
+        team.Property(x => x.UpdatedAtUtc).IsRequired();
+        team.HasIndex(x => x.CreatedByUserId);
 
-        var calendarEvent = modelBuilder.Entity<PortalCalendarEventEntity>();
-        calendarEvent.ToTable("portal_calendar_events");
+        var membership = modelBuilder.Entity<TeamMembershipEntity>();
+        membership.ToTable("team_memberships");
+        membership.HasKey(x => x.Id);
+        membership.Property(x => x.Role).HasMaxLength(32).IsRequired();
+        membership.Property(x => x.ScopesJson).HasColumnType("jsonb").IsRequired();
+        membership.Property(x => x.IsActive).IsRequired();
+        membership.Property(x => x.CreatedAtUtc).IsRequired();
+        membership.Property(x => x.UpdatedAtUtc).IsRequired();
+        membership.HasIndex(x => new { x.TeamId, x.UserId }).IsUnique();
+        membership.HasIndex(x => new { x.UserId, x.IsActive });
+
+        var invitation = modelBuilder.Entity<TeamInvitationEntity>();
+        invitation.ToTable("team_invitations");
+        invitation.HasKey(x => x.Id);
+        invitation.Property(x => x.InviteeEmail).HasMaxLength(320).IsRequired();
+        invitation.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
+        invitation.Property(x => x.Role).HasMaxLength(32).IsRequired();
+        invitation.Property(x => x.ScopesJson).HasColumnType("jsonb").IsRequired();
+        invitation.Property(x => x.InvitedByUserId).IsRequired();
+        invitation.Property(x => x.ExpiresAtUtc).IsRequired();
+        invitation.Property(x => x.CreatedAtUtc).IsRequired();
+        invitation.HasIndex(x => x.TokenHash).IsUnique();
+        invitation.HasIndex(x => new { x.TeamId, x.InviteeEmail, x.AcceptedAtUtc });
+
+        var permissionGroup = modelBuilder.Entity<PermissionGroupEntity>();
+        permissionGroup.ToTable("permission_groups");
+        permissionGroup.HasKey(x => x.Id);
+        permissionGroup.Property(x => x.Name).HasMaxLength(120).IsRequired();
+        permissionGroup.Property(x => x.Description).HasMaxLength(500).IsRequired();
+        permissionGroup.Property(x => x.CreatedByUserId).IsRequired();
+        permissionGroup.Property(x => x.CreatedAtUtc).IsRequired();
+        permissionGroup.Property(x => x.UpdatedAtUtc).IsRequired();
+
+        var groupPermission = modelBuilder.Entity<PermissionGroupPermissionEntity>();
+        groupPermission.ToTable("permission_group_permissions");
+        groupPermission.HasKey(x => x.Id);
+        groupPermission.Property(x => x.Permission).HasMaxLength(120).IsRequired();
+        groupPermission.HasIndex(x => new { x.GroupId, x.Permission }).IsUnique();
+
+        var groupMembership = modelBuilder.Entity<PermissionGroupMembershipEntity>();
+        groupMembership.ToTable("permission_group_memberships");
+        groupMembership.HasKey(x => x.Id);
+        groupMembership.HasIndex(x => new { x.GroupId, x.UserId }).IsUnique();
+
+        var userOverride = modelBuilder.Entity<UserPermissionOverrideEntity>();
+        userOverride.ToTable("user_permission_overrides");
+        userOverride.HasKey(x => x.Id);
+        userOverride.Property(x => x.Permission).HasMaxLength(120).IsRequired();
+        userOverride.Property(x => x.IsAllowed).IsRequired();
+        userOverride.Property(x => x.ChangedByUserId).IsRequired();
+        userOverride.HasIndex(x => new { x.UserId, x.Permission }).IsUnique();
+
+        var appTask = modelBuilder.Entity<TaskEntity>();
+        appTask.ToTable("app_tasks");
+        appTask.HasKey(x => x.Id);
+        appTask.Property(x => x.Title).HasMaxLength(240).IsRequired();
+        appTask.Property(x => x.Description).HasMaxLength(4000);
+        appTask.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        appTask.Property(x => x.Priority).HasMaxLength(32).IsRequired();
+        appTask.Property(x => x.CreatedAt).IsRequired();
+        appTask.Property(x => x.UpdatedAt).IsRequired();
+        appTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
+
+        var calendarEvent = modelBuilder.Entity<CalendarEventEntity>();
+        calendarEvent.ToTable("app_calendar_events");
         calendarEvent.HasKey(x => x.Id);
         calendarEvent.Property(x => x.Title).HasMaxLength(240).IsRequired();
         calendarEvent.Property(x => x.Description).HasMaxLength(4000);
@@ -89,8 +158,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         calendarEvent.Property(x => x.UpdatedAt).IsRequired();
         calendarEvent.HasIndex(x => new { x.OwnerId, x.StartAt });
 
-        var followup = modelBuilder.Entity<PortalFollowupEntity>();
-        followup.ToTable("portal_followups");
+        var followup = modelBuilder.Entity<FollowupEntity>();
+        followup.ToTable("app_followups");
         followup.HasKey(x => x.Id);
         followup.Property(x => x.StudentRef).HasMaxLength(200).IsRequired();
         followup.Property(x => x.CourseRef).HasMaxLength(200);
@@ -268,3 +337,4 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         evidence.HasIndex(x => x.GradingItemId);
     }
 }
+

@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS portal_tasks (
+﻿CREATE TABLE IF NOT EXISTS app_tasks (
     "Id" uuid NOT NULL,
     "OwnerId" uuid NOT NULL,
     "Title" varchar(240) NOT NULL,
@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS portal_tasks (
     "DueAt" timestamp with time zone,
     "CreatedAt" timestamp with time zone NOT NULL,
     "UpdatedAt" timestamp with time zone NOT NULL,
-    CONSTRAINT "PK_portal_tasks" PRIMARY KEY ("Id")
+    CONSTRAINT "PK_app_tasks" PRIMARY KEY ("Id")
 );
-CREATE INDEX IF NOT EXISTS "IX_portal_tasks_OwnerId_Status_DueAt" ON portal_tasks ("OwnerId", "Status", "DueAt");
+CREATE INDEX IF NOT EXISTS "IX_app_tasks_OwnerId_Status_DueAt" ON app_tasks ("OwnerId", "Status", "DueAt");
+

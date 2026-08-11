@@ -9,7 +9,9 @@ internal sealed class AccountService(
     ConnectorDbContext dbContext,
     IConnectorSecretProtector secretProtector,
     IConnectorClientRegistrationService registrationService,
-    IMoodleCredentialValidator moodleValidator) : IAccountService
+    IMoodleCredentialValidator moodleValidator,
+    ITeamAccessService? teamAccessService = null,
+    IPlatformPermissionService? platformPermissionService = null) : IAccountService
 {
     private const int MinimumPasswordLength = 12;
     private const int MaximumPasswordLength = 256;
@@ -38,6 +40,16 @@ internal sealed class AccountService(
 
         dbContext.UserAccounts.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        if (teamAccessService is not null)
+        {
+            await teamAccessService.CreatePersonalTeamAsync(entity.Id, entity.Name, cancellationToken);
+        }
+
+        if (platformPermissionService is not null)
+        {
+            await platformPermissionService.EnsureDefaultPermissionsAsync(entity.Id, cancellationToken);
+        }
 
         return ToDto(entity);
     }

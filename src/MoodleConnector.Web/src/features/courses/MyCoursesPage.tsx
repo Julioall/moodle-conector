@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { BookOpen } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -9,7 +9,7 @@ import { coursesGateway } from './courses-gateway';
 export function MyCoursesPage() {
   const { connectionRef, selectedConnection } = useConnectionScope();
   const query = useQuery({
-    queryKey: ['portal', 'courses', connectionRef],
+    queryKey: ['app', 'courses', connectionRef],
     queryFn: () => coursesGateway.list(connectionRef),
   });
 
@@ -19,7 +19,7 @@ export function MyCoursesPage() {
         <div>
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Operacional</p>
           <h1 id="courses-title" className="text-2xl font-semibold tracking-tight">Meus cursos</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Acompanhe os cursos disponíveis no Moodle selecionado.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Acompanhe os cursos disponÃ­veis no Moodle selecionado.</p>
         </div>
         <div className="text-left text-xs text-muted-foreground sm:text-right">
           <p className="font-medium text-foreground">{connectionDisplayName(selectedConnection)}</p>
@@ -33,13 +33,13 @@ export function MyCoursesPage() {
         </div>
       )}
 
-      {query.isError && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar os cursos.</p></CardContent></Card>}
+      {query.isError && <Card><CardContent className="p-6"><p role="alert">NÃ£o foi possÃ­vel carregar os cursos.</p></CardContent></Card>}
 
       {query.isSuccess && query.data.data.length === 0 && (
         <Card><CardContent className="flex flex-col items-center gap-2 p-12 text-center">
           <BookOpen className="h-10 w-10 text-muted-foreground/50" />
           <h2 className="font-medium">Nenhum curso encontrado</h2>
-          <p className="text-sm text-muted-foreground">Verifique a conexão selecionada ou atualize as conexões Moodle.</p>
+          <p className="text-sm text-muted-foreground">Verifique a conexÃ£o selecionada ou atualize as conexÃµes Moodle.</p>
         </CardContent></Card>
       )}
 
@@ -51,3 +51,4 @@ export function MyCoursesPage() {
     </main>
   );
 }
+

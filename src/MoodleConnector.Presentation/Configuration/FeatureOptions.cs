@@ -1,4 +1,4 @@
-namespace MoodleConnector.Presentation.Configuration;
+﻿namespace MoodleConnector.Presentation.Configuration;
 
 public sealed class FeatureOptions
 {
@@ -10,5 +10,6 @@ public sealed class FeatureOptions
     public bool AssignmentGradeWriteEnabled { get; init; }
     public bool CourseContentWriteEnabled { get; init; }
     public bool DemoToolsEnabled { get; init; }
-    public bool PortalV2Enabled { get; init; }
+    public bool AppV2Enabled { get; init; }
 }
+

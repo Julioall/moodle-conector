@@ -100,6 +100,7 @@ public sealed class ToolMetadataRegistry
                                     case "ExposureStatus": metadata.ExposureStatus = na.TypedValue.Value as string ?? "Keep"; break;
                                     case "ExposureReason": metadata.ExposureReason = na.TypedValue.Value as string ?? string.Empty; break;
                                     case "Evidence": metadata.Evidence = na.TypedValue.Value as string ?? string.Empty; break;
+                                    case "RequiredPlatformPermission": metadata.RequiredPlatformPermission = na.TypedValue.Value as string ?? string.Empty; break;
                                 }
                             }
 
@@ -111,11 +112,13 @@ public sealed class ToolMetadataRegistry
                         {
                             if (!_map.ContainsKey(toolName))
                             {
-                                _map[toolName] = ToolMetadataInference.Create(
+                                var inferred = ToolMetadataInference.Create(
                                     toolContainerType,
                                     toolName,
                                     ReadOnly: GetBooleanNamedArgument(mcptoolAttrData, "ReadOnly"),
                                     Destructive: GetBooleanNamedArgument(mcptoolAttrData, "Destructive"));
+                                inferred.RequiredPlatformPermission = PlatformToolPermissionMapping.For(toolName, inferred);
+                                _map[toolName] = inferred;
                             }
                         }
                     }
@@ -140,6 +143,10 @@ public sealed class ToolMetadataRegistry
         if (string.IsNullOrWhiteSpace(metadata.Evidence))
         {
             metadata.Evidence = $"Explicit metadata on {declaringType.FullName}.{toolName}.";
+        }
+        if (string.IsNullOrWhiteSpace(metadata.RequiredPlatformPermission))
+        {
+            metadata.RequiredPlatformPermission = PlatformToolPermissionMapping.For(toolName, metadata);
         }
     }
 

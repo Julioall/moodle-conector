@@ -1,10 +1,10 @@
-import { request } from 'node:http';
+﻿import { request } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 
-const baseUrl = new URL(process.env.PORTAL_API_SMOKE_URL ?? 'http://127.0.0.1:8787');
+const baseUrl = new URL(process.env.APP_API_SMOKE_URL ?? 'http://127.0.0.1:8787');
 if (!['127.0.0.1', 'localhost', '::1'].includes(baseUrl.hostname)) {
-  throw new Error('Portal E2E smoke only runs against a local host.');
+  throw new Error('App E2E smoke only runs against a local host.');
 }
 
 let cookie = '';
@@ -55,18 +55,18 @@ const expectJson = (response, expected, label) => {
   return response.json;
 };
 
-const email = `portal-e2e-${randomUUID()}@example.test`;
-const password = 'PortalE2EFlow!2026';
-const moodleAlias = process.env.PORTAL_E2E_MOODLE_ALIAS ?? 'local-e2e';
-const moodleBaseUrl = process.env.PORTAL_E2E_MOODLE_URL ?? 'https://moodle.local';
-const moodleUsername = process.env.PORTAL_E2E_MOODLE_USERNAME ?? 'demo';
-const moodlePassword = process.env.PORTAL_E2E_MOODLE_PASSWORD ?? 'demo-password';
+const email = `app-e2e-${randomUUID()}@example.test`;
+const password = 'AppE2EFlow!2026';
+const moodleAlias = process.env.APP_E2E_MOODLE_ALIAS ?? 'local-e2e';
+const moodleBaseUrl = process.env.APP_E2E_MOODLE_URL ?? 'https://moodle.local';
+const moodleUsername = process.env.APP_E2E_MOODLE_USERNAME ?? 'demo';
+const moodlePassword = process.env.APP_E2E_MOODLE_PASSWORD ?? 'demo-password';
 
-expectJson(await call('POST', '/api/account/register', { name: 'Portal E2E Smoke', email, password }), 200, 'register');
-const session = expectJson(await call('GET', '/api/portal/session'), 200, 'session');
+expectJson(await call('POST', '/api/account/register', { name: 'App E2E Smoke', email, password }), 200, 'register');
+const session = expectJson(await call('GET', '/api/session'), 200, 'session');
 if (session.data?.authenticated !== true) throw new Error('session is not authenticated.');
 
-const csrf = expectJson(await call('GET', '/api/portal/csrf'), 200, 'csrf');
+const csrf = expectJson(await call('GET', '/api/csrf'), 200, 'csrf');
 if (!csrf.token) throw new Error('CSRF token was not issued.');
 
 const connectionPayload = {
@@ -77,26 +77,26 @@ const connectionPayload = {
   isDefault: true,
   canWrite: false,
 };
-const missingCsrf = await call('POST', '/api/portal/connections', connectionPayload);
+const missingCsrf = await call('POST', '/api/connections', connectionPayload);
 expectStatus(missingCsrf, 400, 'reject missing CSRF');
 if (missingCsrf.json?.error?.code !== 'csrf_invalid') {
   throw new Error(`missing CSRF contract is invalid: ${missingCsrf.text}`);
 }
 
-const connection = expectJson(await call('POST', '/api/portal/connections', connectionPayload, { 'x-csrf-token': csrf.token }), 200, 'connect Moodle');
+const connection = expectJson(await call('POST', '/api/connections', connectionPayload, { 'x-csrf-token': csrf.token }), 200, 'connect Moodle');
 if (!connection.connectionRef || !connection.alias || connection.status !== 'unknown' || connection.apiKey || connection.password || connection.token) {
   throw new Error(`connection contract is invalid or contains a secret: ${JSON.stringify(connection)}`);
 }
 
-const connections = expectJson(await call('GET', '/api/portal/connections'), 200, 'connections');
+const connections = expectJson(await call('GET', '/api/connections'), 200, 'connections');
 const connectionRef = connections.data?.[0]?.connectionRef;
 if (!connectionRef) throw new Error('connectionRef was not returned.');
 
-const courses = expectJson(await call('GET', `/api/portal/courses?connectionRef=${encodeURIComponent(connectionRef)}`), 200, 'courses');
+const courses = expectJson(await call('GET', `/api/courses?connectionRef=${encodeURIComponent(connectionRef)}`), 200, 'courses');
 const course = courses.data?.[0];
 if (!course?.courseId) throw new Error('stub course was not returned.');
 
-const coursePath = `/api/portal/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(course.courseId)}`;
+const coursePath = `/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(course.courseId)}`;
 expectJson(await call('GET', coursePath), 200, 'course detail');
 const activities = expectJson(await call('GET', `${coursePath}/activities`), 200, 'activities');
 if (activities.data?.length !== 3 || activities.meta?.total !== 3) throw new Error('activity pagination contract is invalid.');
@@ -106,10 +106,11 @@ const student = students.data?.[0];
 if (!student?.studentId || students.data.length !== 3) throw new Error('stub students were not returned.');
 expectJson(await call('GET', `${coursePath}/students/${encodeURIComponent(student.studentId)}`), 200, 'student profile');
 
-const pending = expectJson(await call('GET', `/api/portal/pending?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}&periodDays=30`), 200, 'pending');
+const pending = expectJson(await call('GET', `/api/pending?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}&periodDays=30`), 200, 'pending');
 if (pending.meta?.total !== 3 || pending.data?.some(item => item.type !== 'pending_submission')) throw new Error('pending contract is invalid.');
 
-const dashboard = expectJson(await call('GET', `/api/portal/dashboard?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}`), 200, 'dashboard');
+const dashboard = expectJson(await call('GET', `/api/dashboard?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}`), 200, 'dashboard');
 if (dashboard.data?.summary?.activeCourses !== 1 || dashboard.data?.summary?.pendingDeliveries !== 3) throw new Error('dashboard stub indicators are invalid.');
 
-console.log('Portal E2E smoke passed (login → Moodle → courses → course → students → profile → pending → dashboard)');
+console.log('App E2E smoke passed (login â†’ Moodle â†’ courses â†’ course â†’ students â†’ profile â†’ pending â†’ dashboard)');
+

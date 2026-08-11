@@ -1,9 +1,9 @@
-using MoodleConnector.Domain;
+﻿using MoodleConnector.Domain;
 using MoodleConnector.Application.Risk.Queries;
 
 namespace MoodleConnector.Presentation;
 
-public sealed record PortalPendingDto(
+public sealed record AppPendingDto(
     string ConnectionRef,
     string CourseId,
     string StudentId,
@@ -20,7 +20,7 @@ public sealed record PortalPendingDto(
     bool CanGrade = false,
     bool CanWrite = false)
 {
-    public PortalPendingDto(
+    public AppPendingDto(
         string connectionRef, string courseId, string studentId, string? activityId, string studentName,
         string activityName, string type, string level, IReadOnlyList<string> factors,
         DateTimeOffset? dueAt, decimal? grade, DateTimeOffset? lastAccessAt,
@@ -30,7 +30,7 @@ public sealed record PortalPendingDto(
 
 }
 
-public sealed record PortalPendingSourceRow(
+public sealed record AppPendingSourceRow(
     string StudentId,
     string StudentName,
     DateTimeOffset? LastAccessAt,
@@ -43,31 +43,31 @@ public sealed record PortalPendingSourceRow(
     decimal? Grade = null,
     string? MoodleUrl = null);
 
-public sealed record PortalPendingAccessRow(
+public sealed record AppPendingAccessRow(
     string StudentId,
     string StudentName,
     DateTimeOffset? LastAccessAt);
 
-public static class PortalPendingContractMapper
+public static class AppPendingContractMapper
 {
-    public static IReadOnlyList<PortalPendingDto> Build(
+    public static IReadOnlyList<AppPendingDto> Build(
         string connectionRef,
         string courseId,
-        IEnumerable<PortalPendingSourceRow> submissionRows,
-        IEnumerable<PortalPendingAccessRow> accessRows,
+        IEnumerable<AppPendingSourceRow> submissionRows,
+        IEnumerable<AppPendingAccessRow> accessRows,
         DateTimeOffset generatedAt)
     {
-        var result = new List<PortalPendingDto>();
+        var result = new List<AppPendingDto>();
         foreach (var row in submissionRows)
         {
             var factors = new List<string>();
-            if (row.Type == "pending_submission") factors.Add("Atividade não entregue.");
-            if (row.IsOverdue) factors.Add("Prazo da atividade já expirou.");
-            if (row.NeedsGrading) factors.Add("Entrega aguardando correção no Moodle.");
+            if (row.Type == "pending_submission") factors.Add("Atividade nÃ£o entregue.");
+            if (row.IsOverdue) factors.Add("Prazo da atividade jÃ¡ expirou.");
+            if (row.NeedsGrading) factors.Add("Entrega aguardando correÃ§Ã£o no Moodle.");
             if (row.DueAt is not null && row.DueAt >= generatedAt && row.DueAt <= generatedAt.AddDays(7))
-                factors.Add($"Prazo próximo: {row.DueAt:O}.");
+                factors.Add($"Prazo prÃ³ximo: {row.DueAt:O}.");
 
-            result.Add(new PortalPendingDto(
+            result.Add(new AppPendingDto(
                 connectionRef, courseId, row.StudentId, row.ActivityId, row.StudentName,
                 row.ActivityName, NormalizeType(row.Type, row.NeedsGrading), MapLevel(row.Type, row.IsOverdue, row.NeedsGrading),
                 factors.Distinct(StringComparer.Ordinal).ToArray(), row.DueAt, row.Grade,
@@ -78,8 +78,8 @@ public static class PortalPendingContractMapper
         {
             var factors = row.LastAccessAt is null
                 ? new[] { "Estudante nunca acessou o curso." }
-                : new[] { $"Sem acesso ao curso há {(int)Math.Max(0, (generatedAt - row.LastAccessAt.Value).TotalDays)} dias." };
-            result.Add(new PortalPendingDto(
+                : new[] { $"Sem acesso ao curso hÃ¡ {(int)Math.Max(0, (generatedAt - row.LastAccessAt.Value).TotalDays)} dias." };
+            result.Add(new AppPendingDto(
                 connectionRef, courseId, row.StudentId, null, row.StudentName,
                 "Acesso ao curso", "no_recent_access", "attention", factors, null, null,
                 row.LastAccessAt, null));
@@ -107,7 +107,7 @@ public static class PortalPendingContractMapper
     private static string NormalizeType(string type, bool needsGrading) =>
         needsGrading || type.Contains("aguardando", StringComparison.OrdinalIgnoreCase)
             ? "awaiting_grading"
-            : type.Contains("nÃ£o entregue", StringComparison.OrdinalIgnoreCase) || type.Contains("não entregue", StringComparison.OrdinalIgnoreCase)
+            : type.Contains("nÃƒÂ£o entregue", StringComparison.OrdinalIgnoreCase) || type.Contains("nÃ£o entregue", StringComparison.OrdinalIgnoreCase)
                 ? "pending_submission"
                 : type;
 
@@ -118,3 +118,4 @@ public static class PortalPendingContractMapper
         _ => 1
     };
 }
+

@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+﻿import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, AlertCircle, BookOpen, ClipboardCheck, RefreshCw, UsersRound } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +20,7 @@ export function DashboardPage() {
   const courseId = params.get('courseId') ?? undefined;
   const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: ['portal', 'dashboard', connectionRef, courseId],
+    queryKey: ['app', 'dashboard', connectionRef, courseId],
     queryFn: () => dashboardGateway.get(connectionRef, courseId),
   });
   const generatedAt = query.data?.meta.generatedAt;
@@ -31,7 +31,7 @@ export function DashboardPage() {
         <div>
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Operacional</p>
           <h1 id="dashboard-title" className="text-2xl font-semibold tracking-tight">Resumo da semana</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Sinais determinísticos para orientar o acompanhamento manual.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Sinais determinÃ­sticos para orientar o acompanhamento manual.</p>
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           <div className="text-right">
@@ -44,7 +44,7 @@ export function DashboardPage() {
             className="h-9 w-9"
             aria-label="Atualizar resumo"
             title="Atualizar resumo"
-            onClick={() => void queryClient.invalidateQueries({ queryKey: ['portal', 'dashboard'] })}
+            onClick={() => void queryClient.invalidateQueries({ queryKey: ['app', 'dashboard'] })}
           >
             <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />
           </Button>
@@ -57,7 +57,7 @@ export function DashboardPage() {
         </section>
       )}
 
-      {query.isError && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar o resumo.</p></CardContent></Card>}
+      {query.isError && <Card><CardContent className="p-6"><p role="alert">NÃ£o foi possÃ­vel carregar o resumo.</p></CardContent></Card>}
 
       {query.isSuccess && (
         <>
@@ -76,9 +76,9 @@ export function DashboardPage() {
             </h2>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard title="Cursos em andamento" value={query.data.data.summary.activeCourses} subtitle="cursos ativos" icon={BookOpen} variant="pending" />
-              <StatCard title="Entregas pendentes" value={query.data.data.summary.pendingDeliveries} subtitle="não entregues" icon={ClipboardCheck} variant="warning" />
-              <StatCard title="Aguardando correção" value={query.data.data.summary.awaitingGrading} subtitle="somente leitura" icon={ClipboardCheck} variant="risk" />
-              <StatCard title="Alunos em atenção" value={query.data.data.summary.studentsNeedingAttention} subtitle={`${query.data.data.summary.studentsAtRisk} em risco`} icon={UsersRound} variant="danger" />
+              <StatCard title="Entregas pendentes" value={query.data.data.summary.pendingDeliveries} subtitle="nÃ£o entregues" icon={ClipboardCheck} variant="warning" />
+              <StatCard title="Aguardando correÃ§Ã£o" value={query.data.data.summary.awaitingGrading} subtitle="somente leitura" icon={ClipboardCheck} variant="risk" />
+              <StatCard title="Alunos em atenÃ§Ã£o" value={query.data.data.summary.studentsNeedingAttention} subtitle={`${query.data.data.summary.studentsAtRisk} em risco`} icon={UsersRound} variant="danger" />
             </div>
           </section>
 
@@ -91,17 +91,17 @@ export function DashboardPage() {
                 ) : query.data.data.priorities.slice(0, 6).map((item) => (
                   <div key={item.key} className="flex items-start justify-between gap-3 rounded-lg border bg-muted/20 p-3 transition-colors hover:bg-muted/40">
                     <div className="min-w-0"><p className="truncate text-sm font-medium"><ScopeLink connectionRef={connectionRef} courseId={item.courseId} studentId={item.studentId}>{item.title}</ScopeLink></p><p className="mt-1 text-xs text-muted-foreground">{item.detail}</p></div>
-                    <Badge variant="outline" className={item.level === 'risk' ? 'border-risk-risco/30 text-risk-risco' : 'border-status-warning/30 text-status-warning'}>{item.level === 'risk' ? 'Risco' : 'Atenção'}</Badge>
+                    <Badge variant="outline" className={item.level === 'risk' ? 'border-risk-risco/30 text-risk-risco' : 'border-status-warning/30 text-status-warning'}>{item.level === 'risk' ? 'Risco' : 'AtenÃ§Ã£o'}</Badge>
                   </div>
                 ))}
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-lg"><ClipboardCheck className="h-5 w-5 text-status-warning" /> Atividades aguardando ação</CardTitle></CardHeader>
+              <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-lg"><ClipboardCheck className="h-5 w-5 text-status-warning" /> Atividades aguardando aÃ§Ã£o</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 {query.data.data.activitiesToReview.length === 0 ? (
-                  <div className="py-6 text-center text-sm text-muted-foreground"><ClipboardCheck className="mx-auto mb-2 h-8 w-8 opacity-50" />Nenhuma atividade aguardando ação.</div>
+                  <div className="py-6 text-center text-sm text-muted-foreground"><ClipboardCheck className="mx-auto mb-2 h-8 w-8 opacity-50" />Nenhuma atividade aguardando aÃ§Ã£o.</div>
                 ) : query.data.data.activitiesToReview.slice(0, 6).map((item) => (
                   <div key={item.key} className="rounded-lg border border-status-warning/25 p-3"><p className="text-sm font-medium"><ScopeLink connectionRef={connectionRef} courseId={item.courseId} studentId={item.studentId}>{item.title}</ScopeLink></p><p className="mt-1 text-xs text-muted-foreground">{item.detail}</p></div>
                 ))}
@@ -112,7 +112,7 @@ export function DashboardPage() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-lg"><Activity className="h-5 w-5 text-primary" /> Atividade recente</CardTitle></CardHeader>
             <CardContent>
-              {query.data.data.recentActivity.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Nenhuma atividade recente.</p> : <div className="space-y-3">{query.data.data.recentActivity.slice(0, 8).map((item) => <div key={item.key} className="flex items-start gap-3 border-b pb-3 last:border-0 last:pb-0"><div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-primary"><Activity className="h-3.5 w-3.5" /></div><div className="min-w-0"><p className="text-sm font-medium"><ScopeLink connectionRef={connectionRef} courseId={item.courseId} studentId={item.studentId}>{item.title}</ScopeLink></p><p className="text-xs text-muted-foreground">{item.detail}{item.occurredAt ? ` · ${new Date(item.occurredAt).toLocaleString('pt-BR')}` : ''}</p></div></div>)}</div>}
+              {query.data.data.recentActivity.length === 0 ? <p className="py-4 text-sm text-muted-foreground">Nenhuma atividade recente.</p> : <div className="space-y-3">{query.data.data.recentActivity.slice(0, 8).map((item) => <div key={item.key} className="flex items-start gap-3 border-b pb-3 last:border-0 last:pb-0"><div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-primary"><Activity className="h-3.5 w-3.5" /></div><div className="min-w-0"><p className="text-sm font-medium"><ScopeLink connectionRef={connectionRef} courseId={item.courseId} studentId={item.studentId}>{item.title}</ScopeLink></p><p className="text-xs text-muted-foreground">{item.detail}{item.occurredAt ? ` Â· ${new Date(item.occurredAt).toLocaleString('pt-BR')}` : ''}</p></div></div>)}</div>}
             </CardContent>
           </Card>
         </>
@@ -120,3 +120,4 @@ export function DashboardPage() {
     </main>
   );
 }
+

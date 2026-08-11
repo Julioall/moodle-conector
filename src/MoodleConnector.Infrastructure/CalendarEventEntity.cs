@@ -1,6 +1,6 @@
 namespace MoodleConnector.Infrastructure;
 
-public sealed class PortalCalendarEventEntity
+public sealed class CalendarEventEntity
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }

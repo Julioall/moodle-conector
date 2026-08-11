@@ -1,4 +1,4 @@
-name: Deploy Moodle Connector to VPS
+﻿name: Deploy Moodle Connector to VPS
 
 on:
   push:
@@ -43,7 +43,7 @@ env:
   OAUTH_KEY_STORAGE_PATH: ${{ vars.OAUTH_KEY_STORAGE_PATH || '/app/data/oauth' }}
   OAUTH_CERTIFICATE_YEARS: ${{ vars.OAUTH_CERTIFICATE_YEARS || '5' }}
   RATE_LIMIT_WINDOW_SECONDS: ${{ vars.RATE_LIMIT_WINDOW_SECONDS || '60' }}
-  RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT || '12' }}
+  RATE_LIMIT_APP_AUTH_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_APP_AUTH_PERMIT_LIMIT || '12' }}
   RATE_LIMIT_ADMIN_API_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_ADMIN_API_PERMIT_LIMIT || '30' }}
   RATE_LIMIT_MCP_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_MCP_PERMIT_LIMIT || '120' }}
   MOODLE_API_HTTP_TIMEOUT_SECONDS: ${{ vars.MOODLE_API_HTTP_TIMEOUT_SECONDS || '30' }}
@@ -149,7 +149,7 @@ jobs:
           require_int_range OAUTH_REFRESH_TOKEN_DAYS "$OAUTH_REFRESH_TOKEN_DAYS" 1 3650
           require_int_range OAUTH_CERTIFICATE_YEARS "$OAUTH_CERTIFICATE_YEARS" 1 20
           require_int_range RATE_LIMIT_WINDOW_SECONDS "$RATE_LIMIT_WINDOW_SECONDS" 1 3600
-          require_int_range RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT "$RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT" 1 1000
+          require_int_range RATE_LIMIT_APP_AUTH_PERMIT_LIMIT "$RATE_LIMIT_APP_AUTH_PERMIT_LIMIT" 1 1000
           require_int_range RATE_LIMIT_ADMIN_API_PERMIT_LIMIT "$RATE_LIMIT_ADMIN_API_PERMIT_LIMIT" 1 1000
           require_int_range RATE_LIMIT_MCP_PERMIT_LIMIT "$RATE_LIMIT_MCP_PERMIT_LIMIT" 1 10000
           require_int_range MOODLE_API_HTTP_TIMEOUT_SECONDS "$MOODLE_API_HTTP_TIMEOUT_SECONDS" 1 300
@@ -420,7 +420,7 @@ jobs:
             printf 'OAuth__KeyStoragePath=%s\n' "$OAUTH_KEY_STORAGE_PATH"
             printf 'OAuth__CertificateYears=%s\n' "$OAUTH_CERTIFICATE_YEARS"
             printf 'RateLimiting__WindowSeconds=%s\n' "$RATE_LIMIT_WINDOW_SECONDS"
-            printf 'RateLimiting__PortalAuthPermitLimit=%s\n' "$RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT"
+            printf 'RateLimiting__AppAuthPermitLimit=%s\n' "$RATE_LIMIT_APP_AUTH_PERMIT_LIMIT"
             printf 'RateLimiting__AdminApiPermitLimit=%s\n' "$RATE_LIMIT_ADMIN_API_PERMIT_LIMIT"
             printf 'RateLimiting__McpPermitLimit=%s\n' "$RATE_LIMIT_MCP_PERMIT_LIMIT"
             printf 'MoodleApi__BaseUrl=%s\n' "$MOODLE_API_BASE_URL"
@@ -505,3 +505,4 @@ jobs:
           else
             sshpass -p "$VPS_AUTH_SECRET" ssh -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
           fi
+

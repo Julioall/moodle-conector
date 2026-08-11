@@ -1,6 +1,6 @@
 namespace MoodleConnector.Infrastructure;
 
-public sealed class PortalFollowupEntity
+public sealed class FollowupEntity
 {
     public Guid Id { get; set; }
     public Guid OwnerId { get; set; }

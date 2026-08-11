@@ -1,4 +1,4 @@
-import { createPortalClient } from '../../integrations/http/portal-client';
+﻿import { createAppClient } from '../../integrations/http-client';
 
 export type StudentGrade = { itemId: string; name: string; grade?: number; maximum?: number; percentage?: number; feedback?: string; readOnly: boolean };
 export type StudentCourse = { connectionRef: string; courseId: string; name: string; url?: string; enrollmentStatus: string; progress?: number; lastCourseAccessAt?: string; grades: StudentGrade[] };
@@ -6,8 +6,9 @@ export type Student = { studentRef: { connectionRef: string; studentId: string }
 export type StudentList = { data: Student[]; meta: { page: number; pageSize: number; returned: number; total?: number; hasMore: boolean; generatedAt: string; connectionRef?: string } };
 export type StudentResponse = { data: Student; meta: { generatedAt: string; connectionRef?: string } };
 
-export const createStudentsGateway = (client = createPortalClient()) => ({
-  byCourse: (connectionRef: string, courseId: string, page = 1, pageSize = 20) => client.get<StudentList>(`/api/portal/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/students?page=${page}&pageSize=${pageSize}`),
-  get: (connectionRef: string, courseId: string, studentId: string) => client.get<StudentResponse>(`/api/portal/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`),
+export const createStudentsGateway = (client = createAppClient()) => ({
+  byCourse: (connectionRef: string, courseId: string, page = 1, pageSize = 20) => client.get<StudentList>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/students?page=${page}&pageSize=${pageSize}`),
+  get: (connectionRef: string, courseId: string, studentId: string) => client.get<StudentResponse>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/students/${encodeURIComponent(studentId)}`),
 });
 export const studentsGateway = createStudentsGateway();
+

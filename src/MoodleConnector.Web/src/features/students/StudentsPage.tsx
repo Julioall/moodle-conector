@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+﻿import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ArrowRight, BookOpen, Search, Users } from 'lucide-react';
 import { Avatar, AvatarFallback } from '../../components/ui/avatar';
@@ -28,13 +28,13 @@ export function StudentsPage() {
   const page = Math.max(Number(params.get('page') || 1), 1);
 
   const courses = useQuery({
-    queryKey: ['portal', 'students', 'courses', connectionRef],
+    queryKey: ['app', 'students', 'courses', connectionRef],
     queryFn: () => coursesGateway.list(connectionRef, 1, 100),
     enabled: Boolean(connectionRef),
     staleTime: 60_000,
   });
   const students = useQuery({
-    queryKey: ['portal', 'students', connectionRef, courseId, page],
+    queryKey: ['app', 'students', connectionRef, courseId, page],
     queryFn: () => studentsGateway.byCourse(connectionRef!, courseId!, page),
     enabled: Boolean(connectionRef && courseId),
   });
@@ -60,7 +60,7 @@ export function StudentsPage() {
         <div>
           <p className="eyebrow">OPERACIONAL</p>
           <h1>Alunos</h1>
-          <p>Consulte alunos, acessos, matrículas e risco de forma somente leitura.</p>
+          <p>Consulte alunos, acessos, matrÃ­culas e risco de forma somente leitura.</p>
         </div>
         {students.data && <span className="freshness">Atualizado em {new Date(students.data.meta.generatedAt).toLocaleString('pt-BR')}</span>}
       </header>
@@ -82,7 +82,7 @@ export function StudentsPage() {
                 onChange={(event) => updateCourse(event.target.value)}
                 disabled={!connectionRef || courses.isPending}
               >
-                <option value="">{courses.isPending ? 'Carregando cursos…' : 'Selecione um curso'}</option>
+                <option value="">{courses.isPending ? 'Carregando cursosâ€¦' : 'Selecione um curso'}</option>
                 {courses.data?.data.map((course) => (
                   <option key={course.courseId} value={course.courseId}>
                     {course.displayName ?? course.fullName} ({course.courseId})
@@ -94,8 +94,8 @@ export function StudentsPage() {
               Moodle: <span className="font-medium text-foreground">{connectionDisplayName(selectedConnection)}</span>
             </div>
           </div>
-          {courses.isError && <p role="alert" className="text-sm text-destructive">Não foi possível carregar os cursos desta conexão.</p>}
-          {!connectionRef && <p className="text-sm text-muted-foreground">Nenhuma conexão Moodle disponível para esta conta.</p>}
+          {courses.isError && <p role="alert" className="text-sm text-destructive">NÃ£o foi possÃ­vel carregar os cursos desta conexÃ£o.</p>}
+          {!connectionRef && <p className="text-sm text-muted-foreground">Nenhuma conexÃ£o Moodle disponÃ­vel para esta conta.</p>}
         </CardContent>
       </Card>
 
@@ -103,7 +103,7 @@ export function StudentsPage() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <div className="rounded-full bg-primary/10 p-3 text-primary"><Search className="h-6 w-6" /></div>
-            <div><h2 className="font-semibold">Selecione um curso</h2><p className="mt-1 text-sm text-muted-foreground">A lista de alunos é sempre limitada ao curso escolhido.</p></div>
+            <div><h2 className="font-semibold">Selecione um curso</h2><p className="mt-1 text-sm text-muted-foreground">A lista de alunos Ã© sempre limitada ao curso escolhido.</p></div>
           </CardContent>
         </Card>
       )}
@@ -111,7 +111,7 @@ export function StudentsPage() {
       {courseId && students.isPending && (
         <Card><CardContent className="space-y-3 py-6"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></CardContent></Card>
       )}
-      {courseId && students.isError && <Card><CardContent className="py-8"><p role="alert" className="text-destructive">Não foi possível carregar os alunos deste curso.</p></CardContent></Card>}
+      {courseId && students.isError && <Card><CardContent className="py-8"><p role="alert" className="text-destructive">NÃ£o foi possÃ­vel carregar os alunos deste curso.</p></CardContent></Card>}
       {courseId && students.isSuccess && students.data.data.length === 0 && (
         <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 py-12 text-center"><Users className="h-8 w-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">Nenhum aluno encontrado em {selectedCourse?.displayName ?? courseId}.</p></CardContent></Card>
       )}
@@ -120,15 +120,15 @@ export function StudentsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg">Participantes do curso</CardTitle>
-            <CardDescription>{selectedCourse?.displayName ?? courseId} · {students.data.meta.returned} nesta página</CardDescription>
+            <CardDescription>{selectedCourse?.displayName ?? courseId} Â· {students.data.meta.returned} nesta pÃ¡gina</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
-              <TableHeader><TableRow><TableHead>Aluno</TableHead><TableHead>Risco</TableHead><TableHead>Matrícula</TableHead><TableHead>Último acesso</TableHead><TableHead className="text-right">Ação</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>Aluno</TableHead><TableHead>Risco</TableHead><TableHead>MatrÃ­cula</TableHead><TableHead>Ãšltimo acesso</TableHead><TableHead className="text-right">AÃ§Ã£o</TableHead></TableRow></TableHeader>
               <TableBody>
                 {students.data.data.map((student) => (
                   <TableRow key={`${student.connectionRef}:${student.studentId}`}>
-                    <TableCell><div className="flex items-center gap-3"><Avatar className="h-9 w-9"><AvatarFallback>{initials(student.name)}</AvatarFallback></Avatar><div className="min-w-0"><p className="font-medium">{student.name}</p><p className="truncate text-xs text-muted-foreground">{student.email ?? 'Email não informado'}</p></div></div></TableCell>
+                    <TableCell><div className="flex items-center gap-3"><Avatar className="h-9 w-9"><AvatarFallback>{initials(student.name)}</AvatarFallback></Avatar><div className="min-w-0"><p className="font-medium">{student.name}</p><p className="truncate text-xs text-muted-foreground">{student.email ?? 'Email nÃ£o informado'}</p></div></div></TableCell>
                     <TableCell><RiskBadge level={student.risk} /></TableCell>
                     <TableCell><EnrollmentBadge status={student.suspended ? 'suspenso' : 'ativo'} /></TableCell>
                     <TableCell className="text-sm text-muted-foreground">{formatDate(student.lastCourseAccessAt)}</TableCell>
@@ -144,3 +144,4 @@ export function StudentsPage() {
     </main>
   );
 }
+

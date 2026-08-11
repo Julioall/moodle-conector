@@ -162,6 +162,8 @@ public static class DependencyInjection
             .AddMoodleResilience(moodleProxyResilience);
 
         services.AddScoped<IAccountService, AccountService>();
+        services.AddScoped<ITeamAccessService, TeamAccessService>();
+        services.AddScoped<IPlatformPermissionService, PlatformPermissionService>();
 
         services
             .AddHttpClient<IMoodleCredentialValidator, MoodleCredentialValidator>(ConfigureMoodleApiClient)
