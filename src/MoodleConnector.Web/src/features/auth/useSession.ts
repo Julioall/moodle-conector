@@ -10,22 +10,28 @@ export function useSession() {
     retry: false
   });
 
-  const logout = () => {
+  const logout = async () => {
     // The app and the account/OAuth broker share the same account cookie.
     // Use the existing sign-out endpoint so the shell never invents a second auth flow.
     queryClient.clear();
-    window.location.href = '/auth/logout';
+    try {
+      await fetch('/auth/logout', { credentials: 'same-origin' });
+    } finally {
+      window.location.assign('/');
+    }
   };
 
   const user = session.data?.data?.user;
   const isAuthenticated = session.data?.data?.authenticated ?? false;
 
+  const hasAdministratorRole = user?.roles?.some((role) => ['admin', 'administrator'].includes(role.toLowerCase())) ?? false;
+
   const can = (permission: string) => {
     if (!user) return false;
-    return user.permissions?.includes(permission) || user.roles?.includes('admin');
+    return user.permissions?.includes(permission) || hasAdministratorRole;
   };
 
-  const isAdmin = user?.roles?.includes('admin') ?? false;
+  const isAdmin = hasAdministratorRole;
 
   return {
     session,

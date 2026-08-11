@@ -8,6 +8,18 @@ export class AppHttpError extends Error {
 
 export type AppClient = { get<T>(path: string, options?: RequestInit): Promise<T>; request<T>(path: string, options?: RequestInit): Promise<T> };
 
+function repairMojibake(value: unknown): unknown {
+  if (typeof value === 'string' && /[ÃÂâ][\u0080-\u00bfÃÂâ]/.test(value)) {
+    try {
+      const bytes = Uint8Array.from(value, (character) => character.charCodeAt(0));
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch { return value; }
+  }
+  if (Array.isArray(value)) return value.map(repairMojibake);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, repairMojibake(item)]));
+  return value;
+}
+
 const mutatingMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const createCorrelationId = () => globalThis.crypto?.randomUUID?.() ?? `app-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -51,7 +63,7 @@ export function createAppClient(fetchImpl: typeof fetch = fetch, timeoutMs = 100
       const responseCorrelationId = response.headers.get('X-Correlation-ID') ?? correlationId;
       const text = await response.text();
       let body: AppErrorBody | undefined;
-      if (text) { try { body = JSON.parse(text) as AppErrorBody; } catch { body = undefined; } }
+      if (text) { try { body = repairMojibake(JSON.parse(text)) as AppErrorBody; } catch { body = undefined; } }
       if (!response.ok) throw new AppHttpError(response.status, body?.error?.message ?? body?.message ?? `App request failed (${response.status})`, responseCorrelationId, body);
       return (body ?? {}) as T;
     } catch (error) {

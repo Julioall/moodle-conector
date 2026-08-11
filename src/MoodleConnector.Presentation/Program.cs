@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using System.Security.Cryptography.X509Certificates;
@@ -478,6 +478,7 @@ app.Use(async (context, next) =>
         });
     }
 });
+app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();
 
@@ -850,7 +851,7 @@ app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async 
         authenticationScheme: OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
 });
 
-// â”€â”€â”€ App API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 
 app.MapGet("/api/csrf", (HttpContext context, IAntiforgery antiforgery) =>
 {
@@ -2032,10 +2033,10 @@ app.MapPost("/auth/login", async (
 
 app.MapGet("/auth/logout", () =>
 {
-    return Results.SignOut(authenticationSchemes: new[] { CookieAuthenticationDefaults.AuthenticationScheme });
+    return Results.SignOut(
+        new AuthenticationProperties { RedirectUri = "/?loggedOut=1" },
+        authenticationSchemes: new[] { CookieAuthenticationDefaults.AuthenticationScheme });
 });
-
-// â”€â”€â”€ Grading App API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 app.MapGet("/api/grading/batches", async (
     HttpContext context,
@@ -2196,8 +2197,6 @@ app.MapPost("/api/grading/batches/{id:guid}/confirm", async (
     }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-// â”€â”€â”€ Admin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 app.MapPost("/admin/connector-clients/register", async (
     RegisterConnectorClientInput input,
     HttpContext context,
@@ -2263,7 +2262,6 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/", () => appV2Enabled ? Results.Redirect("/") : Results.NotFound());
 app.MapGet("/app.html", () => appV2Enabled ? Results.Redirect("/") : Results.NotFound());
 app.MapGet("/auth.html", (string? tab, string? error) =>
 {
@@ -3137,6 +3135,11 @@ static bool HasAppPermission(HttpContext context, string permission)
 {
     if (context.User.FindAll("platform_permission_deny").Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase)))
         return false;
+    if (context.User.FindAll(ClaimTypes.Role)
+        .Concat(context.User.FindAll("role"))
+        .Any(x => string.Equals(x.Value, "admin", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(x.Value, "administrator", StringComparison.OrdinalIgnoreCase)))
+        return true;
     return context.User.FindAll("platform_permission")
         .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase));
 }
