@@ -486,6 +486,12 @@ Esta tabela preserva rastreabilidade histórica; as jornadas são a organizaçã
 | 19 — Documentação e handoff | 7 | parcial | Runbooks/documentação existem; aceite operacional de handoff não é comprovado pelo repositório. |
 | 20 — Monitor | 1, 2, 6 | parcial | Checklist do monitor testado; relatório do monitor implementado sem teste dedicado; fontes administrativas externas e diagnóstico de acesso faltam. |
 
+## Visão por camadas e equipes
+
+O roadmap deve ser lido em quatro camadas: **portal web** (interface determinística), **portal MCP** (integração e tools), **conector/aplicação** (casos de uso, policies e registry) e **dados/integrações** (PostgreSQL, auditoria e Moodle). Tutor e monitor priorizam acompanhamento; gerente prioriza coordenação e governança; administrador habilita equipes, conexões, políticas e capabilities. Nenhum papel amplia acesso sem escopo, equipe, contexto e permissão Moodle correspondentes.
+
+A decisão de acesso delimitado por equipe está em `docs/architecture/adr-0002-team-scoped-access.md`; o modelo está em `docs/architecture/roles-and-scopes.md`. Itens continuam classificados como suportados, assistidos, dependentes de configuração, planejados ou exclusivamente humanos.
+
 ## Backlog priorizado por jornada
 
 ### P0 — bloqueadores transversais

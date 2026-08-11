@@ -450,6 +450,8 @@ Demo de pending action:
 
 ## Documentação Detalhada
 
+- Índice da documentação: `docs/README.md`
+
 - TODO operacional: `TODO.md`
 - Roadmap funcional canônico, organizado pelas jornadas de tutor, monitor, corpo pedagógico e operação: `docs/roadmap.md`
 - Setup local: `docs/technical/local-setup.md`
@@ -462,4 +464,4 @@ Demo de pending action:
 - Deploy: `docs/operations/deploy-runbook.md`
 - Troubleshooting: `docs/operations/troubleshooting-runbook.md`
 - Auth e escopos: `docs/security/auth-and-scopes.md`
-- Contrato de resposta MCP: `docs/mcp/tool-response-contract.md`
+- Contrato de resposta MCP: `docs/technical/tool-response-contract.md`

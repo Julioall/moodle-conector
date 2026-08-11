@@ -46,6 +46,7 @@ appsettings.Development.json
 !.env.example
 
 ## Temporary files
+scratch/
 .worktrees/
 *.tmp
 *.log

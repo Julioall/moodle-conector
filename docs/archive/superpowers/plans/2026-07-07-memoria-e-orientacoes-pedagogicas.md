@@ -253,7 +253,7 @@ git commit -m "feat: expor memoria e guias como tools mcp"
 - Modify: `src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj`
 - Modify: `Dockerfile`
 - Modify: `docs/technical/mcp-tools-catalog.md`
-- Modify: `docs/functional/privacy-best-practices.md`
+- Modify: `docs/security/privacy-best-practices.md`
 - Modify: `README.md`
 - Test: `tests/MoodleConnector.Application.Tests/Infrastructure/PedagogicContentPublishTests.cs`
 
@@ -297,7 +297,7 @@ Expected: teste PASS, publish exit 0 e arquivos em `.artifacts/memory-publish/pu
 Adicionar somente a movimentação já presente dos guias e os arquivos desta tarefa; não incluir `.artifacts`.
 
 ```powershell
-git add Dockerfile README.md docs/technical/mcp-tools-catalog.md docs/functional/privacy-best-practices.md src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj tests/MoodleConnector.Application.Tests/Infrastructure/PedagogicContentPublishTests.cs public/pedagogic docs/pedagogic
+git add Dockerfile README.md docs/technical/mcp-tools-catalog.md docs/security/privacy-best-practices.md src/MoodleConnector.Presentation/MoodleConnector.Presentation.csproj tests/MoodleConnector.Application.Tests/Infrastructure/PedagogicContentPublishTests.cs public/pedagogic docs/pedagogic
 git commit -m "docs: publicar guias e documentar memoria"
 ```
 

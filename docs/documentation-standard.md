@@ -1,0 +1,40 @@
+# Padrão de documentação
+
+## Objetivo
+
+Manter a documentação encontrável, previsível e sem múltiplas fontes concorrentes. Todo novo documento deve seguir esta regra antes de ser versionado.
+
+## Nome de arquivo
+
+- Usar somente letras minúsculas, números e hífens: `lowercase-kebab-case.md`.
+- Usar extensão `.md` para documentação textual.
+- Para ADRs, usar `adr-NNNN-descricao-curta.md`, com quatro dígitos sequenciais.
+- Usar nomes por assunto, não por data, salvo documentos explicitamente históricos ou planos datados.
+- Evitar espaços, acentos, maiúsculas, abreviações obscuras e nomes genéricos como `novo.md`, `final.md` ou `documento-2.md`.
+- `README.md` é a única exceção: deve ser usado apenas como índice de uma pasta ou entrada do repositório.
+
+## Localização
+
+| Conteúdo | Pasta |
+|---|---|
+| Decisões e limites | `docs/architecture/` |
+| Visão, jornadas e fronteiras do produto | `docs/product/` |
+| Segurança, privacidade e controles | `docs/security/` |
+| Deploy, setup operacional e troubleshooting | `docs/operations/` |
+| Contratos, integrações e modelos técnicos | `docs/technical/` |
+| Material substituído, datado ou somente histórico | `docs/archive/` |
+
+## Conteúdo mínimo
+
+Todo documento deve declarar, quando aplicável: objetivo, escopo, status, autoridade, limitações e referências. Não declarar funcionalidades como implementadas sem evidência no código/testes ou sem marcar explicitamente como planejadas.
+
+ADRs devem conter no mínimo `Status`, `Contexto`, `Decisão` e `Consequências`.
+
+## Regras de manutenção
+
+- Antes de criar um arquivo, procurar se já existe documento canônico sobre o assunto.
+- Preferir atualizar/consolidar o documento canônico a criar uma cópia.
+- Ao mover um arquivo versionado, usar `git mv` e atualizar todos os links.
+- Ao substituir um documento, mover o anterior para `docs/archive/` em vez de duplicá-lo.
+- Não usar `CHANGELOG.md` para notas soltas ou estado de release; registrar estado atual na documentação canônica e histórico técnico somente quando houver valor de rastreabilidade.
+- Toda alteração estrutural deve atualizar [docs/README.md](README.md) e [documentation-audit.md](documentation-audit.md) quando afetar inventário ou localização.

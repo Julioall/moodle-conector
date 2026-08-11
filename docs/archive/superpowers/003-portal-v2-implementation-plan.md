@@ -42,7 +42,7 @@
 
 **Files:** Create DTO/contract tests in `src/MoodleConnector.Presentation` and `tests/MoodleConnector.Application.Tests/Portal/`; create matching TypeScript contracts under `portal/src/features/*/api/contracts`.
 
-- [ ] Implement the envelope and list metadata from `docs/superpowers/005-portal-v2-api-contracts.md`.
+- [ ] Implement the envelope and list metadata from `docs/archive/superpowers/005-portal-v2-api-contracts.md`.
 - [ ] Define `CourseRef`, `StudentRef`, and `ActivityRef` consistently in URLs, DTOs, query keys, and logs.
 - [ ] Add contract tests for authorization, pagination, freshness, `connectionRef`, errors, and absence of secrets.
 - [ ] Run the focused .NET test project; expected: PASS.
@@ -108,7 +108,7 @@
 - [ ] Add frontend lint, typecheck, tests, build, .NET restore/build/test, and Docker build to CI.
 - [ ] Fail the guard when production Web imports Supabase runtime access, OpenAI, MCP, chat, suggestions, grading, or direct Moodle clients.
 - [ ] Ensure final image contains ASP.NET runtime and Web static assets but no Node runtime requirement.
-- [ ] Run the complete checklist in `docs/superpowers/004-portal-v2-verification-checklist.md` and record results.
+- [ ] Run the complete checklist in `docs/archive/superpowers/004-portal-v2-verification-checklist.md` and record results.
 
 ## Task 12: Wave 2 operational modules
 

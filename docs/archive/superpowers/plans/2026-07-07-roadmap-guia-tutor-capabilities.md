@@ -16,14 +16,14 @@
 - Modify: `docs/technical/moodle-webservice-setup.md` — alinhar lista de funções e limitações transversais descobertas.
 - Modify: `docs/technical/mcp-tools-catalog.md` — corrigir somente descrições que contradigam níveis de suporte ou gates reais.
 - Modify: `README.md` — apontar para a nova organização do roadmap, se o README ainda descrever fases técnicas como eixo principal.
-- Reference: `docs/superpowers/specs/2026-07-07-roadmap-guia-tutor-capabilities-design.md` — desenho aprovado.
+- Reference: `docs/archive/superpowers/specs/2026-07-07-roadmap-guia-tutor-capabilities-design.md` — desenho aprovado.
 - Reference: `public/pedagogic/*.md` — fundamentos pedagógicos.
 
 ### Task 1: Criar o esqueleto normativo e a legenda de suporte
 
 **Files:**
 - Modify: `docs/roadmap.md:1-169`
-- Reference: `docs/superpowers/specs/2026-07-07-roadmap-guia-tutor-capabilities-design.md`
+- Reference: `docs/archive/superpowers/specs/2026-07-07-roadmap-guia-tutor-capabilities-design.md`
 
 - [ ] **Step 1: Registrar a estrutura esperada antes da edição**
 
@@ -379,7 +379,7 @@ Expected: todos os testes passam; a reestruturação documental não altera comp
 
 - [ ] **Step 5: Revisão final**
 
-Comparar cada critério de aceite de `docs/superpowers/specs/2026-07-07-roadmap-guia-tutor-capabilities-design.md` com uma seção do roadmap. Corrigir lacunas antes de concluir.
+Comparar cada critério de aceite de `docs/archive/superpowers/specs/2026-07-07-roadmap-guia-tutor-capabilities-design.md` com uma seção do roadmap. Corrigir lacunas antes de concluir.
 
 - [ ] **Step 6: Commit final se necessário**
 
