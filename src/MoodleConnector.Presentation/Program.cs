@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.EntityFrameworkCore;
@@ -62,6 +63,17 @@ using MoodleConnector.Infrastructure.Reports;
 var builder = WebApplication.CreateBuilder(args);
 const string AppAuthRateLimitPolicy = "app-auth";
 const string AdminApiRateLimitPolicy = "admin-api";
+
+// Windows adds EventLog as a default provider, which requires elevated
+// permissions and makes integration tests fail before the host starts.
+if (builder.Environment.IsEnvironment("Testing"))
+{
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    var testKeyPath = Path.Combine(Path.GetTempPath(), "moodle-connector-tests", "keys");
+    Directory.CreateDirectory(testKeyPath);
+    builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(testKeyPath));
+}
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAntiforgery(options =>
