@@ -1,4 +1,5 @@
 import { Calendar, Clock3, ExternalLink, ImageOff, Users } from 'lucide-react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,14 +22,15 @@ function lifecycle(course: Course) {
 }
 
 export function CourseCard({ course }: { course: Course }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const status = lifecycle(course);
   const title = course.displayName ?? course.fullName;
 
   return (
     <Card className="group h-full overflow-hidden transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
-      {course.courseImage ? (
+      {course.courseImage && !imageFailed ? (
         <div className="relative h-28 overflow-hidden bg-muted">
-          <img src={course.courseImage} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+          <img src={course.courseImage} alt="" className="h-full w-full object-cover transition-transform group-hover:scale-105" onError={() => setImageFailed(true)} />
         </div>
       ) : (
         <div className="flex h-20 items-center justify-center bg-gradient-to-br from-primary/10 via-muted to-card text-primary/35">
