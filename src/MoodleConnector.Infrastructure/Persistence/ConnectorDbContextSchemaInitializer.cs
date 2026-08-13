@@ -23,6 +23,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "015_grant_all_platform_permissions.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "016_permission_group_management.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "017_revoke_temporary_global_permissions.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "018_restore_default_read_permissions.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(
