@@ -14,7 +14,7 @@ internal static class GradingAccessControl
             return;
         }
 
-        if (currentUser.HasScope("grading.admin") || currentUser.HasScope("moodle.admin"))
+        if (currentUser.HasScope("grading.admin") || currentUser.HasPlatformPermission("tool.assignments.grade"))
         {
             return;
         }

@@ -9,4 +9,6 @@ public interface ICurrentUserContext
     IReadOnlyCollection<string> Scopes { get; }
 
     bool HasScope(string scope);
+
+    bool HasPlatformPermission(string permission) => false;
 }

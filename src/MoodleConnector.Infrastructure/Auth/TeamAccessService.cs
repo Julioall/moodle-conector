@@ -6,7 +6,9 @@ using MoodleConnector.Application.Abstractions;
 
 namespace MoodleConnector.Infrastructure;
 
-internal sealed class TeamAccessService(ConnectorDbContext dbContext) : ITeamAccessService
+internal sealed class TeamAccessService(
+    ConnectorDbContext dbContext,
+    IPlatformPermissionService platformPermissionService) : ITeamAccessService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -46,9 +48,11 @@ internal sealed class TeamAccessService(ConnectorDbContext dbContext) : ITeamAcc
     public async Task<TeamInvitationDto> CreateInvitationAsync(CreateTeamInvitationRequest request, CancellationToken cancellationToken)
     {
         var inviter = await dbContext.TeamMemberships.FirstOrDefaultAsync(item =>
-            item.TeamId == request.TeamId && item.UserId == request.UserId && item.IsActive &&
-            (item.Role == "administrator" || item.Role == "manager"), cancellationToken)
-            ?? throw new InvalidOperationException("Usuário não pode convidar membros para esta equipe.");
+            item.TeamId == request.TeamId && item.UserId == request.UserId && item.IsActive, cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não pertence a esta equipe.");
+        var effectivePermissions = await platformPermissionService.GetEffectivePermissionsAsync(request.UserId, cancellationToken);
+        if (!effectivePermissions.Contains(PlatformPermissionCatalog.TeamsManage, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Usuário não possui permissão para gerenciar equipes.");
 
         var email = NormalizeEmail(request.Email);
         var role = NormalizeRole(request.Role);
@@ -121,11 +125,13 @@ internal sealed class TeamAccessService(ConnectorDbContext dbContext) : ITeamAcc
     private static string NormalizeEmail(string email) =>
         email.Trim().ToUpperInvariant();
 
-    private static string NormalizeRole(string role) => role.Trim().ToLowerInvariant() switch
+    private static string NormalizeRole(string role)
     {
-        "administrator" or "manager" or "tutor" or "monitor" or "member" => role.Trim().ToLowerInvariant(),
-        _ => throw new ArgumentException("Papel de equipe inválido.", nameof(role))
-    };
+        var normalized = role.Trim().ToLowerInvariant();
+        if (normalized.Length is 0 or > 32 || normalized.Any(char.IsControl))
+            throw new ArgumentException("O papel de equipe deve ter entre 1 e 32 caracteres.", nameof(role));
+        return normalized;
+    }
 
     private static IReadOnlyCollection<string> NormalizeScopes(IEnumerable<string> scopes) =>
         scopes.Select(scope => scope.Trim().ToLowerInvariant())

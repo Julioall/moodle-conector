@@ -4,6 +4,8 @@ O endpoint MCP aceita JWT OAuth emitido pelo broker local e API key opcional do 
 
 Escopos planejados:
 
+- `moodle.read` (somente primitives universais legadas)
+- `moodle.write` (somente primitives universais/compatibilidade)
 - `moodle.read.courses`
 - `moodle.read.students`
 - `moodle.read.groups`
@@ -19,8 +21,15 @@ Escopos planejados:
 - `moodle.write.assignments.feedback`
 - `moodle.write.assignments.grade`
 - `moodle.write.course_content`
-- `moodle.admin`
+- `moodle.read.forums`
+- `moodle.write.forums`
 
-As policies ficam registradas em `MoodleScopePolicies`. A confirmacao de pending action tambem pode receber um `requiredScope`; se o usuario nao possuir esse escopo, a confirmacao falha antes de qualquer escrita.
+`moodle.admin` não é scope emitido pelo broker e não pode ser solicitado pelo cliente.
 
-API keys antigas com `CanWrite=true` continuam emitindo `moodle.write` para compatibilidade. As novas tools devem migrar gradualmente para escopos especificos.
+As policies ficam registradas em `MoodleScopePolicies`. O manifesto MCP anuncia os scopes específicos de cada tool; scopes não são permissões de plataforma.
+
+O `/authorize` emite somente a interseção entre scopes pedidos, scopes permitidos pelo cliente, permissões efetivas dos grupos do usuário e a capacidade coarse da conexão ativa. A revogação de um grupo é recalculada no limite MCP, sem depender da expiração do JWT.
+
+API keys antigas com `CanWrite=true` continuam emitindo `moodle.write` para compatibilidade. Quando a chave pertence a uma conta local, as platform permissions efetivas dos grupos dessa conta são aplicadas; clientes de serviço legados ainda usam o contrato explícito `CanWrite` até receberem uma política própria.
+
+Escopos legados armazenados na associação de equipe não são mais copiados para tokens MCP.

@@ -2,7 +2,11 @@ using Xunit;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Presentation.Configuration;
+using MoodleConnector.Presentation.Security;
 using MoodleConnector.Presentation.Tools;
+using MoodleConnector.Presentation.Tools.Completion;
+using MoodleConnector.Presentation.Tools.Forums;
+using MoodleConnector.Presentation.Tools.Gradebook;
 using MoodleConnector.Presentation.Tools.Grading;
 
 namespace MoodleConnector.Application.Tests.Unit;
@@ -28,6 +32,8 @@ public class ToolMetadataRegistryTests
         Assert.Equal("courses", meta!.Family);
         Assert.Equal("R1", meta.Classification);
         Assert.False(meta.Structural);
+        Assert.Equal("tool.courses.view", meta.RequiredPlatformPermission);
+        Assert.Equal(MoodleScopePolicies.ReadCourses, meta.RequiredOAuthScopes);
     }
 
     [Fact]
@@ -102,6 +108,28 @@ public class ToolMetadataRegistryTests
     }
 
     [Fact]
+    public void Tool_contracts_do_not_inherit_the_wrong_domain_scope()
+    {
+        var reg = new ToolMetadataRegistry();
+        reg.RegisterFromType(typeof(MoodleStudentPerformanceTools));
+        reg.RegisterFromType(typeof(MoodleForumParticipationTools));
+        reg.RegisterFromType(typeof(MoodleAccessMonitoringTools));
+
+        Assert.True(reg.TryGet("get_student_activity_grades", out var grades));
+        Assert.Equal("tool.assignments.view", grades!.RequiredPlatformPermission);
+        Assert.Contains(MoodleScopePolicies.ReadAssignments, grades.RequiredOAuthScopes);
+        Assert.Contains(MoodleScopePolicies.ReadSubmissions, grades.RequiredOAuthScopes);
+
+        Assert.True(reg.TryGet("list_students_without_forum_participation", out var forumParticipation));
+        Assert.Equal("tool.followup.view", forumParticipation!.RequiredPlatformPermission);
+        Assert.Contains(MoodleScopePolicies.ReadForums, forumParticipation.RequiredOAuthScopes);
+
+        Assert.True(reg.TryGet("list_students_without_recent_access", out var access));
+        Assert.Equal("tool.followup.view", access!.RequiredPlatformPermission);
+        Assert.Contains(MoodleScopePolicies.ReadAccess, access.RequiredOAuthScopes);
+    }
+
+    [Fact]
     public void Registry_covers_the_complete_registered_mcp_surface()
     {
         var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
@@ -114,12 +142,22 @@ public class ToolMetadataRegistryTests
             Assert.Matches("^R[1-6]$", entry.Value.Classification);
             Assert.False(string.IsNullOrWhiteSpace(entry.Value.ExposureStatus));
             Assert.False(string.IsNullOrWhiteSpace(entry.Value.Evidence));
+            Assert.False(string.IsNullOrWhiteSpace(entry.Value.RequiredPlatformPermission));
+            Assert.DoesNotContain("moodle.admin", entry.Value.RequiredOAuthScopes, StringComparison.OrdinalIgnoreCase);
         });
+
+        Assert.True(reg.TryGet("list_course_contents", out var contents));
+        Assert.Equal("tool.classroom.view", contents!.RequiredPlatformPermission);
+        Assert.Equal(MoodleScopePolicies.ReadContents, contents.RequiredOAuthScopes);
+
+        Assert.True(reg.TryGet("moodle_execute_read", out var universalRead));
+        Assert.Equal(MoodleScopePolicies.ReadAny, universalRead!.RequiredOAuthScopes);
+        Assert.DoesNotContain(MoodleScopePolicies.WriteAny, universalRead.RequiredOAuthScopes, StringComparison.OrdinalIgnoreCase);
 
         var inventory = new ToolSurfaceInventory(reg);
         Assert.Equal(97, inventory.Total);
         Assert.Equal(11, inventory.StructuralCount);
-        Assert.Equal(65, inventory.SpecializedCount);
+        Assert.Equal(59, inventory.SpecializedCount);
         Assert.Equal(22, inventory.ControlledWriteCount);
         Assert.Equal(0, inventory.DeprecatedCount);
     }

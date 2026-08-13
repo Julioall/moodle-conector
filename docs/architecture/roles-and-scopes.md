@@ -4,11 +4,13 @@
 
 `Team` representa um agrupamento gerencial de tutores e monitores. Serve para acompanhamento, indicadores, relatórios e tomada de decisão; pertencer a uma equipe não deve, por si só, liberar todas as ferramentas.
 
-O acesso às ferramentas usa grupos de permissões e concessões diretas ao usuário. Um grupo pode permitir correção de atividades, enquanto outro permite apenas visualização. A mesma permissão também pode ser concedida ou revogada diretamente para um usuário.
+O acesso às ferramentas e aos recursos do portal usa grupos de permissões e concessões diretas ao usuário. Um grupo pode permitir correção de atividades, enquanto outro permite apenas visualização. A mesma permissão também pode ser concedida ou revogada diretamente para um usuário.
 
 ## Papéis e responsabilidades
 
-| Papel | Responsabilidade | Não implica |
+Os papéis são rótulos organizacionais definidos pela instituição ou pelo usuário. Não existe um conjunto fixo de papéis que funcione como ACL.
+
+| Exemplo de rótulo | Responsabilidade | Não implica |
 |---|---|---|
 | Tutor | Acompanhar, corrigir e orientar | acesso institucional amplo |
 | Monitor | Apoiar acesso e encaminhamentos | decisão ou alteração de nota |
@@ -19,13 +21,13 @@ O acesso às ferramentas usa grupos de permissões e concessões diretas ao usu�
 
 O acesso efetivo é a interseção de identidade, permissões diretas ou herdadas de grupo, contexto, conexão Moodle e capability remota. A política local pode restringir, mas nunca ampliar a autorização concedida pelo Moodle. Entidades mínimas: `User`, `Team`, `TeamMembership`, `PermissionGroup`, `PermissionGroupMembership`, `UserPermissionGrant`, `UserPermissionDeny`, `Permission`, `MoodleConnection`, `CourseContext`, `StudentContext`, `ConnectorClient` e `AuditEvent`.
 
-Exemplos de escopo técnico: `moodle.read.courses`, `moodle.read.students`, `moodle.write.messages`, `moodle.write.assignments.feedback`, `moodle.write.assignments.grade` e `moodle.admin`. Exemplos de permissões de ferramenta: `tool.assignments.grade`, `tool.messages.send` e `tool.reports.view`. O legado `moodle.write` existe apenas para compatibilidade documentada.
+Exemplos de escopo técnico: `moodle.read.courses`, `moodle.read.students`, `moodle.write.messages`, `moodle.write.assignments.feedback` e `moodle.write.assignments.grade`. `moodle.admin` não é emitido no OAuth. Exemplos de permissões de ferramenta: `tool.assignments.grade`, `tool.messages.send` e `tool.reports.view`. O legado `moodle.write` existe apenas para compatibilidade documentada.
 
 Cada `MoodleConnection` deve possuir um perfil de capabilities descobertas. Esse perfil é a fronteira superior das permissões locais: papéis e escopos podem selecionar um subconjunto, nunca conceder algo que não esteja disponível no Moodle. Gerentes e administradores consultam esse perfil em modo somente leitura para tomar decisões de configuração.
 
 ## Convite e aceite
 
-1. Administrador ou gerente autorizado cria convite para equipe, papel e escopos delimitados.
+1. Usuário com `tool.teams.manage` cria convite para equipe, rótulo organizacional e escopos legados delimitados.
 2. O convite é direcionado, expira e não concede acesso antes do aceite.
 3. O destinatário autentica-se, revisa os limites e aceita explicitamente.
 4. O sistema cria a associação auditável; revogação remove a associação sem apagar histórico.

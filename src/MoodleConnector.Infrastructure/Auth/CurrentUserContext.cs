@@ -34,5 +34,17 @@ public sealed class CurrentUserContext(IHttpContextAccessor httpContextAccessor)
         return currentScopes.Any(s => s.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
+    public bool HasPlatformPermission(string permission)
+    {
+        if (Principal?.FindAll("platform_permission_deny")
+            .Any(claim => string.Equals(claim.Value, permission, StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            return false;
+        }
+
+        return Principal?.FindAll("platform_permission")
+            .Any(claim => string.Equals(claim.Value, permission, StringComparison.OrdinalIgnoreCase)) == true;
+    }
+
     private ClaimsPrincipal? Principal => httpContextAccessor.HttpContext?.User;
 }

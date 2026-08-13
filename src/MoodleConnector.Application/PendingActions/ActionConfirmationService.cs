@@ -24,7 +24,7 @@ public sealed class ActionConfirmationService(
             ?? throw new InvalidOperationException("Acao pendente nao encontrada.");
 
         if (!string.Equals(action.CreatedBySubject, currentUser.Subject, StringComparison.Ordinal) &&
-            !currentUser.HasScope("moodle.admin"))
+            !currentUser.HasPlatformPermission("tool.pending_actions.manage"))
         {
             await RecordAuthorizationFailureAsync(
                 "pending_action_actor_mismatch",

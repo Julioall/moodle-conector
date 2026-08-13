@@ -101,6 +101,8 @@ public sealed class ToolMetadataRegistry
                                     case "ExposureReason": metadata.ExposureReason = na.TypedValue.Value as string ?? string.Empty; break;
                                     case "Evidence": metadata.Evidence = na.TypedValue.Value as string ?? string.Empty; break;
                                     case "RequiredPlatformPermission": metadata.RequiredPlatformPermission = na.TypedValue.Value as string ?? string.Empty; break;
+                                    case "RequiredOAuthScopes": metadata.RequiredOAuthScopes = na.TypedValue.Value as string ?? string.Empty; break;
+                                    case "RequiredMoodleCapabilities": metadata.RequiredMoodleCapabilities = na.TypedValue.Value as string ?? string.Empty; break;
                                 }
                             }
 
@@ -118,6 +120,7 @@ public sealed class ToolMetadataRegistry
                                     ReadOnly: GetBooleanNamedArgument(mcptoolAttrData, "ReadOnly"),
                                     Destructive: GetBooleanNamedArgument(mcptoolAttrData, "Destructive"));
                                 inferred.RequiredPlatformPermission = PlatformToolPermissionMapping.For(toolName, inferred);
+                                inferred.RequiredOAuthScopes = string.Join(' ', ToolAuthorizationMapping.OAuthScopesFor(toolName, inferred));
                                 _map[toolName] = inferred;
                             }
                         }
@@ -147,6 +150,10 @@ public sealed class ToolMetadataRegistry
         if (string.IsNullOrWhiteSpace(metadata.RequiredPlatformPermission))
         {
             metadata.RequiredPlatformPermission = PlatformToolPermissionMapping.For(toolName, metadata);
+        }
+        if (string.IsNullOrWhiteSpace(metadata.RequiredOAuthScopes))
+        {
+            metadata.RequiredOAuthScopes = string.Join(' ', ToolAuthorizationMapping.OAuthScopesFor(toolName, metadata));
         }
     }
 

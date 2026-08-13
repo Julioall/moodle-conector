@@ -24,14 +24,15 @@ export function useSession() {
   const user = session.data?.data?.user;
   const isAuthenticated = session.data?.data?.authenticated ?? false;
 
-  const hasAdministratorRole = user?.roles?.some((role) => ['admin', 'administrator'].includes(role.toLowerCase())) ?? false;
+  const canManagePermissionGroups = user?.permissions?.includes('tool.permission_groups.manage') ?? false;
 
   const can = (permission: string) => {
     if (!user) return false;
-    return user.permissions?.includes(permission) || hasAdministratorRole;
+    return user.permissions?.includes(permission) ||
+      ((permission === 'settings.view' || permission === 'admin.view') && canManagePermissionGroups);
   };
 
-  const isAdmin = hasAdministratorRole;
+  const isAdmin = canManagePermissionGroups;
 
   return {
     session,

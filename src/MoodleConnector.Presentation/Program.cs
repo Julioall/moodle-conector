@@ -332,6 +332,15 @@ var mcpServerBuilder = builder.Services
                         errorCode: "platform_permission_denied");
                 }
 
+                if (httpContext is not null &&
+                    httpContext.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) &&
+                    !HasRequiredOAuthScopes(httpContext.User, toolName, metadata))
+                {
+                    return ToolResultHelper.Error<object>(
+                        $"O token não possui os scopes OAuth necessários para a tool '{toolName}'.",
+                        errorCode: "oauth_scope_denied");
+                }
+
                 return await next(request, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -362,13 +371,12 @@ var mcpServerBuilder = builder.Services
             }
 
             var security = request.Services.GetRequiredService<IOptions<McpServerSecurityOptions>>().Value;
+            var registry = request.Services.GetService<ToolMetadataRegistry>();
 
             // Apply exposure policy BEFORE serialization/transport so JSON vs SSE is irrelevant.
             var policy = request.Services.GetService<IMcpToolExposurePolicy>();
             if (policy != null)
             {
-                var registry = request.Services.GetService<ToolMetadataRegistry>();
-
                 // Remove tools that the policy says should not be exposed.
                 // Iterate in reverse to allow removal from the collection.
                 for (int i = result.Tools.Count - 1; i >= 0; i--)
@@ -398,7 +406,9 @@ var mcpServerBuilder = builder.Services
 
                 if (security.RequireJwt)
                 {
-                    AddOAuthSecuritySchemes(tool);
+                    MoodleToolMetadataAttribute? toolMetadata = null;
+                    registry?.TryGet(tool.Name ?? string.Empty, out toolMetadata);
+                    AddOAuthSecuritySchemes(tool, toolMetadata);
                 }
             }
 
@@ -497,6 +507,21 @@ const string mcpPath = "/mcp";
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Rehydrate group/direct permissions for cookie and JWT principals at the
+// request boundary. This makes revocations effective without waiting for a
+// cookie/JWT lifetime to elapse; the database remains the source of truth.
+app.Use(async (context, next) =>
+{
+    if ((context.Request.Path.StartsWithSegments("/api") ||
+         context.Request.Path.StartsWithSegments(mcpPath, StringComparison.OrdinalIgnoreCase)) &&
+        context.User.Identity?.IsAuthenticated == true)
+    {
+        await EnrichMcpPrincipalFromLocalAccountAsync(context, context.RequestAborted);
+    }
+
+    await next();
+});
+
 app.Use(async (context, next) =>
 {
     if (!context.Request.Path.StartsWithSegments(mcpPath, StringComparison.OrdinalIgnoreCase) ||
@@ -537,18 +562,30 @@ app.Use(async (context, next) =>
                 claims.Add(new("scope", "moodle.write"));
             }
 
-            // API keys represent connector clients, not app users. Keep their
-            // explicit legacy read/write contract visible to the same central
-            // platform-permission gate used by JWT and app identities.
-            foreach (var permission in PlatformPermissionCatalog.AllRead)
+            var dbContext = context.RequestServices.GetRequiredService<ConnectorDbContext>();
+            var accountId = await dbContext.UserAccounts
+                .AsNoTracking()
+                .Where(account => account.ConnectorClientId == client.ClientId)
+                .Select(account => (Guid?)account.Id)
+                .SingleOrDefaultAsync(context.RequestAborted);
+            if (accountId is Guid localUserId)
             {
-                claims.Add(new Claim("platform_permission", permission));
-            }
-            if (client.CanWrite)
-            {
-                foreach (var permission in PlatformPermissionCatalog.AllWrite)
-                {
+                var permissionService = context.RequestServices.GetRequiredService<IPlatformPermissionService>();
+                var effectivePermissions = await permissionService.GetEffectivePermissionsAsync(localUserId, context.RequestAborted);
+                foreach (var permission in effectivePermissions)
                     claims.Add(new Claim("platform_permission", permission));
+            }
+            else
+            {
+                // Legacy service clients do not have a local user identity yet.
+                // Keep their explicit compatibility contract until a client-level
+                // permission-group record is provisioned for them.
+                foreach (var permission in PlatformPermissionCatalog.AllRead)
+                    claims.Add(new Claim("platform_permission", permission));
+                if (client.CanWrite)
+                {
+                    foreach (var permission in PlatformPermissionCatalog.AllWrite)
+                        claims.Add(new Claim("platform_permission", permission));
                 }
             }
 
@@ -796,6 +833,7 @@ app.MapGet("/.well-known/oauth-authorization-server", BuildOAuthAuthorizationSer
 app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async (
     HttpContext context,
     ConnectorDbContext dbContext,
+    IPlatformPermissionService platformPermissionService,
     IOptions<OAuthBrokerOptions> oauth,
     CancellationToken cancellationToken) =>
 {
@@ -831,8 +869,35 @@ app.MapMethods("/authorize", new[] { HttpMethods.Get, HttpMethods.Post }, async 
             ? identity.Id.ToString()
             : identity.ConnectorClientId);
 
+    var effectivePermissions = await platformPermissionService.GetEffectivePermissionsAsync(identity.Id, cancellationToken);
+    foreach (var permission in effectivePermissions)
+        claims.AddClaim(new Claim("platform_permission", permission));
+
     var principal = new ClaimsPrincipal(claims);
-    principal.SetScopes(request.GetScopes());
+    var protocolScopes = GetProtocolOAuthScopes(oauth.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var delegatedScopes = ToolAuthorizationMapping.ScopesForPermissions(effectivePermissions)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var connection = string.IsNullOrWhiteSpace(identity.ConnectorClientId)
+        ? null
+        : await dbContext.ConnectorClients
+            .AsNoTracking()
+            .Where(item => item.ClientId == identity.ConnectorClientId && item.IsActive)
+            .OrderByDescending(item => item.IsDefault)
+            .FirstOrDefaultAsync(cancellationToken);
+    if (connection is null)
+    {
+        delegatedScopes.RemoveWhere(scope => scope.StartsWith("moodle.read.", StringComparison.OrdinalIgnoreCase) ||
+                                             scope.StartsWith("moodle.write.", StringComparison.OrdinalIgnoreCase));
+    }
+    else if (!connection.CanWrite)
+    {
+        delegatedScopes.RemoveWhere(scope => scope.StartsWith("moodle.write.", StringComparison.OrdinalIgnoreCase));
+    }
+    var grantedScopes = request.GetScopes()
+        .Where(scope => protocolScopes.Contains(scope) || delegatedScopes.Contains(scope))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    principal.SetScopes(grantedScopes);
 
     var resource = request.GetParameter("resource")?.ToString();
     if (string.IsNullOrWhiteSpace(resource))
@@ -1114,7 +1179,6 @@ app.MapGet("/api/session", async (
     var roles = context.User.FindAll(ClaimTypes.Role).Select(x => x.Value)
         .Concat(context.User.FindAll("role").Select(x => x.Value))
         .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-    if (roles.Length == 0) roles = ["Tutor"];
     var permissions = context.User.FindAll("platform_permission").Select(x => x.Value)
         .Where(permission => !context.User.FindAll("platform_permission_deny").Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase)))
         .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -2611,10 +2675,11 @@ static string[] GetMcpOauthScopes(OAuthBrokerOptions? options = null)
         audienceScope = "moodle-mcp-audience";
     }
 
-    return new[]
+    return GetProtocolOAuthScopes(options)
+        .Concat(new[]
         {
-            "openid", "profile", "email", "offline_access", audienceScope.Trim(),
-            // Moodle granular scopes (from MoodleScopePolicies)
+            MoodleScopePolicies.ReadAny,
+            MoodleScopePolicies.WriteAny,
             MoodleScopePolicies.ReadCourses,
             MoodleScopePolicies.ReadStudents,
             MoodleScopePolicies.ReadGroups,
@@ -2626,18 +2691,27 @@ static string[] GetMcpOauthScopes(OAuthBrokerOptions? options = null)
             MoodleScopePolicies.ReadSubmissions,
             MoodleScopePolicies.ReadQuizzes,
             MoodleScopePolicies.ReadScorms,
+            MoodleScopePolicies.ReadForums,
             MoodleScopePolicies.WriteMessages,
             MoodleScopePolicies.WriteAssignmentsFeedback,
             MoodleScopePolicies.WriteAssignmentsGrade,
             MoodleScopePolicies.WriteCourseContent,
-            MoodleScopePolicies.Admin
-        }
+            MoodleScopePolicies.WriteForums
+        })
         .Where(scope => !string.IsNullOrWhiteSpace(scope))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray();
 }
 
-static void AddOAuthSecuritySchemes(ModelContextProtocol.Protocol.Tool tool)
+static string[] GetProtocolOAuthScopes(OAuthBrokerOptions? options = null)
+{
+    var audienceScope = string.IsNullOrWhiteSpace(options?.ScopeName)
+        ? "moodle-mcp-audience"
+        : options!.ScopeName.Trim();
+    return ["openid", "profile", "email", "offline_access", audienceScope];
+}
+
+static void AddOAuthSecuritySchemes(ModelContextProtocol.Protocol.Tool tool, MoodleToolMetadataAttribute? metadata)
 {
     tool.Meta ??= new JsonObject();
     if (tool.Meta.ContainsKey("securitySchemes"))
@@ -2645,13 +2719,15 @@ static void AddOAuthSecuritySchemes(ModelContextProtocol.Protocol.Tool tool)
         return;
     }
 
-    tool.Meta["securitySchemes"] = CreateOAuthSecuritySchemesNode();
+    var requiredScopes = GetProtocolOAuthScopes()
+        .Concat(metadata is null ? [] : ToolAuthorizationMapping.OAuthScopesFor(tool.Name ?? string.Empty, metadata));
+    tool.Meta["securitySchemes"] = CreateOAuthSecuritySchemesNode(requiredScopes);
 }
 
-static JsonArray CreateOAuthSecuritySchemesNode()
+static JsonArray CreateOAuthSecuritySchemesNode(IEnumerable<string> requiredScopes)
 {
     var scopes = new JsonArray();
-    foreach (var scope in GetMcpOauthScopes())
+    foreach (var scope in requiredScopes.Distinct(StringComparer.OrdinalIgnoreCase))
     {
         scopes.Add(scope);
     }
@@ -2709,7 +2785,7 @@ static string BuildMcpOauthAuthenticateChallenge(
     return string.Join(", ", new[]
     {
         $"Bearer resource_metadata=\"{GetPublicBaseUrl(context)}/.well-known/oauth-protected-resource/mcp\"",
-        $"scope=\"{EscapeWwwAuthenticateValue(string.Join(' ', GetMcpOauthScopes()))}\"",
+        $"scope=\"{EscapeWwwAuthenticateValue(string.Join(' ', GetProtocolOAuthScopes()))}\"",
         $"error=\"{EscapeWwwAuthenticateValue(error)}\"",
         $"error_description=\"{EscapeWwwAuthenticateValue(errorDescription)}\""
     });
@@ -2933,7 +3009,7 @@ static async Task EnrichMcpPrincipalFromLocalAccountAsync(HttpContext context, C
     var account = await dbContext.UserAccounts
         .AsNoTracking()
         .SingleOrDefaultAsync(user => user.Email == normalizedEmail, cancellationToken);
-    if (account is null || string.IsNullOrWhiteSpace(account.ConnectorClientId))
+    if (account is null)
     {
         return;
     }
@@ -2943,11 +3019,30 @@ static async Task EnrichMcpPrincipalFromLocalAccountAsync(HttpContext context, C
         return;
     }
 
-    foreach (var existingClaim in identity.FindAll("connector_client_id").ToArray())
+    foreach (var existingClaim in identity.FindAll("connector_client_id")
+                 .Concat(identity.FindAll("platform_permission"))
+                 .Concat(identity.FindAll("platform_permission_deny"))
+                 .Concat(identity.FindAll("team_id"))
+                 .Concat(identity.FindAll(ClaimTypes.Role))
+                 .Concat(identity.FindAll("role"))
+                 .ToArray())
     {
         identity.RemoveClaim(existingClaim);
     }
-    identity.AddClaim(new Claim("connector_client_id", account.ConnectorClientId));
+    if (!string.IsNullOrWhiteSpace(account.ConnectorClientId))
+        identity.AddClaim(new Claim("connector_client_id", account.ConnectorClientId));
+
+    var permissionService = context.RequestServices.GetRequiredService<IPlatformPermissionService>();
+    var effectivePermissions = await permissionService.GetEffectivePermissionsAsync(account.Id, cancellationToken);
+    foreach (var existingClaim in identity.FindAll("platform_permission").Concat(identity.FindAll("platform_permission_deny")).ToArray())
+        identity.RemoveClaim(existingClaim);
+    foreach (var permission in effectivePermissions)
+        identity.AddClaim(new Claim("platform_permission", permission));
+    var overrides = await dbContext.UserPermissionOverrides.AsNoTracking()
+        .Where(item => item.UserId == account.Id && !item.IsAllowed)
+        .ToArrayAsync(cancellationToken);
+    foreach (var deny in overrides)
+        identity.AddClaim(new Claim("platform_permission_deny", deny.Permission));
 
     var memberships = await dbContext.TeamMemberships
         .AsNoTracking()
@@ -2957,28 +3052,6 @@ static async Task EnrichMcpPrincipalFromLocalAccountAsync(HttpContext context, C
     {
         identity.AddClaim(new Claim("team_id", membership.TeamId.ToString()));
         identity.AddClaim(new Claim(ClaimTypes.Role, membership.Role));
-        foreach (var scope in JsonSerializer.Deserialize<string[]>(membership.ScopesJson) ?? [])
-        {
-            if (!principal.FindAll("scope").Any(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                    .Contains(scope, StringComparer.OrdinalIgnoreCase)))
-            {
-                identity.AddClaim(new Claim("scope", scope));
-            }
-        }
-    }
-
-    var canWrite = await dbContext.ConnectorClients
-        .AsNoTracking()
-        .AnyAsync(client =>
-            client.ClientId == account.ConnectorClientId &&
-            client.IsActive &&
-            client.CanWrite,
-            cancellationToken);
-    if (canWrite && !principal.FindAll("scope").Any(claim =>
-            claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .Any(value => string.Equals(value, "moodle.write", StringComparison.OrdinalIgnoreCase))))
-    {
-        identity.AddClaim(new Claim("scope", "moodle.write"));
     }
 }
 
@@ -3066,8 +3139,6 @@ static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext 
     {
         claims.Add(new Claim("team_id", membership.TeamId.ToString()));
         claims.Add(new Claim(ClaimTypes.Role, membership.Role));
-        foreach (var scope in JsonSerializer.Deserialize<string[]>(membership.ScopesJson) ?? [])
-            claims.Add(new Claim("scope", scope));
     }
 
     var groupPermissions = await (from membership in dbContext.PermissionGroupMemberships.AsNoTracking()
@@ -3142,25 +3213,8 @@ static async Task SeedChatGptOAuthClientAsync(
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.ResponseTypes.Code);
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Scopes.Email);
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Scopes.Profile);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + "offline_access");
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + oauth.ScopeName);
-    // Moodle granular scopes
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadCourses);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadStudents);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadGroups);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadAccess);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadContents);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadResources);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadActivities);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadAssignments);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadSubmissions);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadQuizzes);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.ReadScorms);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteMessages);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteAssignmentsFeedback);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteAssignmentsGrade);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.WriteCourseContent);
-    descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + MoodleScopePolicies.Admin);
+    foreach (var scope in GetMcpOauthScopes(oauth))
+        descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Scope + scope);
     descriptor.Permissions.Add(OpenIddictConstants.Permissions.Prefixes.Resource + oauthAudience);
     descriptor.Requirements.Add(OpenIddictConstants.Requirements.Features.ProofKeyForCodeExchange);
 
@@ -3178,15 +3232,13 @@ static bool HasAppPermission(HttpContext context, string permission)
 {
     if (context.User.FindAll("platform_permission_deny").Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase)))
         return false;
-    if (context.User.FindAll(ClaimTypes.Role)
-        .Concat(context.User.FindAll("role"))
-        .Any(x => string.Equals(x.Value, "admin", StringComparison.OrdinalIgnoreCase) ||
-                  string.Equals(x.Value, "administrator", StringComparison.OrdinalIgnoreCase)))
+    if ((string.Equals(permission, AppPermissionCatalog.SettingsView, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(permission, AppPermissionCatalog.AdminView, StringComparison.OrdinalIgnoreCase)) &&
+        HasPlatformToolPermission(context.User, PlatformPermissionCatalog.PermissionGroupsManage))
         return true;
     return context.User.FindAll("platform_permission")
         .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase));
 }
-
 static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permission)
 {
     if (principal is null) return false;
@@ -3194,6 +3246,16 @@ static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permiss
         return false;
     return principal.FindAll("platform_permission")
         .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase));
+}
+
+static bool HasRequiredOAuthScopes(ClaimsPrincipal principal, string toolName, MoodleToolMetadataAttribute metadata)
+{
+    var required = ToolAuthorizationMapping.OAuthScopesFor(toolName, metadata);
+    if (required.Length == 0) return true;
+    var granted = principal.FindAll("scope")
+        .SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    return required.All(scope => granted.Contains(scope));
 }
 
 public sealed record AppIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);

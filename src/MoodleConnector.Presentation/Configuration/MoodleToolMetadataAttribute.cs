@@ -14,4 +14,11 @@ public sealed class MoodleToolMetadataAttribute : Attribute
     public string ExposureReason { get; set; } = string.Empty;
     public string Evidence { get; set; } = string.Empty;
     public string RequiredPlatformPermission { get; set; } = string.Empty;
+    /// <summary>
+    /// OAuth scopes required by this tool, space separated. The MCP manifest
+    /// must expose this per-tool contract instead of a global scope superset.
+    /// </summary>
+    public string RequiredOAuthScopes { get; set; } = string.Empty;
+    /// <summary>Remote Moodle Web Service functions/capabilities required by the tool.</summary>
+    public string RequiredMoodleCapabilities { get; set; } = string.Empty;
 }

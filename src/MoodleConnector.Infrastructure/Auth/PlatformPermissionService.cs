@@ -6,10 +6,6 @@ namespace MoodleConnector.Infrastructure;
 
 internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : IPlatformPermissionService
 {
-    // Temporariamente, todos os usuários recebem o catálogo completo para manter
-    // os fluxos do conector operacionais enquanto o RBAC ainda está sendo validado.
-    private static readonly string[] DefaultPermissions = PlatformPermissionCatalog.All;
-
     public async Task EnsureDefaultPermissionsAsync(Guid userId, CancellationToken cancellationToken)
     {
         var existingMembership = await dbContext.PermissionGroupMemberships
@@ -17,16 +13,8 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (existingMembership is not null)
         {
-            var existingPermissions = await dbContext.PermissionGroupPermissions
-                .Where(item => item.GroupId == existingMembership.GroupId)
-                .Select(item => item.Permission)
-                .ToHashSetAsync(StringComparer.OrdinalIgnoreCase, cancellationToken);
-            var missingPermissions = DefaultPermissions.Where(permission => !existingPermissions.Contains(permission));
-            dbContext.PermissionGroupPermissions.AddRange(missingPermissions.Select(permission => new PermissionGroupPermissionEntity
-            {
-                Id = Guid.NewGuid(), GroupId = existingMembership.GroupId, Permission = permission
-            }));
-            await dbContext.SaveChangesAsync(cancellationToken);
+            // Existing groups are user-managed authorization state. Never
+            // expand them on login when the catalog changes.
             return;
         }
 
@@ -38,10 +26,13 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
             CreatedByUserId = userId
         };
         dbContext.PermissionGroups.Add(group);
-        dbContext.PermissionGroupPermissions.AddRange(DefaultPermissions.Select(permission => new PermissionGroupPermissionEntity
+        // A new account receives only the ability to configure its own
+        // permission groups. Tool access must be granted explicitly by the
+        // user through groups or direct overrides.
+        dbContext.PermissionGroupPermissions.Add(new PermissionGroupPermissionEntity
         {
-            Id = Guid.NewGuid(), GroupId = group.Id, Permission = permission
-        }));
+            Id = Guid.NewGuid(), GroupId = group.Id, Permission = PlatformPermissionCatalog.PermissionGroupsManage
+        });
         dbContext.PermissionGroupMemberships.Add(new PermissionGroupMembershipEntity
         {
             Id = Guid.NewGuid(), GroupId = group.Id, UserId = userId
@@ -51,7 +42,7 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
 
     public async Task<PermissionGroupDto> CreateGroupAsync(CreatePermissionGroupRequest request, CancellationToken cancellationToken)
     {
-        await EnsureAdministratorAsync(request.ActorUserId, cancellationToken);
+        await EnsureCanManageGroupsAsync(request.ActorUserId, cancellationToken);
         var permissions = NormalizePermissions(request.Permissions);
         var group = new PermissionGroupEntity
         {
@@ -73,7 +64,7 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
 
     public async Task AddMemberAsync(AddPermissionGroupMemberRequest request, CancellationToken cancellationToken)
     {
-        await EnsureAdministratorAsync(request.ActorUserId, cancellationToken);
+        await EnsureCanManageGroupsAsync(request.ActorUserId, cancellationToken);
         if (!await dbContext.PermissionGroups.AnyAsync(item => item.Id == request.GroupId, cancellationToken))
             throw new InvalidOperationException("Grupo de permissões não encontrado.");
         if (!await dbContext.PermissionGroupMemberships.AnyAsync(item => item.GroupId == request.GroupId && item.UserId == request.UserId, cancellationToken))
@@ -88,7 +79,7 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
 
     public async Task SetUserPermissionAsync(SetUserPermissionRequest request, CancellationToken cancellationToken)
     {
-        await EnsureAdministratorAsync(request.ActorUserId, cancellationToken);
+        await EnsureCanManageGroupsAsync(request.ActorUserId, cancellationToken);
         var permission = NormalizePermission(request.Permission);
         var existing = await dbContext.UserPermissionOverrides.FirstOrDefaultAsync(item => item.UserId == request.UserId && item.Permission == permission, cancellationToken);
         if (existing is null)
@@ -131,10 +122,11 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
         return rows.Select(row => new PermissionGroupDto(row.teamGroup.Id, row.teamGroup.Name, row.teamGroup.Description, row.permissions.Select(item => item.Permission).ToArray())).ToArray();
     }
 
-    private async Task EnsureAdministratorAsync(Guid userId, CancellationToken cancellationToken)
+    private async Task EnsureCanManageGroupsAsync(Guid userId, CancellationToken cancellationToken)
     {
-        if (!await dbContext.TeamMemberships.AnyAsync(item => item.UserId == userId && item.IsActive && item.Role == "administrator", cancellationToken))
-            throw new InvalidOperationException("Apenas administradores podem alterar grupos e permissões.");
+        var effective = await GetEffectivePermissionsAsync(userId, cancellationToken);
+        if (!effective.Contains(PlatformPermissionCatalog.PermissionGroupsManage, StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("O usuário não possui permissão para gerenciar grupos de permissões.");
     }
 
     private static IReadOnlyCollection<string> NormalizePermissions(IEnumerable<string> permissions) =>
@@ -151,6 +143,15 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
 
 public static class PlatformPermissionCatalog
 {
+    public const string PermissionGroupsManage = "tool.permission_groups.manage";
+    public const string PendingActionsManage = "tool.pending_actions.manage";
+    public const string TeamsManage = "tool.teams.manage";
+    public static readonly string[] PortalPermissions =
+    [
+        "dashboard.view", "courses.view", "students.view", "students.followup.write",
+        "tasks.manage", "agenda.manage", "messages.prepare", "reports.view",
+        "connections.manage", "settings.view", "admin.view"
+    ];
     public static readonly string[] AllRead =
     [
         "tool.assignments.view", "tool.messages.view", "tool.reports.view", "tool.courses.view",
@@ -159,13 +160,14 @@ public static class PlatformPermissionCatalog
     ];
 
     public static readonly string[] AllWrite =
-    ["tool.assignments.grade", "tool.messages.send"];
+    ["tool.assignments.grade", "tool.messages.send", "tool.forums.write"];
 
     public static readonly string[] All =
     [
         "tool.assignments.view", "tool.assignments.grade", "tool.messages.view",
         "tool.messages.send", "tool.reports.view", "tool.courses.view", "tool.students.view",
-        "tool.classroom.view", "tool.followup.view", "tool.forums.view", "tool.connections.manage",
-        "tool.memory.manage", "tool.pedagogy.view"
+        "tool.classroom.view", "tool.followup.view", "tool.forums.view", "tool.forums.write", "tool.connections.manage",
+        "tool.memory.manage", "tool.pedagogy.view", PermissionGroupsManage, PendingActionsManage, TeamsManage,
+        ..PortalPermissions
     ];
 }

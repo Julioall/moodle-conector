@@ -15,6 +15,7 @@ public sealed class PlatformPermissionServiceTests
         dbContext.TeamMemberships.Add(new TeamMembershipEntity { Id = Guid.NewGuid(), TeamId = Guid.NewGuid(), UserId = adminId, Role = "administrator" });
         await dbContext.SaveChangesAsync();
         var sut = new PlatformPermissionService(dbContext);
+        await sut.EnsureDefaultPermissionsAsync(adminId, CancellationToken.None);
         var group = await sut.CreateGroupAsync(new CreatePermissionGroupRequest(adminId, "Correção", "", ["tool.assignments.grade"]), CancellationToken.None);
         await sut.AddMemberAsync(new AddPermissionGroupMemberRequest(adminId, group.Id, userId), CancellationToken.None);
         await sut.SetUserPermissionAsync(new SetUserPermissionRequest(adminId, userId, "tool.assignments.grade", false), CancellationToken.None);
@@ -25,7 +26,7 @@ public sealed class PlatformPermissionServiceTests
     }
 
     [Fact]
-    public async Task NewUserReceivesAllPlatformPermissions()
+    public async Task NewUserReceivesOnlyPermissionGroupManagementUntilConfigured()
     {
         await using var dbContext = CreateContext();
         var userId = Guid.NewGuid();
@@ -35,9 +36,7 @@ public sealed class PlatformPermissionServiceTests
 
         var permissions = await sut.GetEffectivePermissionsAsync(userId, CancellationToken.None);
 
-        Assert.Equal(
-            PlatformPermissionCatalog.All.OrderBy(permission => permission, StringComparer.OrdinalIgnoreCase),
-            permissions);
+        Assert.Equal([PlatformPermissionCatalog.PermissionGroupsManage], permissions);
     }
 
     [Fact]
@@ -48,6 +47,7 @@ public sealed class PlatformPermissionServiceTests
         dbContext.TeamMemberships.Add(new TeamMembershipEntity { Id = Guid.NewGuid(), TeamId = Guid.NewGuid(), UserId = adminId, Role = "administrator" });
         await dbContext.SaveChangesAsync();
         var sut = new PlatformPermissionService(dbContext);
+        await sut.EnsureDefaultPermissionsAsync(adminId, CancellationToken.None);
 
         await Assert.ThrowsAsync<ArgumentException>(() => sut.CreateGroupAsync(
             new CreatePermissionGroupRequest(adminId, "Invalid", "", ["moodle.admin"]), CancellationToken.None));
