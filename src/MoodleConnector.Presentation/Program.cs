@@ -3230,14 +3230,23 @@ static async Task SeedChatGptOAuthClientAsync(
 
 static bool HasAppPermission(HttpContext context, string permission)
 {
-    if (context.User.FindAll("platform_permission_deny").Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase)))
+    var platformPermission = permission switch
+    {
+        AppPermissionCatalog.ConnectionsManage => "tool.connections.manage",
+        _ => null
+    };
+
+    if (context.User.FindAll("platform_permission_deny").Any(x =>
+            string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase) ||
+            (platformPermission is not null && string.Equals(x.Value, platformPermission, StringComparison.OrdinalIgnoreCase))))
         return false;
     if ((string.Equals(permission, AppPermissionCatalog.SettingsView, StringComparison.OrdinalIgnoreCase) ||
          string.Equals(permission, AppPermissionCatalog.AdminView, StringComparison.OrdinalIgnoreCase)) &&
         HasPlatformToolPermission(context.User, PlatformPermissionCatalog.PermissionGroupsManage))
         return true;
     return context.User.FindAll("platform_permission")
-        .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase));
+        .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase) ||
+                  (platformPermission is not null && string.Equals(x.Value, platformPermission, StringComparison.OrdinalIgnoreCase)));
 }
 static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permission)
 {
