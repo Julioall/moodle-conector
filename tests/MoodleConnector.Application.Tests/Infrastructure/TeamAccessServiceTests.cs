@@ -11,7 +11,7 @@ public sealed class TeamAccessServiceTests
     {
         await using var dbContext = CreateContext();
         var userId = Guid.NewGuid();
-        var sut = new TeamAccessService(dbContext);
+        var sut = new TeamAccessService(dbContext, new PlatformPermissionService(dbContext));
 
         var team = await sut.CreatePersonalTeamAsync(userId, "Ana", CancellationToken.None);
 
@@ -31,7 +31,11 @@ public sealed class TeamAccessServiceTests
             new UserAccountEntity { Id = ownerId, Name = "Owner", Email = "owner@example.com", PasswordHash = "hash" },
             new UserAccountEntity { Id = inviteeId, Name = "Invitee", Email = "invitee@example.com", PasswordHash = "hash" });
         await dbContext.SaveChangesAsync();
-        var sut = new TeamAccessService(dbContext);
+        var permissions = new PlatformPermissionService(dbContext);
+        await permissions.EnsureDefaultPermissionsAsync(ownerId, CancellationToken.None);
+        var group = await permissions.CreateGroupAsync(new CreatePermissionGroupRequest(ownerId, "Gestão de equipes", "", [PlatformPermissionCatalog.TeamsManage]), CancellationToken.None);
+        await permissions.AddMemberAsync(new AddPermissionGroupMemberRequest(ownerId, group.Id, ownerId), CancellationToken.None);
+        var sut = new TeamAccessService(dbContext, permissions);
         var team = await sut.CreatePersonalTeamAsync(ownerId, "Owner", CancellationToken.None);
         var invitation = await sut.CreateInvitationAsync(
             new CreateTeamInvitationRequest(ownerId, team.Id, "invitee@example.com", "tutor", ["moodle.read.courses"], TimeSpan.FromDays(2)),
@@ -53,7 +57,11 @@ public sealed class TeamAccessServiceTests
         await using var dbContext = CreateContext();
         var ownerId = Guid.NewGuid();
         var memberId = Guid.NewGuid();
-        var sut = new TeamAccessService(dbContext);
+        var permissions = new PlatformPermissionService(dbContext);
+        await permissions.EnsureDefaultPermissionsAsync(ownerId, CancellationToken.None);
+        var group = await permissions.CreateGroupAsync(new CreatePermissionGroupRequest(ownerId, "Gestão de equipes", "", [PlatformPermissionCatalog.TeamsManage]), CancellationToken.None);
+        await permissions.AddMemberAsync(new AddPermissionGroupMemberRequest(ownerId, group.Id, ownerId), CancellationToken.None);
+        var sut = new TeamAccessService(dbContext, permissions);
         var team = await sut.CreatePersonalTeamAsync(ownerId, "Owner", CancellationToken.None);
         dbContext.TeamMemberships.Add(new TeamMembershipEntity { Id = Guid.NewGuid(), TeamId = team.Id, UserId = memberId, Role = "tutor" });
         await dbContext.SaveChangesAsync();

@@ -4,6 +4,10 @@ namespace MoodleConnector.Presentation.Security;
 
 public static class MoodleScopePolicies
 {
+    // Coarse scopes are reserved for universal connector primitives whose
+    // remote operation is selected dynamically at runtime.
+    public const string ReadAny = "moodle.read";
+    public const string WriteAny = "moodle.write";
     public const string ReadCourses = "moodle.read.courses";
     public const string ReadStudents = "moodle.read.students";
     public const string ReadGroups = "moodle.read.groups";
@@ -15,11 +19,12 @@ public static class MoodleScopePolicies
     public const string ReadSubmissions = "moodle.read.submissions";
     public const string ReadQuizzes = "moodle.read.quizzes";
     public const string ReadScorms = "moodle.read.scorms";
+    public const string ReadForums = "moodle.read.forums";
     public const string WriteMessages = "moodle.write.messages";
     public const string WriteAssignmentsFeedback = "moodle.write.assignments.feedback";
     public const string WriteAssignmentsGrade = "moodle.write.assignments.grade";
     public const string WriteCourseContent = "moodle.write.course_content";
-    public const string Admin = "moodle.admin";
+    public const string WriteForums = "moodle.write.forums";
 
     public static void AddMoodleScopePolicies(this AuthorizationOptions options)
     {
@@ -34,11 +39,12 @@ public static class MoodleScopePolicies
         options.AddPolicy(ReadSubmissions, policy => policy.RequireAssertion(context => HasScope(context, ReadSubmissions)));
         options.AddPolicy(ReadQuizzes, policy => policy.RequireAssertion(context => HasScope(context, ReadQuizzes)));
         options.AddPolicy(ReadScorms, policy => policy.RequireAssertion(context => HasScope(context, ReadScorms)));
+        options.AddPolicy(ReadForums, policy => policy.RequireAssertion(context => HasScope(context, ReadForums)));
         options.AddPolicy(WriteMessages, policy => policy.RequireAssertion(context => HasScope(context, WriteMessages)));
         options.AddPolicy(WriteAssignmentsFeedback, policy => policy.RequireAssertion(context => HasScope(context, WriteAssignmentsFeedback)));
         options.AddPolicy(WriteAssignmentsGrade, policy => policy.RequireAssertion(context => HasScope(context, WriteAssignmentsGrade)));
         options.AddPolicy(WriteCourseContent, policy => policy.RequireAssertion(context => HasScope(context, WriteCourseContent)));
-        options.AddPolicy(Admin, policy => policy.RequireAssertion(context => HasScope(context, Admin)));
+        options.AddPolicy(WriteForums, policy => policy.RequireAssertion(context => HasScope(context, WriteForums)));
     }
 
     private static bool HasScope(AuthorizationHandlerContext context, string scope)

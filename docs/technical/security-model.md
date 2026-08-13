@@ -116,7 +116,10 @@ Ordem de resolução:
 | `moodle.write.assignments.feedback` | Feedback de atividades. |
 | `moodle.write.assignments.grade` | Lançamento/ajuste de nota. |
 | `moodle.write.course_content` | Conteúdo de curso. |
-| `moodle.admin` | Ações administrativas. |
+| `moodle.read.forums` | Leitura de fóruns e participação observável. |
+| `moodle.write.forums` | Publicação confirmada em fórum. |
+
+`moodle.admin` não é registrado pelo broker OAuth. Ações administrativas dependem de platform permission e política server-side.
 
 ## Proteção De Segredos
 

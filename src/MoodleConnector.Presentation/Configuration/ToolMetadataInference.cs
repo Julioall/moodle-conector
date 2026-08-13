@@ -72,13 +72,13 @@ internal static class ToolMetadataInference
                 : "classroom-audit";
         }
         if (normalizedType.Contains("coursecontent", StringComparison.Ordinal)) return "classroom-audit";
-        if (normalizedType.Contains("forum", StringComparison.Ordinal)) return "follow-up";
+        if (normalizedType.Contains("forum", StringComparison.Ordinal)) return "forums";
         if (normalizedType.Contains("grading", StringComparison.Ordinal) ||
             normalizedType.Contains("gradebook", StringComparison.Ordinal)) return "grading";
         if (normalizedType.Contains("accessmonitoring", StringComparison.Ordinal) ||
             normalizedType.Contains("risk", StringComparison.Ordinal)) return "follow-up";
-        if (normalizedType.Contains("monitor", StringComparison.Ordinal) ||
-            normalizedType.Contains("report", StringComparison.Ordinal)) return "classroom-audit";
+        if (normalizedType.Contains("report", StringComparison.Ordinal)) return "reports";
+        if (normalizedType.Contains("monitor", StringComparison.Ordinal)) return "classroom-audit";
         if (normalizedType.Contains("message", StringComparison.Ordinal)) return "messaging";
         if (normalizedType.Contains("memorydocument", StringComparison.Ordinal)) return "memory-document";
         if (normalizedType.Contains("memory", StringComparison.Ordinal)) return "memory";

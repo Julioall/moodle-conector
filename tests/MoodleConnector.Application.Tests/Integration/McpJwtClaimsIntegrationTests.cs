@@ -582,7 +582,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
             Assert.Contains("resource_metadata=\\\"http://localhost/.well-known/oauth-protected-resource/mcp\\\"", body);
             Assert.Contains("scope=\\\"openid", body);
             Assert.Contains("moodle-mcp-audience", body);
-            Assert.Contains("moodle.write.assignments.grade", body);
+            Assert.DoesNotContain("moodle.write.assignments.grade", body);
         }
         finally
         {
@@ -855,7 +855,12 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         var claims = new List<Claim>
         {
             new("sub", "jwt-user-1"),
-            new("scope", "openid profile email moodle-mcp-audience"),
+            new("scope", "openid profile email offline_access moodle-mcp-audience " +
+                "moodle.read moodle.write moodle.read.courses moodle.read.students moodle.read.groups " +
+                "moodle.read.access moodle.read.contents moodle.read.resources moodle.read.activities " +
+                "moodle.read.assignments moodle.read.submissions moodle.read.quizzes moodle.read.scorms " +
+                "moodle.read.forums moodle.write.messages moodle.write.assignments.feedback " +
+                "moodle.write.assignments.grade moodle.write.course_content moodle.write.forums"),
             new("platform_permission", "tool.assignments.view"),
             new("platform_permission", "tool.assignments.grade"),
             new("platform_permission", "tool.messages.view"),
