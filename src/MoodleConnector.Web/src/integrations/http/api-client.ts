@@ -30,7 +30,10 @@ export function readCsrfToken(): string | undefined {
   return cookie ? decodeURIComponent(cookie.slice('XSRF-TOKEN='.length)) : undefined;
 }
 
-export function createAppClient(fetchImpl: typeof fetch = fetch, timeoutMs = 10000): AppClient {
+// Moodle reads can legitimately take longer than a browser-only API call,
+// especially when a course catalogue is being assembled from remote data.
+// Keep this aligned with MoodleApi:HttpTimeoutSeconds (30s by default).
+export function createAppClient(fetchImpl: typeof fetch = fetch, timeoutMs = 30000): AppClient {
   return {
     get: <T>(path: string, options?: RequestInit) => request<T>(path, { ...options, method: 'GET' }),
     request: <T>(path: string, options: RequestInit = {}) => request<T>(path, options),

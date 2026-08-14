@@ -70,7 +70,9 @@ public sealed record AssignmentExistingGrade(
     string AssignmentId,
     string StudentId,
     decimal? Grade,
-    bool HasGrade);
+    bool HasGrade,
+    string? Feedback = null,
+    decimal? GradeMax = null);
 
 public sealed record AssignmentSubmissionAttemptStatus(
     string AssignmentId,

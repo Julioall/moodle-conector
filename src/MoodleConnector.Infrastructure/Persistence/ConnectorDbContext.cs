@@ -21,6 +21,10 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<TaskEntity> Tasks => Set<TaskEntity>();
     public DbSet<CalendarEventEntity> CalendarEvents => Set<CalendarEventEntity>();
     public DbSet<FollowupEntity> Followups => Set<FollowupEntity>();
+    public DbSet<AutomationDefinitionEntity> AutomationDefinitions => Set<AutomationDefinitionEntity>();
+    public DbSet<AutomationRunEntity> AutomationRuns => Set<AutomationRunEntity>();
+    public DbSet<AutomationActionEntity> AutomationActions => Set<AutomationActionEntity>();
+    public DbSet<PortalEvidenceEntity> PortalEvidence => Set<PortalEvidenceEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -168,6 +172,66 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         followup.Property(x => x.OccurredAt).IsRequired();
         followup.Property(x => x.CreatedAt).IsRequired();
         followup.HasIndex(x => new { x.OwnerId, x.OccurredAt });
+
+        var automation = modelBuilder.Entity<AutomationDefinitionEntity>();
+        automation.ToTable("automation_definitions");
+        automation.HasKey(x => x.Id);
+        automation.Property(x => x.ConnectionAlias).HasMaxLength(64);
+        automation.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        automation.Property(x => x.Name).HasMaxLength(200).IsRequired();
+        automation.Property(x => x.Description).HasMaxLength(1000);
+        automation.Property(x => x.ScheduleType).HasMaxLength(32).IsRequired();
+        automation.Property(x => x.ConditionType).HasMaxLength(64).IsRequired();
+        automation.Property(x => x.ActionType).HasMaxLength(64).IsRequired();
+        automation.Property(x => x.ConfigJson).HasColumnType("jsonb").IsRequired();
+        automation.Property(x => x.IsEnabled).IsRequired();
+        automation.Property(x => x.CreatedAt).IsRequired();
+        automation.Property(x => x.UpdatedAt).IsRequired();
+        automation.HasIndex(x => new { x.OwnerId, x.IsEnabled, x.NextRunAt });
+
+        var automationRun = modelBuilder.Entity<AutomationRunEntity>();
+        automationRun.ToTable("automation_runs");
+        automationRun.HasKey(x => x.Id);
+        automationRun.Property(x => x.IdempotencyKey).HasMaxLength(180).IsRequired();
+        automationRun.Property(x => x.Trigger).HasMaxLength(32).IsRequired();
+        automationRun.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        automationRun.Property(x => x.SummaryJson).HasColumnType("jsonb");
+        automationRun.Property(x => x.ErrorCode).HasMaxLength(120);
+        automationRun.Property(x => x.ErrorMessage).HasMaxLength(4000);
+        automationRun.Property(x => x.CreatedAt).IsRequired();
+        automationRun.Property(x => x.UpdatedAt).IsRequired();
+        automationRun.HasIndex(x => x.IdempotencyKey).IsUnique();
+        automationRun.HasIndex(x => new { x.AutomationId, x.CreatedAt });
+
+        var automationAction = modelBuilder.Entity<AutomationActionEntity>();
+        automationAction.ToTable("automation_actions");
+        automationAction.HasKey(x => x.Id);
+        automationAction.Property(x => x.IdempotencyKey).HasMaxLength(220).IsRequired();
+        automationAction.Property(x => x.ActionType).HasMaxLength(64).IsRequired();
+        automationAction.Property(x => x.TargetRef).HasMaxLength(240).IsRequired();
+        automationAction.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        automationAction.Property(x => x.ResultJson).HasColumnType("jsonb");
+        automationAction.Property(x => x.ErrorMessage).HasMaxLength(4000);
+        automationAction.Property(x => x.CreatedAt).IsRequired();
+        automationAction.Property(x => x.UpdatedAt).IsRequired();
+        automationAction.HasIndex(x => x.IdempotencyKey).IsUnique();
+        automationAction.HasIndex(x => new { x.RunId, x.Status });
+
+        var evidence = modelBuilder.Entity<PortalEvidenceEntity>();
+        evidence.ToTable("portal_evidence");
+        evidence.HasKey(x => x.Id);
+        evidence.Property(x => x.ConnectionAlias).HasMaxLength(64);
+        evidence.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        evidence.Property(x => x.StudentId).HasMaxLength(64);
+        evidence.Property(x => x.ActivityId).HasMaxLength(64);
+        evidence.Property(x => x.Kind).HasMaxLength(64).IsRequired();
+        evidence.Property(x => x.Title).HasMaxLength(240).IsRequired();
+        evidence.Property(x => x.Details).HasMaxLength(4000).IsRequired();
+        evidence.Property(x => x.Source).HasMaxLength(64).IsRequired();
+        evidence.Property(x => x.ObservedAt).IsRequired();
+        evidence.Property(x => x.CreatedAt).IsRequired();
+        evidence.HasIndex(x => new { x.OwnerId, x.CourseId, x.ObservedAt });
+        evidence.HasIndex(x => new { x.OwnerId, x.StudentId, x.Kind, x.ActivityId });
 
         var pendingAction = modelBuilder.Entity<PendingMoodleAction>();
         pendingAction.ToTable("moodle_pending_actions");

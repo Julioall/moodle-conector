@@ -13,6 +13,12 @@ public sealed record PendingSubmissionItem(
     DateTimeOffset? DueDate,
     bool IsOverdue);
 
+public sealed record AwaitingGradingItem(
+    string AssignmentId,
+    string AssignmentName,
+    DateTimeOffset? DueDate,
+    DateTimeOffset? SubmittedAt);
+
 /// <summary>
 /// Resumo de estudante com pelo menos uma SA pendente.
 /// </summary>
@@ -28,14 +34,18 @@ public sealed record GetStudentsWithPendingSubmissionsResult(
     int DueDaysAhead,
     IReadOnlyList<StudentPendingSubmissionSummary> Students,
     IReadOnlyList<string> SuggestedRecipientIds,
-    string? Warning);
+    string? Warning)
+{
+    public IReadOnlyList<(string StudentId, string FullName, DateTimeOffset? LastCourseAccessAt, AwaitingGradingItem Item)> AwaitingGrading { get; init; } = [];
+}
 
 /// <summary>
 /// Lista estudantes com SAs pendentes de entrega.
 ///
 /// Estratégia:
 /// 1. Busca todos os módulos do tipo 'assign' no curso.
-/// 2. Para cada assign, obtém quem não submeteu (status: notsubmitted).
+/// 2. Para cada assign, obtém quem não submeteu e, quando solicitado, quem
+///    entregou e ainda aguarda correção.
 /// 3. Consolida por estudante.
 ///
 /// DueDaysAhead = 0 → inclui todas as atividades sem entrega, independente do prazo.
@@ -44,7 +54,9 @@ public sealed record GetStudentsWithPendingSubmissionsResult(
 public sealed record GetStudentsWithPendingSubmissionsQuery(
     string CourseId,
     int DueDaysAhead = 0,
-    int MaxStudentsToAnalyze = 100) : IRequest<GetStudentsWithPendingSubmissionsResult>;
+    int MaxStudentsToAnalyze = 100,
+    bool IncludeAwaitingGrading = false,
+    int MaxAssignmentsToAnalyze = 0) : IRequest<GetStudentsWithPendingSubmissionsResult>;
 
 public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -73,6 +85,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
 
         var studentMap = participantsPage.Participants.ToDictionary(p => p.UserId, p => p);
         var pendingByStudent = studentMap.Keys.ToDictionary(id => id, _ => new List<PendingSubmissionItem>());
+        var gradingByStudent = studentMap.Keys.ToDictionary(id => id, _ => new List<AwaitingGradingItem>());
 
         // 2. Fetch course contents — only assign modules
         CourseContentsSummary contents;
@@ -100,13 +113,20 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         var now = DateTimeOffset.UtcNow;
         var assignmentsProcessed = 0;
 
-        // 3. Iterate assign modules
-        foreach (var section in contents.Sections)
+        // 3. Iterate assign modules. Dashboard callers can cap this because
+        // each assignment requires one Moodle submissions request.
+        var assignModules = contents.Sections
+            .SelectMany(section => section.Modules)
+            .Where(module =>
+                string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(module.InstanceId))
+            .ToList();
+        var modulesToProcess = request.MaxAssignmentsToAnalyze > 0
+            ? assignModules.Take(request.MaxAssignmentsToAnalyze)
+            : assignModules;
+
+        foreach (var module in modulesToProcess)
         {
-            foreach (var module in section.Modules.Where(m =>
-                string.Equals(m.ModuleType, "assign", StringComparison.OrdinalIgnoreCase)
-                && !string.IsNullOrWhiteSpace(m.InstanceId)))
-            {
                 // Resolve DueDate from module dates (label matching "Due date" or similar)
                 var dueDate = module.Dates
                     .FirstOrDefault(d =>
@@ -127,13 +147,13 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
 
                 bool isOverdue = dueDate.HasValue && dueDate.Value < now;
 
-                IReadOnlyList<AssignmentSubmissionRecord> notSubmitted;
+                IReadOnlyList<AssignmentSubmissionRecord> submissions;
                 try
                 {
-                    notSubmitted = await submissionsGateway.GetAssignmentSubmissionsAsync(
+                    submissions = await submissionsGateway.GetAssignmentSubmissionsAsync(
                         userExternalId: currentUserExternalId,
                         assignmentId: module.InstanceId!,
-                        status: "notsubmitted",
+                        status: request.IncludeAwaitingGrading ? null : "notsubmitted",
                         since: null,
                         before: null,
                         cancellationToken: cancellationToken);
@@ -151,14 +171,22 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                     DueDate: dueDate,
                     IsOverdue: isOverdue);
 
-                foreach (var record in notSubmitted)
+                foreach (var record in submissions)
                 {
-                    if (pendingByStudent.TryGetValue(record.UserId, out var pendingList))
+                    if (string.Equals(record.Status, "notsubmitted", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(record.Status, "not_submitted", StringComparison.OrdinalIgnoreCase))
                     {
-                        pendingList.Add(pendingItem);
+                        if (pendingByStudent.TryGetValue(record.UserId, out var pendingList))
+                            pendingList.Add(pendingItem);
+                    }
+                    else if (request.IncludeAwaitingGrading &&
+                             string.Equals(record.Status, "submitted", StringComparison.OrdinalIgnoreCase) &&
+                             IsAwaitingGrading(record.GradingStatus) &&
+                             gradingByStudent.TryGetValue(record.UserId, out var gradingList))
+                    {
+                        gradingList.Add(new AwaitingGradingItem(module.InstanceId!, module.Name, dueDate, record.ModifiedAt ?? record.CreatedAt));
                     }
                 }
-            }
         }
 
         // 4. Build result
@@ -182,8 +210,20 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             warning = "Nenhuma atividade do tipo 'assign' foi encontrada ou processada no curso. " +
                       "Verifique se o curso possui atividades avaliativas configuradas.";
         }
+        else if (request.MaxAssignmentsToAnalyze > 0 && assignModules.Count > request.MaxAssignmentsToAnalyze)
+        {
+            warning = $"A análise foi limitada às {request.MaxAssignmentsToAnalyze} primeiras atividades avaliativas para preservar o desempenho.";
+        }
 
         var suggestedRecipients = studentsWithPending.Select(s => s.StudentId).ToList();
+        var awaitingGrading = gradingByStudent
+            .Where(kv => kv.Value.Count > 0 && studentMap.ContainsKey(kv.Key))
+            .SelectMany(kv => kv.Value.Select(item =>
+            {
+                var student = studentMap[kv.Key];
+                return (kv.Key, student.FullName, student.LastCourseAccessAt, item);
+            }))
+            .ToArray();
 
         return new GetStudentsWithPendingSubmissionsResult(
             CourseId: request.CourseId,
@@ -191,6 +231,15 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             DueDaysAhead: request.DueDaysAhead,
             Students: studentsWithPending,
             SuggestedRecipientIds: suggestedRecipients,
-            Warning: warning);
+            Warning: warning)
+        {
+            AwaitingGrading = awaitingGrading,
+        };
     }
+
+    private static bool IsAwaitingGrading(string? gradingStatus) =>
+        string.IsNullOrWhiteSpace(gradingStatus) ||
+        string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(gradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
 }

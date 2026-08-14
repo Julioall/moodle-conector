@@ -4,22 +4,26 @@ using MoodleConnector.Application.Abstractions;
 
 namespace MoodleConnector.Infrastructure;
 
-public sealed class CurrentUserContext(IHttpContextAccessor httpContextAccessor) : ICurrentUserContext
+public sealed class CurrentUserContext(
+    IHttpContextAccessor httpContextAccessor,
+    IConnectorExecutionContext executionContext) : ICurrentUserContext
 {
     public string Subject =>
         Principal?.FindFirst("sub")?.Value ??
         Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value ??
+        executionContext.Subject ??
         string.Empty;
 
     public string? Email =>
         Principal?.FindFirst("email")?.Value ??
-        Principal?.FindFirst(ClaimTypes.Email)?.Value;
+        Principal?.FindFirst(ClaimTypes.Email)?.Value ??
+        executionContext.Email;
 
     public IReadOnlyCollection<string> Scopes =>
         Principal?.FindAll("scope")
             .SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray() ?? [];
+            .ToArray() ?? executionContext.Scopes;
 
     public bool HasScope(string scope)
     {

@@ -14,6 +14,7 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
     ConnectorDbContext dbContext,
     IConnectorSecretProtector secretProtector,
     IMoodleConnectionSelection selection,
+    IConnectorExecutionContext executionContext,
     IMoodleEndpointValidator endpointValidator,
     IOptions<MoodleApiOptions> moodleApiOptions,
     ILogger<HttpContextMoodleConnectorCredentialsProvider> logger) : IMoodleConnectorCredentialsProvider
@@ -30,6 +31,7 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
             dbContext,
             secretProtector,
             selection,
+            new ConnectorExecutionContext(),
             endpointValidator,
             Options.Create(new MoodleApiOptions()),
             logger)
@@ -43,7 +45,7 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
     {
         var httpContext = httpContextAccessor.HttpContext;
         var principal = httpContext?.User;
-        var clientId = await ResolveClientIdAsync(principal, cancellationToken);
+        var clientId = executionContext.ClientId ?? await ResolveClientIdAsync(principal, cancellationToken);
         if (string.IsNullOrWhiteSpace(clientId))
         {
             throw LogFailure(

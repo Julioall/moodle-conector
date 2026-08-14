@@ -24,6 +24,10 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "016_permission_group_management.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "017_revoke_temporary_global_permissions.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "018_restore_default_read_permissions.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "019_automation_runtime.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "020_portal_grading_permissions.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "021_portal_evidence.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "022_restore_portal_navigation_permissions.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

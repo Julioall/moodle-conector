@@ -39,7 +39,10 @@ public sealed record AssignmentSubmissionSummary(
     int? AttemptNumber,
     int FileCount,
     bool HasOnlineText,
-    IReadOnlyList<AssignmentSubmissionFile>? Files = null);
+    IReadOnlyList<AssignmentSubmissionFile>? Files = null,
+    decimal? CurrentGrade = null,
+    string? CurrentFeedback = null,
+    decimal? GradeMax = null);
 
 public sealed record AssignmentSubmissionFile(
     string Filename,

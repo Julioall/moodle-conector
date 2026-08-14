@@ -160,8 +160,9 @@ internal sealed class MoodleCoursesGateway(
                 entry.AbsoluteExpirationRelativeToNow = CourseListCacheDuration;
                 entry.SlidingExpiration = TimeSpan.FromMinutes(3);
 
-                var moodleCourses = await GetCoursesAsync(credentials, moodleUserId, cancellationToken);
-                var categories = await GetCategoryPathsAsync(credentials, cancellationToken);
+                var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+                var moodleCourses = await GetCoursesAsync(credentials, moodleUserId, profile, cancellationToken);
+                var categories = await GetCategoryPathsAsync(credentials, profile, cancellationToken);
                 _logger.LogInformation("Moodle courses loaded: {CourseCount}, categories: {CategoryCount}", moodleCourses.Count, categories.Count);
                 return moodleCourses
                     .Select(course => new CourseSummary(
@@ -187,8 +188,18 @@ internal sealed class MoodleCoursesGateway(
 
     private async Task<IReadOnlyDictionary<long, string>> GetCategoryPathsAsync(
         MoodleConnectorCredentials credentials,
+        MoodleFunctionProfile profile,
         CancellationToken cancellationToken)
     {
+        if (!IsFunctionAvailable(profile, "core_course_get_categories"))
+        {
+            _logger.LogWarning(
+                "Moodle categories function is unavailable. Courses will remain without category paths. ConnectionId={ConnectionId} Alias={Alias}",
+                credentials.ConnectionId,
+                credentials.Alias);
+            return new Dictionary<long, string>();
+        }
+
         var cacheKey = $"moodle:course-categories:{credentials.ConnectionId}";
         return await cache.GetOrCreateAsync(cacheKey, async entry =>
         {
@@ -237,18 +248,60 @@ internal sealed class MoodleCoursesGateway(
         }) ?? new Dictionary<long, string>();
     }
 
-    private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(MoodleConnectorCredentials credentials, long moodleUserId, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(
+        MoodleConnectorCredentials credentials,
+        long moodleUserId,
+        MoodleFunctionProfile profile,
+        CancellationToken cancellationToken)
     {
-        var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
         var strategy = businessFlows.ResolveStrategy("listar_cursos_ativos", profile);
         if (strategy?.StrategyName == "timeline")
         {
+            // The timeline endpoint is available on some Moodle installations,
+            // but it commonly omits categoryid and can be slow. The enrolled
+            // endpoint contains the category reference needed by the portal,
+            // so use it first whenever the connection advertises it.
+            if (IsFunctionAvailable(profile, "core_enrol_get_users_courses"))
+            {
+                try
+                {
+                    var enrolledPayload = await restClient.CallAsync(
+                        credentials,
+                        "core_enrol_get_users_courses",
+                        new Dictionary<string, object?>
+                        {
+                            ["userid"] = moodleUserId.ToString(CultureInfo.InvariantCulture)
+                        },
+                        cancellationToken);
+                    var enrolledCourses = JsonSerializer.Deserialize<IReadOnlyList<CourseDto>>(enrolledPayload.GetRawText()) ?? [];
+                    if (enrolledCourses.Count > 0)
+                    {
+                        return enrolledCourses;
+                    }
+                }
+                catch (MoodleApiException exception)
+                {
+                    _logger.LogWarning(exception, "Moodle enrolled courses preferred path unavailable; falling back to timeline courses.");
+                }
+            }
+
+            if (!IsFunctionAvailable(profile, "core_course_get_enrolled_courses_by_timeline_classification"))
+            {
+                throw new MoodleApiException(
+                    "flow_unavailable",
+                    "A conexão Moodle não possui uma função compatível para listar os cursos matriculados.");
+            }
+
             var timelinePayload = await restClient.CallAsync(
                 credentials,
                 "core_course_get_enrolled_courses_by_timeline_classification",
                 new Dictionary<string, object?>
                 {
-                    ["classification"] = "inprogress",
+                    // The portal needs the complete enrolled catalogue. Moodle
+                    // still scopes this response to the authenticated user; an
+                    // in-progress-only view made valid past/future courses look
+                    // like a failed course import in Claris.
+                    ["classification"] = "all",
                     ["limit"] = 1_000,
                     ["offset"] = 0,
                     ["sort"] = "fullname"
@@ -259,27 +312,6 @@ internal sealed class MoodleCoursesGateway(
             if (timelineCourses.Count > 0 && timelineCourses.All(course => course.CategoryId is not null))
             {
                 return timelineCourses;
-            }
-
-            try
-            {
-                var enrolledPayload = await restClient.CallAsync(
-                    credentials,
-                    "core_enrol_get_users_courses",
-                    new Dictionary<string, object?>
-                    {
-                        ["userid"] = moodleUserId.ToString(CultureInfo.InvariantCulture)
-                    },
-                    cancellationToken);
-                var enrolledCourses = JsonSerializer.Deserialize<IReadOnlyList<CourseDto>>(enrolledPayload.GetRawText()) ?? [];
-                if (enrolledCourses.Count > 0)
-                {
-                    return enrolledCourses;
-                }
-            }
-            catch (MoodleApiException exception)
-            {
-                _logger.LogWarning(exception, "Moodle enrolled courses fallback unavailable; keeping timeline courses.");
             }
 
             return timelineCourses;
@@ -303,6 +335,11 @@ internal sealed class MoodleCoursesGateway(
 
         return JsonSerializer.Deserialize<List<CourseDto>>(payload.GetRawText()) ?? [];
     }
+
+    private static bool IsFunctionAvailable(MoodleFunctionProfile profile, string functionName) =>
+        profile.Functions.Any(function =>
+            function.IsAvailable &&
+            string.Equals(function.Name, functionName, StringComparison.OrdinalIgnoreCase));
 
     private async Task<IReadOnlyList<CourseSummary>> GetCoursesByFieldAsync(
         MoodleConnectorCredentials credentials,

@@ -22,7 +22,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
             cache,
             new FakeCredentialsProvider(),
             restClient,
-            new FakeCatalog(Profile(availableFunction)),
+            new FakeCatalog(Profile(availableFunction, "core_course_get_categories")),
             new FakeCurrentUserIdGateway(),
             new MoodleBusinessFlowRegistry(),
             new MoodleResourceResolver());
@@ -32,6 +32,53 @@ public sealed class MoodleCoursesCapabilityGatewayTests
         Assert.Single(page.Items);
         Assert.Equal(expectedFunction, restClient.Calls[0]);
         Assert.Equal("core_course_get_categories", restClient.Calls[^1]);
+    }
+
+    [Fact]
+    public async Task GetMyCoursesAsync_PrefereCursosMatriculadosQuandoAConexaoOfereceAsDuasFuncoes()
+    {
+        var restClient = new FakeRestClient();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var gateway = new MoodleCoursesGateway(
+            Options.Create(new MoodleApiOptions()),
+            cache,
+            new FakeCredentialsProvider(),
+            restClient,
+            new FakeCatalog(Profile(
+                "core_course_get_enrolled_courses_by_timeline_classification",
+                "core_enrol_get_users_courses",
+                "core_course_get_categories")),
+            new FakeCurrentUserIdGateway(),
+            new MoodleBusinessFlowRegistry(),
+            new MoodleResourceResolver());
+
+        var page = await gateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None);
+
+        Assert.Single(page.Items);
+        Assert.Equal(["core_enrol_get_users_courses", "core_course_get_categories"], restClient.Calls);
+    }
+
+    [Fact]
+    public async Task GetMyCoursesAsync_NaoChamaFallbackNaoAnunciadoPelaConexao()
+    {
+        var restClient = new FakeRestClient();
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var gateway = new MoodleCoursesGateway(
+            Options.Create(new MoodleApiOptions()),
+            cache,
+            new FakeCredentialsProvider(),
+            restClient,
+            new FakeCatalog(Profile(
+                "core_course_get_enrolled_courses_by_timeline_classification",
+                "core_course_get_categories")),
+            new FakeCurrentUserIdGateway(),
+            new MoodleBusinessFlowRegistry(),
+            new MoodleResourceResolver());
+
+        var page = await gateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None);
+
+        Assert.Single(page.Items);
+        Assert.Equal(["core_course_get_enrolled_courses_by_timeline_classification", "core_course_get_categories"], restClient.Calls);
     }
 
     [Fact]

@@ -27,6 +27,12 @@ public sealed class ConfirmTutorMessageCommandHandlerTests
             LastRecipients = recipientUserIds;
             return Task.FromResult(new MessageSendResult(Success, SentCount, FailedCount, FailedUserIds, ErrorMessage));
         }
+
+        public Task<MoodleConversationsResult> GetConversationsAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new MoodleConversationsResult(0, []));
+
+        public Task<MoodleMessagesResult> GetMessagesAsync(long otherUserId, int limit, CancellationToken cancellationToken) =>
+            Task.FromResult(new MoodleMessagesResult(0, null, []));
     }
 
     private sealed class FakeConfirmationService : IActionConfirmationService

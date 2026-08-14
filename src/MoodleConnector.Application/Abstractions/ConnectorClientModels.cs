@@ -24,6 +24,21 @@ public interface IMoodleConnectorCredentialsProvider
     Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Contexto explícito usado por workers internos quando não existe uma
+/// requisição HTTP para fornecer o cliente, o ator e os escopos atuais.
+/// </summary>
+public interface IConnectorExecutionContext
+{
+    string? ClientId { get; }
+    string? Subject { get; }
+    string? Email { get; }
+    IReadOnlyCollection<string> Scopes { get; }
+
+    void Enter(string clientId, string subject, string? email, IReadOnlyCollection<string>? scopes = null);
+    void Clear();
+}
+
 public interface IMoodleConnectionSelection
 {
     string? Alias { get; set; }

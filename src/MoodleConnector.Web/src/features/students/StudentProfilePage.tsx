@@ -27,13 +27,14 @@ export function StudentProfilePage() {
     queryKey: ['app', 'student', connectionRef, courseId, studentId],
     queryFn: () => studentsGateway.get(connectionRef, courseId, studentId),
     enabled: Boolean(connectionRef && courseId && studentId),
+    staleTime: 30_000,
   });
 
   const student = query.data?.data;
   const currentCourse = student?.courses.find((course) => course.courseId === courseId && course.connectionRef === connectionRef);
 
   return (
-    <main className="content-frame space-y-6">
+    <main className="space-y-6 animate-fade-in">
       <Button variant="ghost" size="sm" asChild><Link to={`/alunos?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(courseId)}`}><ArrowLeft className="h-4 w-4" /> Voltar para alunos</Link></Button>
 
       {query.isPending && <Card><CardContent className="space-y-4 py-8"><Skeleton className="h-12 w-1/2" /><Skeleton className="h-24 w-full" /></CardContent></Card>}

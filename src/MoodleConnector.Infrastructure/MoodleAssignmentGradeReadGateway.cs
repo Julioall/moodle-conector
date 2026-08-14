@@ -79,7 +79,11 @@ internal sealed class MoodleAssignmentGradeReadGateway(
                     assignmentId.ToString(CultureInfo.InvariantCulture),
                     studentId.ToString(CultureInfo.InvariantCulture),
                     parsedGrade,
-                    HasGrade: parsedGrade is >= 0);
+                    HasGrade: parsedGrade is >= 0,
+                    Feedback: ReadTextProperty(grade, "feedback")
+                        ?? ReadTextProperty(grade, "feedbacktext")
+                        ?? ReadTextProperty(grade, "feedbackcomments"),
+                    GradeMax: ReadDecimalProperty(grade, "grademax"));
             }
         }
 
@@ -110,6 +114,32 @@ internal sealed class MoodleAssignmentGradeReadGateway(
             JsonValueKind.String when decimal.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var grade) => grade,
             _ => null
         };
+    }
+
+    private static string? ReadTextProperty(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return null;
+        }
+
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString();
+        }
+
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var childName in new[] { "text", "content", "message" })
+            {
+                if (value.TryGetProperty(childName, out var child) && child.ValueKind == JsonValueKind.String)
+                {
+                    return child.GetString();
+                }
+            }
+        }
+
+        return null;
     }
 
     private static long ParseMoodleId(string value, string parameterName)

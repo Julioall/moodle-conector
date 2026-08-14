@@ -70,7 +70,8 @@ public sealed class PrepareIndividualGradeCommandHandler(
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMoodleParticipantsGateway participantsGateway,
     IPendingActionService pendingActions,
-    IOptions<AssignmentWriteFeatureOptions> features)
+    IOptions<AssignmentWriteFeatureOptions> features,
+    IMoodleCourseContentsGateway? contentsGateway = null)
     : IRequestHandler<PrepareIndividualGradeCommand, IndividualGradePrepareResult>
 {
     private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(15);
@@ -100,6 +101,36 @@ public sealed class PrepareIndividualGradeCommandHandler(
         if (string.IsNullOrWhiteSpace(request.JustificationText))
             throw new ArgumentException("Uma justificativa Ã© obrigatÃ³ria para o lanÃ§amento de nota.");
 
+        var effectiveAssignmentId = request.AssignmentId.Trim();
+        if (contentsGateway is not null)
+        {
+            try
+            {
+                var currentUser = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
+                var contents = await contentsGateway.GetCourseContentsAsync(
+                    currentUser,
+                    request.CourseId.Trim(),
+                    CourseActivityModuleTypes.Assignments,
+                    includeHidden: true,
+                    onlyWithFiles: false,
+                    cancellationToken);
+                var module = contents.Sections
+                    .SelectMany(section => section.Modules)
+                    .FirstOrDefault(item =>
+                        string.Equals(item.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
+                        (string.Equals(item.ModuleId, effectiveAssignmentId, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(item.InstanceId, effectiveAssignmentId, StringComparison.OrdinalIgnoreCase)));
+                if (!string.IsNullOrWhiteSpace(module?.InstanceId))
+                {
+                    effectiveAssignmentId = module.InstanceId!;
+                }
+            }
+            catch
+            {
+                // Fall back to the identifier supplied by the caller.
+            }
+        }
+
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
 
         // 3. Resolve student name (best effort)
@@ -122,7 +153,7 @@ public sealed class PrepareIndividualGradeCommandHandler(
         try
         {
             existing = await gradeReadGateway.GetExistingGradeAsync(
-                currentUserExternalId, request.AssignmentId, request.StudentId, cancellationToken);
+                currentUserExternalId, effectiveAssignmentId, request.StudentId, cancellationToken);
         }
         catch { /* partial data ok */ }
 
@@ -148,21 +179,21 @@ public sealed class PrepareIndividualGradeCommandHandler(
         var expiresAt = DateTimeOffset.UtcNow.Add(PendingActionExpiration);
 
         var preview = new IndividualGradePreview(
-            AssignmentId: request.AssignmentId,
+            AssignmentId: effectiveAssignmentId,
             StudentId: request.StudentId,
             StudentFullName: studentName,
             CourseId: request.CourseId,
             ProposedGrade: request.ProposedGrade,
-            GradeMax: null,
+            GradeMax: existing?.GradeMax,
             PreviousGrade: existing?.HasGrade == true ? existing.Grade : null,
-            PreviousFeedback: null,
+            PreviousFeedback: existing?.Feedback,
             ConfirmationText: confirmationText,
             Risks: risks,
             ExpiresAt: expiresAt);
 
         var payload = new IndividualGradePayload(
             CourseId: request.CourseId,
-            AssignmentId: request.AssignmentId,
+            AssignmentId: effectiveAssignmentId,
             StudentId: request.StudentId,
             StudentFullName: studentName,
             ProposedGrade: request.ProposedGrade,
