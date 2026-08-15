@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useConnectionScope } from '../connections/useConnectionScope';
 import { CourseCard } from './components/CourseCard';
 import { coursesGateway, type Course } from './courses-gateway';
+import { getCourseLifecycle, type CourseLifecycle } from './course-status';
 
 type CategoryNode = { name: string; path: string; children: Map<string, CategoryNode>; courses: Course[] };
 
@@ -54,20 +55,39 @@ function CategoryBranch({ node, level = 0 }: { node: CategoryNode; level?: numbe
 export function MyCoursesPage() {
   const { connectionRef } = useConnectionScope();
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<CourseLifecycle | 'all'>('in_progress');
   const query = useQuery({ queryKey: ['app', 'courses', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
+  const allCourses = query.data?.data ?? [];
+  const statusCounts = useMemo(() => allCourses.reduce<Record<CourseLifecycle, number>>((counts, course) => {
+    counts[getCourseLifecycle(course)] += 1;
+    return counts;
+  }, { in_progress: 0, not_started: 0, finished: 0 }), [allCourses]);
   const tree = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('pt-BR');
-    const courses = (query.data?.data ?? []).filter((course) => !term || [course.fullName, course.shortName, course.displayName, course.categoryName].filter(Boolean).some((value) => value!.toLocaleLowerCase('pt-BR').includes(term)));
+    const courses = allCourses.filter((course) => {
+      const matchesStatus = statusFilter === 'all' || getCourseLifecycle(course) === statusFilter;
+      const matchesSearch = !term || [course.fullName, course.shortName, course.displayName, course.categoryName].filter(Boolean).some((value) => value!.toLocaleLowerCase('pt-BR').includes(term));
+      return matchesStatus && matchesSearch;
+    });
     return buildCategoryTree(courses);
-  }, [query.data?.data, search]);
-  const courseCount = query.data?.meta.total ?? query.data?.data.length ?? 0;
+  }, [allCourses, search, statusFilter]);
+  const courseCount = allCourses.length;
+  const filteredCourseCount = statusFilter === 'all' ? courseCount : statusCounts[statusFilter];
+  const filters: { value: CourseLifecycle | 'all'; label: string; count: number }[] = [
+    { value: 'in_progress', label: 'Em andamento', count: statusCounts.in_progress },
+    { value: 'all', label: 'Todos', count: courseCount },
+    { value: 'not_started', label: 'Não iniciados', count: statusCounts.not_started },
+    { value: 'finished', label: 'Finalizados', count: statusCounts.finished },
+  ];
+  const statusSummary = statusFilter === 'in_progress' ? 'em andamento' : statusFilter === 'all' ? 'em acompanhamento' : statusFilter === 'not_started' ? 'não iniciado' : 'finalizado';
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="courses-title">
-      <header className="page-heading"><div><p className="eyebrow">OPERACIONAL</p><h1 id="courses-title">Meus Cursos</h1><p>{query.isPending ? 'Carregando cursos…' : `${courseCount} curso${courseCount === 1 ? '' : 's'} em acompanhamento`}</p></div><div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" placeholder="Buscar curso..." value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" /></div></header>
+      <header className="page-heading"><div><p className="eyebrow">OPERACIONAL</p><h1 id="courses-title">Meus Cursos</h1><p>{query.isPending ? 'Carregando cursos…' : `${filteredCourseCount} ${filteredCourseCount === 1 ? 'curso' : 'cursos'} ${statusSummary}`}</p></div><div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" placeholder="Buscar curso..." value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" /></div></header>
       {query.isPending && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
       {query.isError && <Card><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar os cursos.</CardContent></Card>}
-      {query.isSuccess && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">Verifique a conexão selecionada ou ajuste a busca.</p></CardContent></Card>}
+      {query.isSuccess && <div className="flex flex-wrap gap-2" role="tablist" aria-label="Status dos cursos">{filters.map((filter) => <button key={filter.value} type="button" role="tab" aria-selected={statusFilter === filter.value} onClick={() => setStatusFilter(filter.value)} className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${statusFilter === filter.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'}`}>{filter.label} <span className="ml-1 text-xs opacity-80">{filter.count}</span></button>)}</div>}
+      {query.isSuccess && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">{statusFilter === 'in_progress' ? 'Não há cursos em andamento no momento.' : 'Verifique a conexão selecionada ou ajuste a busca.'}</p>{statusFilter === 'in_progress' && <button type="button" className="text-sm font-medium text-primary hover:underline" onClick={() => setStatusFilter('all')}>Ver todos os cursos</button>}</CardContent></Card>}
       {query.isSuccess && tree.children.size > 0 && <section className="space-y-4" aria-label="Cursos agrupados por categoria">{[...tree.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((node) => <CategoryBranch key={node.path} node={node} />)}</section>}
     </main>
   );

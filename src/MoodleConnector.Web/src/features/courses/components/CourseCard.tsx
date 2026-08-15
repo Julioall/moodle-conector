@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import type { Course } from '../courses-gateway';
+import { getCourseLifecycle } from '../course-status';
 
 function formatDate(value?: string) {
   if (!value) return '—';
@@ -12,11 +13,9 @@ function formatDate(value?: string) {
 }
 
 function lifecycle(course: Course) {
-  const now = Date.now();
-  const start = course.startDate ? new Date(course.startDate).getTime() : undefined;
-  const end = course.endDate ? new Date(course.endDate).getTime() : undefined;
-  if (end && end < now) return { label: 'Finalizada', className: 'border-slate-300 bg-slate-100 text-slate-700' };
-  if (start && start > now) return { label: 'Não iniciada', className: 'border-amber-200 bg-amber-50 text-amber-700' };
+  const status = getCourseLifecycle(course);
+  if (status === 'finished') return { label: 'Finalizada', className: 'border-slate-300 bg-slate-100 text-slate-700' };
+  if (status === 'not_started') return { label: 'Não iniciada', className: 'border-amber-200 bg-amber-50 text-amber-700' };
   return { label: 'Em andamento', className: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
 }
 
