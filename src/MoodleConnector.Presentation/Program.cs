@@ -2041,6 +2041,85 @@ app.MapGet("/api/courses", async (
         new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, effectiveConnectionRef, null, result.TotalCount)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
+app.MapGet("/api/course-preferences/ignored", async (
+    string? connectionRef,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var ignoredCourseIds = await dbContext.UserIgnoredCourses
+        .AsNoTracking()
+        .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias)
+        .OrderBy(item => item.CourseId)
+        .Select(item => item.CourseId)
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(new AppEnvelope<IReadOnlyList<string>>(
+        ignoredCourseIds,
+        new(DateTimeOffset.UtcNow, resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPut("/api/course-preferences/ignored", async (
+    UpdateIgnoredCoursesInput? input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (input is null || input.CourseIds is null)
+        return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe os cursos que devem ser atualizados." } });
+
+    const int maxCourseIdsPerRequest = 1000;
+    var courseIds = input.CourseIds
+        .Where(courseId => !string.IsNullOrWhiteSpace(courseId))
+        .Select(courseId => courseId.Trim())
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+    if (courseIds.Length == 0 || courseIds.Length > maxCourseIdsPerRequest || courseIds.Any(courseId => courseId.Length > 64))
+        return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe entre 1 e 1000 IDs de cursos válidos." } });
+
+    var resolved = await connectionRegistry.ResolveConnectionAsync(input.ConnectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var existing = await dbContext.UserIgnoredCourses
+        .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias && courseIds.Contains(item.CourseId))
+        .ToDictionaryAsync(item => item.CourseId, StringComparer.Ordinal, cancellationToken);
+    var now = DateTimeOffset.UtcNow;
+
+    if (input.Ignored)
+    {
+        foreach (var courseId in courseIds)
+        {
+            if (existing.ContainsKey(courseId)) continue;
+            dbContext.UserIgnoredCourses.Add(new UserIgnoredCourseEntity
+            {
+                Id = Guid.NewGuid(),
+                OwnerId = identity.Id,
+                ConnectionAlias = resolved.Alias,
+                CourseId = courseId,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+    }
+    else
+    {
+        foreach (var preference in existing.Values)
+            dbContext.UserIgnoredCourses.Remove(preference);
+    }
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new AppEnvelope<bool>(true, new(now, resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
 app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
     string connectionRef, string courseId, HttpContext context, ConnectorDbContext dbContext,
     IMediator mediator, IConnectionRegistry connectionRegistry, CancellationToken cancellationToken) =>
@@ -4058,6 +4137,7 @@ public sealed record TeamInvitationAcceptInput(string Token);
 public sealed record CreatePermissionGroupInput(string Name, string? Description, string[]? Permissions = null);
 public sealed record UpdatePermissionGroupInput(string Name, string? Description, string[]? Permissions = null);
 public sealed record PermissionGroupMemberInput(Guid UserId);
+public sealed record UpdateIgnoredCoursesInput(string? ConnectionRef, IReadOnlyList<string>? CourseIds, bool Ignored);
 public sealed record SetUserPermissionInput(string Permission, bool IsAllowed);
 
 public sealed record ReviewGradingItemInput(decimal? FinalGrade, string? FinalFeedback, string? TeacherDecision, string? ReviewNotes, string? ExpectedReviewStatus);

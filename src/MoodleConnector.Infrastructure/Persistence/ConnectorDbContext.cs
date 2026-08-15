@@ -25,6 +25,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<AutomationRunEntity> AutomationRuns => Set<AutomationRunEntity>();
     public DbSet<AutomationActionEntity> AutomationActions => Set<AutomationActionEntity>();
     public DbSet<PortalEvidenceEntity> PortalEvidence => Set<PortalEvidenceEntity>();
+    public DbSet<UserIgnoredCourseEntity> UserIgnoredCourses => Set<UserIgnoredCourseEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -233,6 +234,16 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         evidence.Property(x => x.CreatedAt).IsRequired();
         evidence.HasIndex(x => new { x.OwnerId, x.CourseId, x.ObservedAt });
         evidence.HasIndex(x => new { x.OwnerId, x.StudentId, x.Kind, x.ActivityId });
+
+        var ignoredCourse = modelBuilder.Entity<UserIgnoredCourseEntity>();
+        ignoredCourse.ToTable("user_ignored_courses");
+        ignoredCourse.HasKey(x => x.Id);
+        ignoredCourse.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        ignoredCourse.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        ignoredCourse.Property(x => x.CreatedAt).IsRequired();
+        ignoredCourse.Property(x => x.UpdatedAt).IsRequired();
+        ignoredCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.CourseId }).IsUnique();
+        ignoredCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias });
 
         var pendingAction = modelBuilder.Entity<PendingMoodleAction>();
         pendingAction.ToTable("moodle_pending_actions");
