@@ -6,28 +6,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useConnectionScope } from '../connections/useConnectionScope';
-import { coursesGateway, type Course, type CourseHierarchyNode } from '../courses/courses-gateway';
+import { coursesGateway, type Course } from '../courses/courses-gateway';
 import { CourseCard } from '../courses/components/CourseCard';
-
-type TreeNode = { name: string; path: string; count: number; children: Map<string, TreeNode> };
-
-function buildTree(items: CourseHierarchyNode[]) {
-  const root: TreeNode = { name: 'root', path: '', count: 0, children: new Map() };
-  for (const item of items) {
-    const parts = item.path.split('>').map((part) => part.trim()).filter(Boolean);
-    if (parts.length === 1 && parts[0].toLocaleLowerCase('pt-BR') === 'senai') continue;
-    const offset = parts.length > 1 && parts[0].toLocaleLowerCase('pt-BR') === 'senai' ? 1 : 0;
-    let node = root;
-    for (let index = offset; index < parts.length; index += 1) {
-      const part = parts[index];
-      const path = parts.slice(0, index + 1).join(' > ');
-      if (!node.children.has(part)) node.children.set(part, { name: part, path, count: 0, children: new Map() });
-      node = node.children.get(part)!;
-    }
-    node.count = item.courseCount;
-  }
-  return root;
-}
+import { buildSchoolsTree, type TreeNode } from './schools-tree';
 
 function TreeBranch({ node, connectionRef, level = 0 }: { node: TreeNode; connectionRef?: string; level?: number }) {
   const [open, setOpen] = useState(false);
@@ -56,7 +37,7 @@ export function SchoolsPage() {
   const tree = useMemo(() => {
     const term = search.trim().toLocaleLowerCase('pt-BR');
     const items = (query.data?.data ?? []).filter((item) => !term || item.path.toLocaleLowerCase('pt-BR').includes(term));
-    return buildTree(items);
+    return buildSchoolsTree(items);
   }, [query.data?.data, search]);
 
   return (
