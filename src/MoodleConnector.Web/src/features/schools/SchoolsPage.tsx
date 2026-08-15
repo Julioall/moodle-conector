@@ -9,7 +9,7 @@ import { useEditMode } from '@/components/layout/edit-mode-context';
 import { useConnectionScope } from '../connections/useConnectionScope';
 import { coursesGateway, type Course } from '../courses/courses-gateway';
 import { CourseCard } from '../courses/components/CourseCard';
-import { filterCoursesByLifecycle, type CourseLifecycleFilter } from '../courses/course-status';
+import { filterCoursesByLifecycle, normalizeCourseEndDatesBySequence, type CourseLifecycleFilter } from '../courses/course-status';
 import { useIgnoredCourses } from '../courses/course-visibility';
 import { buildSchoolsTree, type TreeNode } from './schools-tree';
 
@@ -23,7 +23,7 @@ const statusFilters: { value: CourseLifecycleFilter; label: string }[] = [
 function TreeBranch({ node, connectionRef, statusFilter, editMode, ignoredCourseIds, onRestore, level = 0 }: { node: TreeNode; connectionRef?: string; statusFilter: CourseLifecycleFilter; editMode: boolean; ignoredCourseIds: Set<string>; onRestore: (courseId: string) => void; level?: number }) {
   const [open, setOpen] = useState(false);
   const coursesQuery = useQuery({ queryKey: ['app', 'schools', 'courses', connectionRef, node.path], queryFn: () => coursesGateway.listAllByCategory(node.path, connectionRef, 100), enabled: open && node.children.size === 0 && Boolean(node.path), staleTime: 60_000 });
-  const courses: Course[] = coursesQuery.data?.data ?? [];
+  const courses: Course[] = useMemo(() => normalizeCourseEndDatesBySequence(coursesQuery.data?.data ?? []), [coursesQuery.data?.data]);
   const filteredCourses = filterCoursesByLifecycle(courses, statusFilter);
   const hasChildren = node.children.size > 0;
   const unitLabel = level === 0 ? 'curso' : level === 1 ? 'turma' : 'disciplina';
@@ -62,7 +62,6 @@ export function SchoolsPage() {
         <div className="relative w-full md:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" placeholder="Buscar escola, curso ou turma" aria-label="Buscar escolas" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
       </header>
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Status dos cursos nas escolas">{statusFilters.map((filter) => <button key={filter.value} type="button" role="tab" aria-selected={statusFilter === filter.value} onClick={() => setStatusFilter(filter.value)} className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${statusFilter === filter.value ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'}`}>{filter.label}</button>)}</div>
-      {editMode && <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted-foreground" role="status">Modo de edição ativo. Os cursos ignorados aparecem aqui com a opção de adicionar novamente aos Meus Cursos.</div>}
       {query.isPending && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
       {query.isError && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar as categorias.</p></CardContent></Card>}
       {query.isSuccess && tree.children.size === 0 && <Card><CardContent className="flex flex-col items-center gap-2 p-12 text-center"><Building2 className="h-10 w-10 text-muted-foreground/50" /><h2 className="font-medium">Nenhuma categoria encontrada</h2></CardContent></Card>}

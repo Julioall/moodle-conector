@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterCoursesByLifecycle, getCourseLifecycle } from '../features/courses/course-status';
+import { filterCoursesByLifecycle, getCourseLifecycle, normalizeCourseEndDatesBySequence } from '../features/courses/course-status';
 
 const now = new Date('2026-08-14T12:00:00Z').getTime();
 
@@ -19,5 +19,30 @@ describe('course lifecycle', () => {
 
     expect(filterCoursesByLifecycle(courses, 'in_progress').map((course) => course.id)).toEqual(['active']);
     expect(filterCoursesByLifecycle(courses, 'all')).toBe(courses);
+  });
+
+  it('uses the next distinct opening as the end of sequential units with a common module end', () => {
+    const courses = [
+      { courseId: 'a', categoryName: 'Turma 1', startDate: '2026-01-01T00:00:00Z', endDate: '2026-12-31T23:59:59Z' },
+      { courseId: 'b', categoryName: 'Turma 1', startDate: '2026-01-01T00:00:00Z', endDate: '2026-12-31T23:59:59Z' },
+      { courseId: 'c', categoryName: 'Turma 1', startDate: '2026-03-01T00:00:00Z', endDate: '2026-12-31T23:59:59Z' },
+    ];
+
+    const normalized = normalizeCourseEndDatesBySequence(courses);
+
+    expect(normalized.map((course) => course.endDate)).toEqual([
+      '2026-03-01T00:00:00Z',
+      '2026-03-01T00:00:00Z',
+      '2026-12-31T23:59:59Z',
+    ]);
+  });
+
+  it('keeps the common end when all units open together', () => {
+    const courses = [
+      { courseId: 'a', categoryName: 'Turma 2', startDate: '2026-01-01T00:00:00Z', endDate: '2026-12-31T23:59:59Z' },
+      { courseId: 'b', categoryName: 'Turma 2', startDate: '2026-01-01T00:00:00Z', endDate: '2026-12-31T23:59:59Z' },
+    ];
+
+    expect(normalizeCourseEndDatesBySequence(courses)).toEqual(courses);
   });
 });

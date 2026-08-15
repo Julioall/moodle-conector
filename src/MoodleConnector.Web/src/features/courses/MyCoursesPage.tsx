@@ -9,7 +9,7 @@ import { useEditMode } from '@/components/layout/edit-mode-context';
 import { useConnectionScope } from '../connections/useConnectionScope';
 import { CourseCard } from './components/CourseCard';
 import { coursesGateway, type Course } from './courses-gateway';
-import { filterCoursesByLifecycle } from './course-status';
+import { filterCoursesByLifecycle, normalizeCourseEndDatesBySequence } from './course-status';
 import { useIgnoredCourses } from './course-visibility';
 
 type CategoryNode = { name: string; path: string; children: Map<string, CategoryNode>; courses: Course[] };
@@ -61,7 +61,7 @@ export function MyCoursesPage() {
   const [search, setSearch] = useState('');
   const query = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
   const visibleCourses = useMemo(() => {
-    const allCourses = query.data?.data ?? [];
+    const allCourses = normalizeCourseEndDatesBySequence(query.data?.data ?? []);
     const term = search.trim().toLocaleLowerCase('pt-BR');
     return filterCoursesByLifecycle(allCourses, 'in_progress').filter((course) => !ignoredCourseIds.has(course.courseId)).filter((course) => {
       const matchesSearch = !term || [course.fullName, course.shortName, course.displayName, course.categoryName].filter(Boolean).some((value) => value!.toLocaleLowerCase('pt-BR').includes(term));
@@ -73,7 +73,6 @@ export function MyCoursesPage() {
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="courses-title">
       <header className="page-heading"><div><p className="eyebrow">OPERACIONAL</p><h1 id="courses-title">Meus Cursos</h1><p>{query.isPending ? 'Carregando cursos…' : `${visibleCourses.length} ${visibleCourses.length === 1 ? 'curso' : 'cursos'} em acompanhamento`}</p></div><div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" placeholder="Buscar curso..." value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" /></div></header>
-      {editMode && <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-muted-foreground" role="status">Modo de edição ativo. Use “Ignorar curso” para retirar um curso da sua lista de acompanhamento. Para adicionar novamente, abra o curso em Escolas.</div>}
       {query.isPending && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
       {query.isError && <Card><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar os cursos.</CardContent></Card>}
       {query.isSuccess && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">Não há cursos em acompanhamento no momento.</p></CardContent></Card>}
