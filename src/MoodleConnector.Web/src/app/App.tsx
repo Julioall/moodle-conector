@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
 import { NotFound } from './NotFound';
 import { AppLayout } from '../components/layout/AppLayout';
@@ -13,15 +13,12 @@ const StudentProfilePage = lazy(() => import('../features/students/StudentProfil
 const DashboardPage = lazy(() => import('../features/dashboard/DashboardPage').then(({ DashboardPage }) => ({ default: DashboardPage })));
 const TasksPage = lazy(() => import('../features/tasks/TasksPage').then(({ TasksPage }) => ({ default: TasksPage })));
 const AgendaPage = lazy(() => import('../features/agenda/AgendaPage').then(({ AgendaPage }) => ({ default: AgendaPage })));
-const FollowupPage = lazy(() => import('../features/followup/FollowupPage').then(({ FollowupPage }) => ({ default: FollowupPage })));
 const MessagesPage = lazy(() => import('../features/messages/MessagesPage').then(({ MessagesPage }) => ({ default: MessagesPage })));
 const ReportsPage = lazy(() => import('../features/reports/ReportsPage').then(({ ReportsPage }) => ({ default: ReportsPage })));
 const SettingsPage = lazy(() => import('../features/settings/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })));
 const SchoolsPage = lazy(() => import('../features/schools/SchoolsPage').then(({ SchoolsPage }) => ({ default: SchoolsPage })));
 const AutomationsPage = lazy(() => import('../features/automations/AutomationsPage').then(({ AutomationsPage }) => ({ default: AutomationsPage })));
-const PendingCorrectionsPage = lazy(() => import('../features/corrections/PendingCorrectionsPage').then(({ PendingCorrectionsPage }) => ({ default: PendingCorrectionsPage })));
 const CampaignsPage = lazy(() => import('../features/campaigns/CampaignsPage').then(({ CampaignsPage }) => ({ default: CampaignsPage })));
-const ForumsPage = lazy(() => import('../features/forums/ForumsPage').then(({ ForumsPage }) => ({ default: ForumsPage })));
 
 export function App() {
   return (
@@ -40,11 +37,11 @@ export function App() {
               <Route path="/alunos/:connectionRef/:courseId/:studentId" element={<StudentProfilePage />} />
               <Route path="/tarefas" element={<TasksPage />} />
               <Route path="/agenda" element={<AgendaPage />} />
-              <Route path="/followup" element={<FollowupPage />} />
+              <Route path="/followup" element={<Navigate to="/meus-cursos" replace />} />
               <Route path="/mensagens" element={<MessagesPage />} />
-              <Route path="/pendencias" element={<PendingCorrectionsPage />} />
+              <Route path="/pendencias" element={<Navigate to="/meus-cursos" replace />} />
               <Route path="/campanhas" element={<CampaignsPage />} />
-              <Route path="/foruns" element={<ForumsPage />} />
+              <Route path="/foruns" element={<Navigate to="/meus-cursos" replace />} />
               <Route path="/automacoes" element={<AutomationsPage />} />
               <Route path="/relatorios" element={<ReportsPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />

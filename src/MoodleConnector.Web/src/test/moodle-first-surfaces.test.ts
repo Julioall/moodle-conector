@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createEvidenceGateway, createSubmissionsGateway } from '../features/corrections/submissions-gateway';
 import { createForumsGateway } from '../features/forums/forums-gateway';
+import { createFollowupGateway } from '../features/followup/followup-gateway';
 
 describe('Moodle-first academic surfaces', () => {
   it('keeps submission scope and manual grade approval explicit', async () => {
@@ -30,5 +31,14 @@ describe('Moodle-first academic surfaces', () => {
     expect(get).toHaveBeenNthCalledWith(1, '/api/courses/campus-a/42/forums');
     expect(get).toHaveBeenNthCalledWith(2, expect.stringContaining('/api/courses/campus-a/42/forums/forum-2'));
     expect(get).toHaveBeenNthCalledWith(3, expect.stringContaining('/api/evidence?'));
+  });
+
+  it('filters follow-up records by the current course when a course scope is provided', async () => {
+    const get = vi.fn().mockResolvedValue({ data: [], meta: {} });
+    const gateway = createFollowupGateway({ get, request: vi.fn() });
+
+    await gateway.list({ connectionRef: 'campus-a', courseId: '42' });
+
+    expect(get).toHaveBeenCalledWith('/api/followups?connectionRef=campus-a&courseId=42');
   });
 });

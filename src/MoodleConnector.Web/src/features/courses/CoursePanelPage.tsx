@@ -12,6 +12,9 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { coursesGateway } from './courses-gateway';
 import { studentsGateway } from '../students/students-gateway';
+import { FollowupPage } from '../followup/FollowupPage';
+import { PendingCorrectionsPage } from '../corrections/PendingCorrectionsPage';
+import { ForumsPage } from '../forums/ForumsPage';
 
 function formatDate(value?: string) {
   if (!value) return 'Não informado';
@@ -47,7 +50,7 @@ export function CoursePanelPage() {
   const activities = useQuery({
     queryKey: ['app', 'course-activities', connectionRef, courseId, activitiesPage],
     queryFn: () => coursesGateway.activities(connectionRef, courseId, activitiesPage, 20),
-    enabled,
+    enabled: enabled && (activeTab === 'overview' || activeTab === 'activities'),
     staleTime: 30_000,
   });
   const students = useQuery({
@@ -114,10 +117,13 @@ export function CoursePanelPage() {
           </div>
 
           <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
-            <TabsList aria-label="Seções do curso">
+            <TabsList className="h-auto w-full flex-wrap justify-start gap-1" aria-label="Seções do curso">
               <TabsTrigger value="overview">Visão geral</TabsTrigger>
               <TabsTrigger value="students">Alunos{studentCount == null ? '' : ` (${studentCount})`}</TabsTrigger>
               <TabsTrigger value="activities">Atividades ({activityCount})</TabsTrigger>
+              <TabsTrigger value="followup">Follow-up</TabsTrigger>
+              <TabsTrigger value="corrections">Pendências e correções</TabsTrigger>
+              <TabsTrigger value="forums">Fóruns</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-4">
@@ -141,6 +147,9 @@ export function CoursePanelPage() {
               {activities.isSuccess && activities.data.data.length > 0 && <div className="divide-y">{activities.data.data.map((activity) => <article className="flex flex-wrap items-center justify-between gap-3 py-4 first:pt-0" key={`${activity.connectionRef}:${activity.courseId}:${activity.activityId}`}><div><p className="font-medium">{activity.name}</p><p className="text-xs text-muted-foreground">{activity.activityType}{activity.dueAt ? ` · prazo ${formatDate(activity.dueAt)}` : ' · sem prazo'}</p></div>{activity.url && <a className="text-sm text-primary hover:underline" href={activity.url} target="_blank" rel="noreferrer">Ver no Moodle</a>}</article>)}</div>}
               {activityTotalPages > 1 && <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4 text-xs text-muted-foreground"><span>Página {activitiesPage} de {activityTotalPages}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setActivitiesPage((page) => Math.max(1, page - 1))} disabled={activitiesPage <= 1}>Anterior</Button><Button variant="outline" size="sm" onClick={() => setActivitiesPage((page) => Math.min(activityTotalPages, page + 1))} disabled={activitiesPage >= activityTotalPages}>Próxima</Button></div></div>}
             </CardContent></Card></TabsContent>
+            <TabsContent value="followup"><FollowupPage embedded courseContext={{ connectionRef, courseId, courseName: data.displayName ?? data.fullName }} /></TabsContent>
+            <TabsContent value="corrections"><PendingCorrectionsPage embedded courseContext={{ connectionRef, courseId, courseName: data.displayName ?? data.fullName }} /></TabsContent>
+            <TabsContent value="forums"><ForumsPage embedded courseContext={{ connectionRef, courseId, courseName: data.displayName ?? data.fullName }} /></TabsContent>
           </Tabs>
         </>
       )}

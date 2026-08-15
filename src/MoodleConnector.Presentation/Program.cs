@@ -950,13 +950,19 @@ app.MapGet("/api/agenda", async (HttpContext context, ConnectorDbContext dbConte
     return Results.Ok(new AppEnvelope<IReadOnlyList<CalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbContext, string? studentRef = null, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default) =>
+app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbContext, string? studentRef = null, string? connectionRef = null, string? courseId = null, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
     var query = dbContext.Followups.AsNoTracking().Where(x => x.OwnerId == identity.Id);
     if (!string.IsNullOrWhiteSpace(studentRef)) query = query.Where(x => x.StudentRef == studentRef);
+    if (!string.IsNullOrWhiteSpace(courseId))
+    {
+        var normalizedCourseId = courseId.Trim();
+        var scopedCourseRef = string.IsNullOrWhiteSpace(connectionRef) ? null : $"{connectionRef.Trim()}:{normalizedCourseId}";
+        query = query.Where(x => x.CourseRef == normalizedCourseId || (scopedCourseRef != null && x.CourseRef == scopedCourseRef));
+    }
     var total = await query.CountAsync(cancellationToken);
     var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new FollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)).ToListAsync(cancellationToken);
     return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
