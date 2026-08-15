@@ -21,5 +21,16 @@ describe('courses gateway', () => {
     expect(get).toHaveBeenNthCalledWith(1, '/api/courses?connectionRef=fieg&page=1&pageSize=2');
     expect(get).toHaveBeenNthCalledWith(2, '/api/courses?connectionRef=fieg&page=2&pageSize=2');
   });
+
+  it('continues when a full page has no hasMore flag', async () => {
+    const get = vi.fn()
+      .mockResolvedValueOnce({ data: [{ courseId: '1' }, { courseId: '2' }], meta: { page: 1, pageSize: 2, returned: 2, total: 3, hasMore: false, generatedAt: '2026-08-10T00:00:00Z' } })
+      .mockResolvedValueOnce({ data: [{ courseId: '3' }], meta: { page: 2, pageSize: 2, returned: 1, total: 3, hasMore: false, generatedAt: '2026-08-10T00:00:01Z' } });
+
+    const response = await createCoursesGateway({ get } as never).listAll('fieg', 2);
+
+    expect(response.data.map((course) => course.courseId)).toEqual(['1', '2', '3']);
+    expect(get).toHaveBeenNthCalledWith(2, '/api/courses?connectionRef=fieg&page=2&pageSize=2');
+  });
 });
 

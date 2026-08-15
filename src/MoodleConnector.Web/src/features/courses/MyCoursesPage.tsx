@@ -56,7 +56,7 @@ export function MyCoursesPage() {
   const { connectionRef } = useConnectionScope();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<CourseLifecycle | 'all'>('in_progress');
-  const query = useQuery({ queryKey: ['app', 'courses', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
+  const query = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
   const allCourses = query.data?.data ?? [];
   const statusCounts = useMemo(() => allCourses.reduce<Record<CourseLifecycle, number>>((counts, course) => {
     counts[getCourseLifecycle(course)] += 1;

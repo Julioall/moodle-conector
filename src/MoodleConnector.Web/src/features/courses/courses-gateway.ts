@@ -15,8 +15,9 @@ export const createCoursesGateway = (client = createAppClient()) => {
     let currentPage = firstPage;
     let page = 2;
 
-    while (currentPage.meta.hasMore && currentPage.data.length > 0) {
+    while ((currentPage.meta.hasMore || currentPage.data.length === pageSize) && currentPage.data.length > 0) {
       currentPage = await list(connectionRef, page, pageSize);
+      if (currentPage.data.length === 0) break;
       courses.push(...currentPage.data);
       page += 1;
     }
