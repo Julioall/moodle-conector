@@ -28,6 +28,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "020_portal_grading_permissions.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "021_portal_evidence.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "022_restore_portal_navigation_permissions.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "023_common_permission_group_keys.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

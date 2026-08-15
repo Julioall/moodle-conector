@@ -2371,6 +2371,7 @@ app.MapGet("/api/permission-groups", async (
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await permissionService.EnsureDefaultPermissionsAsync(identity.Id, cancellationToken);
     var groups = await permissionService.GetGroupsAsync(identity.Id, cancellationToken);
     return Results.Ok(new { ok = true, groups });
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
@@ -2406,6 +2407,28 @@ app.MapPost("/api/permission-groups", async (
     }
     catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
     catch (InvalidOperationException) { return Results.Forbid(); }
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPut("/api/permission-groups/{groupId:guid}", async (
+    Guid groupId,
+    UpdatePermissionGroupInput input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IPlatformPermissionService permissionService,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    try
+    {
+        var group = await permissionService.UpdateGroupAsync(
+            new UpdatePermissionGroupRequest(identity.Id, groupId, input.Name, input.Description ?? string.Empty, input.Permissions ?? []), cancellationToken);
+        return Results.Ok(new { ok = true, group });
+    }
+    catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+    catch (InvalidOperationException) { return Results.NotFound(new { ok = false, error = "Grupo de permissões não encontrado." }); }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/permission-groups/{groupId:guid}/members", async (
@@ -4033,6 +4056,7 @@ public sealed record UpdateMoodleInput(string MoodleAlias, string MoodleBaseUrl,
 public sealed record TeamInvitationInput(string Email, string Role, string[]? Scopes = null, int? ExpiresInHours = null);
 public sealed record TeamInvitationAcceptInput(string Token);
 public sealed record CreatePermissionGroupInput(string Name, string? Description, string[]? Permissions = null);
+public sealed record UpdatePermissionGroupInput(string Name, string? Description, string[]? Permissions = null);
 public sealed record PermissionGroupMemberInput(Guid UserId);
 public sealed record SetUserPermissionInput(string Permission, bool IsAllowed);
 

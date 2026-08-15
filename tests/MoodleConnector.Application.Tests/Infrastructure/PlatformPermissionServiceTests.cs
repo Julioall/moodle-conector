@@ -37,6 +37,34 @@ public sealed class PlatformPermissionServiceTests
         var permissions = await sut.GetEffectivePermissionsAsync(userId, CancellationToken.None);
 
         Assert.Equal([PlatformPermissionCatalog.PermissionGroupsManage], permissions);
+        var groups = await sut.GetGroupsAsync(userId, CancellationToken.None);
+        Assert.Equal(["Acesso inicial", "Monitor", "Tutor"], groups.Select(group => group.Name));
+    }
+
+    [Fact]
+    public async Task CommonGroupsCanBeEditedWithoutActivatingTheirPermissions()
+    {
+        await using var dbContext = CreateContext();
+        var userId = Guid.NewGuid();
+        var sut = new PlatformPermissionService(dbContext);
+
+        await sut.EnsureDefaultPermissionsAsync(userId, CancellationToken.None);
+        var tutor = (await sut.GetGroupsAsync(userId, CancellationToken.None)).Single(group => group.Name == "Tutor");
+
+        var updated = await sut.UpdateGroupAsync(
+            new UpdatePermissionGroupRequest(userId, tutor.Id, "Tutor personalizado", "Acompanhamento personalizado", ["courses.view"]),
+            CancellationToken.None);
+
+        Assert.Equal("Tutor personalizado", updated.Name);
+        Assert.Equal("Acompanhamento personalizado", updated.Description);
+        Assert.Equal(["courses.view"], updated.Permissions);
+        Assert.Equal([PlatformPermissionCatalog.PermissionGroupsManage], await sut.GetEffectivePermissionsAsync(userId, CancellationToken.None));
+
+        await sut.EnsureDefaultPermissionsAsync(userId, CancellationToken.None);
+
+        var groups = await sut.GetGroupsAsync(userId, CancellationToken.None);
+        Assert.Equal(3, groups.Count);
+        Assert.DoesNotContain(groups, group => group.Name == "Tutor");
     }
 
     [Fact]

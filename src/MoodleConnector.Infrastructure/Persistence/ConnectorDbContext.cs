@@ -117,6 +117,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         permissionGroup.HasKey(x => x.Id);
         permissionGroup.Property(x => x.Name).HasMaxLength(120).IsRequired();
         permissionGroup.Property(x => x.Description).HasMaxLength(500).IsRequired();
+        permissionGroup.Property(x => x.CommonRoleKey).HasMaxLength(64);
         permissionGroup.Property(x => x.CreatedByUserId).IsRequired();
         permissionGroup.Property(x => x.CreatedAtUtc).IsRequired();
         permissionGroup.Property(x => x.UpdatedAtUtc).IsRequired();

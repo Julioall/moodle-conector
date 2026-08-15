@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, CheckCheck, Pencil, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { Bell, CheckCheck, Pencil, RefreshCw, WifiOff } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,17 +13,8 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { MoodleIcon } from '@/components/ui/MoodleIcon';
 import { dashboardGateway } from '@/features/dashboard/dashboard-gateway';
-import { connectionDisplayName, useConnectionScope } from '@/features/connections/useConnectionScope';
+import { useConnectionScope } from '@/features/connections/useConnectionScope';
 import { GlobalActivityLine } from './GlobalActivityLine';
-
-const statusLabels: Record<string, string> = {
-  active: 'Ativa',
-  online: 'Online',
-  inactive: 'Inativa',
-  offline: 'Offline',
-  needs_reauth: 'Reautenticação necessária',
-  unknown: 'Status desconhecido',
-};
 
 const LAST_SEEN_KEY = 'app:notifications-last-seen';
 
@@ -58,7 +49,6 @@ export function TopBar() {
   const [lastSeenAt, setLastSeenAt] = useState(readLastSeen);
   const [editMode, setEditMode] = useState(false);
   const status = selectedConnection?.status ?? 'unknown';
-  const isOnline = status === 'online' || status === 'active';
   const isOffline = status === 'offline' || status === 'inactive';
   const activityQuery = useQuery({
     queryKey: ['app', 'topbar-activity', connectionRef],
@@ -105,14 +95,6 @@ export function TopBar() {
             <span>Modo Offline</span>
           </div>
         )}
-
-        <div className="hidden min-w-0 items-center gap-2 sm:flex">
-          <span className="max-w-32 truncate text-sm font-medium lg:max-w-48">{connectionDisplayName(selectedConnection)}</span>
-          <Badge variant="outline" className="hidden gap-1 text-[10px] font-normal lg:inline-flex">
-            {isOnline ? <Wifi className="h-3 w-3 text-emerald-600" /> : <WifiOff className="h-3 w-3 text-muted-foreground" />}
-            {statusLabels[status] ?? status}
-          </Badge>
-        </div>
 
         <label className="sr-only" htmlFor="global-moodle-selector">Moodle atual</label>
         <Select value={connectionRef ?? ''} onValueChange={selectConnection} disabled={connections.isPending || connections.data?.data.length === 0}>
