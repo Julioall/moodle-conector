@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSchoolsTree } from '../features/schools/schools-tree';
+import { buildSchoolsTree, countCoursesByCategory, groupCoursesByCategory } from '../features/schools/schools-tree';
 
 function node(path: string, courseCount: number) {
   const parts = path.split(' > ');
@@ -25,5 +25,17 @@ describe('schools tree', () => {
     ]);
 
     expect([...tree.children.keys()]).toEqual(['Escola A', 'Outro portal']);
+  });
+
+  it('groups and counts only the courses that remain after a filter', () => {
+    const courses = [
+      { categoryName: 'Portal > Escola A > Turma 1', courseId: '1' },
+      { categoryName: 'Portal > Escola A > Turma 1', courseId: '2' },
+      { categoryName: 'Portal > Escola B', courseId: '3' },
+    ];
+
+    expect(groupCoursesByCategory(courses).get('portal > escola a > turma 1')).toHaveLength(2);
+    expect(countCoursesByCategory(courses).get('portal > escola a')).toBe(2);
+    expect(countCoursesByCategory([courses[0]]).get('portal > escola a')).toBe(1);
   });
 });

@@ -21,6 +21,14 @@ export function filterCoursesByLifecycle<T extends Pick<Course, 'startDate' | 'e
   return filter === 'all' ? courses : courses.filter((course) => getCourseLifecycle(course) === filter);
 }
 
+export function matchesCourseSearch(course: Pick<Course, 'courseId' | 'fullName' | 'shortName' | 'displayName' | 'categoryName'>, search: string): boolean {
+  const term = search.trim().toLocaleLowerCase('pt-BR');
+  if (!term) return true;
+  return [course.courseId, course.fullName, course.shortName, course.displayName, course.categoryName]
+    .filter(Boolean)
+    .some((value) => value!.toLocaleLowerCase('pt-BR').includes(term));
+}
+
 export function normalizeCourseEndDatesBySequence<T extends Pick<Course, 'courseId' | 'categoryName' | 'startDate' | 'endDate'>>(courses: T[]): T[] {
   const groups = new Map<string, T[]>();
   courses.forEach((course) => {

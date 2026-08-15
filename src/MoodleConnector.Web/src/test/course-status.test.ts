@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterCoursesByLifecycle, getCourseLifecycle, normalizeCourseEndDatesBySequence } from '../features/courses/course-status';
+import { filterCoursesByLifecycle, getCourseLifecycle, matchesCourseSearch, normalizeCourseEndDatesBySequence } from '../features/courses/course-status';
 
 const now = new Date('2026-08-14T12:00:00Z').getTime();
 
@@ -44,5 +44,13 @@ describe('course lifecycle', () => {
     ];
 
     expect(normalizeCourseEndDatesBySequence(courses)).toEqual(courses);
+  });
+
+  it('searches courses by id, name or category', () => {
+    const course = { courseId: '42', fullName: 'Projeto Docente', categoryName: 'Escola A > Turma 1' };
+
+    expect(matchesCourseSearch(course, 'docente')).toBe(true);
+    expect(matchesCourseSearch(course, 'escola a')).toBe(true);
+    expect(matchesCourseSearch(course, '99')).toBe(false);
   });
 });

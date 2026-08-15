@@ -10,7 +10,7 @@ import { useEditMode } from '@/components/layout/edit-mode-context';
 import { useConnectionScope } from '../connections/useConnectionScope';
 import { CourseCard } from './components/CourseCard';
 import { coursesGateway, type Course } from './courses-gateway';
-import { filterCoursesByLifecycle, normalizeCourseEndDatesBySequence } from './course-status';
+import { filterCoursesByLifecycle, matchesCourseSearch, normalizeCourseEndDatesBySequence } from './course-status';
 import { useIgnoredCourses } from './course-visibility';
 
 type CategoryNode = { name: string; path: string; children: Map<string, CategoryNode>; courses: Course[] };
@@ -71,11 +71,7 @@ export function MyCoursesPage() {
   const query = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
   const visibleCourses = useMemo(() => {
     const allCourses = normalizeCourseEndDatesBySequence(query.data?.data ?? []);
-    const term = search.trim().toLocaleLowerCase('pt-BR');
-    return filterCoursesByLifecycle(allCourses, 'in_progress').filter((course) => !ignoredCourseIds.has(course.courseId)).filter((course) => {
-      const matchesSearch = !term || [course.fullName, course.shortName, course.displayName, course.categoryName].filter(Boolean).some((value) => value!.toLocaleLowerCase('pt-BR').includes(term));
-      return matchesSearch;
-    });
+    return filterCoursesByLifecycle(allCourses, 'in_progress').filter((course) => !ignoredCourseIds.has(course.courseId)).filter((course) => matchesCourseSearch(course, search));
   }, [ignoredCourseIds, query.data?.data, search]);
   const tree = useMemo(() => buildCategoryTree(visibleCourses), [visibleCourses]);
 
