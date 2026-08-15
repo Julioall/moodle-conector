@@ -69,6 +69,24 @@ if (session.data?.authenticated !== true) throw new Error('session is not authen
 const csrf = expectJson(await call('GET', '/api/csrf'), 200, 'csrf');
 if (!csrf.token) throw new Error('CSRF token was not issued.');
 
+const account = expectJson(await call('GET', '/api/account/me'), 200, 'account');
+const permissionPayload = {
+  name: `E2E ${randomUUID()}`,
+  description: 'Permissões temporárias para o smoke test ponta a ponta.',
+  permissions: ['connections.manage', 'courses.view', 'students.view', 'dashboard.view'],
+};
+const missingCsrf = await call('POST', '/api/permission-groups', permissionPayload);
+expectStatus(missingCsrf, 400, 'reject missing CSRF');
+if (missingCsrf.json?.error?.code !== 'csrf_invalid') {
+  throw new Error(`missing CSRF contract is invalid: ${missingCsrf.text}`);
+}
+
+const permissionGroup = expectJson(await call('POST', '/api/permission-groups', permissionPayload, { 'x-csrf-token': csrf.token }), 200, 'create E2E permissions');
+const groupId = permissionGroup.group?.id;
+if (!groupId || !account.id) throw new Error('E2E permission group was not created.');
+expectJson(await call('POST', `/api/permission-groups/${encodeURIComponent(groupId)}/members`, { userId: account.id }, { 'x-csrf-token': csrf.token }), 200, 'assign E2E permissions');
+expectJson(await call('POST', '/api/account/login', { email, password }), 200, 'refresh session permissions');
+
 const connectionPayload = {
   moodleAlias,
   moodleBaseUrl,
@@ -77,14 +95,8 @@ const connectionPayload = {
   isDefault: true,
   canWrite: false,
 };
-const missingCsrf = await call('POST', '/api/connections', connectionPayload);
-expectStatus(missingCsrf, 400, 'reject missing CSRF');
-if (missingCsrf.json?.error?.code !== 'csrf_invalid') {
-  throw new Error(`missing CSRF contract is invalid: ${missingCsrf.text}`);
-}
-
 const connection = expectJson(await call('POST', '/api/connections', connectionPayload, { 'x-csrf-token': csrf.token }), 200, 'connect Moodle');
-if (!connection.connectionRef || !connection.alias || connection.status !== 'unknown' || connection.apiKey || connection.password || connection.token) {
+if (!connection.connectionRef || !connection.alias || connection.status !== 'active' || connection.apiKey || connection.password || connection.token) {
   throw new Error(`connection contract is invalid or contains a secret: ${JSON.stringify(connection)}`);
 }
 

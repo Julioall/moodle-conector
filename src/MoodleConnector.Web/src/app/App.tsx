@@ -9,7 +9,6 @@ import { AuthGate } from '../features/auth/AuthGate';
 const ConnectionsPage = lazy(() => import('../features/connections/ConnectionsPage').then(({ ConnectionsPage }) => ({ default: ConnectionsPage })));
 const MyCoursesPage = lazy(() => import('../features/courses/MyCoursesPage').then(({ MyCoursesPage }) => ({ default: MyCoursesPage })));
 const CoursePanelPage = lazy(() => import('../features/courses/CoursePanelPage').then(({ CoursePanelPage }) => ({ default: CoursePanelPage })));
-const StudentsPage = lazy(() => import('../features/students/StudentsPage').then(({ StudentsPage }) => ({ default: StudentsPage })));
 const StudentProfilePage = lazy(() => import('../features/students/StudentProfilePage').then(({ StudentProfilePage }) => ({ default: StudentProfilePage })));
 const DashboardPage = lazy(() => import('../features/dashboard/DashboardPage').then(({ DashboardPage }) => ({ default: DashboardPage })));
 const TasksPage = lazy(() => import('../features/tasks/TasksPage').then(({ TasksPage }) => ({ default: TasksPage })));
@@ -36,7 +35,8 @@ export function App() {
               <Route path="/meus-cursos" element={<MyCoursesPage />} />
               <Route path="/escolas" element={<SchoolsPage />} />
               <Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} />
-              <Route path="/alunos" element={<StudentsPage />} />
+              <Route path="/cursos/:connectionRef/:courseId/alunos/:studentId" element={<StudentProfilePage />} />
+              {/* Keep old profile URLs readable for bookmarks; the roster itself is now only a course tab. */}
               <Route path="/alunos/:connectionRef/:courseId/:studentId" element={<StudentProfilePage />} />
               <Route path="/tarefas" element={<TasksPage />} />
               <Route path="/agenda" element={<AgendaPage />} />

@@ -18,7 +18,7 @@ describe('Claris-first shell', () => {
     renderWithProviders(<AppSidebar />);
     expect(screen.getByText('Resumo da Semana')).toBeInTheDocument();
     expect(screen.getByText('Meus Cursos')).toBeInTheDocument();
-    expect(screen.getByText('Alunos')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Alunos' })).not.toBeInTheDocument();
   });
 
   it('exposes the v2 operational smoke path', () => {

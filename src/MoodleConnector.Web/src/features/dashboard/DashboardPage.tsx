@@ -43,7 +43,7 @@ function ScopeLink({
   return (
     <Link
       className="hover:underline"
-      to={`/alunos/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/${encodeURIComponent(studentId)}`}
+      to={`/cursos/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/alunos/${encodeURIComponent(studentId)}`}
     >
       {children}
     </Link>

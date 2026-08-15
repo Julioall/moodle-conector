@@ -5,7 +5,7 @@ const paths = [
   '/',
   '/meus-cursos',
   '/cursos/demo/1',
-  '/alunos',
+  '/cursos/demo/1?tab=students',
   '/pendencias',
   '/tarefas',
   '/agenda',

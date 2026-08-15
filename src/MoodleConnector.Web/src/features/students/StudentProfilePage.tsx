@@ -35,7 +35,7 @@ export function StudentProfilePage() {
 
   return (
     <main className="space-y-6 animate-fade-in">
-      <Button variant="ghost" size="sm" asChild><Link to={`/alunos?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(courseId)}`}><ArrowLeft className="h-4 w-4" /> Voltar para alunos</Link></Button>
+      <Button variant="ghost" size="sm" asChild><Link to={`/cursos/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}?tab=students`}><ArrowLeft className="h-4 w-4" /> Voltar para alunos do curso</Link></Button>
 
       {query.isPending && <Card><CardContent className="space-y-4 py-8"><Skeleton className="h-12 w-1/2" /><Skeleton className="h-24 w-full" /></CardContent></Card>}
       {query.isError && <Card><CardContent className="py-8"><p role="alert" className="text-destructive">Não foi possível carregar o perfil do aluno.</p></CardContent></Card>}
