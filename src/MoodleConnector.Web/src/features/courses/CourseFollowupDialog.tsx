@@ -52,6 +52,7 @@ export function CourseFollowupDialog({ open, onOpenChange, connectionRef, course
       if (!student) throw new Error('Selecione um aluno.');
       return followupGateway.create({
         studentRef: `${student.connectionRef}:${student.studentId}`,
+        studentName: student.name,
         courseRef: `${connectionRef}:${courseId}`,
         kind: 'acompanhamento',
         reason,

@@ -31,6 +31,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "023_common_permission_group_keys.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "024_user_ignored_courses.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "025_structured_followups.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "026_followup_student_context.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

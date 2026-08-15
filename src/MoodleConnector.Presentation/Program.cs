@@ -955,7 +955,18 @@ app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbCo
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
-    var query = dbContext.Followups.AsNoTracking().Where(x => x.OwnerId == identity.Id);
+    var teamIds = await dbContext.TeamMemberships.AsNoTracking()
+        .Where(item => item.UserId == identity.Id && item.IsActive)
+        .Select(item => item.TeamId)
+        .ToArrayAsync(cancellationToken);
+    var collaboratorIds = teamIds.Length == 0
+        ? [identity.Id]
+        : await dbContext.TeamMemberships.AsNoTracking()
+            .Where(item => teamIds.Contains(item.TeamId) && item.IsActive)
+            .Select(item => item.UserId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+    var query = dbContext.Followups.AsNoTracking().Where(x => collaboratorIds.Contains(x.OwnerId));
     if (!string.IsNullOrWhiteSpace(studentRef)) query = query.Where(x => x.StudentRef == studentRef);
     if (!string.IsNullOrWhiteSpace(courseId))
     {
@@ -964,13 +975,37 @@ app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbCo
         query = query.Where(x => x.CourseRef == normalizedCourseId || (scopedCourseRef != null && x.CourseRef == scopedCourseRef));
     }
     var total = await query.CountAsync(cancellationToken);
-    var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new FollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)
+    var rows = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize)
+        .Select(x => new
+        {
+            x.Id,
+            x.OwnerId,
+            x.StudentRef,
+            x.StudentName,
+            x.CourseRef,
+            x.Kind,
+            x.Reason,
+            x.Action,
+            x.Status,
+            x.Notes,
+            x.OccurredAt,
+            x.CreatedAt,
+        })
+        .ToListAsync(cancellationToken);
+    var ownerIds = rows.Select(item => item.OwnerId).Distinct().ToArray();
+    var actorNames = ownerIds.Length == 0
+        ? new Dictionary<Guid, string>()
+        : await dbContext.UserAccounts.AsNoTracking()
+            .Where(item => ownerIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => item.Name, cancellationToken);
+    var items = rows.Select(item => new FollowupDto(item.Id, item.StudentRef, item.StudentName, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt)
     {
-        Reason = x.Reason,
-        Action = x.Action,
-        Status = x.Status,
-    }).ToListAsync(cancellationToken);
-    return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
+        Reason = item.Reason,
+        Action = item.Action,
+        Status = item.Status,
+        ActorName = actorNames.GetValueOrDefault(item.OwnerId) ?? "Usuário",
+    }).ToArray();
+    return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Length, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/reports/operational", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
@@ -1330,6 +1365,7 @@ app.MapPost("/api/followups", async (HttpContext context, ConnectorDbContext dbC
         Id = Guid.NewGuid(),
         OwnerId = identity.Id,
         StudentRef = input.StudentRef.Trim(),
+        StudentName = input.StudentName?.Trim(),
         CourseRef = input.CourseRef?.Trim(),
         Kind = NormalizeFollowupKind(input.Kind),
         Reason = NormalizeFollowupReason(input.Reason),
@@ -1340,11 +1376,12 @@ app.MapPost("/api/followups", async (HttpContext context, ConnectorDbContext dbC
         CreatedAt = now,
     };
     dbContext.Followups.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/followups/{item.Id}", new AppEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt)
+    return Results.Created($"/api/followups/{item.Id}", new AppEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.StudentName, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt)
     {
         Reason = item.Reason,
         Action = item.Action,
         Status = item.Status,
+        ActorName = identity.Name,
     }, new(now, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
