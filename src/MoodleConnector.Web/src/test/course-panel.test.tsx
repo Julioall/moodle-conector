@@ -17,9 +17,16 @@ vi.mock('../features/students/students-gateway', () => ({
   },
 }));
 
+vi.mock('../features/dashboard/dashboard-gateway', () => ({
+  dashboardGateway: {
+    get: vi.fn(),
+  },
+}));
+
 import { CoursePanelPage } from '../features/courses/CoursePanelPage';
 import { coursesGateway } from '../features/courses/courses-gateway';
 import { studentsGateway } from '../features/students/students-gateway';
+import { dashboardGateway } from '../features/dashboard/dashboard-gateway';
 
 describe('CoursePanelPage', () => {
   beforeEach(() => {
@@ -40,6 +47,16 @@ describe('CoursePanelPage', () => {
     vi.mocked(studentsGateway.byCourse).mockResolvedValue({
       data: [],
       meta: { page: 1, pageSize: 25, returned: 0, total: 0, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
+    });
+    vi.mocked(dashboardGateway.get).mockResolvedValue({
+      data: {
+        summary: { activeCourses: 1, pendingDeliveries: 0, awaitingGrading: 2, studentsAtRisk: 0, studentsNeedingAttention: 0, activitiesToReview: 2, pendingCorrectionAssignments: 2 },
+        priorities: [],
+        activitiesToReview: [],
+        recentActivity: [],
+        warnings: [],
+      },
+      meta: { generatedAt: '2026-08-14T00:00:00Z' },
     });
   });
 
@@ -65,5 +82,15 @@ describe('CoursePanelPage', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Alunos' }));
 
     await waitFor(() => expect(studentsGateway.byCourse).toHaveBeenCalledWith('demo', '42', 1, 25));
+  });
+
+  it('shows correction status inside Activities without exposing a corrections tab', async () => {
+    renderPage('/cursos/demo/42?tab=activities');
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Atividades' })).toBeInTheDocument());
+
+    expect(screen.getByText('2 para corrigir')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Pendências e correções' })).not.toBeInTheDocument();
+    expect(dashboardGateway.get).toHaveBeenCalledWith('demo', '42');
   });
 });

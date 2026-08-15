@@ -10,10 +10,10 @@ import { MoodleIcon } from '../../components/ui/MoodleIcon';
 import { Progress } from '../../components/ui/progress';
 import { Skeleton } from '../../components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
+import { dashboardGateway } from '../dashboard/dashboard-gateway';
 import { coursesGateway } from './courses-gateway';
 import { studentsGateway } from '../students/students-gateway';
 import { FollowupPage } from '../followup/FollowupPage';
-import { PendingCorrectionsPage } from '../corrections/PendingCorrectionsPage';
 import { ForumsPage } from '../forums/ForumsPage';
 
 function formatDate(value?: string) {
@@ -36,7 +36,8 @@ function isAtRisk(risk?: string) {
 export function CoursePanelPage() {
   const { connectionRef = '', courseId = '' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') || 'overview';
+  const requestedTab = searchParams.get('tab') || 'overview';
+  const activeTab = requestedTab === 'corrections' ? 'activities' : requestedTab;
   const [studentsPage, setStudentsPage] = useState(1);
   const [activitiesPage, setActivitiesPage] = useState(1);
   const enabled = Boolean(connectionRef && courseId);
@@ -51,6 +52,12 @@ export function CoursePanelPage() {
     queryKey: ['app', 'course-activities', connectionRef, courseId, activitiesPage],
     queryFn: () => coursesGateway.activities(connectionRef, courseId, activitiesPage, 20),
     enabled: enabled && (activeTab === 'overview' || activeTab === 'activities'),
+    staleTime: 30_000,
+  });
+  const activityReview = useQuery({
+    queryKey: ['app', 'course-activity-review', connectionRef, courseId],
+    queryFn: () => dashboardGateway.get(connectionRef, courseId),
+    enabled: enabled && activeTab === 'activities',
     staleTime: 30_000,
   });
   const students = useQuery({
@@ -122,7 +129,6 @@ export function CoursePanelPage() {
               <TabsTrigger value="students">Alunos{studentCount == null ? '' : ` (${studentCount})`}</TabsTrigger>
               <TabsTrigger value="activities">Atividades ({activityCount})</TabsTrigger>
               <TabsTrigger value="followup">Follow-up</TabsTrigger>
-              <TabsTrigger value="corrections">Pendências e correções</TabsTrigger>
               <TabsTrigger value="forums">Fóruns</TabsTrigger>
             </TabsList>
 
@@ -131,7 +137,7 @@ export function CoursePanelPage() {
               <Card><CardHeader><CardTitle className="text-base">Acompanhamento do curso</CardTitle><CardDescription>Percentual informado pelo Moodle para a conexão atual.</CardDescription></CardHeader><CardContent>{progress == null ? <p className="text-sm text-muted-foreground">O Moodle não retornou um percentual de progresso.</p> : <div className="space-y-2"><div className="flex items-center justify-between text-sm"><span>Progresso</span><span className="font-medium">{Math.round(progress)}%</span></div><Progress value={progress} className="h-2" /><p className="text-xs text-muted-foreground">O indicador é informativo e não altera dados no Moodle.</p></div>}</CardContent></Card>
             </TabsContent>
 
-            <TabsContent value="students"><Card><CardHeader><CardTitle className="flex items-center gap-2"><Users className="h-5 w-5 text-primary" />Alunos do curso</CardTitle><CardDescription>Participantes limitados à página atual e à conexão selecionada.</CardDescription></CardHeader><CardContent>
+            <TabsContent value="students"><Card><CardHeader><CardTitle className="text-base">Alunos do curso</CardTitle><CardDescription>Participantes limitados à página atual e à conexão selecionada.</CardDescription></CardHeader><CardContent>
               {students.isPending && <div className="space-y-3"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>}
               {students.isError && <p role="alert" className="text-destructive">Não foi possível carregar os alunos.</p>}
               {students.isSuccess && <p className="mb-3 text-xs text-muted-foreground">Consulta paginada e limitada ao curso atual.</p>}
@@ -140,7 +146,7 @@ export function CoursePanelPage() {
               {studentTotalPages > 1 && <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4 text-xs text-muted-foreground"><span>Página {studentsPage} de {studentTotalPages}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setStudentsPage((page) => Math.max(1, page - 1))} disabled={studentsPage <= 1}>Anterior</Button><Button variant="outline" size="sm" onClick={() => setStudentsPage((page) => Math.min(studentTotalPages, page + 1))} disabled={studentsPage >= studentTotalPages}>Próxima</Button></div></div>}
             </CardContent></Card></TabsContent>
 
-            <TabsContent value="activities"><Card><CardHeader><CardTitle>Atividades</CardTitle><CardDescription>Datas, tipos e links informativos retornados pelo Moodle.</CardDescription></CardHeader><CardContent>
+            <TabsContent value="activities"><Card><CardHeader><div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle className="text-base">Atividades</CardTitle><CardDescription>Datas, tipos e links informativos retornados pelo Moodle.</CardDescription></div>{activityReview.data && <Badge variant={(activityReview.data.data.summary.pendingCorrectionAssignments ?? 0) > 0 ? 'destructive' : 'outline'}>{(activityReview.data.data.summary.pendingCorrectionAssignments ?? 0) > 0 ? `${activityReview.data.data.summary.pendingCorrectionAssignments} para corrigir` : 'Sem pendências de correção'}</Badge>}</div></CardHeader><CardContent>
               {activities.isPending && <div className="space-y-3"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div>}
               {activities.isError && <p role="alert" className="text-destructive">Não foi possível carregar as atividades.</p>}
               {activities.isSuccess && activities.data.data.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma atividade disponível.</p>}
@@ -148,7 +154,6 @@ export function CoursePanelPage() {
               {activityTotalPages > 1 && <div className="mt-4 flex items-center justify-between gap-3 border-t pt-4 text-xs text-muted-foreground"><span>Página {activitiesPage} de {activityTotalPages}</span><div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setActivitiesPage((page) => Math.max(1, page - 1))} disabled={activitiesPage <= 1}>Anterior</Button><Button variant="outline" size="sm" onClick={() => setActivitiesPage((page) => Math.min(activityTotalPages, page + 1))} disabled={activitiesPage >= activityTotalPages}>Próxima</Button></div></div>}
             </CardContent></Card></TabsContent>
             <TabsContent value="followup"><FollowupPage embedded courseContext={{ connectionRef, courseId, courseName: data.displayName ?? data.fullName }} /></TabsContent>
-            <TabsContent value="corrections"><PendingCorrectionsPage embedded courseContext={{ connectionRef, courseId, courseName: data.displayName ?? data.fullName }} /></TabsContent>
             <TabsContent value="forums"><ForumsPage embedded courseContext={{ connectionRef, courseId, courseName: data.displayName ?? data.fullName }} /></TabsContent>
           </Tabs>
         </>
