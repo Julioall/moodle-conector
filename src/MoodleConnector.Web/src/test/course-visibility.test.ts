@@ -11,6 +11,9 @@ describe('course visibility preferences', () => {
     act(() => result.current.ignoreCourse('30585'));
     expect(result.current.ignoredCourseIds.has('30585')).toBe(true);
 
+    act(() => result.current.ignoreCourses(['30586', '30587']));
+    expect([...result.current.ignoredCourseIds]).toEqual(['30585', '30586', '30587']);
+
     const secondHook = renderHook(() => useIgnoredCourses('fieg'));
     expect(secondHook.result.current.ignoredCourseIds.has('30585')).toBe(true);
 

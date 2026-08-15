@@ -36,10 +36,17 @@ export function useIgnoredCourses(connectionRef?: string) {
 
   function updateIgnoredCourse(courseId: string, ignored: boolean) {
     if (!connectionRef) return;
+    updateIgnoredCourses([courseId], ignored);
+  }
+
+  function updateIgnoredCourses(courseIds: string[], ignored: boolean) {
+    if (!connectionRef || courseIds.length === 0) return;
     setIgnoredCourseIds((current) => {
       const next = new Set(current);
-      if (ignored) next.add(courseId);
-      else next.delete(courseId);
+      courseIds.forEach((courseId) => {
+        if (ignored) next.add(courseId);
+        else next.delete(courseId);
+      });
       writeIgnoredCourseIds(connectionRef, next);
       return next;
     });
@@ -48,6 +55,7 @@ export function useIgnoredCourses(connectionRef?: string) {
   return {
     ignoredCourseIds,
     ignoreCourse: (courseId: string) => updateIgnoredCourse(courseId, true),
+    ignoreCourses: (courseIds: string[]) => updateIgnoredCourses(courseIds, true),
     restoreCourse: (courseId: string) => updateIgnoredCourse(courseId, false),
   };
 }

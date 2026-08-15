@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { BookOpen, Building2, ChevronDown, EyeOff, GraduationCap, Search, UsersRound } from 'lucide-react';
 
 import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useEditMode } from '@/components/layout/edit-mode-context';
@@ -35,21 +36,29 @@ function countCourses(node: CategoryNode): number {
   return node.courses.length + [...node.children.values()].reduce((total, child) => total + countCourses(child), 0);
 }
 
-function CategoryBranch({ node, editMode, onIgnore, level = 0 }: { node: CategoryNode; editMode: boolean; onIgnore: (courseId: string) => void; level?: number }) {
+function collectCourseIds(node: CategoryNode): string[] {
+  return [...node.courses.map((course) => course.courseId), ...[...node.children.values()].flatMap(collectCourseIds)];
+}
+
+function CategoryBranch({ node, editMode, onIgnore, onIgnoreCategory, level = 0 }: { node: CategoryNode; editMode: boolean; onIgnore: (courseId: string) => void; onIgnoreCategory: (courseIds: string[]) => void; level?: number }) {
   const [open, setOpen] = useState(false);
   const children = [...node.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'));
   const courseCount = countCourses(node);
+  const categoryCourseIds = collectCourseIds(node);
   const Icon = level === 0 ? Building2 : level === 1 ? GraduationCap : UsersRound;
   const hasContent = children.length > 0 || node.courses.length > 0;
 
   return (
     <section className={level === 0 ? 'overflow-hidden rounded-lg border bg-card' : 'overflow-hidden rounded-lg border bg-muted/30'}>
-      <button type="button" className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/50" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
-        <Icon className={level === 0 ? 'h-5 w-5 text-primary' : 'h-4 w-4 text-primary/80'} />
-        <span className="min-w-0 flex-1"><span className="block truncate font-semibold">{node.name}</span><span className="mt-0.5 block text-xs font-normal text-muted-foreground">{courseCount} curso{courseCount === 1 ? '' : 's'}</span></span>
-        {hasContent && <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />}
-      </button>
-      {open && <div className="space-y-3 border-t p-4">{children.map((child) => <CategoryBranch key={child.path} node={child} editMode={editMode} onIgnore={onIgnore} level={level + 1} />)}{node.courses.length > 0 && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{node.courses.map((course) => <CourseCard key={`${course.connectionRef}:${course.courseId}`} course={course} action={editMode ? { label: 'Ignorar curso', ariaLabel: `Ignorar ${course.displayName ?? course.fullName}`, icon: <EyeOff className="h-4 w-4" />, onClick: () => onIgnore(course.courseId) } : undefined} />)}</div>}</div>}
+      <div className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/50">
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setOpen((value) => !value)} aria-expanded={open}>
+          <Icon className={level === 0 ? 'h-5 w-5 text-primary' : 'h-4 w-4 text-primary/80'} />
+          <span className="min-w-0 flex-1"><span className="block truncate font-semibold">{node.name}</span><span className="mt-0.5 block text-xs font-normal text-muted-foreground">{courseCount} curso{courseCount === 1 ? '' : 's'}</span></span>
+          {hasContent && <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-180' : ''}`} />}
+        </button>
+        {editMode && categoryCourseIds.length > 0 && <Button type="button" variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground" aria-label={`Ignorar todos os cursos de ${node.name}`} title={`Ignorar todos os cursos de ${node.name}`} onClick={() => onIgnoreCategory(categoryCourseIds)}><EyeOff className="h-4 w-4" /></Button>}
+      </div>
+      {open && <div className="space-y-3 border-t p-4">{children.map((child) => <CategoryBranch key={child.path} node={child} editMode={editMode} onIgnore={onIgnore} onIgnoreCategory={onIgnoreCategory} level={level + 1} />)}{node.courses.length > 0 && <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{node.courses.map((course) => <CourseCard key={`${course.connectionRef}:${course.courseId}`} course={course} action={editMode ? { label: 'Ignorar curso', ariaLabel: `Ignorar ${course.displayName ?? course.fullName}`, icon: <EyeOff className="h-4 w-4" />, onClick: () => onIgnore(course.courseId) } : undefined} />)}</div>}</div>}
     </section>
   );
 }
@@ -57,7 +66,7 @@ function CategoryBranch({ node, editMode, onIgnore, level = 0 }: { node: Categor
 export function MyCoursesPage() {
   const { connectionRef } = useConnectionScope();
   const { editMode } = useEditMode();
-  const { ignoredCourseIds, ignoreCourse } = useIgnoredCourses(connectionRef);
+  const { ignoredCourseIds, ignoreCourse, ignoreCourses } = useIgnoredCourses(connectionRef);
   const [search, setSearch] = useState('');
   const query = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
   const visibleCourses = useMemo(() => {
@@ -76,7 +85,7 @@ export function MyCoursesPage() {
       {query.isPending && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
       {query.isError && <Card><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar os cursos.</CardContent></Card>}
       {query.isSuccess && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">Não há cursos em acompanhamento no momento.</p></CardContent></Card>}
-      {query.isSuccess && tree.children.size > 0 && <section className="space-y-4" aria-label="Cursos agrupados por categoria">{[...tree.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((node) => <CategoryBranch key={node.path} node={node} editMode={editMode} onIgnore={ignoreCourse} />)}</section>}
+      {query.isSuccess && tree.children.size > 0 && <section className="space-y-4" aria-label="Cursos agrupados por categoria">{[...tree.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((node) => <CategoryBranch key={node.path} node={node} editMode={editMode} onIgnore={ignoreCourse} onIgnoreCategory={ignoreCourses} />)}</section>}
     </main>
   );
 }
