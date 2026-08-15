@@ -14,8 +14,8 @@ import { useIgnoredCourses } from '../courses/course-visibility';
 import { buildSchoolsTree, countCoursesByCategory, courseCategoryPath, groupCoursesByCategory, normalizeCategoryPath, type TreeNode } from './schools-tree';
 
 const statusFilters: { value: CourseLifecycleFilter; label: string }[] = [
-  { value: 'in_progress', label: 'Em andamento' },
   { value: 'all', label: 'Todos' },
+  { value: 'in_progress', label: 'Em andamento' },
   { value: 'not_started', label: 'Não iniciados' },
   { value: 'finished', label: 'Finalizados' },
 ];
