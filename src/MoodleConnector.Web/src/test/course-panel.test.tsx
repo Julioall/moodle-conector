@@ -151,4 +151,26 @@ describe('CoursePanelPage', () => {
     expect(screen.getByText('Mensagem')).toBeInTheDocument();
     expect(screen.queryByText('Atividades que precisam de ação')).not.toBeInTheDocument();
   });
+
+  it('does not expose the technical student reference for legacy history records', async () => {
+    vi.mocked(followupGateway.list).mockResolvedValue({
+      data: [{
+        id: 'followup-legacy',
+        studentRef: 'demo:440754',
+        courseRef: 'demo:42',
+        kind: 'acompanhamento',
+        action: 'mensagem',
+        status: 'em_acompanhamento',
+        notes: 'Mensagem registrada antes da persistência do nome.',
+        occurredAt: '2026-08-14T12:00:00Z',
+        createdAt: '2026-08-14T12:00:00Z',
+      }],
+      meta: { page: 1, pageSize: 20, returned: 1, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('Aluno 440754')).toBeInTheDocument());
+    expect(screen.queryByText('demo:440754')).not.toBeInTheDocument();
+  });
 });

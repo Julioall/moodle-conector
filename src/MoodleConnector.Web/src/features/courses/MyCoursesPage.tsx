@@ -12,17 +12,18 @@ import { CourseCard } from './components/CourseCard';
 import { coursesGateway, type Course } from './courses-gateway';
 import { filterCoursesByLifecycle, matchesCourseSearch, normalizeCourseEndDatesBySequence } from './course-status';
 import { useIgnoredCourses } from './course-visibility';
+import { categoryPartsWithoutRedundantRoot, redundantCategoryRoots } from '../schools/schools-tree';
 
 type CategoryNode = { name: string; path: string; children: Map<string, CategoryNode>; courses: Course[] };
 
 function buildCategoryTree(courses: Course[]) {
   const root: CategoryNode = { name: 'root', path: '', children: new Map(), courses: [] };
+  const redundantRoots = redundantCategoryRoots(courses.map((course) => course.categoryName ?? ''));
   courses.forEach((course) => {
-    const parts = (course.categoryName?.split('>').map((part) => part.trim()).filter(Boolean) ?? []);
-    const visibleParts = parts.length > 1 && parts[0].toLocaleLowerCase('pt-BR') === 'senai' ? parts.slice(1) : parts;
-    const categoryParts = visibleParts.length > 0 ? visibleParts : ['Sem categoria'];
+    const categoryParts = categoryPartsWithoutRedundantRoot(course.categoryName ?? '', redundantRoots);
+    const visibleCategoryParts = categoryParts.length > 0 ? categoryParts : ['Sem categoria'];
     let node = root;
-    categoryParts.forEach((part) => {
+    visibleCategoryParts.forEach((part) => {
       const path = node.path ? `${node.path} > ${part}` : part;
       if (!node.children.has(part)) node.children.set(part, { name: part, path, children: new Map(), courses: [] });
       node = node.children.get(part)!;

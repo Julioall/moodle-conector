@@ -165,23 +165,33 @@ internal sealed class MoodleCoursesGateway(
                 var categories = await GetCategoryPathsAsync(credentials, profile, cancellationToken);
                 _logger.LogInformation("Moodle courses loaded: {CourseCount}, categories: {CategoryCount}", moodleCourses.Count, categories.Count);
                 return moodleCourses
-                    .Select(course => new CourseSummary(
-                        course.Id.ToString(CultureInfo.InvariantCulture),
-                        course.IdNumber,
-                        course.ShortName,
-                        course.FullName,
-                        course.DisplayName,
-                        course.CategoryId ?? course.Category,
-                        course.CategoryName ?? ((course.CategoryId ?? course.Category) is long categoryId && categories.TryGetValue(categoryId, out var categoryPath) ? categoryPath : null),
-                        ToDateTimeOffset(course.StartDate),
-                        ToDateTimeOffset(course.EndDate),
-                        ToBool(course.Visible),
-                        course.ViewUrl,
-                        course.CourseImage,
-                        ToDecimal(course.Progress),
-                        ToBool(course.HasProgress),
-                        ToBool(course.IsFavourite),
-                        ToDateTimeOffset(course.TimeAccess)))
+                    .Select(course =>
+                    {
+                        var categoryId = course.CategoryId ?? course.Category;
+                        var categoryName = categoryId is long resolvedCategoryId &&
+                                            categories.TryGetValue(resolvedCategoryId, out var resolvedCategoryPath) &&
+                                            !string.IsNullOrWhiteSpace(resolvedCategoryPath)
+                            ? resolvedCategoryPath
+                            : course.CategoryName;
+
+                        return new CourseSummary(
+                            course.Id.ToString(CultureInfo.InvariantCulture),
+                            course.IdNumber,
+                            course.ShortName,
+                            course.FullName,
+                            course.DisplayName,
+                            categoryId,
+                            categoryName,
+                            ToDateTimeOffset(course.StartDate),
+                            ToDateTimeOffset(course.EndDate),
+                            ToBool(course.Visible),
+                            course.ViewUrl,
+                            course.CourseImage,
+                            ToDecimal(course.Progress),
+                            ToBool(course.HasProgress),
+                            ToBool(course.IsFavourite),
+                            ToDateTimeOffset(course.TimeAccess));
+                    })
                     .ToArray();
             }) ?? [];
     }

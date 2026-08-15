@@ -6,6 +6,21 @@ function splitPath(path: string) {
   return path.split('>').map((part) => part.trim()).filter(Boolean);
 }
 
+export function redundantCategoryRoots(paths: string[]) {
+  return new Set(
+    paths
+      .map(splitPath)
+      .filter((parts) => parts.length > 1)
+      .map((parts) => parts[0].toLocaleLowerCase('pt-BR')),
+  );
+}
+
+export function categoryPartsWithoutRedundantRoot(path: string, roots: Set<string>) {
+  const parts = splitPath(path);
+  const shouldHideRoot = parts[0] !== undefined && roots.has(parts[0].toLocaleLowerCase('pt-BR'));
+  return shouldHideRoot ? parts.slice(1) : parts;
+}
+
 export function normalizeCategoryPath(path: string) {
   return splitPath(path).join(' > ').toLocaleLowerCase('pt-BR');
 }
@@ -38,29 +53,20 @@ export function countCoursesByCategory<T extends Pick<Course, 'categoryName'>>(c
   return counts;
 }
 
-function getRedundantRoots(items: CourseHierarchyNode[]) {
-  return new Set(
-    items
-      .map((item) => splitPath(item.path))
-      .filter((parts) => parts.length > 1)
-      .map((parts) => parts[0].toLocaleLowerCase('pt-BR')),
-  );
-}
-
 export function buildSchoolsTree(items: CourseHierarchyNode[]) {
   const root: TreeNode = { name: 'root', path: '', count: 0, children: new Map() };
-  const redundantRoots = getRedundantRoots(items);
+  const redundantRoots = redundantCategoryRoots(items.map((item) => item.path));
 
   for (const item of items) {
-    const parts = splitPath(item.path);
-    const shouldHideRedundantRoot = parts[0] !== undefined && redundantRoots.has(parts[0].toLocaleLowerCase('pt-BR'));
-    const offset = shouldHideRedundantRoot ? 1 : 0;
-    if (parts.length <= offset) continue;
+    const rawParts = splitPath(item.path);
+    const parts = categoryPartsWithoutRedundantRoot(item.path, redundantRoots);
+    if (parts.length === 0) continue;
+    const hiddenRootCount = rawParts.length - parts.length;
 
     let node = root;
-    for (let index = offset; index < parts.length; index += 1) {
+    for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index];
-      const path = parts.slice(0, index + 1).join(' > ');
+      const path = rawParts.slice(0, index + hiddenRootCount + 1).join(' > ');
       if (!node.children.has(part)) node.children.set(part, { name: part, path, count: 0, children: new Map() });
       node = node.children.get(part)!;
     }
