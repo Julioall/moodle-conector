@@ -46,6 +46,34 @@ describe('course lifecycle', () => {
     expect(normalizeCourseEndDatesBySequence(courses)).toEqual(courses);
   });
 
+  it('uses equal defined ends even when the latest unit has no end yet', () => {
+    const courses = [
+      { courseId: 'a', categoryName: 'Turma 3', startDate: '2026-05-20T00:00:00Z', endDate: '2026-08-25T23:59:59Z' },
+      { courseId: 'b', categoryName: 'Turma 3', startDate: '2026-07-31T00:00:00Z', endDate: '2026-08-25T23:59:59Z' },
+      { courseId: 'c', categoryName: 'Turma 3', startDate: '2026-08-13T00:00:00Z' },
+    ];
+
+    expect(normalizeCourseEndDatesBySequence(courses).map((course) => course.endDate)).toEqual([
+      '2026-07-31T00:00:00Z',
+      '2026-08-13T00:00:00Z',
+      undefined,
+    ]);
+  });
+
+  it('groups equivalent category paths despite inconsistent Moodle spacing', () => {
+    const courses = [
+      { courseId: 'a', categoryName: 'Escola > Turma 4', startDate: '2026-05-20T00:00:00Z', endDate: '2026-08-25T23:59:59Z' },
+      { courseId: 'b', categoryName: 'Escola>Turma 4', startDate: '2026-07-31T00:00:00Z', endDate: '2026-08-25T23:59:59Z' },
+      { courseId: 'c', categoryName: 'Escola > Turma 4', startDate: '2026-08-13T00:00:00Z' },
+    ];
+
+    expect(normalizeCourseEndDatesBySequence(courses).map((course) => course.endDate)).toEqual([
+      '2026-07-31T00:00:00Z',
+      '2026-08-13T00:00:00Z',
+      undefined,
+    ]);
+  });
+
   it('searches courses by id, name or category', () => {
     const course = { courseId: '42', fullName: 'Projeto Docente', categoryName: 'Escola A > Turma 1' };
 

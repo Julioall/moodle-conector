@@ -9,6 +9,10 @@ function parseDate(value?: string) {
   return Number.isNaN(timestamp) ? undefined : timestamp;
 }
 
+function normalizeCategoryPath(value?: string) {
+  return value?.split('>').map((part) => part.trim()).filter(Boolean).join(' > ').toLocaleLowerCase('pt-BR') ?? '';
+}
+
 export function getCourseLifecycle(course: Pick<Course, 'startDate' | 'endDate'>, now = Date.now()): CourseLifecycle {
   const start = course.startDate ? new Date(course.startDate).getTime() : undefined;
   const end = course.endDate ? new Date(course.endDate).getTime() : undefined;
@@ -32,20 +36,20 @@ export function matchesCourseSearch(course: Pick<Course, 'courseId' | 'fullName'
 export function normalizeCourseEndDatesBySequence<T extends Pick<Course, 'courseId' | 'categoryName' | 'startDate' | 'endDate'>>(courses: T[]): T[] {
   const groups = new Map<string, T[]>();
   courses.forEach((course) => {
-    const category = course.categoryName?.trim();
+    const category = normalizeCategoryPath(course.categoryName);
     if (!category) return;
-    const key = category.toLocaleLowerCase('pt-BR');
-    const group = groups.get(key) ?? [];
+    const group = groups.get(category) ?? [];
     group.push(course);
-    groups.set(key, group);
+    groups.set(category, group);
   });
 
   const adjustedEndDates = new Map<T, string>();
   groups.forEach((group) => {
     if (group.length < 2) return;
     const endTimes = group.map((course) => parseDate(course.endDate));
-    const commonEndTime = endTimes[0];
-    if (commonEndTime === undefined || endTimes.some((time) => time !== commonEndTime)) return;
+    const definedEndTimes = endTimes.filter((time): time is number => time !== undefined);
+    const commonEndTime = definedEndTimes[0];
+    if (definedEndTimes.length < 2 || commonEndTime === undefined || definedEndTimes.some((time) => time !== commonEndTime)) return;
 
     const startsByTime = new Map<number, string>();
     group.forEach((course) => {

@@ -47,7 +47,7 @@ export function SchoolsPage() {
   const { editMode } = useEditMode();
   const { ignoredCourseIds, restoreCourse } = useIgnoredCourses(connectionRef);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<CourseLifecycleFilter>('in_progress');
+  const [statusFilter, setStatusFilter] = useState<CourseLifecycleFilter>('all');
   const query = useQuery({ queryKey: ['app', 'schools', 'hierarchy', connectionRef], queryFn: () => coursesGateway.hierarchy(connectionRef), staleTime: 60_000 });
   const coursesQuery = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
   const allCourses = useMemo(() => normalizeCourseEndDatesBySequence(coursesQuery.data?.data ?? []), [coursesQuery.data?.data]);
