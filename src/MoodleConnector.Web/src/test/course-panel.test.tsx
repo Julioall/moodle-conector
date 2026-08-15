@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../features/courses/courses-gateway', () => ({
   coursesGateway: {
@@ -29,6 +29,8 @@ import { studentsGateway } from '../features/students/students-gateway';
 import { dashboardGateway } from '../features/dashboard/dashboard-gateway';
 
 describe('CoursePanelPage', () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(coursesGateway.get).mockResolvedValue({
@@ -81,7 +83,7 @@ describe('CoursePanelPage', () => {
 
     await userEvent.click(screen.getByRole('tab', { name: 'Alunos' }));
 
-    await waitFor(() => expect(studentsGateway.byCourse).toHaveBeenCalledWith('demo', '42', 1, 25));
+    await waitFor(() => expect(studentsGateway.byCourse).toHaveBeenCalledWith('demo', '42', 1, 25, true));
   });
 
   it('shows correction status inside Activities without exposing a corrections tab', async () => {
@@ -92,5 +94,21 @@ describe('CoursePanelPage', () => {
     expect(screen.getByText('2 para corrigir')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Pendências e correções' })).not.toBeInTheDocument();
     expect(dashboardGateway.get).toHaveBeenCalledWith('demo', '42');
+  });
+
+  it('keeps the course workspace to three tabs and opens contextual follow-up', async () => {
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Estado da turma' })).toBeInTheDocument());
+
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(screen.queryByRole('tab', { name: 'Follow-up' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Fóruns' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Registrar acompanhamento' }));
+
+    expect(screen.getByRole('dialog', { name: 'Registrar acompanhamento' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Aluno' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Referência do aluno' })).not.toBeInTheDocument();
   });
 });

@@ -15,7 +15,10 @@ public sealed record StudentDto(
     string? Email, bool? Suspended, DateTimeOffset? FirstAccessAt,
     DateTimeOffset? LastAccessAt, DateTimeOffset? LastCourseAccessAt,
     string Risk, IReadOnlyList<string> RiskFactors, IReadOnlyList<StudentCourseDto> Courses,
-    string? MoodleUrl);
+    string? MoodleUrl)
+{
+    public int PendingCount { get; init; }
+}
 
 public static class StudentContractMapper
 {

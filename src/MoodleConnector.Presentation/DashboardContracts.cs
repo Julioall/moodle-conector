@@ -16,6 +16,7 @@ public sealed record AppDashboardSummaryDto(
     public int? PendingSubmissionAssignments { get; init; }
     public int? PendingCorrectionAssignments { get; init; }
     public int? NewAtRiskThisWeek { get; init; }
+    public int? ActiveStudents { get; init; }
 }
 
 public sealed record AppDashboardPriorityDto(

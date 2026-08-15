@@ -170,6 +170,9 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         followup.Property(x => x.StudentRef).HasMaxLength(200).IsRequired();
         followup.Property(x => x.CourseRef).HasMaxLength(200);
         followup.Property(x => x.Kind).HasMaxLength(64).IsRequired();
+        followup.Property(x => x.Reason).HasMaxLength(64);
+        followup.Property(x => x.Action).HasMaxLength(64);
+        followup.Property(x => x.Status).HasMaxLength(64);
         followup.Property(x => x.Notes).HasMaxLength(4000).IsRequired();
         followup.Property(x => x.OccurredAt).IsRequired();
         followup.Property(x => x.CreatedAt).IsRequired();

@@ -964,7 +964,12 @@ app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbCo
         query = query.Where(x => x.CourseRef == normalizedCourseId || (scopedCourseRef != null && x.CourseRef == scopedCourseRef));
     }
     var total = await query.CountAsync(cancellationToken);
-    var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new FollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)).ToListAsync(cancellationToken);
+    var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new FollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)
+    {
+        Reason = x.Reason,
+        Action = x.Action,
+        Status = x.Status,
+    }).ToListAsync(cancellationToken);
     return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -1320,9 +1325,27 @@ app.MapPost("/api/followups", async (HttpContext context, ConnectorDbContext dbC
     await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.StudentRef) || string.IsNullOrWhiteSpace(input.Notes)) return Results.BadRequest(new { error = new { code = "invalid_followup", message = "Aluno e registro sÃ£o obrigatÃ³rios." } });
     var now = DateTimeOffset.UtcNow;
-    var item = new FollowupEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, StudentRef = input.StudentRef.Trim(), CourseRef = input.CourseRef?.Trim(), Kind = NormalizeFollowupKind(input.Kind), Notes = input.Notes.Trim(), OccurredAt = input.OccurredAt ?? now, CreatedAt = now };
+    var item = new FollowupEntity
+    {
+        Id = Guid.NewGuid(),
+        OwnerId = identity.Id,
+        StudentRef = input.StudentRef.Trim(),
+        CourseRef = input.CourseRef?.Trim(),
+        Kind = NormalizeFollowupKind(input.Kind),
+        Reason = NormalizeFollowupReason(input.Reason),
+        Action = NormalizeFollowupAction(input.Action),
+        Status = NormalizeFollowupStatus(input.Status),
+        Notes = input.Notes.Trim(),
+        OccurredAt = input.OccurredAt ?? now,
+        CreatedAt = now,
+    };
     dbContext.Followups.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/followups/{item.Id}", new AppEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt), new(now, null)));
+    return Results.Created($"/api/followups/{item.Id}", new AppEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt)
+    {
+        Reason = item.Reason,
+        Action = item.Action,
+        Status = item.Status,
+    }, new(now, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/agenda", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CalendarEventInput input, CancellationToken cancellationToken) =>
@@ -1940,6 +1963,7 @@ app.MapGet("/api/dashboard", async (
             $"{student.FullName} · sem acesso recente",
             "risk", courseId, student.UserId))
         .Concat(pendingRows)
+        .Concat(gradingRows)
         .OrderByDescending(item => item.Level == "risk")
         .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
         .Take(AppDashboardBudget.MaxPriorities)
@@ -1962,6 +1986,7 @@ app.MapGet("/api/dashboard", async (
         PendingSubmissionAssignments = pendingSubmissionAssignments,
         PendingCorrectionAssignments = pendingCorrectionAssignments,
         NewAtRiskThisWeek = null,
+        ActiveStudents = participants.Participants.Count,
     };
     var recent = pendingRows.Take(AppDashboardBudget.MaxActivities)
         .Select(item => new AppDashboardActivityDto(item.Key, item.Title, item.Detail, null, item.CourseId, item.StudentId))
@@ -2141,7 +2166,7 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
-    string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
+    string connectionRef, string courseId, int? page, int? pageSize, bool? includeActionSummary, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
@@ -2152,14 +2177,35 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
     var result = await mediator.Send(new ListCourseActivitiesQuery(identity.Id.ToString(), courseId, CourseActivityModuleTypes.All, false), cancellationToken);
     if (result is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
-    var data = result.Activities.Skip((currentPage - 1) * size).Take(size)
-        .Select(activity => AppCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray();
+    var pageActivities = result.Activities.Skip((currentPage - 1) * size).Take(size).ToArray();
+    var submissionCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    var gradingCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    if (includeActionSummary == true)
+    {
+        var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+            courseId, 0, AppDashboardBudget.MaxParticipantsRead, IncludeAwaitingGrading: true,
+            MaxAssignmentsToAnalyze: AppDashboardBudget.MaxAssignmentsRead), cancellationToken);
+        foreach (var item in pending.Students.SelectMany(student => student.PendingAssignments))
+            submissionCounts[item.AssignmentId] = submissionCounts.GetValueOrDefault(item.AssignmentId) + 1;
+        foreach (var item in pending.AwaitingGrading)
+            gradingCounts[item.Item.AssignmentId] = gradingCounts.GetValueOrDefault(item.Item.AssignmentId) + 1;
+    }
+    var data = pageActivities.Select(activity =>
+    {
+        var dto = AppCourseContractMapper.ToDto(activity, connectionRef, courseId);
+        var keys = new[] { activity.InstanceId, activity.ActivityId }.Where(key => !string.IsNullOrWhiteSpace(key)).Cast<string>();
+        return dto with
+        {
+            PendingSubmissionCount = keys.Select(key => submissionCounts.GetValueOrDefault(key)).FirstOrDefault(value => value > 0),
+            AwaitingGradingCount = keys.Select(key => gradingCounts.GetValueOrDefault(key)).FirstOrDefault(value => value > 0),
+        };
+    }).ToArray();
     return Results.Ok(new AppListEnvelope<AppActivityDto>(data,
         new(currentPage, size, data.Length, currentPage * size < result.Total, DateTimeOffset.UtcNow, connectionRef, null, result.Total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
-    string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
+    string connectionRef, string courseId, int? page, int? pageSize, bool? includePending, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
@@ -2171,12 +2217,26 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
     try
     {
     var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, currentPage, size, true, true), cancellationToken);
+    var pendingByStudent = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    if (includePending == true)
+    {
+        var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+            courseId, 0, AppDashboardBudget.MaxParticipantsRead, IncludeAwaitingGrading: false,
+            MaxAssignmentsToAnalyze: AppDashboardBudget.MaxAssignmentsRead), cancellationToken);
+        pendingByStudent = pending.Students.ToDictionary(
+            student => student.StudentId,
+            student => student.PendingAssignments.Count,
+            StringComparer.OrdinalIgnoreCase);
+    }
     if (paged is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
     var data = paged.Participants
         .Select(participant => StudentContractMapper.ToDto(connectionRef, participant,
             new[] { new StudentCourseDto(connectionRef, courseId, courseId, null,
                 participant.Suspended == true ? "suspenso" : "ativo", null,
-                participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) }))
+                participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) }) with
+        {
+            PendingCount = pendingByStudent.GetValueOrDefault(participant.UserId),
+        })
         .ToArray();
     return Results.Ok(new AppListEnvelope<StudentDto>(data,
         new(currentPage, size, data.Length, paged.HasMore,
@@ -3162,6 +3222,24 @@ static string NormalizeFollowupKind(string? value) => value switch
 {
     "contato" or "orientacao" or "pendencia_conferida" or "ligacao" or "resposta_aluno" or "acompanhamento" => value,
     _ => "acompanhamento"
+};
+
+static string? NormalizeFollowupReason(string? value) => value switch
+{
+    "falta_acesso" or "atividade_pendente" or "desempenho" or "participacao" or "duvida" or "outro" => value,
+    _ => null,
+};
+
+static string? NormalizeFollowupAction(string? value) => value switch
+{
+    "mensagem" or "ligacao" or "orientacao" or "conversa_presencial" or "verificacao" or "outro" => value,
+    _ => null,
+};
+
+static string NormalizeFollowupStatus(string? value) => value switch
+{
+    "em_acompanhamento" or "aguardando_aluno" or "resolvido" => value,
+    _ => "em_acompanhamento",
 };
 
 static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
