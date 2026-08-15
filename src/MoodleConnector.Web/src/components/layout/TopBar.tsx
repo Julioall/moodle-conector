@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bell, CheckCheck, Pencil, RefreshCw, WifiOff } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -15,6 +14,7 @@ import { MoodleIcon } from '@/components/ui/MoodleIcon';
 import { dashboardGateway } from '@/features/dashboard/dashboard-gateway';
 import { useConnectionScope } from '@/features/connections/useConnectionScope';
 import { GlobalActivityLine } from './GlobalActivityLine';
+import { useEditMode } from './edit-mode-context';
 
 const LAST_SEEN_KEY = 'app:notifications-last-seen';
 
@@ -45,9 +45,9 @@ function readLastSeen() {
 export function TopBar() {
   const queryClient = useQueryClient();
   const { connections, selectedConnection, connectionRef, selectConnection } = useConnectionScope();
+  const { editMode, setEditMode } = useEditMode();
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [lastSeenAt, setLastSeenAt] = useState(readLastSeen);
-  const [editMode, setEditMode] = useState(false);
   const status = selectedConnection?.status ?? 'unknown';
   const isOffline = status === 'offline' || status === 'inactive';
   const activityQuery = useQuery({
