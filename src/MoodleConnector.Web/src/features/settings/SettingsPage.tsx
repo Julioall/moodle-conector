@@ -81,7 +81,7 @@ export function SettingsPage() {
   const permissionSections: { title: string; permissions: string[] }[] = permissionSectionDefinitions
     .map((section) => ({ ...section, permissions: section.permissions.filter((permission) => catalog.data?.permissions.includes(permission)) }))
     .filter((section) => section.permissions.length > 0);
-  const knownPermissions = new Set(permissionSectionDefinitions.flatMap((section) => section.permissions));
+  const knownPermissions = new Set<string>(permissionSectionDefinitions.flatMap((section) => section.permissions));
   const toolPermissions = (catalog.data?.permissions ?? []).filter((permission) => permission.startsWith('tool.') && !knownPermissions.has(permission));
   if (toolPermissions.length > 0) permissionSections.push({ title: 'Ferramentas do conector', permissions: toolPermissions });
   const remainingPermissions = (catalog.data?.permissions ?? []).filter((permission) => !knownPermissions.has(permission) && !permission.startsWith('tool.'));
