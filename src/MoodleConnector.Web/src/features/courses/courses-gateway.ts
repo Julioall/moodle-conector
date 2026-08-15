@@ -8,6 +8,7 @@ export type CourseHierarchyNode = { path: string; name: string; level: number; c
 
 export const createCoursesGateway = (client = createAppClient()) => {
   const list = (connectionRef?: string, page = 1, pageSize = 20) => client.get<ListResponse<Course>>(`/api/courses?${new URLSearchParams({ ...(connectionRef ? { connectionRef } : {}), page: String(page), pageSize: String(pageSize) })}`);
+  const byCategory = (categoryPath: string, connectionRef?: string, page = 1, pageSize = 50) => client.get<ListResponse<Course>>(`/api/schools/courses?${new URLSearchParams({ categoryPath, ...(connectionRef ? { connectionRef } : {}), page: String(page), pageSize: String(pageSize) })}`);
 
   const listAll = async (connectionRef?: string, pageSize = 100) => {
     const firstPage = await list(connectionRef, 1, pageSize);
@@ -28,9 +29,29 @@ export const createCoursesGateway = (client = createAppClient()) => {
     } satisfies ListResponse<Course>;
   };
 
+  const listAllByCategory = async (categoryPath: string, connectionRef?: string, pageSize = 100) => {
+    const firstPage = await byCategory(categoryPath, connectionRef, 1, pageSize);
+    const courses = [...firstPage.data];
+    let currentPage = firstPage;
+    let page = 2;
+
+    while ((currentPage.meta.hasMore || currentPage.data.length === pageSize) && currentPage.data.length > 0) {
+      currentPage = await byCategory(categoryPath, connectionRef, page, pageSize);
+      if (currentPage.data.length === 0) break;
+      courses.push(...currentPage.data);
+      page += 1;
+    }
+
+    return {
+      data: courses,
+      meta: { ...firstPage.meta, returned: courses.length, hasMore: false },
+    } satisfies ListResponse<Course>;
+  };
+
   return {
   hierarchy: (connectionRef?: string) => client.get<{ data: CourseHierarchyNode[]; meta: { generatedAt: string; connectionRef?: string } }>(`/api/schools?${new URLSearchParams(connectionRef ? { connectionRef } : {})}`),
-  byCategory: (categoryPath: string, connectionRef?: string, page = 1, pageSize = 50) => client.get<ListResponse<Course>>(`/api/schools/courses?${new URLSearchParams({ categoryPath, ...(connectionRef ? { connectionRef } : {}), page: String(page), pageSize: String(pageSize) })}`),
+  byCategory,
+  listAllByCategory,
   list,
   listAll,
   get: (connectionRef: string, courseId: string) => client.get<CourseResponse>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}`),
