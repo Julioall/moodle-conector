@@ -1,24 +1,28 @@
 ---
 name: moodle-grading
-description: Discover grading capabilities, prepare grading work, review evidence and execute human-confirmed grade changes.
+description: Ler notas, descobrir capabilities de correcao, preparar revisao assistida, editar rascunhos, gerar previas e confirmar lancamentos de nota com auditoria.
 ---
 
 # moodle-grading
 
-Use this skill for gradebook reads, grading preparation, AI-assisted grading review, batch previews, confirmation, and audit. Reading grades and writing grades are separate workflows.
+Separe leitura, preparacao, revisao e escrita. A decisao pedagogica permanece humana.
 
-## Read path
+## Leitura e descoberta
 
-- Gradebook and activity grades use the gradebook gateway and registered read operations such as `gradereport_user_get_grade_items`, `gradereport_user_get_grades_table`, and `mod_assign_get_grades`.
-- Capability discovery uses the grading discovery flow and must report blockers for missing submissions, files, or write functions.
-- Submission context comes from `moodle-assignments`; student identity comes from `moodle-students`.
+- Use `get_student_gradebook`, `get_student_activity_grades`, `list_students_below_min_grade`, `gradereport_user_get_grade_items`, `gradereport_user_get_grades_table` e `mod_assign_get_grades` conforme o escopo.
+- Use `discover_grading_functions`, `execute_grading_discovery`, `get_grading_item_context` e `list_gradable_submissions` para verificar funcoes, arquivos, submissao e contexto.
+- Submissao vem de `moodle-assignments`; identidade vem de `moodle-students`; orientacao de avaliacao vem de `moodle-pedagogy`.
+- Antes de propor nota, aplique `references/grading-evidence-matrix.md` e mantenha estados de extracao, cobertura e incerteza visiveis.
 
-## Controlled write path
+## Correcao assistida
 
-1. Prepare a bounded grading batch with explicit course, assignment, students, rubric/criteria, and proposed values.
-2. Validate permissions, feature flags, Moodle capabilities, conflicts, and idempotency.
-3. Present a preview with parameter hash, item count, warnings, and expiration.
-4. Require the pending-action confirmation service before `mod_assign_save_grade` or batch grade execution.
-5. Persist an audit record for every item and expose partial failures without claiming full success.
+1. Crie o lote limitado com estudantes, tarefas, criterios e valores propostos.
+2. Use `prepare_ai_grading_batch`/`save_ai_grading_batch`, `update_grading_draft` ou `update_grading_drafts_batch` apenas para o estado de revisao definido pelo produto.
+3. Revise com `review_batch_feedbacks`, `get_batch_grading_ui_state`, `get_assisted_grading_item` e os auditores do lote.
+4. Exporte `export_grading_coordination_report` quando necessario.
 
-Never call grade-write functions through `SafeReadExecutor` or the generic read tool. Human confirmation is a product boundary and cannot be replaced by an LLM decision.
+## Escrita Moodle
+
+Use `create_batch_grade_launch_preview` ou o fluxo individual `prepare_individual_grade_launch`, depois confirme com `confirm_batch_grade_launch` ou `confirm_individual_grade_launch`. A confirmacao exige pending action vigente, hash/contagem/escopo da previa, texto literal, mesmo usuario/conexao, `CanWrite`, escopo `moodle.write`, capability `mod_assign_save_grade`, feature flag e auditoria.
+
+Nunca execute `mod_assign_save_grade` por `moodle_execute_read`, nunca substitua revisao humana por decisao do modelo e reporte sucesso parcial/falha por item sem declarar lote completo.

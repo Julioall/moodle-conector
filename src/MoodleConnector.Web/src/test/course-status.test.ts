@@ -21,6 +21,16 @@ describe('course lifecycle', () => {
     expect(filterCoursesByLifecycle(courses, 'all')).toBe(courses);
   });
 
+  it('combines multiple lifecycle statuses', () => {
+    const courses = [
+      { id: 'active', startDate: '2020-08-01T00:00:00Z', endDate: '2099-08-31T23:59:59Z' },
+      { id: 'future', startDate: '2099-08-15T00:00:00Z', endDate: '2099-08-31T23:59:59Z' },
+      { id: 'finished', startDate: '2020-07-01T00:00:00Z', endDate: '2021-08-13T23:59:59Z' },
+    ];
+
+    expect(filterCoursesByLifecycle(courses, ['in_progress', 'finished']).map((course) => course.id)).toEqual(['active', 'finished']);
+  });
+
   it('uses the next distinct opening as the end of sequential units with a common module end', () => {
     const courses = [
       { courseId: 'a', categoryName: 'Turma 1', startDate: '2026-01-01T00:00:00Z', endDate: '2026-12-31T23:59:59Z' },

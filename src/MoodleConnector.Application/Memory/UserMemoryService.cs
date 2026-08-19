@@ -93,7 +93,7 @@ public sealed partial class UserMemoryService(
         EnsureLength(courseId, 64, nameof(request.CourseId));
         EnsureLength(query, 1000, nameof(request.Query));
         if (courseId is not null && alias is null) throw new ArgumentException("CourseId exige MoodleAlias.", nameof(request));
-        if (category is not null && !Categories.Contains(category)) throw new ArgumentException("Categoria de memÃ³ria invÃ¡lida.", nameof(request));
+        if (category is not null && !Categories.Contains(category)) throw new ArgumentException("Categoria de memória inválida.", nameof(request));
         var limit = Math.Clamp(request.Limit ?? 20, 1, 50);
         var memories = await repository.ListAsync(owner, alias, courseId, category, query, normalizedQuery, limit, cancellationToken);
         return memories.Select(Map).ToList();

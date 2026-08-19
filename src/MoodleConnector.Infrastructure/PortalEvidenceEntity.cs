@@ -12,7 +12,6 @@ public sealed class PortalEvidenceEntity
     public string Title { get; set; } = string.Empty;
     public string Details { get; set; } = string.Empty;
     public string Source { get; set; } = "moodle";
-    public Guid? AutomationRunId { get; set; }
     public DateTimeOffset ObservedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

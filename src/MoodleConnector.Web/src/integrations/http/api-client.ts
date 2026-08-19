@@ -34,6 +34,24 @@ export function readCsrfToken(): string | undefined {
 // especially when a course catalogue is being assembled from remote data.
 // Keep this aligned with MoodleApi:HttpTimeoutSeconds (30s by default).
 export function createAppClient(fetchImpl: typeof fetch = fetch, timeoutMs = 30000): AppClient {
+  let csrfToken: string | undefined;
+  let csrfRequest: Promise<string> | undefined;
+
+  async function getCsrfToken() {
+    if (csrfToken) return csrfToken;
+    if (!csrfRequest) {
+      csrfRequest = (async () => {
+        const csrfResponse = await fetchImpl('/api/csrf', { method: 'GET', credentials: 'same-origin', cache: 'no-store' });
+        const csrfBody = await csrfResponse.json() as { token?: string };
+        const token = csrfBody.token ?? readCsrfToken();
+        if (!csrfResponse.ok || !token) throw new AppHttpError(csrfResponse.status || 400, 'CSRF token is required for this operation');
+        csrfToken = token;
+        return token;
+      })().finally(() => { csrfRequest = undefined; });
+    }
+    return csrfRequest;
+  }
+
   return {
     get: <T>(path: string, options?: RequestInit) => request<T>(path, { ...options, method: 'GET' }),
     request: <T>(path: string, options: RequestInit = {}) => request<T>(path, options),
@@ -51,15 +69,11 @@ export function createAppClient(fetchImpl: typeof fetch = fetch, timeoutMs = 300
     headers.set('Accept', 'application/json');
     headers.set('X-Correlation-ID', correlationId);
     if (mutatingMethods.has(method)) {
-      // Always issue a fresh token before a mutation. A token left in the
-      // browser cookie can be stale after a deploy, restart or long-lived tab.
-      // The endpoint also returns the token in JSON, which is more reliable
-      // than depending only on Set-Cookie being observed by the browser.
-      const csrfResponse = await fetchImpl('/api/csrf', { method: 'GET', credentials: 'same-origin', cache: 'no-store' });
-      const csrfBody = await csrfResponse.json() as { token?: string };
-      const csrf = csrfBody.token ?? readCsrfToken();
-      if (!csrf) throw new AppHttpError(400, 'CSRF token is required for this operation', correlationId, { error: { code: 'csrf_missing' } });
-      headers.set('X-CSRF-TOKEN', csrf);
+      try { headers.set('X-CSRF-TOKEN', await getCsrfToken()); }
+      catch (error) {
+        if (error instanceof AppHttpError) throw new AppHttpError(error.status, error.message, correlationId, error.body);
+        throw error;
+      }
     }
     try {
       const response = await fetchImpl(path, { ...options, method, credentials: 'same-origin', signal: controller.signal, headers });

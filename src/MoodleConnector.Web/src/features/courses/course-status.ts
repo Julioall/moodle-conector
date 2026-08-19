@@ -2,6 +2,7 @@ import type { Course } from './courses-gateway';
 
 export type CourseLifecycle = 'in_progress' | 'not_started' | 'finished';
 export type CourseLifecycleFilter = CourseLifecycle | 'all';
+export type CourseLifecycleSelection = CourseLifecycleFilter | readonly CourseLifecycle[];
 
 function parseDate(value?: string) {
   if (!value) return undefined;
@@ -21,8 +22,14 @@ export function getCourseLifecycle(course: Pick<Course, 'startDate' | 'endDate'>
   return 'in_progress';
 }
 
-export function filterCoursesByLifecycle<T extends Pick<Course, 'startDate' | 'endDate'>>(courses: T[], filter: CourseLifecycleFilter): T[] {
-  return filter === 'all' ? courses : courses.filter((course) => getCourseLifecycle(course) === filter);
+export function filterCoursesByLifecycle<T extends Pick<Course, 'startDate' | 'endDate'>>(courses: T[], filter: CourseLifecycleSelection): T[] {
+  const selected = typeof filter === 'string'
+    ? filter === 'all' ? [] : [filter]
+    : filter;
+  if (selected.length === 0) return courses;
+
+  const selectedStatuses = new Set(selected);
+  return courses.filter((course) => selectedStatuses.has(getCourseLifecycle(course)));
 }
 
 export function matchesCourseSearch(course: Pick<Course, 'courseId' | 'fullName' | 'shortName' | 'displayName' | 'categoryName'>, search: string): boolean {

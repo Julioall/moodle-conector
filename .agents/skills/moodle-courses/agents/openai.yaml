@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Courses"
+  short_description: "Find and inspect Moodle courses"
+  default_prompt: "Use $moodle-courses to find a Moodle course and inspect its contents, activities, resources, or deadlines."

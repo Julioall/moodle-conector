@@ -10,6 +10,5 @@ public sealed record AppEvidenceDto(
     string Title,
     string Details,
     string Source,
-    Guid? AutomationRunId,
     DateTimeOffset ObservedAt,
     DateTimeOffset CreatedAt);

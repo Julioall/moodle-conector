@@ -37,7 +37,7 @@ public sealed class MoodleRestClientTests
     public async Task CallAsync_NormalizaErroEstruturadoDoMoodle()
     {
         var handler = new CapturingHandler(
-            "{\"exception\":\"invalid_parameter_exception\",\"errorcode\":\"invalidparameter\",\"message\":\"ParÃ¢metro invÃ¡lido\"}",
+            "{\"exception\":\"invalid_parameter_exception\",\"errorcode\":\"invalidparameter\",\"message\":\"Parâmetro inválido\"}",
             HttpStatusCode.BadRequest);
         using var client = new HttpClient(handler);
         var sut = new MoodleRestClient(

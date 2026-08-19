@@ -9,6 +9,9 @@
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
       Features__AppV2Enabled: "true"
+      DataProtection__KeyStoragePath: /app/data/keys
+      MoodleApi__UseStubData: "false"
+      MoodleProxy__UseStubData: "false"
       Postgres__ConnectionString: Host=postgres;Database=moodle_connector;Username=moodle_connector;Password=app-local-only
       ConnectorSecrets__EncryptionKeyBase64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
     ports:

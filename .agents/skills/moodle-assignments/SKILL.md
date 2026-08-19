@@ -1,38 +1,40 @@
 ---
 name: moodle-assignments
-description: Read assignment definitions, submissions, deadlines, status and grading context through the Moodle Connector.
+description: Consultar tarefas Moodle, prazos, entregas, status, pendencias, atrasos, notas existentes e contexto para correcao sem alterar submissao.
 ---
 
 # moodle-assignments
 
-Use this skill for assignment work: finding activities, inspecting their configuration, listing submissions, checking delivery status, and assembling grading context. It does not launch grades, send messages, or mutate submission state.
+Use para descobrir tarefas e analisar submissao. Toda intencao de lancar nota ou feedback passa para `moodle-grading`.
 
-## Routing
+## Roteamento
 
-- Assignment discovery or deadlines: `mod_assign_get_assignments`.
-- Submission listing or filtering: `mod_assign_get_submissions`.
-- A single submission/status request: `mod_assign_get_submission_status` or the registered specialized submission flow.
-- Existing grades or grade definitions: `mod_assign_get_grades` and the gradebook skill.
-- Course membership or student identity: route to `moodle-students`.
-- Any grade/write intent: route to `moodle-grading` and require its controlled workflow.
+- Definicao, nota maxima e prazos: `list_course_assignments`, `get_assignment`, `list_activity_deadlines` e `mod_assign_get_assignments`.
+- Entregas: `list_assignment_submissions`, `get_student_submission` e `get_submission_status`.
+- Pendentes/atrasadas/aguardando correcao: `list_pending_submissions`, `list_late_submissions`, `list_submissions_awaiting_grading` e `list_students_with_pending_submissions`.
+- Notas existentes de tarefa: `mod_assign_get_grades`; boletim agregado pertence a `moodle-grading`.
+- Identidade, matricula e grupos pertencem a `moodle-students`.
 
-## Identifiers
+## Contrato
 
-- `courseId` identifies the Moodle course and must be resolved in the selected connection.
-- `assignmentId` / `instanceId` identifies the assignment activity instance used by the submission APIs.
-- `cmid` is the course-module id. It is not interchangeable with `assignmentId`; when a tool accepts either, preserve which form the caller supplied and resolve it through course contents/activity discovery.
-- `userid` identifies the Moodle user. Do not substitute a display name, local account id, or a user from another connection.
+Resolva alias e capabilities antes da leitura. Use `SafeReadExecutor` para uma leitura direta registrada; use o gateway especializado quando houver paginacao, filtros, joins com estudantes ou normalizacao. Preserve `courseid`, `assignmentid`, `userid`, `status`, `before` e `after`.
 
-## Execution contract
+`assignmentId`/`instanceId` e `cmid` nao sao intercambiaveis. Nao substitua um estudante por nome exibido nem um curso por outro resultado aproximado.
 
-Resolve the connection and capabilities first. Use `SafeReadExecutor` for canonical read operations when the request is a direct read. Use the assignment gateway when it performs pagination, joins submissions with students, or normalizes Moodle-specific shapes. Preserve `courseid`, `assignmentid`, `userid`, `status`, `before`, and `after` semantics; never silently replace an explicit student or course.
+## Completude
 
-## Pagination and evidence
+`hasMore`, cursor ou pagina parcial significa que a evidencia esta incompleta. So diga 'nao entregou' depois de exaurir o escopo de estudantes, tarefa, paginas e filtros. Se a funcao de submissao faltar, reporte a capability ausente; nunca converta isso em zero entregas.
 
-Treat a response with `hasMore` or a Moodle paging cursor as incomplete. Continue only when the user asked for all results or the specialized flow owns continuation. Report the retrieved scope and any truncation. A missing submission is not evidence that a student did not submit unless the requested page/filter was exhausted.
+## Inspecao de arquivos e contexto de correcao
 
-## Fallback and ownership
+Leituras coletivas nao devem expor o texto integral das entregas. Quando o usuario pedir leitura de anexos, contexto ou correcao, encaminhe a `moodle-grading`:
 
-If the primary function is unavailable, consult the capability snapshot and choose a registered fallback. Do not guess a function name or invoke an unknown operation. The skill owns intent resolution and interpretation; Registry, PolicyEngine, SafeRead, credential selection, and write confirmation remain platform-owned.
+1. Crie um lote limitado com `create_assisted_grading_batch`, usando `includeSubmissionFiles`, `includeRubric` e `includeCourseMaterials` somente quando necessarios.
+2. Consulte `get_grading_batch_status` e `get_grading_item_context` para cobertura e artefatos.
+3. Use `prepare_submission_grading` para obter enunciado, texto extraido, nota maxima, instrucoes e status de cada entrega.
+4. Trate `succeeded`, `scanned_pdf`, `ocr_extracted`, `unsupported_format`, `file_too_large`, `empty` e `failed` como estados distintos.
+5. So pontue criterios cujo conteudo esteja verificavel. `scanned_pdf`, `unsupported_format` ou `failed` bloqueiam a atribuicao automatica de nota.
 
-If assignment discovery succeeds but the submission capability is unavailable, report the missing capability and stop at discovery; do not infer that there are no submissions. For a request that combines submissions with student identity, keep the handoff explicit: Assignments owns submission state, Students owns participant identity, and Follow-up owns pedagogical prioritization.
+O extrator atual cobre texto/HTML/JSON/XML/CSV, PDF, DOCX, PPTX, XLSX, OpenDocument e ZIP com entradas suportadas, com limites de tamanho, quantidade e chunking. Ele nao verifica nativamente formulas calculadas, graficos, camadas XCF/PSD ou requisitos de audio/video. Para detalhes e o pre-processador local de bundles, leia [references/submission-inspection.md](references/submission-inspection.md).
+
+Para correcao, entregue contexto de submissao e identidade a `moodle-grading`; nao prepare ou confirme escrita nesta skill.

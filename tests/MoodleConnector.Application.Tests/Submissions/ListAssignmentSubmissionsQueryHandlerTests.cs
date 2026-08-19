@@ -111,15 +111,17 @@ public class ListAssignmentSubmissionsQueryHandlerTests
     [Fact]
     public async Task Deve_listar_entregas_aguardando_correcao()
     {
+        var submissionsGateway = new FakeSubmissionsGateway
+        {
+            Records =
+            [
+                Submitted("9001", "101", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded"),
+                Submitted("9002", "102", new DateTimeOffset(2026, 6, 10, 11, 0, 0, TimeSpan.Zero), "graded"),
+                Submitted("9003", "103", new DateTimeOffset(2026, 6, 10, 12, 0, 0, TimeSpan.Zero), null)
+            ]
+        };
         var sut = CreateHandler(
-            submissionsGateway: new FakeSubmissionsGateway
-            {
-                Records =
-                [
-                    Submitted("9001", "101", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded"),
-                    Submitted("9002", "102", new DateTimeOffset(2026, 6, 10, 11, 0, 0, TimeSpan.Zero), "graded")
-                ]
-            });
+            submissionsGateway: submissionsGateway);
 
         var result = await sut.Handle(
             new ListAssignmentSubmissionsQuery(
@@ -136,6 +138,7 @@ public class ListAssignmentSubmissionsQueryHandlerTests
             CancellationToken.None);
 
         Assert.NotNull(result);
+        Assert.Null(submissionsGateway.LastStatus);
         var submission = Assert.Single(result!.Submissions);
         Assert.Equal("101", submission.UserId);
         Assert.True(submission.NeedsGrading);

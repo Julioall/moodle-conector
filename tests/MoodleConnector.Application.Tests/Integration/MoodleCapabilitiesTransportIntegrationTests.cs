@@ -28,7 +28,7 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
             Assert.DoesNotContain("wstoken", context.Request.QueryString.Value, StringComparison.OrdinalIgnoreCase);
 
             var response = form["wstoken"] == "token-goias"
-                ? "{\"sitename\":\"GoiÃ¡s\",\"release\":\"4.5\",\"userid\":7,\"functions\":[{\"name\":\"core_course_get_courses_by_field\"},{\"name\":\"core_course_get_enrolled_courses_by_timeline_classification\"},{\"name\":\"mod_assign_get_assignments\"}]}"
+                ? "{\"sitename\":\"Goiás\",\"release\":\"4.5\",\"userid\":7,\"functions\":[{\"name\":\"core_course_get_courses_by_field\"},{\"name\":\"core_course_get_enrolled_courses_by_timeline_classification\"},{\"name\":\"mod_assign_get_assignments\"}]}"
                 : "{\"sitename\":\"Nacional\",\"release\":\"5.1.2\",\"userid\":8,\"functions\":[{\"name\":\"core_enrol_get_users_courses\"},{\"name\":\"mod_assign_get_assignments\"},{\"name\":\"mod_assign_get_submissions\"}]}";
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(response, Encoding.UTF8);

@@ -19,11 +19,9 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<PermissionGroupMembershipEntity> PermissionGroupMemberships => Set<PermissionGroupMembershipEntity>();
     public DbSet<UserPermissionOverrideEntity> UserPermissionOverrides => Set<UserPermissionOverrideEntity>();
     public DbSet<TaskEntity> Tasks => Set<TaskEntity>();
+    public DbSet<ReportJobEntity> ReportJobs => Set<ReportJobEntity>();
     public DbSet<CalendarEventEntity> CalendarEvents => Set<CalendarEventEntity>();
     public DbSet<FollowupEntity> Followups => Set<FollowupEntity>();
-    public DbSet<AutomationDefinitionEntity> AutomationDefinitions => Set<AutomationDefinitionEntity>();
-    public DbSet<AutomationRunEntity> AutomationRuns => Set<AutomationRunEntity>();
-    public DbSet<AutomationActionEntity> AutomationActions => Set<AutomationActionEntity>();
     public DbSet<PortalEvidenceEntity> PortalEvidence => Set<PortalEvidenceEntity>();
     public DbSet<UserIgnoredCourseEntity> UserIgnoredCourses => Set<UserIgnoredCourseEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
@@ -153,6 +151,29 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         appTask.Property(x => x.UpdatedAt).IsRequired();
         appTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
 
+        var reportJob = modelBuilder.Entity<ReportJobEntity>();
+        reportJob.ToTable("report_jobs");
+        reportJob.HasKey(x => x.Id);
+        reportJob.Property(x => x.ClientId).HasMaxLength(200).IsRequired();
+        reportJob.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        reportJob.Property(x => x.ReportType).HasMaxLength(64).IsRequired();
+        reportJob.Property(x => x.ScopeType).HasMaxLength(32).IsRequired();
+        reportJob.Property(x => x.CategoryPath).HasMaxLength(500);
+        reportJob.Property(x => x.CourseId).HasMaxLength(64);
+        reportJob.Property(x => x.CourseIdsJson);
+        reportJob.Property(x => x.CourseNamesJson);
+        reportJob.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        reportJob.Property(x => x.FileName).HasMaxLength(240);
+        reportJob.Property(x => x.ContentType).HasMaxLength(120);
+        reportJob.Property(x => x.FileSizeBytes).IsRequired();
+        reportJob.Property(x => x.ContentText);
+        reportJob.Property(x => x.ContentBase64);
+        reportJob.Property(x => x.ErrorMessage).HasMaxLength(4000);
+        reportJob.Property(x => x.RequestedAt).IsRequired();
+        reportJob.Property(x => x.UpdatedAt).IsRequired();
+        reportJob.HasIndex(x => new { x.OwnerId, x.UpdatedAt });
+        reportJob.HasIndex(x => new { x.Status, x.RequestedAt });
+
         var calendarEvent = modelBuilder.Entity<CalendarEventEntity>();
         calendarEvent.ToTable("app_calendar_events");
         calendarEvent.HasKey(x => x.Id);
@@ -178,50 +199,6 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         followup.Property(x => x.OccurredAt).IsRequired();
         followup.Property(x => x.CreatedAt).IsRequired();
         followup.HasIndex(x => new { x.OwnerId, x.OccurredAt });
-
-        var automation = modelBuilder.Entity<AutomationDefinitionEntity>();
-        automation.ToTable("automation_definitions");
-        automation.HasKey(x => x.Id);
-        automation.Property(x => x.ConnectionAlias).HasMaxLength(64);
-        automation.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
-        automation.Property(x => x.Name).HasMaxLength(200).IsRequired();
-        automation.Property(x => x.Description).HasMaxLength(1000);
-        automation.Property(x => x.ScheduleType).HasMaxLength(32).IsRequired();
-        automation.Property(x => x.ConditionType).HasMaxLength(64).IsRequired();
-        automation.Property(x => x.ActionType).HasMaxLength(64).IsRequired();
-        automation.Property(x => x.ConfigJson).HasColumnType("jsonb").IsRequired();
-        automation.Property(x => x.IsEnabled).IsRequired();
-        automation.Property(x => x.CreatedAt).IsRequired();
-        automation.Property(x => x.UpdatedAt).IsRequired();
-        automation.HasIndex(x => new { x.OwnerId, x.IsEnabled, x.NextRunAt });
-
-        var automationRun = modelBuilder.Entity<AutomationRunEntity>();
-        automationRun.ToTable("automation_runs");
-        automationRun.HasKey(x => x.Id);
-        automationRun.Property(x => x.IdempotencyKey).HasMaxLength(180).IsRequired();
-        automationRun.Property(x => x.Trigger).HasMaxLength(32).IsRequired();
-        automationRun.Property(x => x.Status).HasMaxLength(32).IsRequired();
-        automationRun.Property(x => x.SummaryJson).HasColumnType("jsonb");
-        automationRun.Property(x => x.ErrorCode).HasMaxLength(120);
-        automationRun.Property(x => x.ErrorMessage).HasMaxLength(4000);
-        automationRun.Property(x => x.CreatedAt).IsRequired();
-        automationRun.Property(x => x.UpdatedAt).IsRequired();
-        automationRun.HasIndex(x => x.IdempotencyKey).IsUnique();
-        automationRun.HasIndex(x => new { x.AutomationId, x.CreatedAt });
-
-        var automationAction = modelBuilder.Entity<AutomationActionEntity>();
-        automationAction.ToTable("automation_actions");
-        automationAction.HasKey(x => x.Id);
-        automationAction.Property(x => x.IdempotencyKey).HasMaxLength(220).IsRequired();
-        automationAction.Property(x => x.ActionType).HasMaxLength(64).IsRequired();
-        automationAction.Property(x => x.TargetRef).HasMaxLength(240).IsRequired();
-        automationAction.Property(x => x.Status).HasMaxLength(32).IsRequired();
-        automationAction.Property(x => x.ResultJson).HasColumnType("jsonb");
-        automationAction.Property(x => x.ErrorMessage).HasMaxLength(4000);
-        automationAction.Property(x => x.CreatedAt).IsRequired();
-        automationAction.Property(x => x.UpdatedAt).IsRequired();
-        automationAction.HasIndex(x => x.IdempotencyKey).IsUnique();
-        automationAction.HasIndex(x => new { x.RunId, x.Status });
 
         var evidence = modelBuilder.Entity<PortalEvidenceEntity>();
         evidence.ToTable("portal_evidence");

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Reports"
+  short_description: "Generate bounded Moodle performance and monitoring reports"
+  default_prompt: "Use $moodle-reports to generate a Moodle course, grades, performance, monitoring, council, or post-execution report with explicit coverage limits; export grades to Excel when requested."

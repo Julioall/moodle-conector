@@ -27,7 +27,7 @@ internal sealed record IndividualGradePayload(
 // â”€â”€ Prepare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// <summary>
-/// PrÃ©via do lanÃ§amento de nota individual.
+/// Prévia do lançamento de nota individual.
 /// </summary>
 public sealed record IndividualGradePreview(
     string AssignmentId,
@@ -48,14 +48,14 @@ public sealed record IndividualGradePrepareResult(
     IndividualGradePreview Preview);
 
 /// <summary>
-/// Prepara o lanÃ§amento de nota individual para um estudante em uma SA.
+/// Prepara o lançamento de nota individual para um estudante em uma SA.
 ///
 /// Risco: CriticalHumanConfirmedWrite.
 /// Feature flag: AssignmentGradeWriteEnabled.
 /// Escopo: moodle.write.assignments.grade.
 ///
-/// Busca a nota atual antes de exibir a prÃ©via para que o tutor possa comparar.
-/// A confirmaÃ§Ã£o exige texto exato incluindo a nota numÃ©rica.
+/// Busca a nota atual antes de exibir a prévia para que o tutor possa comparar.
+/// A confirmação exige texto exato incluindo a nota numérica.
 /// </summary>
 public sealed record PrepareIndividualGradeCommand(
     string CourseId,
@@ -86,20 +86,20 @@ public sealed class PrepareIndividualGradeCommandHandler(
         // 1. Feature flag
         if (!features.Value.AssignmentGradeWriteEnabled)
             throw new InvalidOperationException(
-                "O lanÃ§amento de notas individuais estÃ¡ desabilitado. " +
-                "Habilite AssignmentGradeWriteEnabled na configuraÃ§Ã£o.");
+                "O lançamento de notas individuais está desabilitado. " +
+                "Habilite AssignmentGradeWriteEnabled na configuração.");
 
         // 2. Validate inputs
         if (string.IsNullOrWhiteSpace(request.CourseId))
-            throw new ArgumentException("courseId Ã© obrigatÃ³rio.");
+            throw new ArgumentException("courseId é obrigatório.");
         if (string.IsNullOrWhiteSpace(request.AssignmentId))
-            throw new ArgumentException("assignmentId Ã© obrigatÃ³rio.");
+            throw new ArgumentException("assignmentId é obrigatório.");
         if (string.IsNullOrWhiteSpace(request.StudentId))
-            throw new ArgumentException("studentId Ã© obrigatÃ³rio.");
+            throw new ArgumentException("studentId é obrigatório.");
         if (request.ProposedGrade < 0)
-            throw new ArgumentOutOfRangeException(nameof(request.ProposedGrade), "A nota nÃ£o pode ser negativa.");
+            throw new ArgumentOutOfRangeException(nameof(request.ProposedGrade), "A nota não pode ser negativa.");
         if (string.IsNullOrWhiteSpace(request.JustificationText))
-            throw new ArgumentException("Uma justificativa Ã© obrigatÃ³ria para o lanÃ§amento de nota.");
+            throw new ArgumentException("Uma justificativa é obrigatória para o lançamento de nota.");
 
         var effectiveAssignmentId = request.AssignmentId.Trim();
         if (contentsGateway is not null)
@@ -165,16 +165,16 @@ public sealed class PrepareIndividualGradeCommandHandler(
         // 6. Risks
         var risks = new List<string>
         {
-            $"Esta aÃ§Ã£o lanÃ§arÃ¡ a nota {gradeLabel} para {studentName}.",
-            "Nota lanÃ§ada via API Moodle Ã© imediata e visÃ­vel ao estudante.",
-            "O sistema registrarÃ¡ esta operaÃ§Ã£o em auditoria.",
-            $"Escopo obrigatÃ³rio: {RequiredScope}.",
-            "Esta aÃ§Ã£o requer feature flag AssignmentGradeWriteEnabled ativa."
+            $"Esta ação lançará a nota {gradeLabel} para {studentName}.",
+            "Nota lançada via API Moodle é imediata e visível ao estudante.",
+            "O sistema registrará esta operação em auditoria.",
+            $"Escopo obrigatório: {RequiredScope}.",
+            "Esta ação requer feature flag AssignmentGradeWriteEnabled ativa."
         };
         if (existing?.HasGrade == true)
-            risks.Add($"ATENÃ‡ÃƒO: nota atual Ã© {existing.Grade:F2}. SerÃ¡ substituÃ­da pela nova nota {gradeLabel}.");
+            risks.Add($"ATENÇÃO: nota atual é {existing.Grade:F2}. Será substituída pela nova nota {gradeLabel}.");
         if (!string.IsNullOrWhiteSpace(request.FeedbackText))
-            risks.Add("O feedback informado serÃ¡ publicado junto com a nota.");
+            risks.Add("O feedback informado será publicado junto com a nota.");
 
         var expiresAt = DateTimeOffset.UtcNow.Add(PendingActionExpiration);
 
@@ -233,8 +233,8 @@ public sealed record IndividualGradeSendResult(
     IReadOnlyList<string> Warnings);
 
 /// <summary>
-/// Confirma o lanÃ§amento de nota individual previamente preparado.
-/// Segue o mesmo padrÃ£o de GradingLaunchCommands: GetByIdAsync â†’ ConfirmAsync â†’ Deserialize â†’ SaveGrade â†’ Audit.
+/// Confirma o lançamento de nota individual previamente preparado.
+/// Segue o mesmo padrão de GradingLaunchCommands: GetByIdAsync â†’ ConfirmAsync â†’ Deserialize â†’ SaveGrade â†’ Audit.
 /// </summary>
 public sealed record ConfirmIndividualGradeCommand(
     Guid PendingActionId,
@@ -259,11 +259,11 @@ public sealed class ConfirmIndividualGradeCommandHandler(
         // 1. Feature flag re-check at execution time
         if (!features.Value.AssignmentGradeWriteEnabled)
             throw new InvalidOperationException(
-                "O lanÃ§amento de notas individuais estÃ¡ desabilitado (AssignmentGradeWriteEnabled=false).");
+                "O lançamento de notas individuais está desabilitado (AssignmentGradeWriteEnabled=false).");
 
         // 2. Load pending action (same pattern as GradingLaunchCommands)
         var action = await pendingActions.GetByIdAsync(request.PendingActionId, cancellationToken)
-            ?? throw new InvalidOperationException("AÃ§Ã£o pendente nÃ£o encontrada ou expirada.");
+            ?? throw new InvalidOperationException("Ação pendente não encontrada ou expirada.");
 
         // 3. Confirm (throws InvalidOperationException on any validation failure)
         var confirmation = await confirmations.ConfirmAsync(
@@ -274,7 +274,7 @@ public sealed class ConfirmIndividualGradeCommandHandler(
 
         // 4. Deserialize payload
         var payload = JsonSerializer.Deserialize<IndividualGradePayload>(action.PayloadJson, JsonOptions)
-            ?? throw new InvalidOperationException("Payload de nota individual invÃ¡lido.");
+            ?? throw new InvalidOperationException("Payload de nota individual inválido.");
 
         if (confirmation.Status == "already_confirmed")
         {
@@ -285,7 +285,7 @@ public sealed class ConfirmIndividualGradeCommandHandler(
                 payload.StudentId,
                 payload.ProposedGrade,
                 confirmation.AuditId,
-                ["Esta aÃ§Ã£o jÃ¡ foi confirmada e nÃ£o serÃ¡ executada novamente."]);
+                ["Esta ação já foi confirmada e não será executada novamente."]);
         }
 
         var userExternalId = action.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture)
@@ -334,7 +334,7 @@ public sealed class ConfirmIndividualGradeCommandHandler(
 
         var warnings = new List<string>();
         if (!writeResult.Success)
-            warnings.Add($"Nota lanÃ§ada com status parcial (MoodleStatus={writeResult.MoodleStatus}). Verificar no Moodle.");
+            warnings.Add($"Nota lançada com status parcial (MoodleStatus={writeResult.MoodleStatus}). Verificar no Moodle.");
 
         return new IndividualGradeSendResult(
             Status: writeResult.Success ? "launched" : "partial",

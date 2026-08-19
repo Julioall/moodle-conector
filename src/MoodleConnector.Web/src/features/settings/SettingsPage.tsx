@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { KeyRound, LogOut, MailPlus, Pencil, Plus, Save, ShieldCheck, UserRound, UsersRound } from 'lucide-react';
+import { KeyRound, LogOut, MailPlus, Pencil, Plug, Plus, Save, ShieldCheck, UserRound, UsersRound } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 
 import { Badge } from '../../components/ui/badge';
@@ -13,13 +13,15 @@ import { accessGateway } from './access-gateway';
 import { MessagePreferencesCard } from './MessagePreferencesCard';
 import { ThemeCard } from './ThemeCard';
 import { cn } from '../../lib/utils';
+import { APP_PERMISSIONS } from '../../lib/access-control';
+import { ConnectionsPage } from '../connections/ConnectionsPage';
 
 const gateway = accessGateway();
 
 const permissionSectionDefinitions = [
   { title: 'Portal', permissions: ['dashboard.view', 'courses.view', 'schools.view', 'settings.view', 'admin.view', 'connections.manage'] },
   { title: 'Alunos e acompanhamento', permissions: ['students.view', 'students.followup.write', 'reports.view', 'messages.prepare'] },
-  { title: 'Operação acadêmica', permissions: ['tasks.manage', 'agenda.manage', 'grading.view', 'grading.manage', 'automations.view', 'automations.manage'] },
+  { title: 'Operação acadêmica', permissions: ['tasks.manage', 'agenda.manage', 'grading.view', 'grading.manage'] },
 ] as const;
 
 const permissionLabels: Record<string, string> = {
@@ -37,8 +39,6 @@ const permissionLabels: Record<string, string> = {
   'agenda.manage': 'Agenda',
   'grading.view': 'Consultar correções',
   'grading.manage': 'Gerenciar correções',
-  'automations.view': 'Consultar automações',
-  'automations.manage': 'Gerenciar automações',
 };
 
 function permissionLabel(permission: string) {
@@ -47,9 +47,10 @@ function permissionLabel(permission: string) {
 
 export function SettingsPage() {
   const client = useQueryClient();
-  const { user, logout, isAdmin } = useSession();
+  const { user, logout, isAdmin, can } = useSession();
   const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState(searchParams.get('tab') === 'acesso' ? 'acesso' : 'geral');
+  const requestedTab = searchParams.get('tab');
+  const [activeTab, setActiveTab] = useState(requestedTab === 'acesso' || requestedTab === 'mensagens' || requestedTab === 'conexoes' ? requestedTab : 'geral');
   const [activeAccessTab, setActiveAccessTab] = useState(searchParams.get('section') === 'grupos' ? 'grupos' : 'equipes');
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -87,6 +88,7 @@ export function SettingsPage() {
   const remainingPermissions = (catalog.data?.permissions ?? []).filter((permission) => !knownPermissions.has(permission) && !permission.startsWith('tool.'));
   if (remainingPermissions.length > 0) permissionSections.push({ title: 'Outras permissões', permissions: remainingPermissions });
   const initials = user?.name?.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'CL';
+  const canManageConnections = can(APP_PERMISSIONS.SERVICES_VIEW);
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="settings-title">
@@ -96,6 +98,7 @@ export function SettingsPage() {
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto">
           <TabsTrigger value="geral" className="gap-2"><UserRound className="h-4 w-4" />Geral</TabsTrigger>
           <TabsTrigger value="mensagens" className="gap-2"><MailPlus className="h-4 w-4" />Mensagens</TabsTrigger>
+          {canManageConnections && <TabsTrigger value="conexoes" className="gap-2"><Plug className="h-4 w-4" />Conexões Moodle</TabsTrigger>}
           <TabsTrigger value="acesso" className="gap-2"><ShieldCheck className="h-4 w-4" />Acesso</TabsTrigger>
         </TabsList>
 
@@ -109,6 +112,8 @@ export function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="mensagens" className="mt-0 space-y-6"><MessagePreferencesCard /></TabsContent>
+
+        {canManageConnections && <TabsContent value="conexoes" className="mt-0"><ConnectionsPage embedded /></TabsContent>}
 
         <TabsContent value="acesso" className="mt-0 space-y-5">
           <Tabs value={activeAccessTab} onValueChange={setActiveAccessTab} className="space-y-5">

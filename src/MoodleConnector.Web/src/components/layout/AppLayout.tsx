@@ -11,10 +11,10 @@ export function AppLayout() {
       <SidebarProvider>
         <div className="min-h-screen flex w-full bg-background">
           <AppSidebar />
-          <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex min-h-0 flex-1 flex-col min-w-0">
             <TopBar />
-            <main className="flex-1 overflow-auto">
-              <div className="container max-w-7xl px-4 py-6 md:px-6 lg:px-8">
+            <main className="min-h-0 flex flex-1 flex-col overflow-auto">
+              <div className="container min-h-0 min-w-0 flex flex-1 flex-col max-w-7xl px-4 py-6 md:px-6 lg:px-8">
                 <Outlet />
               </div>
             </main>

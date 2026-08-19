@@ -96,7 +96,7 @@ export const createPendingGateway = (client = createAppClient()) => ({
 
 export const pendingGateway = createPendingGateway();
 
-export type Evidence = { id: string; connectionRef?: string; courseId: string; studentId?: string; activityId?: string; kind: string; title: string; details: string; source: string; automationRunId?: string; observedAt: string; createdAt: string };
+export type Evidence = { id: string; connectionRef?: string; courseId: string; studentId?: string; activityId?: string; kind: string; title: string; details: string; source: string; observedAt: string; createdAt: string };
 
 export const createEvidenceGateway = (client = createAppClient()) => ({
   list: (connectionRef: string, courseId: string) => client.get<{ data: Evidence[]; meta: { page: number; pageSize: number; returned: number; total?: number; hasMore: boolean; generatedAt: string } }>(`/api/evidence?${new URLSearchParams({ connectionRef, courseId, page: '1', pageSize: '30' })}`),

@@ -17,6 +17,7 @@ public sealed record AppDashboardSummaryDto(
     public int? PendingCorrectionAssignments { get; init; }
     public int? NewAtRiskThisWeek { get; init; }
     public int? ActiveStudents { get; init; }
+    public int? NeverAccessedStudents { get; init; }
 }
 
 public sealed record AppDashboardPriorityDto(
@@ -48,6 +49,59 @@ public sealed record AppDashboardDto(
     public DateTimeOffset? WeekEndsAt { get; init; }
 }
 
+public sealed record AppDashboardSummaryMetricDto(
+    AppDashboardSummaryDto Summary,
+    IReadOnlyList<string> Warnings);
+
+public sealed record AppDashboardPendingMetricDto(
+    AppDashboardSummaryDto Summary,
+    IReadOnlyList<AppDashboardPriorityDto> Priorities,
+    IReadOnlyList<AppDashboardPriorityDto> ActivitiesToReview,
+    IReadOnlyList<AppDashboardCoursePendingSummaryDto> CourseSummaries,
+    IReadOnlyList<AppDashboardTodayItemDto> TodayItems,
+    IReadOnlyList<string> Warnings)
+{
+    public bool IsRefreshing { get; init; }
+    public int CoursesInScope { get; init; }
+    public int CoursesAnalyzed { get; init; }
+    public DateTimeOffset? SnapshotGeneratedAt { get; init; }
+}
+
+public sealed record AppDashboardCoursePendingSummaryDto(
+    string CourseId,
+    string CourseName,
+    int PendingCorrectionActivities,
+    int PendingCorrectionSubmissions,
+    int PendingSubmissionActivities,
+    int PendingSubmissions,
+    int StudentsAwaitingCorrection,
+    int StudentsWithPendingSubmissions,
+    int OverdueSubmissions,
+    bool IsTruncated,
+    string? Warning);
+
+public sealed record AppDashboardTodayItemDto(
+    string Key,
+    string Kind,
+    string Title,
+    string? Detail,
+    DateTimeOffset? StartsAt);
+
+public sealed record AppDashboardAccessMetricDto(
+    AppDashboardSummaryDto Summary,
+    IReadOnlyList<AppDashboardAccessSegmentDto> Segments,
+    IReadOnlyList<string> Warnings);
+
+public sealed record AppDashboardAccessSegmentDto(
+    string Key,
+    string Label,
+    int Students,
+    string Tone);
+
+public sealed record AppDashboardCoursesMetricDto(
+    IReadOnlyList<AppCourseDto> Courses,
+    IReadOnlyList<string> Warnings);
+
 public static class AppDashboardWeekFilter
 {
     public const string Current = "current";
@@ -59,10 +113,13 @@ public static class AppDashboardWeekFilter
 
 public static class AppDashboardBudget
 {
-    public const int MaxCoursesRead = 20;
+    public static readonly TimeSpan MetricCacheDuration = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan CourseScopeCacheDuration = TimeSpan.FromMinutes(5);
+    public const int MaxCoursesRead = 50;
     public const int MaxParticipantsRead = 100;
     public const int MaxAssignmentsRead = 20;
     public const int MaxPriorities = 8;
+    public const int MaxCorrectionItems = 100;
     public const int MaxActivities = 8;
 }
 

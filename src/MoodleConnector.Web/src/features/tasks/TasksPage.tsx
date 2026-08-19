@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Edit2,
+  Flag,
   LayoutDashboard,
   List,
   ListFilter,
@@ -39,6 +40,7 @@ import { tasksGateway, type Task, type TaskInput, type TaskPriority, type TaskSt
 type ViewMode = 'list' | 'kanban';
 type StatusFilter = 'all' | TaskStatus;
 type DateWindow = 'all' | 'today' | 'week' | 'overdue';
+type ColumnPages = Record<TaskStatus, number>;
 
 const priorityLabels: Record<TaskPriority, string> = {
   low: 'Baixa',
@@ -73,6 +75,12 @@ function formatDueDate(value?: string) {
   return Number.isNaN(date.getTime()) ? 'Sem prazo' : date.toLocaleDateString('pt-BR');
 }
 
+function formatStartDate(value?: string) {
+  if (!value) return 'Sem início';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Sem início' : date.toLocaleDateString('pt-BR');
+}
+
 function isOverdue(task: Task) {
   if (!task.dueAt || task.status === 'done') return false;
   const due = new Date(task.dueAt);
@@ -94,18 +102,28 @@ function matchesDateWindow(value: string | undefined, window: DateWindow) {
   return due >= start && due < new Date(start.getTime() + 7 * 86_400_000);
 }
 
+function mutationErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function TaskCard({
   task,
   onEdit,
   onDelete,
   onStatusChange,
   onOpen,
+  selectionMode,
+  selected,
+  onSelect,
 }: {
   task: Task;
   onEdit: (task: Task) => void;
   onDelete: (id: string) => void;
   onStatusChange: (id: string, status: TaskStatus) => void;
   onOpen: (task: Task) => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onSelect?: (id: string, selected: boolean) => void;
 }) {
   const stopPropagation = (event: MouseEvent) => event.stopPropagation();
 
@@ -114,8 +132,8 @@ function TaskCard({
       <div className="flex items-start gap-3">
           <input
             type="checkbox"
-            checked={task.status === 'done'}
-            onChange={(event) => onStatusChange(task.id, event.target.checked ? 'done' : 'todo')}
+            checked={selectionMode ? selected : task.status === 'done'}
+            onChange={(event) => selectionMode ? onSelect?.(task.id, event.target.checked) : onStatusChange(task.id, event.target.checked ? 'done' : 'todo')}
             onClick={stopPropagation}
             className="mt-0.5 h-4 w-4 cursor-pointer rounded accent-primary"
             aria-label={task.status === 'done' ? 'Marcar como pendente' : 'Marcar como concluída'}
@@ -123,11 +141,11 @@ function TaskCard({
           <div className="min-w-0 flex-1">
             <p className={cn('line-clamp-2 text-sm font-medium leading-snug', task.status === 'done' && 'text-muted-foreground line-through')}>{task.title}</p>
             {task.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.description}</p>}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium', priorityStyles[task.priority])}>{priorityLabels[task.priority]}</span>
+              <span className="inline-flex items-center gap-1 text-muted-foreground"><Calendar className="h-3 w-3" />Início: {formatStartDate(task.startAt)}</span>
               <span className={cn('inline-flex items-center gap-1', isOverdue(task) ? 'text-destructive' : 'text-muted-foreground')}>
-                <Calendar className="h-3.5 w-3.5" />
-                {formatDueDate(task.dueAt)}
+                <Calendar className="h-3 w-3" />Prazo: {formatDueDate(task.dueAt)}
                 {isOverdue(task) && ' · Atrasada'}
               </span>
             </div>
@@ -150,20 +168,25 @@ export function TasksPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('kanban');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | TaskPriority>('all');
-  const [dateWindow, setDateWindow] = useState<DateWindow>('today');
+  const [dateWindow, setDateWindow] = useState<DateWindow>('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [columnPages, setColumnPages] = useState<ColumnPages>({ todo: 1, in_progress: 1, done: 1 });
   const [formOpen, setFormOpen] = useState(false);
   const [detailTask, setDetailTask] = useState<Task | null>(null);
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const [dropTargetStatus, setDropTargetStatus] = useState<TaskStatus | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set());
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TaskPriority>('medium');
+  const [startAt, setStartAt] = useState('');
   const [dueAt, setDueAt] = useState('');
   const [defaultStatus, setDefaultStatus] = useState<TaskStatus>('todo');
+  const [taskActionError, setTaskActionError] = useState<string | null>(null);
 
   const query = useQuery({
     queryKey: ['app', 'tasks', priorityFilter],
@@ -180,23 +203,41 @@ export function TasksPage() {
     [baseFilteredTasks, statusFilter, viewMode],
   );
   const tasksByStatus = useMemo(() => Object.fromEntries(columns.map((column) => [column.status, filteredTasks.filter((task) => task.status === column.status)])) as Record<TaskStatus, Task[]>, [filteredTasks]);
-  const pageSize = 24;
+  const pageSize = 20;
   const total = filteredTasks.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const paginatedTasks = useMemo(() => filteredTasks.slice((page - 1) * pageSize, page * pageSize), [filteredTasks, page]);
-  const paginatedTasksByStatus = useMemo(() => Object.fromEntries(columns.map((column) => [column.status, paginatedTasks.filter((task) => task.status === column.status)])) as Record<TaskStatus, Task[]>, [paginatedTasks]);
 
   const create = useMutation({
     mutationFn: (input: TaskInput) => tasksGateway.create(input),
-    onSuccess: () => { setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível criar a tarefa.')),
   });
   const update = useMutation({
     mutationFn: ({ id, input }: { id: string; input: TaskInput }) => tasksGateway.update(id, input),
-    onSuccess: () => { setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível atualizar a tarefa.')),
+  });
+  const bulkUpdate = useMutation({
+    mutationFn: async ({ ids, status }: { ids: string[]; status: TaskStatus }) => {
+      const results = [];
+      for (let index = 0; index < ids.length; index += 4) {
+        results.push(...await Promise.all(ids.slice(index, index + 4).map((id) => tasksGateway.update(id, { status }))));
+      }
+      return results;
+    },
+    onSuccess: () => { setTaskActionError(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível atualizar os itens da página.')),
   });
   const remove = useMutation({
     mutationFn: tasksGateway.remove,
-    onSuccess: () => { setDeleteId(null); setDetailTask(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setDeleteIds([]); setDetailTask(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível remover a tarefa.')),
+  });
+  const removeMany = useMutation({
+    mutationFn: tasksGateway.removeMany,
+    onSuccess: () => { setTaskActionError(null); setDeleteIds([]); setSelectedTaskIds(new Set()); setSelectionMode(false); setDetailTask(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Nao foi possivel remover as tarefas selecionadas.')),
   });
 
   function resetForm() {
@@ -204,6 +245,7 @@ export function TasksPage() {
     setTitle('');
     setDescription('');
     setPriority('medium');
+    setStartAt('');
     setDueAt('');
     setDefaultStatus('todo');
   }
@@ -220,6 +262,7 @@ export function TasksPage() {
     setTitle(task.title);
     setDescription(task.description ?? '');
     setPriority(task.priority);
+    setStartAt(dateInputValue(task.startAt));
     setDueAt(dateInputValue(task.dueAt));
     setDefaultStatus(task.status);
     setFormOpen(true);
@@ -228,6 +271,27 @@ export function TasksPage() {
   function changeFilter<T>(setter: (value: T) => void, value: T) {
     setter(value);
     setPage(1);
+    setColumnPages({ todo: 1, in_progress: 1, done: 1 });
+  }
+
+  function markColumnPage(tasksOnPage: Task[], column: TaskStatus) {
+    if (tasksOnPage.length === 0) return;
+    const allDone = tasksOnPage.every((task) => task.status === 'done');
+    bulkUpdate.mutate({ ids: tasksOnPage.map((task) => task.id), status: allDone || column === 'done' ? 'todo' : 'done' });
+  }
+
+  function toggleTaskSelection(id: string, selected: boolean) {
+    setSelectedTaskIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function clearTaskSelection() {
+    setSelectedTaskIds(new Set());
+    setSelectionMode(false);
   }
 
   function handleDragStart(event: DragEvent<HTMLDivElement>, task: Task) {
@@ -253,6 +317,7 @@ export function TasksPage() {
       description: description.trim() || undefined,
       priority,
       status: defaultStatus,
+      startAt: startAt ? new Date(`${startAt}T12:00:00`).toISOString() : undefined,
       dueAt: dueAt ? new Date(`${dueAt}T12:00:00`).toISOString() : undefined,
     };
     if (editingTask) update.mutate({ id: editingTask.id, input });
@@ -263,14 +328,32 @@ export function TasksPage() {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
+  useEffect(() => {
+    setColumnPages((current) => {
+      const next = { ...current };
+      let changed = false;
+      columns.forEach((column) => {
+        const totalColumnPages = Math.max(1, Math.ceil(tasksByStatus[column.status].length / pageSize));
+        const nextPage = Math.min(current[column.status], totalColumnPages);
+        if (nextPage !== current[column.status]) { next[column.status] = nextPage; changed = true; }
+      });
+      return changed ? next : current;
+    });
+  }, [tasksByStatus]);
+
   return (
-    <main className="space-y-6 animate-fade-in" aria-labelledby="tasks-title">
+    <main className="flex min-h-0 flex-1 flex-col gap-6 animate-fade-in" aria-labelledby="tasks-title">
       <header className="flex items-start justify-between gap-4">
         <div>
           <h1 id="tasks-title" className="flex items-center gap-2 text-2xl font-bold tracking-tight"><CheckSquare className="h-6 w-6 text-primary" />Tarefas</h1>
           <p className="text-muted-foreground">Organize e acompanhe suas tarefas operacionais.</p>
         </div>
         <div className="flex items-center gap-2">
+          {selectionMode ? <>
+            <span className="text-xs text-muted-foreground">{selectedTaskIds.size} selecionada{selectedTaskIds.size === 1 ? '' : 's'}</span>
+            <Button type="button" variant="outline" size="sm" onClick={clearTaskSelection}>Cancelar selecao</Button>
+            <Button type="button" variant="destructive" size="sm" disabled={selectedTaskIds.size === 0 || removeMany.isPending} onClick={() => setDeleteIds(Array.from(selectedTaskIds))}><Trash2 className="mr-1.5 h-4 w-4" />Remover selecionadas</Button>
+          </> : <Button type="button" variant="outline" size="sm" onClick={() => setSelectionMode(true)}>Selecionar</Button>}
           <div className="flex overflow-hidden rounded-md border">
             <Button type="button" variant={viewMode === 'kanban' ? 'default' : 'ghost'} size="sm" className="h-9 rounded-none px-3 text-xs" onClick={() => setViewMode('kanban')}><LayoutDashboard className="h-3.5 w-3.5" />Kanban</Button>
             <Button type="button" variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" className="h-9 rounded-none px-3 text-xs" onClick={() => setViewMode('list')}><List className="h-3.5 w-3.5" />Lista</Button>
@@ -290,34 +373,39 @@ export function TasksPage() {
         ) : <span className="text-xs text-muted-foreground">{filteredTasks.length} tarefa{filteredTasks.length === 1 ? '' : 's'}</span>}
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative w-full sm:w-56"><ListFilter className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => changeFilter(setSearch, event.target.value)} placeholder="Buscar tarefa…" className="pl-9" /></div>
-          <Select value={priorityFilter} onValueChange={(value) => changeFilter(setPriorityFilter, value as 'all' | TaskPriority)}><SelectTrigger className="h-9 w-36 text-xs"><SelectValue placeholder="Prioridade" /></SelectTrigger><SelectContent><SelectItem value="all">Todas as prioridades</SelectItem><SelectItem value="low">Baixa</SelectItem><SelectItem value="medium">Média</SelectItem><SelectItem value="high">Alta</SelectItem><SelectItem value="urgent">Urgente</SelectItem></SelectContent></Select>
+          <Select value={priorityFilter} onValueChange={(value) => changeFilter(setPriorityFilter, value as 'all' | TaskPriority)}><SelectTrigger className="h-9 w-36 text-xs"><Flag className="mr-1.5 h-3.5 w-3.5" /><SelectValue placeholder="Prioridade" /></SelectTrigger><SelectContent><SelectItem value="all">Todas as prioridades</SelectItem><SelectItem value="low">Baixa</SelectItem><SelectItem value="medium">Média</SelectItem><SelectItem value="high">Alta</SelectItem><SelectItem value="urgent">Urgente</SelectItem></SelectContent></Select>
           <Select value={dateWindow} onValueChange={(value) => changeFilter(setDateWindow, value as DateWindow)}><SelectTrigger className="h-9 w-36 text-xs"><CalendarRange className="mr-1.5 h-3.5 w-3.5" /><SelectValue placeholder="Período" /></SelectTrigger><SelectContent><SelectItem value="today">Hoje</SelectItem><SelectItem value="week">Próximos 7 dias</SelectItem><SelectItem value="overdue">Atrasadas</SelectItem><SelectItem value="all">Todos os prazos</SelectItem></SelectContent></Select>
         </div>
       </div>
 
       {query.isPending && <Card><CardContent className="flex items-center justify-center p-12 text-sm text-muted-foreground">Carregando tarefas…</CardContent></Card>}
       {query.isError && <Card className="border-destructive/30"><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar as tarefas.</CardContent></Card>}
+      {taskActionError && <Card className="border-destructive/30"><CardContent className="p-4 text-sm text-destructive" role="alert">{taskActionError}</CardContent></Card>}
 
       {query.isSuccess && viewMode === 'kanban' && (
-          <section className="grid min-h-[400px] grid-cols-1 gap-4 md:grid-cols-3" aria-label="Quadro de tarefas">
-            {columns.map((column) => (
-            <div key={column.status} className={cn('flex min-h-[300px] flex-col rounded-lg border-2 transition-colors', column.border, dropTargetStatus === column.status && 'border-primary bg-primary/5')} onDragOver={(event) => { event.preventDefault(); setDropTargetStatus(column.status); }} onDrop={(event) => handleDrop(event, column.status)} onDragLeave={() => setDropTargetStatus(null)}>
-              <div className={`flex items-center justify-between rounded-t-md px-3 py-2 ${column.header}`}><span className="text-xs font-semibold uppercase tracking-wider">{column.label}</span><div className="flex items-center gap-1.5"><Badge variant="secondary" className="h-4 px-1.5 py-0 text-[10px]">{tasksByStatus[column.status].length}</Badge><Button type="button" size="icon" variant="ghost" className="h-5 w-5" onClick={(event) => { event.stopPropagation(); openCreate(column.status); }} title={`Nova tarefa em "${column.label}"`}><Plus className="h-3 w-3" /></Button></div></div>
-              <div className="flex-1 space-y-2 p-2">
-                {paginatedTasksByStatus[column.status].length === 0 ? <div className="flex h-24 items-center justify-center rounded border border-dashed text-xs text-muted-foreground">{dropTargetStatus === column.status && draggingTaskId ? 'Solte a tarefa aqui' : 'Nenhuma tarefa'}</div> : paginatedTasksByStatus[column.status].map((task) => <div key={task.id} draggable onDragStart={(event) => handleDragStart(event, task)} onDragEnd={() => { setDraggingTaskId(null); setDropTargetStatus(null); }} className={cn('cursor-grab active:cursor-grabbing', draggingTaskId === task.id && 'opacity-60')}><TaskCard task={task} onOpen={setDetailTask} onEdit={openEdit} onDelete={setDeleteId} onStatusChange={(id, status) => update.mutate({ id, input: { status } })} /></div>)}
-              </div>
-            </div>
-          ))}
+          <section className="grid min-h-[400px] flex-1 grid-cols-1 gap-4 md:grid-cols-3" aria-label="Quadro de tarefas">
+            {columns.map((column) => {
+              const columnTasks = tasksByStatus[column.status];
+              const columnTotalPages = Math.max(1, Math.ceil(columnTasks.length / pageSize));
+              const columnPage = Math.min(columnPages[column.status], columnTotalPages);
+              const columnPageTasks = columnTasks.slice((columnPage - 1) * pageSize, columnPage * pageSize);
+              const allPageTasksDone = columnPageTasks.length > 0 && columnPageTasks.every((task) => task.status === 'done');
+              return <div key={column.status} className={cn('flex min-h-[300px] flex-col rounded-lg border-2 transition-colors', column.border, dropTargetStatus === column.status && 'border-primary bg-primary/5')} onDragOver={(event) => { event.preventDefault(); setDropTargetStatus(column.status); }} onDrop={(event) => handleDrop(event, column.status)} onDragLeave={() => setDropTargetStatus(null)}>
+                <div className={`flex items-center justify-between rounded-t-md px-3 py-2 ${column.header}`}><div className="flex min-w-0 items-center gap-2"><span className="text-xs font-semibold uppercase tracking-wider">{column.label}</span><Badge variant="secondary" className="h-4 px-1.5 py-0 text-[10px]">{columnTasks.length}</Badge></div><Button type="button" size="icon" variant="ghost" className="h-5 w-5" onClick={(event) => { event.stopPropagation(); openCreate(column.status); }} title={`Nova tarefa em "${column.label}"`}><Plus className="h-3 w-3" /></Button></div>
+                <div className="flex-1 space-y-2 p-2">{columnPageTasks.length === 0 ? <div className="flex min-h-0 flex-1 items-center justify-center rounded border border-dashed text-xs text-muted-foreground">{dropTargetStatus === column.status && draggingTaskId ? 'Solte a tarefa aqui' : 'Nenhuma tarefa'}</div> : columnPageTasks.map((task) => <div key={task.id} draggable={!selectionMode} onDragStart={(event) => handleDragStart(event, task)} onDragEnd={() => { setDraggingTaskId(null); setDropTargetStatus(null); }} className={cn('cursor-grab active:cursor-grabbing', draggingTaskId === task.id && 'opacity-60')}><TaskCard task={task} onOpen={setDetailTask} onEdit={openEdit} onDelete={(id) => setDeleteIds([id])} onStatusChange={(id, status) => update.mutate({ id, input: { status } })} selectionMode={selectionMode} selected={selectedTaskIds.has(task.id)} onSelect={toggleTaskSelection} /></div>)}</div>
+                {columnTasks.length > 0 && <div className="flex flex-wrap items-center justify-between gap-2 border-t px-2 py-2 text-[11px] text-muted-foreground"><div className="flex items-center gap-3"><label className="flex items-center gap-1.5 font-medium" title="Marcar todos os itens desta página"><input type="checkbox" checked={allPageTasksDone} disabled={columnPageTasks.length === 0 || bulkUpdate.isPending} onChange={() => markColumnPage(columnPageTasks, column.status)} onClick={(event) => event.stopPropagation()} className="h-3.5 w-3.5 cursor-pointer rounded accent-primary" aria-label="Marcar itens da página" /><span>Marcar página</span></label><span>Página {columnPage} de {columnTotalPages}</span></div><div className="flex gap-1"><Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setColumnPages((current) => ({ ...current, [column.status]: Math.max(1, current[column.status] - 1) }))} disabled={columnPage <= 1}>Anterior</Button><Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => setColumnPages((current) => ({ ...current, [column.status]: Math.min(columnTotalPages, current[column.status] + 1) }))} disabled={columnPage >= columnTotalPages}>Próxima</Button></div></div>}
+              </div>;
+            })}
         </section>
       )}
 
-      {query.isSuccess && viewMode === 'list' && (filteredTasks.length === 0 ? <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center"><CheckSquare className="mb-3 h-10 w-10 text-muted-foreground/40" /><p className="text-sm font-medium text-muted-foreground">{dateWindow === 'today' && statusFilter === 'all' && priorityFilter === 'all' && !search.trim() ? 'Nenhuma tarefa prevista para hoje' : 'Nenhuma tarefa encontrada com esses filtros.'}</p><Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => openCreate()}><Plus className="mr-1.5 h-4 w-4" />Criar tarefa</Button></div> : <div className="space-y-2">{paginatedTasks.map((task) => <TaskCard key={task.id} task={task} onOpen={setDetailTask} onEdit={openEdit} onDelete={setDeleteId} onStatusChange={(id, status) => update.mutate({ id, input: { status } })} />)}</div>)}
-      {query.isSuccess && total > 0 && <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-muted-foreground">Página {page} de {totalPages} · {total} tarefas</p><div className="flex items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || query.isFetching}><ChevronLeft className="mr-1 h-4 w-4" />Anterior</Button><Button type="button" variant="outline" size="sm" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={page >= totalPages || query.isFetching}>Próxima<ChevronRight className="ml-1 h-4 w-4" /></Button></div></div>}
+      {query.isSuccess && viewMode === 'list' && (filteredTasks.length === 0 ? <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center"><CheckSquare className="mb-3 h-10 w-10 text-muted-foreground/40" /><p className="text-sm font-medium text-muted-foreground">{dateWindow === 'today' && statusFilter === 'all' && priorityFilter === 'all' && !search.trim() ? 'Nenhuma tarefa prevista para hoje' : 'Nenhuma tarefa encontrada com esses filtros.'}</p><Button type="button" variant="outline" size="sm" className="mt-4" onClick={() => openCreate()}><Plus className="mr-1.5 h-4 w-4" />Criar tarefa</Button></div> : <div className="space-y-2">{paginatedTasks.map((task) => <TaskCard key={task.id} task={task} onOpen={setDetailTask} onEdit={openEdit} onDelete={(id) => setDeleteIds([id])} onStatusChange={(id, status) => update.mutate({ id, input: { status } })} selectionMode={selectionMode} selected={selectedTaskIds.has(task.id)} onSelect={toggleTaskSelection} />)}</div>)}
+      {query.isSuccess && viewMode === 'list' && total > 0 && <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-muted-foreground">Página {page} de {totalPages} · {total} tarefas</p><div className="flex items-center gap-2"><Button type="button" variant="outline" size="sm" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1 || query.isFetching}><ChevronLeft className="mr-1 h-4 w-4" />Anterior</Button><Button type="button" variant="outline" size="sm" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={page >= totalPages || query.isFetching}>Próxima<ChevronRight className="ml-1 h-4 w-4" /></Button></div></div>}
 
-      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} onEdit={openEdit} onDelete={setDeleteId} onStatusChange={(id, status) => update.mutate({ id, input: { status } })} />
+      <TaskDetailDrawer task={detailTask} onClose={() => setDetailTask(null)} onEdit={openEdit} onDelete={(id) => setDeleteIds([id])} onStatusChange={(id, status) => update.mutate({ id, input: { status } })} />
 
-      <Dialog open={formOpen} onOpenChange={(open) => { if (!open) { setFormOpen(false); resetForm(); } }}><DialogContent><DialogHeader><DialogTitle>{editingTask ? 'Editar tarefa' : 'Nova tarefa'}</DialogTitle><DialogDescription>{editingTask ? 'Atualize as informações da tarefa.' : 'Preencha os dados para criar uma nova tarefa.'}</DialogDescription></DialogHeader><form className="grid gap-4" onSubmit={submit}><label className="grid gap-1.5 text-sm font-medium">Título<Input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: acompanhar aluno" required /></label><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-sm font-medium">Prioridade<Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Baixa</SelectItem><SelectItem value="medium">Média</SelectItem><SelectItem value="high">Alta</SelectItem><SelectItem value="urgent">Urgente</SelectItem></SelectContent></Select></label><label className="grid gap-1.5 text-sm font-medium">Status<Select value={defaultStatus} onValueChange={(value) => setDefaultStatus(value as TaskStatus)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{columns.map((column) => <SelectItem key={column.status} value={column.status}>{column.label}</SelectItem>)}</SelectContent></Select></label></div><label className="grid gap-1.5 text-sm font-medium">Prazo<Input type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></label><label className="grid gap-1.5 text-sm font-medium">Descrição<Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Descrição opcional" /></label><DialogFooter><Button type="button" variant="outline" onClick={() => { setFormOpen(false); resetForm(); }}>Cancelar</Button><Button type="submit" disabled={create.isPending || update.isPending}>{create.isPending || update.isPending ? 'Salvando…' : 'Salvar tarefa'}</Button></DialogFooter></form></DialogContent></Dialog>
-      <AlertDialog open={Boolean(deleteId)} onOpenChange={(open) => { if (!open) setDeleteId(null); }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Remover tarefa?</AlertDialogTitle><AlertDialogDescription>Esta ação não pode ser desfeita. A tarefa será permanentemente removida.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deleteId && remove.mutate(deleteId)}>{remove.isPending ? 'Removendo…' : 'Remover'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+      <Dialog open={formOpen} onOpenChange={(open) => { if (!open) { setFormOpen(false); resetForm(); } }}><DialogContent><DialogHeader><DialogTitle>{editingTask ? 'Editar tarefa' : 'Nova tarefa'}</DialogTitle><DialogDescription>{editingTask ? 'Atualize as informações da tarefa.' : 'Preencha os dados para criar uma nova tarefa.'}</DialogDescription></DialogHeader><form className="grid gap-4" onSubmit={submit}><label className="grid gap-1.5 text-sm font-medium">Título<Input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ex.: acompanhar aluno" required /></label><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-sm font-medium">Prioridade<Select value={priority} onValueChange={(value) => setPriority(value as TaskPriority)}><SelectTrigger aria-label="Prioridade"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Baixa</SelectItem><SelectItem value="medium">Média</SelectItem><SelectItem value="high">Alta</SelectItem><SelectItem value="urgent">Urgente</SelectItem></SelectContent></Select></label><label className="grid gap-1.5 text-sm font-medium">Status<Select value={defaultStatus} onValueChange={(value) => setDefaultStatus(value as TaskStatus)}><SelectTrigger aria-label="Status"><SelectValue /></SelectTrigger><SelectContent>{columns.map((column) => <SelectItem key={column.status} value={column.status}>{column.label}</SelectItem>)}</SelectContent></Select></label></div><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-sm font-medium">Data de início<Input type="date" value={startAt} onChange={(event) => setStartAt(event.target.value)} /></label><label className="grid gap-1.5 text-sm font-medium">Prazo<Input type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></label></div><label className="grid gap-1.5 text-sm font-medium">Descrição<Textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Descrição opcional" /></label><DialogFooter><Button type="button" variant="outline" onClick={() => { setFormOpen(false); resetForm(); }}>Cancelar</Button><Button type="submit" disabled={create.isPending || update.isPending}>{create.isPending || update.isPending ? 'Salvando…' : 'Salvar tarefa'}</Button></DialogFooter></form></DialogContent></Dialog>
+      <AlertDialog open={deleteIds.length > 0} onOpenChange={(open) => { if (!open) setDeleteIds([]); }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{deleteIds.length > 1 ? 'Remover tarefas selecionadas?' : 'Remover tarefa?'}</AlertDialogTitle><AlertDialogDescription>Esta acao nao pode ser desfeita. {deleteIds.length > 1 ? `As ${deleteIds.length} tarefas selecionadas` : 'A tarefa'} serao permanentemente removidas.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => { if (deleteIds.length > 1) removeMany.mutate(deleteIds); else if (deleteIds[0]) remove.mutate(deleteIds[0]); }}>{remove.isPending || removeMany.isPending ? 'Removendo...' : 'Remover'}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     </main>
   );
 }

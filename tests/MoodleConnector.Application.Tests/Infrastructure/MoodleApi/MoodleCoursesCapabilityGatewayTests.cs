@@ -144,7 +144,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
     }
 
     private static MoodleFunctionProfile Profile(params string[] functions) => new(
-        "connection", "goias", "Moodle GoiÃ¡s", "4.5", 7,
+        "connection", "goias", "Moodle Goiás", "4.5", 7,
         functions.Select(function => new MoodleFunctionDescriptor(function, MoodleFunctionRisk.Read, true)).ToArray(),
         DateTimeOffset.UtcNow);
 

@@ -62,7 +62,9 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IMoodleCourseContentsGateway contentsGateway,
-    IMoodleCurrentUserIdGateway currentUserIdGateway)
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleAssignmentSettingsGateway assignmentSettingsGateway,
+    IMoodleAssignmentSubmissionStatusGateway submissionStatusGateway)
     : IRequestHandler<GetStudentsWithPendingSubmissionsQuery, GetStudentsWithPendingSubmissionsResult>
 {
     public async Task<GetStudentsWithPendingSubmissionsResult> Handle(
@@ -113,8 +115,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         var now = DateTimeOffset.UtcNow;
         var assignmentsProcessed = 0;
 
-        // 3. Iterate assign modules. Dashboard callers can cap this because
-        // each assignment requires one Moodle submissions request.
+        // 3. Build the assignment scope first. The gateway then sends the
+        // assignment IDs in batches instead of making one request per activity.
         var assignModules = contents.Sections
             .SelectMany(section => section.Modules)
             .Where(module =>
@@ -125,68 +127,137 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             ? assignModules.Take(request.MaxAssignmentsToAnalyze)
             : assignModules;
 
-        foreach (var module in modulesToProcess)
-        {
-                // Resolve DueDate from module dates (label matching "Due date" or similar)
-                var dueDate = module.Dates
+        var assignmentContexts = modulesToProcess
+            .Select(module => new AssignmentContext(
+                module,
+                module.Dates
                     .FirstOrDefault(d =>
                         d.Label.Contains("due", StringComparison.OrdinalIgnoreCase) ||
                         d.Label.Contains("prazo", StringComparison.OrdinalIgnoreCase) ||
                         d.Label.Contains("entrega", StringComparison.OrdinalIgnoreCase))
-                    ?.Date;
+                    ?.Date))
+            .Where(context => request.DueDaysAhead <= 0 ||
+                !context.DueDate.HasValue ||
+                (context.DueDate.Value - now).TotalDays <= request.DueDaysAhead)
+            .ToArray();
 
-                // Filter by due date window if requested
-                if (request.DueDaysAhead > 0 && dueDate.HasValue)
+        // Uma atividade sem nota ainda pode exigir feedback. O grau da
+        // atividade só define qual sinal devemos usar para saber se ela foi
+        // tratada; não é motivo para removê-la da fila do tutor.
+        IReadOnlyDictionary<string, AssignmentSettingsSummary> assignmentSettings =
+            new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
+        try
+        {
+            assignmentSettings = await assignmentSettingsGateway.GetCourseAssignmentSettingsAsync(
+                currentUserExternalId,
+                request.CourseId,
+                cancellationToken);
+        }
+        catch
+        {
+            // Mantém o comportamento baseado em gradingstatus se a leitura
+            // das configurações não estiver disponível.
+        }
+
+        var canClassifyNoGradeActivities = assignmentSettings.Count > 0;
+        // O Moodle recebe uma chamada por envio para descobrir feedback em
+        // atividades sem nota. O limite evita que a leitura global de vários
+        // cursos cause rajadas de chamadas e respostas incompletas.
+        using var feedbackStatusLimiter = new SemaphoreSlim(4);
+        var feedbackStatusUnavailable = false;
+
+        IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches;
+        try
+        {
+            submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+                currentUserExternalId,
+                assignmentContexts.Select(context => context.Module.InstanceId!).ToArray(),
+                request.IncludeAwaitingGrading ? null : "notsubmitted",
+                since: null,
+                before: null,
+                cancellationToken);
+        }
+        catch
+        {
+            submissionBatches = [];
+        }
+
+        var contextsByAssignmentId = assignmentContexts
+            .ToDictionary(context => context.Module.InstanceId!, StringComparer.Ordinal);
+
+        foreach (var batch in submissionBatches)
+        {
+            if (!contextsByAssignmentId.TryGetValue(batch.AssignmentId, out var context))
+            {
+                continue;
+            }
+
+            assignmentsProcessed++;
+            var module = context.Module;
+            var dueDate = context.DueDate;
+            var isOverdue = dueDate.HasValue && dueDate.Value < now;
+            var pendingItem = new PendingSubmissionItem(
+                AssignmentId: module.InstanceId!,
+                AssignmentName: module.Name,
+                DueDate: dueDate,
+                IsOverdue: isOverdue);
+            var isNoGradeActivity = canClassifyNoGradeActivities &&
+                IsNoGradeActivity(module, assignmentSettings);
+            foreach (var record in batch.Submissions)
+            {
+                if (string.Equals(record.Status, "notsubmitted", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(record.Status, "not_submitted", StringComparison.OrdinalIgnoreCase))
                 {
-                    var daysUntilDue = (dueDate.Value - now).TotalDays;
-                    if (daysUntilDue > request.DueDaysAhead)
+                    // Atividades extras só entram na fila de feedback depois
+                    // que houve envio; não são cobranças de entrega avaliativa.
+                    if (!isNoGradeActivity && pendingByStudent.TryGetValue(record.UserId, out var pendingList))
+                        pendingList.Add(pendingItem);
+                }
+                else if (request.IncludeAwaitingGrading &&
+                         string.Equals(record.Status, "submitted", StringComparison.OrdinalIgnoreCase))
+                {
+                    var needsFeedback = IsAwaitingGrading(record.GradingStatus);
+                    if (isNoGradeActivity)
                     {
-                        continue;
+                        try
+                        {
+                            await feedbackStatusLimiter.WaitAsync(cancellationToken);
+                            var status = await submissionStatusGateway.GetSubmissionStatusAsync(
+                                currentUserExternalId,
+                                module.InstanceId!,
+                                record.UserId,
+                                cancellationToken);
+                            needsFeedback = status is null || !status.HasFeedback;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch
+                        {
+                            // Sem confirmação não afirmamos que existe uma
+                            // pendência: isso evita falsos positivos quando o
+                            // Moodle limita ou interrompe uma chamada. O aviso
+                            // abaixo deixa o dado incompleto explícito.
+                            needsFeedback = false;
+                            feedbackStatusUnavailable = true;
+                        }
+                        finally
+                        {
+                            feedbackStatusLimiter.Release();
+                        }
+                    }
+
+                    if (needsFeedback && gradingByStudent.TryGetValue(record.UserId, out var gradingList))
+                    {
+                        gradingList.Add(new AwaitingGradingItem(
+                            module.InstanceId!,
+                            module.Name,
+                            dueDate,
+                            record.ModifiedAt ?? record.CreatedAt));
                     }
                 }
-
-                bool isOverdue = dueDate.HasValue && dueDate.Value < now;
-
-                IReadOnlyList<AssignmentSubmissionRecord> submissions;
-                try
-                {
-                    submissions = await submissionsGateway.GetAssignmentSubmissionsAsync(
-                        userExternalId: currentUserExternalId,
-                        assignmentId: module.InstanceId!,
-                        status: request.IncludeAwaitingGrading ? null : "notsubmitted",
-                        since: null,
-                        before: null,
-                        cancellationToken: cancellationToken);
-                }
-                catch
-                {
-                    continue;
-                }
-
-                assignmentsProcessed++;
-
-                var pendingItem = new PendingSubmissionItem(
-                    AssignmentId: module.InstanceId!,
-                    AssignmentName: module.Name,
-                    DueDate: dueDate,
-                    IsOverdue: isOverdue);
-
-                foreach (var record in submissions)
-                {
-                    if (string.Equals(record.Status, "notsubmitted", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(record.Status, "not_submitted", StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (pendingByStudent.TryGetValue(record.UserId, out var pendingList))
-                            pendingList.Add(pendingItem);
-                    }
-                    else if (request.IncludeAwaitingGrading &&
-                             string.Equals(record.Status, "submitted", StringComparison.OrdinalIgnoreCase) &&
-                             IsAwaitingGrading(record.GradingStatus) &&
-                             gradingByStudent.TryGetValue(record.UserId, out var gradingList))
-                    {
-                        gradingList.Add(new AwaitingGradingItem(module.InstanceId!, module.Name, dueDate, record.ModifiedAt ?? record.CreatedAt));
-                    }
-                }
+            }
         }
 
         // 4. Build result
@@ -215,6 +286,13 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             warning = $"A análise foi limitada às {request.MaxAssignmentsToAnalyze} primeiras atividades avaliativas para preservar o desempenho.";
         }
 
+        if (feedbackStatusUnavailable)
+        {
+            warning = string.IsNullOrWhiteSpace(warning)
+                ? "Não foi possível confirmar todos os feedbacks das atividades extras; os itens sem confirmação foram omitidos da contagem."
+                : $"{warning} Não foi possível confirmar todos os feedbacks das atividades extras; os itens sem confirmação foram omitidos da contagem.";
+        }
+
         var suggestedRecipients = studentsWithPending.Select(s => s.StudentId).ToList();
         var awaitingGrading = gradingByStudent
             .Where(kv => kv.Value.Count > 0 && studentMap.ContainsKey(kv.Key))
@@ -238,8 +316,22 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     }
 
     private static bool IsAwaitingGrading(string? gradingStatus) =>
-        string.IsNullOrWhiteSpace(gradingStatus) ||
         string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(gradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsNoGradeActivity(
+        CourseModuleSummary module,
+        IReadOnlyDictionary<string, AssignmentSettingsSummary> settings)
+    {
+        if (settings.TryGetValue(module.InstanceId ?? string.Empty, out var byInstance))
+        {
+            return byInstance.MaxGrade <= 0;
+        }
+
+        return settings.TryGetValue(module.ModuleId ?? string.Empty, out var byModule) &&
+            byModule.MaxGrade <= 0;
+    }
+
+    private sealed record AssignmentContext(CourseModuleSummary Module, DateTimeOffset? DueDate);
 }

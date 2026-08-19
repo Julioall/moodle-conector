@@ -84,12 +84,14 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var tools = await GetToolsListAsync(_factory, "Production");
 
-        Assert.Equal(95, tools.Count);
+        Assert.Equal(104, tools.Count);
         Assert.Contains("moodle_execute_read", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_prepare_write", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_confirm_write", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("search", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("fetch", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("generate_course_grades_report", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("export_course_grades_excel", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("prepare_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirm_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("future_unregistered_tool", tools, StringComparer.OrdinalIgnoreCase);

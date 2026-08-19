@@ -6,7 +6,6 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { Spinner } from '../components/ui/spinner';
 import { AuthGate } from '../features/auth/AuthGate';
 
-const ConnectionsPage = lazy(() => import('../features/connections/ConnectionsPage').then(({ ConnectionsPage }) => ({ default: ConnectionsPage })));
 const MyCoursesPage = lazy(() => import('../features/courses/MyCoursesPage').then(({ MyCoursesPage }) => ({ default: MyCoursesPage })));
 const CoursePanelPage = lazy(() => import('../features/courses/CoursePanelPage').then(({ CoursePanelPage }) => ({ default: CoursePanelPage })));
 const StudentProfilePage = lazy(() => import('../features/students/StudentProfilePage').then(({ StudentProfilePage }) => ({ default: StudentProfilePage })));
@@ -14,11 +13,9 @@ const DashboardPage = lazy(() => import('../features/dashboard/DashboardPage').t
 const TasksPage = lazy(() => import('../features/tasks/TasksPage').then(({ TasksPage }) => ({ default: TasksPage })));
 const AgendaPage = lazy(() => import('../features/agenda/AgendaPage').then(({ AgendaPage }) => ({ default: AgendaPage })));
 const MessagesPage = lazy(() => import('../features/messages/MessagesPage').then(({ MessagesPage }) => ({ default: MessagesPage })));
-const ReportsPage = lazy(() => import('../features/reports/ReportsPage').then(({ ReportsPage }) => ({ default: ReportsPage })));
 const SettingsPage = lazy(() => import('../features/settings/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })));
 const SchoolsPage = lazy(() => import('../features/schools/SchoolsPage').then(({ SchoolsPage }) => ({ default: SchoolsPage })));
-const AutomationsPage = lazy(() => import('../features/automations/AutomationsPage').then(({ AutomationsPage }) => ({ default: AutomationsPage })));
-const CampaignsPage = lazy(() => import('../features/campaigns/CampaignsPage').then(({ CampaignsPage }) => ({ default: CampaignsPage })));
+const ReportHistoryPage = lazy(() => import('../features/reports/ReportHistoryPage').then(({ ReportHistoryPage }) => ({ default: ReportHistoryPage })));
 
 export function App() {
   return (
@@ -28,7 +25,8 @@ export function App() {
           <Routes>
             <Route element={<AppLayout />}>
               <Route path="/" element={<DashboardPage />} />
-              <Route path="/conexoes" element={<ConnectionsPage />} />
+              {/* Keep the former standalone URL readable after connections moved into Settings. */}
+              <Route path="/conexoes" element={<Navigate to="/configuracoes?tab=conexoes" replace />} />
               <Route path="/meus-cursos" element={<MyCoursesPage />} />
               <Route path="/escolas" element={<SchoolsPage />} />
               <Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} />
@@ -40,10 +38,9 @@ export function App() {
               <Route path="/followup" element={<Navigate to="/meus-cursos" replace />} />
               <Route path="/mensagens" element={<MessagesPage />} />
               <Route path="/pendencias" element={<Navigate to="/meus-cursos" replace />} />
-              <Route path="/campanhas" element={<CampaignsPage />} />
               <Route path="/foruns" element={<Navigate to="/meus-cursos" replace />} />
-              <Route path="/automacoes" element={<AutomationsPage />} />
-              <Route path="/relatorios" element={<ReportsPage />} />
+              {/* Reports are generated from course and school selections; this page tracks their progress and files. */}
+              <Route path="/relatorios" element={<ReportHistoryPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>

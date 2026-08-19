@@ -34,6 +34,12 @@ function formatDueDate(value?: string) {
   return Number.isNaN(date.getTime()) ? 'Sem prazo' : date.toLocaleDateString('pt-BR');
 }
 
+function formatStartDate(value?: string) {
+  if (!value) return 'Sem início';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Sem início' : date.toLocaleDateString('pt-BR');
+}
+
 function isOverdue(task: Task) {
   if (!task.dueAt || task.status === 'done') return false;
   const due = new Date(task.dueAt);
@@ -61,7 +67,8 @@ export function TaskDetailDrawer({ task, onClose, onEdit, onDelete, onStatusChan
         {task && <>
           <div className="grid gap-4 border-b px-6 py-4 sm:grid-cols-2">
             <div><p className="text-xs font-medium text-muted-foreground">Prioridade</p><span className={cn('mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-medium', priorityStyles[task.priority])}>{priorityLabels[task.priority]}</span></div>
-            <div><p className="text-xs font-medium text-muted-foreground">Prazo</p><p className={cn('mt-1 flex items-center gap-1 text-sm', isOverdue(task) && 'text-destructive')}><Calendar className="h-3.5 w-3.5" />{formatDueDate(task.dueAt)}</p></div>
+            <div><p className="text-xs font-medium text-muted-foreground">Data de início</p><p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><Calendar className="h-3.5 w-3.5" />{formatStartDate(task.startAt)}</p></div>
+            <div><p className="text-xs font-medium text-muted-foreground">Prazo</p><p className={cn('mt-1 flex items-center gap-1 text-xs', isOverdue(task) ? 'text-destructive' : 'text-muted-foreground')}><Calendar className="h-3.5 w-3.5" />{formatDueDate(task.dueAt)}</p></div>
             {onStatusChange && <label className="grid gap-1.5 text-xs font-medium sm:col-span-2">Status<Select value={task.status} onValueChange={(value) => onStatusChange(task.id, value as TaskStatus)}><SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger><SelectContent>{statuses.map((status) => <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>)}</SelectContent></Select></label>}
           </div>
           <div className="flex-1 space-y-4 overflow-auto px-6 py-5">

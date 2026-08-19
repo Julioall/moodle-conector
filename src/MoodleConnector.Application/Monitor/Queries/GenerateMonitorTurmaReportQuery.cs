@@ -26,12 +26,12 @@ public sealed record GenerateMonitorTurmaReportResult(
 
 
 /// <summary>
-/// Gera relatÃ³rio administrativo da turma para uso do monitor SENAI CTM.
+/// Gera relatório administrativo da turma para uso do monitor SENAI CTM.
 ///
-/// Diferente do relatÃ³rio do tutor:
-/// - NÃƒO consulta notas ou submissÃµes (fora do papel do monitor).
-/// - Foco em acesso ao AVA e matrÃ­cula.
-/// - Linguagem administrativa, nÃ£o pedagÃ³gica.
+/// Diferente do relatório do tutor:
+/// - NÃO consulta notas ou submissões (fora do papel do monitor).
+/// - Foco em acesso ao AVA e matrícula.
+/// - Linguagem administrativa, não pedagógica.
 /// </summary>
 public sealed record GenerateMonitorTurmaReportQuery(
     string CourseId,
@@ -72,7 +72,7 @@ public sealed class GenerateMonitorTurmaReportQueryHandler(
                 StudentsNeverAccessed: 0, StudentsInactiveDays: 0,
                 InactiveDaysThreshold: request.InactiveDaysThreshold,
                 NeverAccessedStudents: [], InactiveStudents: [],
-                Warning: "Nenhum estudante ativo encontrado no curso. Verificar matrÃ­culas.");
+                Warning: "Nenhum estudante ativo encontrado no curso. Verificar matrículas.");
         }
 
         var neverAccessed = new List<MonitorStudentRow>();
@@ -106,7 +106,7 @@ public sealed class GenerateMonitorTurmaReportQueryHandler(
         string? warning = null;
         if (!students.Any(s => s.LastCourseAccessAt.HasValue))
         {
-            warning = "O campo de Ãºltimo acesso ao curso pode nÃ£o estar disponÃ­vel para esta configuraÃ§Ã£o de Moodle. Todos aparecem como 'nunca acessaram'.";
+            warning = "O campo de último acesso ao curso pode não estar disponível para esta configuração de Moodle. Todos aparecem como 'nunca acessaram'.";
         }
 
         return new GenerateMonitorTurmaReportResult(

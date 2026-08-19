@@ -242,7 +242,7 @@ public static class PlatformPermissionCatalog
     public static readonly string[] PortalPermissions =
     [
         "dashboard.view", "courses.view", "schools.view", "students.view", "students.followup.write",
-        "tasks.manage", "agenda.manage", "messages.prepare", "automations.view", "automations.manage", "grading.view", "grading.manage", "reports.view",
+        "tasks.manage", "agenda.manage", "messages.prepare", "grading.view", "grading.manage", "reports.view",
         "connections.manage", "settings.view", "admin.view"
     ];
     public static readonly string[] AllRead =

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Forums"
+  short_description: "Read, analyze, and publish Moodle forum activity safely"
+  default_prompt: "Use $moodle-forums to read forum discussions, find participation gaps, or prepare and confirm a Moodle forum post."

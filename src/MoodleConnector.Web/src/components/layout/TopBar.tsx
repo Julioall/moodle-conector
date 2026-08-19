@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bell, CheckCheck, Pencil, RefreshCw, WifiOff } from 'lucide-react';
+import { Bell, CheckCheck, Download, Pencil, RefreshCw, WifiOff } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -12,9 +12,11 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { MoodleIcon } from '@/components/ui/MoodleIcon';
 import { dashboardGateway } from '@/features/dashboard/dashboard-gateway';
+import { reportsGateway } from '@/features/reports/reports-gateway';
 import { useConnectionScope } from '@/features/connections/useConnectionScope';
 import { GlobalActivityLine } from './GlobalActivityLine';
 import { useEditMode } from './edit-mode-context';
+import { useSession } from '@/features/auth/useSession';
 
 const LAST_SEEN_KEY = 'app:notifications-last-seen';
 
@@ -37,6 +39,16 @@ function formatActivityDate(value?: string) {
   return days < 0 ? `há ${Math.abs(days)} dia${Math.abs(days) === 1 ? '' : 's'}` : `em ${days} dia${days === 1 ? '' : 's'}`;
 }
 
+function reportTitle(type: string) {
+  return type === 'grades'
+    ? 'Notas do curso'
+    : type === 'weekly'
+      ? 'Desempenho semanal'
+      : type === 'overview'
+        ? 'Visão de acompanhamento'
+        : 'Conclusão provável';
+}
+
 function readLastSeen() {
   if (typeof window === 'undefined') return undefined;
   return window.localStorage.getItem(LAST_SEEN_KEY) ?? undefined;
@@ -45,6 +57,7 @@ function readLastSeen() {
 export function TopBar() {
   const queryClient = useQueryClient();
   const { connections, selectedConnection, connectionRef, selectConnection } = useConnectionScope();
+  const { can } = useSession();
   const { editMode, setEditMode } = useEditMode();
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [lastSeenAt, setLastSeenAt] = useState(readLastSeen);
@@ -56,14 +69,33 @@ export function TopBar() {
     enabled: notificationOpen && Boolean(connectionRef),
     staleTime: 30_000,
   });
+  const reportJobsQuery = useQuery({
+    queryKey: ['app', 'report-jobs-notifications'],
+    queryFn: () => reportsGateway.jobs(1, 10),
+    enabled: can('reports.view'),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  });
   const activities = useMemo(() => activityQuery.data?.data.recentActivity ?? [], [activityQuery.data?.data.recentActivity]);
+  const notifications = useMemo(() => {
+    const reportNotifications = (reportJobsQuery.data?.data ?? [])
+      .filter((job) => job.status === 'completed' || job.status === 'failed')
+      .map((job) => ({
+        key: `report:${job.id}:${job.status}`,
+        title: job.status === 'completed' ? 'Relatório disponível' : 'Falha ao gerar relatório',
+        detail: `${reportTitle(job.reportType)} · ${job.scopeType === 'category' ? job.categoryPath : job.scopeType === 'courses' ? `${job.totalCourses} cursos selecionados` : `Curso ${job.courseId}`}`,
+        occurredAt: job.updatedAt,
+        downloadUrl: job.downloadUrl,
+      }));
+    return [...activities.map((activity) => ({ ...activity, downloadUrl: undefined })), ...reportNotifications].sort((left, right) => new Date(right.occurredAt ?? 0).getTime() - new Date(left.occurredAt ?? 0).getTime());
+  }, [activities, reportJobsQuery.data?.data]);
   const unreadCount = useMemo(() => {
-    if (activities.length === 0) return 0;
-    if (!lastSeenAt) return activities.length;
+    if (notifications.length === 0) return 0;
+    if (!lastSeenAt) return notifications.length;
     const lastSeen = new Date(lastSeenAt).getTime();
-    if (Number.isNaN(lastSeen)) return activities.length;
-    return activities.filter((item) => item.occurredAt && new Date(item.occurredAt).getTime() > lastSeen).length;
-  }, [activities, lastSeenAt]);
+    if (Number.isNaN(lastSeen)) return notifications.length;
+    return notifications.filter((item) => item.occurredAt && new Date(item.occurredAt).getTime() > lastSeen).length;
+  }, [notifications, lastSeenAt]);
 
   const markNotificationsAsSeen = () => {
     const now = new Date().toISOString();
@@ -75,7 +107,8 @@ export function TopBar() {
     setNotificationOpen(open);
     if (open) {
       void activityQuery.refetch();
-      if (activities.length > 0) markNotificationsAsSeen();
+      void reportJobsQuery.refetch();
+      if (notifications.length > 0) markNotificationsAsSeen();
     }
   };
 
@@ -129,14 +162,14 @@ export function TopBar() {
             <div className="flex items-center justify-between border-b px-3 py-2">
               <div>
                 <p className="text-sm font-medium">Notificações</p>
-                <p className="text-xs text-muted-foreground">{activities.length} itens recentes</p>
+                <p className="text-xs text-muted-foreground">{notifications.length} itens recentes</p>
               </div>
-              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={markNotificationsAsSeen} disabled={activities.length === 0}>
+              <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={markNotificationsAsSeen} disabled={notifications.length === 0}>
                 <CheckCheck className="mr-1 h-3.5 w-3.5" />Marcar lidas
               </Button>
             </div>
             <ScrollArea className="max-h-[360px]">
-              {activityQuery.isFetching ? <div className="px-3 py-4 text-xs text-muted-foreground">Carregando notificações…</div> : activities.length === 0 ? <div className="px-3 py-4 text-xs text-muted-foreground">Nenhuma notificação no momento.</div> : <div className="divide-y">{activities.map((item) => <div key={item.key} className="px-3 py-2.5"><p className="text-sm font-medium leading-snug">{item.title}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{item.detail}</p><p className="mt-1 text-[11px] text-muted-foreground">{formatActivityDate(item.occurredAt)}</p></div>)}</div>}
+              {activityQuery.isFetching || reportJobsQuery.isFetching ? <div className="px-3 py-4 text-xs text-muted-foreground">Carregando notificações…</div> : notifications.length === 0 ? <div className="px-3 py-4 text-xs text-muted-foreground">Nenhuma notificação no momento.</div> : <div className="divide-y">{notifications.map((item) => <div key={item.key} className="px-3 py-2.5"><p className="text-sm font-medium leading-snug">{item.title}</p><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{item.detail}</p><p className="mt-1 text-[11px] text-muted-foreground">{formatActivityDate(item.occurredAt)}</p>{item.downloadUrl && <a href={item.downloadUrl} download className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Download className="h-3.5 w-3.5" />{item.detail.includes('cursos selecionados') ? 'Baixar arquivo' : 'Baixar Excel'}</a>}</div>)}</div>}
             </ScrollArea>
           </PopoverContent>
         </Popover>

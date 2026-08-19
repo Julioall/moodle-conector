@@ -108,7 +108,7 @@ describe('CoursePanelPage', () => {
     expect(dashboardGateway.get).toHaveBeenCalledWith('demo', '42');
   });
 
-  it('keeps the course workspace to three tabs and opens contextual follow-up', async () => {
+  it('keeps the course workspace focused and opens contextual follow-up', async () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Estado da turma' })).toBeInTheDocument());

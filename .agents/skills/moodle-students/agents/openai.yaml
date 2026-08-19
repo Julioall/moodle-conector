@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Students"
+  short_description: "Resolve Moodle students and enrollment"
+  default_prompt: "Use $moodle-students to resolve Moodle participants, students, enrollment, groups, or recent-access context."

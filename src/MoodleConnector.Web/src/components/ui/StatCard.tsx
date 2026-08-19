@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
-import { LucideIcon } from 'lucide-react';
+import { LucideIcon, RefreshCw } from 'lucide-react';
+import { Button } from './button';
 
 interface StatCardProps {
   title: string;
@@ -13,6 +14,8 @@ interface StatCardProps {
   };
   variant?: 'default' | 'warning' | 'danger' | 'success' | 'pending' | 'risk';
   className?: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 export function StatCard({ 
@@ -22,7 +25,9 @@ export function StatCard({
   icon: Icon,
   trend,
   variant = 'default',
-  className 
+  className,
+  onRefresh,
+  refreshing = false,
 }: StatCardProps) {
   const variantStyles = {
     default: 'bg-card',
@@ -39,7 +44,7 @@ export function StatCard({
       variantStyles[variant],
       className
     )}>
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-2">
         <div className="space-y-1">
           <p className="text-sm font-medium text-muted-foreground">{title}</p>
           <p className="text-2xl font-bold tracking-tight">{value}</p>
@@ -55,10 +60,9 @@ export function StatCard({
             </p>
           )}
         </div>
-        {Icon && (
-          <div className={cn(
-            'rounded-lg p-2',
-          )}>
+        <div className="flex items-start gap-1">
+          {onRefresh && <Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label={`Atualizar ${title}`} title={`Atualizar ${title}`} onClick={onRefresh} disabled={refreshing}><RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} /></Button>}
+          {Icon && <div className={cn('rounded-lg p-2')}>
             <Icon className={cn(
               'h-5 w-5',
               variant === 'default' && 'text-muted-foreground',
@@ -68,8 +72,8 @@ export function StatCard({
               variant === 'pending' && 'text-status-pending',
               variant === 'risk' && 'text-risk-risco',
             )} />
-          </div>
-        )}
+          </div>}
+        </div>
       </div>
     </div>
   );

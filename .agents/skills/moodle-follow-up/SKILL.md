@@ -1,24 +1,23 @@
 ---
 name: moodle-follow-up
-description: Identify students or activities requiring follow-up from observable Moodle activity, submissions and completion evidence.
+description: Identificar estudantes e atividades que exigem acompanhamento a partir de entregas, acesso, conclusao, forum e notas observaveis no Moodle.
 ---
 
 # moodle-follow-up
 
-Use this skill for operational follow-up: missing submissions, inactive students, incomplete activities, overdue work, and preparation of a follow-up list. It produces evidence and priorities; it does not send messages automatically.
+Use para produzir uma lista priorizada de acompanhamento. A skill gera evidencia e proximos passos; nao envia mensagens automaticamente.
 
-## Workflow
+## Fluxo
 
-1. Resolve connection, course, date window, and the population of students.
-2. Gather the minimum evidence: assignment submission/status, completion, recent access, and—when requested—forum participation.
-3. Apply explicit user criteria such as “late”, “not submitted”, or “no access in 14 days”. Do not invent a threshold.
-4. Return each candidate with student ID, course/activity, evidence timestamp, source operation, and confidence.
-5. If the caller wants outreach, hand off to `moodle-messaging` for prepare/confirm.
+1. Execute `moodle-core` e fixe conexao, curso, janela e populacao.
+2. Consulte apenas as evidencias necessarias: `list_pending_submissions`/`list_late_submissions`, `get_student_completion`, `list_students_without_recent_access`, `list_students_without_forum_participation`, gradebook ou `report_students_at_risk` quando solicitados.
+3. Antes de interpretar avaliacao, feedback, risco ou recomendacao pedagogica, use `moodle-pedagogy` para buscar orientacao pertinente.
+4. Aplique criterios explicitos, como atraso ou 'sem acesso em 14 dias'; nao invente limiar.
+5. Retorne estudante, curso/atividade, evidencia, timestamp, fonte, cobertura e confianca.
+6. Para outreach, entregue candidatos a `moodle-messaging` para prepare/confirm.
 
-## Interpretation rules
+## Regras de interpretacao
 
-“No submission” is valid only after the assignment and student scope are complete. “Inactive” requires a defined window and a connection that provides recent-access evidence. Missing optional data is reported as unknown, not as a negative finding.
+'Nao entregou' exige escopo completo de tarefa e estudantes. 'Inativo' exige janela definida e last access observavel. Ausencia de uma capability e desconhecido, nao negativo. Misture sinais somente depois de reconciliar `userid`, curso e atividade.
 
-## Safety and ownership
-
-All reads use registered SafeRead or an owned specialized gateway. The skill does not select credentials, execute writes, or decide exposure. Large candidate sets must retain pagination metadata and may be summarized only after the source result is complete.
+Se houver truncamento, pagina parcial ou falha de uma fonte, marque o candidato como cobertura parcial e nao apresente a lista como censo.

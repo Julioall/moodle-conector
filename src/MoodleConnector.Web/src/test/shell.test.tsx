@@ -19,6 +19,8 @@ describe('Claris-first shell', () => {
     expect(screen.getByText('Resumo da Semana')).toBeInTheDocument();
     expect(screen.getByText('Meus Cursos')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Alunos' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Conexões Moodle' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Configurações' })).toBeInTheDocument();
   });
 
   it('exposes the v2 operational smoke path', () => {

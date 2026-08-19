@@ -3,12 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
-using MoodleConnector.Application.Automation;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Pedagogy;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Infrastructure.Configuration;
-using MoodleConnector.Infrastructure.Automation;
 using MoodleConnector.Infrastructure.DocumentExtraction;
 using MoodleConnector.Infrastructure.Pedagogy;
 using MoodleConnector.Infrastructure.Reports;
@@ -45,10 +43,6 @@ public static class DependencyInjection
         services
             .AddOptions<MoodleProxyOptions>()
             .Bind(configuration.GetSection(MoodleProxyOptions.SectionName));
-
-        services
-            .AddOptions<AutomationSchedulerOptions>()
-            .Bind(configuration.GetSection(AutomationSchedulerOptions.SectionName));
 
         var postgresOptions = configuration
             .GetSection(PostgresOptions.SectionName)
@@ -169,8 +163,8 @@ public static class DependencyInjection
             .AddMoodleResilience(moodleProxyResilience);
 
         services.AddScoped<IAccountService, AccountService>();
-        services.AddScoped<IAutomationRuntime, AutomationRuntime>();
-        services.AddHostedService<AutomationSchedulerService>();
+        services.AddScoped<ReportJobProcessor>();
+        services.AddHostedService<ReportJobWorkerService>();
         services.AddScoped<ITeamAccessService, TeamAccessService>();
         services.AddScoped<IPlatformPermissionService, PlatformPermissionService>();
 

@@ -10,8 +10,6 @@ const paths = [
   '/tarefas',
   '/agenda',
   '/mensagens',
-  '/automacoes',
-  '/campanhas',
   '/foruns',
   '/followup',
   '/relatorios',

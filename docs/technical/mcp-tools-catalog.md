@@ -1131,6 +1131,52 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
+## `generate_course_grades_report`
+
+Gera o relatorio estruturado de notas totais do curso por estudante. Reutiliza a mesma query do exportador Excel do frontend e nao soma notas de atividades localmente.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso Moodle. |
+| `pageSize` | `int` | Tamanho das paginas de leitura de participantes, de 1 a 100. Padrao: 100. |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+O resultado inclui estudantes, nota total, percentual, ultimo acesso, contadores, media e advertencias de cobertura. Para consumo humano ou arquivamento, use `export_course_grades_excel`.
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
+## `export_course_grades_excel`
+
+Gera o mesmo relatorio de notas em um arquivo `.xlsx` formatado e o entrega como recurso binario anexado ao resultado MCP. O resultado estruturado informa nome, tipo, tamanho e resumo do arquivo.
+
+Parametros:
+
+| Nome | Tipo | Descricao |
+| --- | --- | --- |
+| `courseId` | `string` | Identificador do curso Moodle. |
+| `pageSize` | `int` | Tamanho das paginas de leitura de participantes, de 1 a 100. Padrao: 100. |
+| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
+
+O arquivo e gerado sob demanda, sem alterar notas, participantes ou configuracoes do Moodle.
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
 ## `list_gradable_submissions`
 
 Descricao:

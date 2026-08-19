@@ -2,14 +2,11 @@ import {
   BookOpen,
   Building2,
   CalendarDays,
-  Bot,
   CheckSquare,
   FileSpreadsheet,
   LayoutDashboard,
   LogOut,
-  Megaphone,
   MessageSquare,
-  Plug,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -31,6 +28,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useSession } from '@/features/auth/useSession';
+import { useConnectionScope } from '@/features/connections/useConnectionScope';
 import { APP_PERMISSIONS } from '@/lib/access-control';
 
 type SidebarNavItem = {
@@ -47,10 +45,7 @@ const mainNavItems: SidebarNavItem[] = [
   { title: 'Tarefas', url: '/tarefas', icon: CheckSquare, permission: APP_PERMISSIONS.TASKS_VIEW },
   { title: 'Agenda', url: '/agenda', icon: CalendarDays, permission: APP_PERMISSIONS.AGENDA_VIEW },
   { title: 'Mensagens', url: '/mensagens', icon: MessageSquare, permission: APP_PERMISSIONS.MESSAGES_VIEW },
-  { title: 'Campanhas', url: '/campanhas', icon: Megaphone, permission: APP_PERMISSIONS.AUTOMATIONS_VIEW },
-  { title: 'Automações', url: '/automacoes', icon: Bot, permission: APP_PERMISSIONS.AUTOMATIONS_VIEW },
   { title: 'Relatórios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
-  { title: 'Conexões Moodle', url: '/conexoes', icon: Plug, permission: APP_PERMISSIONS.SERVICES_VIEW },
 ];
 
 const settingsItems: SidebarNavItem[] = [
@@ -59,6 +54,7 @@ const settingsItems: SidebarNavItem[] = [
 
 export function AppSidebar() {
   const { user, logout, can } = useSession();
+  const { connectionRef } = useConnectionScope();
   const { state } = useSidebar();
   const isCollapsed = state === 'collapsed';
 
@@ -77,7 +73,7 @@ export function AppSidebar() {
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton asChild tooltip={item.title}>
                   <NavLink
-                    to={item.url}
+                    to={item.url === '/' && connectionRef ? `/?connectionRef=${encodeURIComponent(connectionRef)}` : item.url}
                     end={item.url === '/'}
                     className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
                     activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"

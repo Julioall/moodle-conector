@@ -291,15 +291,19 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             return false;
         }
 
-        return string.IsNullOrWhiteSpace(gradingStatus) ||
-               string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
+        return string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(gradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ToMoodleSubmissionStatus(AssignmentSubmissionFilter filter)
     {
-        return filter == AssignmentSubmissionFilter.Submitted ? "submitted" : null;
+        return filter switch
+        {
+            AssignmentSubmissionFilter.Submitted => "submitted",
+            AssignmentSubmissionFilter.NeedsGrading => null,
+            _ => null,
+        };
     }
 }
 
