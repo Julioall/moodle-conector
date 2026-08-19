@@ -47,7 +47,10 @@ export function AuthPage() {
           isDefault: true,
           canWrite: false,
         });
-        window.location.assign('/configuracoes?tab=acesso&section=grupos');
+        // The first Moodle connection completes onboarding. Start at the
+        // operational dashboard; the legacy access/groups URL is no longer
+        // part of the user-facing flow.
+        window.location.assign('/selecionar-cursos');
         return;
       }
 

@@ -56,6 +56,22 @@ describe('course lifecycle', () => {
     expect(normalizeCourseEndDatesBySequence(courses)).toEqual(courses);
   });
 
+  it('normalizes independent sequences when a turma has different common ends', () => {
+    const courses = [
+      { courseId: 'a', categoryName: 'Turma 2B', startDate: '2026-01-01T00:00:00Z', endDate: '2026-09-30T23:59:59Z' },
+      { courseId: 'b', categoryName: 'Turma 2B', startDate: '2026-03-01T00:00:00Z', endDate: '2026-09-30T23:59:59Z' },
+      { courseId: 'c', categoryName: 'Turma 2B', startDate: '2026-02-01T00:00:00Z', endDate: '2026-12-15T23:59:59Z' },
+      { courseId: 'd', categoryName: 'Turma 2B', startDate: '2026-04-01T00:00:00Z', endDate: '2026-12-15T23:59:59Z' },
+    ];
+
+    expect(normalizeCourseEndDatesBySequence(courses).map((course) => course.endDate)).toEqual([
+      '2026-03-01T00:00:00Z',
+      '2026-09-30T23:59:59Z',
+      '2026-04-01T00:00:00Z',
+      '2026-12-15T23:59:59Z',
+    ]);
+  });
+
   it('uses equal defined ends even when the latest unit has no end yet', () => {
     const courses = [
       { courseId: 'a', categoryName: 'Turma 3', startDate: '2026-05-20T00:00:00Z', endDate: '2026-08-25T23:59:59Z' },

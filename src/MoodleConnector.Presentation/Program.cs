@@ -4425,11 +4425,8 @@ static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext 
         claims.Add(new Claim(ClaimTypes.Role, membership.Role));
     }
 
-    var groupPermissions = await (from membership in dbContext.PermissionGroupMemberships.AsNoTracking()
-                                  join permission in dbContext.PermissionGroupPermissions.AsNoTracking() on membership.GroupId equals permission.GroupId
-                                  where membership.UserId == id
-                                  select permission.Permission).ToArrayAsync(cancellationToken);
-    foreach (var permission in groupPermissions.Distinct(StringComparer.OrdinalIgnoreCase))
+    var effectivePermissions = await platformPermissionService.GetEffectivePermissionsAsync(id, cancellationToken);
+    foreach (var permission in effectivePermissions)
         claims.Add(new Claim("platform_permission", permission));
     var userOverrides = await dbContext.UserPermissionOverrides.AsNoTracking().Where(item => item.UserId == id).ToArrayAsync(cancellationToken);
     foreach (var permission in userOverrides)
@@ -4488,15 +4485,26 @@ static IReadOnlyList<CourseSummary> NormalizeDashboardCourseEndDates(IReadOnlyLi
     {
         if (group.Count() < 2) continue;
         var endDates = group.Select(course => course.EndDate).Where(date => date.HasValue).Select(date => date!.Value).Distinct().ToArray();
-        if (endDates.Length < 2) continue;
-        var starts = group.Select(course => course.StartDate).Where(date => date.HasValue).Select(date => date!.Value).Distinct().OrderBy(date => date).ToArray();
-        if (starts.Length < 2) continue;
+        if (endDates.Length == 0) continue;
 
-        foreach (var course in group)
+        // Moodle pode devolver mais de uma sequência dentro da mesma turma
+        // (por exemplo, módulos configurados com finais diferentes). Cada
+        // sequência deve ser inferida separadamente.
+        IEnumerable<IEnumerable<CourseSummary>> sequences = endDates.Length == 1
+            ? new[] { group.AsEnumerable() }
+            : endDates.Select(endDate => group.Where(course => course.EndDate == endDate));
+
+        foreach (var sequence in sequences)
         {
-            if (course.StartDate is not { } start) continue;
-            var nextStart = starts.FirstOrDefault(candidate => candidate > start);
-            if (nextStart > start) adjustedEndDates[course.CourseId] = nextStart;
+            var starts = sequence.Select(course => course.StartDate).Where(date => date.HasValue).Select(date => date!.Value).Distinct().OrderBy(date => date).ToArray();
+            if (starts.Length < 2) continue;
+
+            foreach (var course in sequence)
+            {
+                if (course.StartDate is not { } start) continue;
+                var nextStart = starts.FirstOrDefault(candidate => candidate > start);
+                if (nextStart > start) adjustedEndDates[course.CourseId] = nextStart;
+            }
         }
     }
 

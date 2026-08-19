@@ -116,11 +116,13 @@ public static class AppDashboardBudget
     public static readonly TimeSpan MetricCacheDuration = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan CourseScopeCacheDuration = TimeSpan.FromMinutes(5);
     public const int MaxCoursesRead = 50;
-    public const int MaxParticipantsRead = 100;
-    public const int MaxAssignmentsRead = 20;
-    public const int MaxPriorities = 8;
-    public const int MaxCorrectionItems = 100;
-    public const int MaxActivities = 8;
+    // The pending overview runs asynchronously, so it can afford a broader
+    // read budget than the synchronous course screens.
+    public const int MaxParticipantsRead = 500;
+    public const int MaxAssignmentsRead = 100;
+    public const int MaxPriorities = 50;
+    public const int MaxCorrectionItems = 500;
+    public const int MaxActivities = 50;
 }
 
 public static class AppDashboardContractMapper
