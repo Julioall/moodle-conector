@@ -26,7 +26,7 @@ public sealed class PlatformPermissionServiceTests
     }
 
     [Fact]
-    public async Task NewUserReceivesOnlyPermissionGroupManagementUntilConfigured()
+    public async Task NewUserReceivesTheCompleteTemporaryPermissionCatalog()
     {
         await using var dbContext = CreateContext();
         var userId = Guid.NewGuid();
@@ -36,7 +36,7 @@ public sealed class PlatformPermissionServiceTests
 
         var permissions = await sut.GetEffectivePermissionsAsync(userId, CancellationToken.None);
 
-        Assert.Equal([PlatformPermissionCatalog.PermissionGroupsManage], permissions);
+        Assert.Equal(PlatformPermissionCatalog.TemporaryRollout.Order(StringComparer.Ordinal), permissions.Order(StringComparer.Ordinal));
         var groups = await sut.GetGroupsAsync(userId, CancellationToken.None);
         Assert.Equal(["Acesso inicial", "Monitor", "Tutor"], groups.Select(group => group.Name));
     }
@@ -58,7 +58,7 @@ public sealed class PlatformPermissionServiceTests
         Assert.Equal("Tutor personalizado", updated.Name);
         Assert.Equal("Acompanhamento personalizado", updated.Description);
         Assert.Equal(["courses.view"], updated.Permissions);
-        Assert.Equal([PlatformPermissionCatalog.PermissionGroupsManage], await sut.GetEffectivePermissionsAsync(userId, CancellationToken.None));
+        Assert.Equal(PlatformPermissionCatalog.TemporaryRollout.Order(StringComparer.Ordinal), (await sut.GetEffectivePermissionsAsync(userId, CancellationToken.None)).Order(StringComparer.Ordinal));
 
         await sut.EnsureDefaultPermissionsAsync(userId, CancellationToken.None);
 

@@ -37,9 +37,8 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
                 CreatedByUserId = userId
             };
             dbContext.PermissionGroups.Add(group);
-            // A new account receives only the ability to configure its own
-            // permission groups. Tool access must be granted explicitly by the
-            // user through groups or direct overrides.
+            // Keep the bootstrap permission so the account can finish its
+            // own access setup while the access-management screens are hidden.
             dbContext.PermissionGroupPermissions.Add(new PermissionGroupPermissionEntity
             {
                 Id = Guid.NewGuid(), GroupId = group.Id, Permission = PlatformPermissionCatalog.PermissionGroupsManage
@@ -176,7 +175,13 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
                                       where membership.UserId == userId
                                       select permission.Permission).ToArrayAsync(cancellationToken);
         var overrides = await dbContext.UserPermissionOverrides.AsNoTracking().Where(item => item.UserId == userId).ToArrayAsync(cancellationToken);
-        var permissions = groupPermissions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Temporary rollout policy: until the access-management UI is enabled
+        // again, every local account receives the complete platform catalog.
+        // Explicit deny overrides still win, so an existing safety exception
+        // is not silently discarded.
+        var permissions = PlatformPermissionCatalog.TemporaryRollout
+            .Concat(groupPermissions)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var grant in overrides.Where(item => item.IsAllowed)) permissions.Add(grant.Permission);
         foreach (var deny in overrides.Where(item => !item.IsAllowed)) permissions.Remove(deny.Permission);
         return permissions.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray();
@@ -262,5 +267,13 @@ public static class PlatformPermissionCatalog
         "tool.classroom.view", "tool.followup.view", "tool.forums.view", "tool.forums.write", "tool.connections.manage",
         "tool.memory.manage", "tool.pedagogy.view", PermissionGroupsManage, PendingActionsManage, TeamsManage,
         ..PortalPermissions
+    ];
+
+    // The temporary rollout opens the application surface for every account,
+    // while keeping team administration behind its existing explicit grant.
+    // Teams control tenancy and access policy, not the Moodle workspace.
+    public static readonly string[] TemporaryRollout =
+    [
+        ..All.Where(permission => permission is not TeamsManage)
     ];
 }

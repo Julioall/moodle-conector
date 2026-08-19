@@ -40,6 +40,8 @@ function applyPendingUpdates(ids: Set<string>, pendingUpdates: Map<string, boole
 
 export function useIgnoredCourses(connectionRef?: string, gateway: CourseVisibilityGateway = courseVisibilityGateway) {
   const [ignoredCourseIds, setIgnoredCourseIds] = useState(() => readLegacyIgnoredCourseIds(connectionRef));
+  const [isLoaded, setIsLoaded] = useState(!connectionRef);
+  const [pendingCount, setPendingCount] = useState(0);
   const pendingUpdates = useRef(new Map<string, boolean>());
   const revision = useRef(0);
 
@@ -47,6 +49,7 @@ export function useIgnoredCourses(connectionRef?: string, gateway: CourseVisibil
     let cancelled = false;
     const loadRevision = revision.current;
     pendingUpdates.current.clear();
+    setIsLoaded(!connectionRef);
     setIgnoredCourseIds(readLegacyIgnoredCourseIds(connectionRef));
     if (!connectionRef) return () => { cancelled = true; };
 
@@ -64,9 +67,11 @@ export function useIgnoredCourses(connectionRef?: string, gateway: CourseVisibil
         if (cancelled || revision.current !== loadRevision) return;
         clearLegacyIgnoredCourseIds(connectionRef);
         setIgnoredCourseIds(applyPendingUpdates(merged, pendingUpdates.current));
+        setIsLoaded(true);
       } catch {
         // Keep the legacy value visible if the preference API is temporarily unavailable.
         // The next mount retries the synchronization without losing local settings.
+        setIsLoaded(true);
       }
     };
 
@@ -74,7 +79,7 @@ export function useIgnoredCourses(connectionRef?: string, gateway: CourseVisibil
     return () => { cancelled = true; };
   }, [connectionRef, gateway]);
 
-  function updateIgnoredCourses(courseIds: string[], ignored: boolean) {
+  async function updateIgnoredCourses(courseIds: string[], ignored: boolean, propagateError = false) {
     if (!connectionRef || courseIds.length === 0) return;
     const normalizedIds = [...new Set(courseIds.map((courseId) => courseId.trim()).filter(Boolean))];
     if (normalizedIds.length === 0) return;
@@ -89,24 +94,39 @@ export function useIgnoredCourses(connectionRef?: string, gateway: CourseVisibil
       return next;
     });
     const input: UpdateIgnoredCoursesInput = { connectionRef, courseIds: normalizedIds, ignored };
-    void gateway.updateIgnored(input).then(() => {
+    setPendingCount((current) => current + normalizedIds.length);
+    try {
+      await gateway.updateIgnored(input);
       normalizedIds.forEach((courseId) => {
         if (pendingUpdates.current.get(courseId) === ignored) pendingUpdates.current.delete(courseId);
       });
-    }).catch(() => {
+    } catch (error) {
       normalizedIds.forEach((courseId) => {
         if (pendingUpdates.current.get(courseId) === ignored) pendingUpdates.current.delete(courseId);
       });
-      void gateway.listIgnored(connectionRef).then((response) => {
+      try {
+        const response = await gateway.listIgnored(connectionRef);
         if (revision.current === updateRevision) setIgnoredCourseIds(applyPendingUpdates(new Set(response.data), pendingUpdates.current));
-      }).catch(() => undefined);
-    });
+      } catch { /* keep the optimistic state until the next refresh */ }
+      if (propagateError) throw error;
+    } finally {
+      setPendingCount((current) => Math.max(0, current - normalizedIds.length));
+    }
+  }
+
+  async function replaceIgnoredCourses(allCourseIds: string[], keptCourseIds: Iterable<string>) {
+    const kept = new Set(keptCourseIds);
+    await updateIgnoredCourses(allCourseIds.filter((courseId) => !kept.has(courseId)), true, true);
+    await updateIgnoredCourses(allCourseIds.filter((courseId) => kept.has(courseId)), false, true);
   }
 
   return {
     ignoredCourseIds,
-    ignoreCourse: (courseId: string) => updateIgnoredCourses([courseId], true),
-    ignoreCourses: (courseIds: string[]) => updateIgnoredCourses(courseIds, true),
-    restoreCourse: (courseId: string) => updateIgnoredCourses([courseId], false),
+    isLoading: !isLoaded,
+    isSaving: pendingCount > 0,
+    ignoreCourse: (courseId: string) => { void updateIgnoredCourses([courseId], true); },
+    ignoreCourses: (courseIds: string[]) => { void updateIgnoredCourses(courseIds, true); },
+    restoreCourse: (courseId: string) => { void updateIgnoredCourses([courseId], false); },
+    replaceIgnoredCourses,
   };
 }

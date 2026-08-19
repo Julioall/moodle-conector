@@ -55,22 +55,31 @@ export function normalizeCourseEndDatesBySequence<T extends Pick<Course, 'course
     if (group.length < 2) return;
     const endTimes = group.map((course) => parseDate(course.endDate));
     const definedEndTimes = endTimes.filter((time): time is number => time !== undefined);
-    const commonEndTime = definedEndTimes[0];
-    if (definedEndTimes.length < 2 || commonEndTime === undefined || definedEndTimes.some((time) => time !== commonEndTime)) return;
+    if (definedEndTimes.length < 2) return;
 
-    const startsByTime = new Map<number, string>();
-    group.forEach((course) => {
-      const startTime = parseDate(course.startDate);
-      if (startTime !== undefined && !startsByTime.has(startTime)) startsByTime.set(startTime, course.startDate!);
-    });
-    const starts = [...startsByTime.keys()].sort((left, right) => left - right);
-    if (starts.length < 2) return;
+    // Moodle pode devolver mais de uma sequência dentro da mesma turma
+    // (por exemplo, módulos configurados com finais diferentes). Cada
+    // sequência deve ser inferida separadamente.
+    const distinctEndTimes = [...new Set(definedEndTimes)];
+    const sequences = distinctEndTimes.length === 1
+      ? [group]
+      : distinctEndTimes.map((endTime) => group.filter((course) => parseDate(course.endDate) === endTime));
 
-    group.forEach((course) => {
-      const startTime = parseDate(course.startDate);
-      if (startTime === undefined) return;
-      const nextStart = starts.find((candidate) => candidate > startTime);
-      if (nextStart !== undefined) adjustedEndDates.set(course, startsByTime.get(nextStart)!);
+    sequences.forEach((sequence) => {
+      const startsByTime = new Map<number, string>();
+      sequence.forEach((course) => {
+        const startTime = parseDate(course.startDate);
+        if (startTime !== undefined && !startsByTime.has(startTime)) startsByTime.set(startTime, course.startDate!);
+      });
+      const starts = [...startsByTime.keys()].sort((left, right) => left - right);
+      if (starts.length < 2) return;
+
+      sequence.forEach((course) => {
+        const startTime = parseDate(course.startDate);
+        if (startTime === undefined) return;
+        const nextStart = starts.find((candidate) => candidate > startTime);
+        if (nextStart !== undefined) adjustedEndDates.set(course, startsByTime.get(nextStart)!);
+      });
     });
   });
 
