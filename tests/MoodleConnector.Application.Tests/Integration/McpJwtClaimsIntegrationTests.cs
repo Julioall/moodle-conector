@@ -313,6 +313,50 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
     }
 
     [Fact]
+    public async Task Deve_usar_a_conexao_e_os_scopes_do_token_sem_exigir_grupo_de_acesso()
+    {
+        var factory = BuildJwtFactory(requireApiKey: false);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new(
+            "Bearer",
+            CreateJwt("jwt-client", deniedPlatformPermission: "tool.courses.view"));
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+
+        var sessionId = await InitializeMcpSessionAsync(client);
+        await NotifyInitializedAsync(client, sessionId);
+
+        var payload = """
+        {
+          "jsonrpc": "2.0",
+          "id": "token-authority-1",
+          "method": "tools/call",
+          "params": {
+            "name": "list_my_courses",
+            "arguments": { "limite": 1, "pagina": 1, "moodleAlias": "default" }
+          }
+        }
+        """;
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            request.Headers.Add("Mcp-Session-Id", sessionId);
+        }
+
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain("platform_permission_denied", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("moodle_connection_not_linked", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Deve_rejeitar_jwt_valido_sem_vinculo_moodle()
     {
         var factory = BuildJwtFactory(requireApiKey: false);
@@ -850,7 +894,10 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         });
     }
 
-    private static string CreateJwt(string? connectorClientId, bool includeEmail = true)
+    private static string CreateJwt(
+        string? connectorClientId,
+        bool includeEmail = true,
+        string? deniedPlatformPermission = null)
     {
         var claims = new List<Claim>
         {
@@ -879,6 +926,11 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         if (includeEmail)
         {
             claims.Add(new Claim("email", "teacher@example.com"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(deniedPlatformPermission))
+        {
+            claims.Add(new Claim("platform_permission_deny", deniedPlatformPermission));
         }
 
         if (!string.IsNullOrWhiteSpace(connectorClientId))

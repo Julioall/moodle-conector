@@ -111,7 +111,7 @@ export function AuthPage() {
                 {isRegister && <div className="space-y-2"><Label htmlFor="password-confirmation">Confirmar senha</Label><Input id="password-confirmation" required minLength={12} type="password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" /></div>}
               </>}
               {isMoodle && <>
-                <div className="rounded-md border border-primary/20 bg-primary/[0.03] p-3 text-sm text-muted-foreground">Depois de conectar, você poderá criar grupos de acesso em Configurações. Nenhuma operação de escrita no Moodle será habilitada nesta etapa.</div>
+                <div className="rounded-md border border-primary/20 bg-primary/[0.03] p-3 text-sm text-muted-foreground">Depois de conectar, as tools usam os escopos do token e as capabilities disponíveis no Moodle. Operações de escrita continuam seguindo confirmação e auditoria.</div>
                 <div className="space-y-2"><Label htmlFor="moodle-alias">Nome da conexão</Label><Input id="moodle-alias" required value={moodleAlias} onChange={(event) => setMoodleAlias(event.target.value)} placeholder="Ex.: Campus principal" /></div>
                 <div className="space-y-2"><Label htmlFor="moodle-base-url">URL base do Moodle</Label><Input id="moodle-base-url" required type="url" value={moodleBaseUrl} onChange={(event) => setMoodleBaseUrl(event.target.value)} placeholder="https://moodle.exemplo.com" /></div>
                 <div className="space-y-2"><Label htmlFor="moodle-username">Usuário Moodle</Label><Input id="moodle-username" required value={moodleUsername} onChange={(event) => setMoodleUsername(event.target.value)} autoComplete="username" /></div>

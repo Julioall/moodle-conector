@@ -336,11 +336,11 @@ var mcpServerBuilder = builder.Services
                 }
 
                 var httpContext = request.Services?.GetService<IHttpContextAccessor>()?.HttpContext;
-                if (!HasPlatformToolPermission(httpContext?.User, metadata.RequiredPlatformPermission))
+                if (!HasLinkedMoodleConnection(httpContext?.User))
                 {
                     return ToolResultHelper.Error<object>(
-                        $"O usuário não possui a permissão de plataforma '{metadata.RequiredPlatformPermission}'.",
-                        errorCode: "platform_permission_denied");
+                        "A tool exige uma conexão Moodle autenticada e vinculada ao token.",
+                        errorCode: "moodle_connection_not_linked");
                 }
 
                 if (httpContext is not null &&
@@ -518,9 +518,9 @@ const string mcpPath = "/mcp";
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Rehydrate group/direct permissions for cookie and JWT principals at the
-// request boundary. This makes revocations effective without waiting for a
-// cookie/JWT lifetime to elapse; the database remains the source of truth.
+// Rehydrate local account metadata at the request boundary. Portal endpoints
+// still use the account model for their own authorization, while MCP tool
+// access is decided by the linked connection, token scopes and Moodle.
 app.Use(async (context, next) =>
 {
     if ((context.Request.Path.StartsWithSegments("/api") ||
@@ -4689,6 +4689,15 @@ static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permiss
         return false;
     return principal.FindAll("platform_permission")
         .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase));
+}
+
+static bool HasLinkedMoodleConnection(ClaimsPrincipal? principal)
+{
+    if (principal?.Identity?.IsAuthenticated != true)
+        return false;
+
+    var connectorClientId = principal.FindFirst("connector_client_id")?.Value;
+    return !string.IsNullOrWhiteSpace(connectorClientId);
 }
 
 static bool HasRequiredOAuthScopes(ClaimsPrincipal principal, string toolName, MoodleToolMetadataAttribute metadata)
