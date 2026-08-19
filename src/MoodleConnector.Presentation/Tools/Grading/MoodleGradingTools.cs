@@ -6,6 +6,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -752,6 +753,7 @@ public sealed class MoodleGradingTools(
 
         var items = new List<EntregaCorrigivelItem>();
         var warnings = new List<string>();
+        var failedAssignments = new List<EntregaCorrigivelFalha>();
         var failedAssignmentCount = 0;
         Exception? firstFailure = null;
 
@@ -785,14 +787,22 @@ public sealed class MoodleGradingTools(
                 {
                     failedAssignmentCount++;
                     firstFailure ??= exception;
-                    warnings.Add($"Nao foi possivel listar entregas da tarefa {assignmentId} neste momento.");
+                    var failure = MoodleErrorContract.Describe(exception);
+                    failedAssignments.Add(new EntregaCorrigivelFalha(
+                        assignmentId,
+                        failure.ErrorCode,
+                        failure.Message));
+                    warnings.Add($"Nao foi possivel listar entregas da tarefa {assignmentId} neste momento (codigo: {failure.ErrorCode}).");
                     break;
                 }
 
                 if (submissions is null)
                 {
                     failedAssignmentCount++;
-                    warnings.Add($"Tarefa {assignmentId} nao encontrada para o usuario atual.");
+                    const string errorCode = "assignment_not_found";
+                    const string message = "A tarefa nao foi encontrada ou nao esta acessivel para o usuario atual.";
+                    failedAssignments.Add(new EntregaCorrigivelFalha(assignmentId, errorCode, message));
+                    warnings.Add($"Tarefa {assignmentId} nao encontrada para o usuario atual (codigo: {errorCode}).");
                     break;
                 }
 
@@ -848,7 +858,10 @@ public sealed class MoodleGradingTools(
                 Late: orderedItems.Count(item => item.Late)),
             new EntregaCorrigivelPermissoes(
                 CanCreateBatch: true,
-                CanCommitToMoodle: false),
+                CanCommitToMoodle: false,
+                CommitStatus: "requires_sandbox_validation",
+                CommitReason: "O lancamento em lote ainda nao foi validado em uma tarefa sandbox. A disponibilidade de funcoes e da conexao com escrita nao libera producao automaticamente."),
+            failedAssignments,
             pagedItems);
 
         if (pagedItems.Any(item => item.StudentName is null))
@@ -1506,6 +1519,7 @@ public sealed class MoodleGradingTools(
         [property: JsonPropertyName("hasMore")] bool HasMore,
         [property: JsonPropertyName("counters")] EntregaCorrigivelContadores Counters,
         [property: JsonPropertyName("permissions")] EntregaCorrigivelPermissoes Permissions,
+        [property: JsonPropertyName("failedAssignments")] IReadOnlyList<EntregaCorrigivelFalha> FailedAssignments,
         [property: JsonPropertyName("items")] IReadOnlyList<EntregaCorrigivelItem> Items);
 
     public sealed record EntregaCorrigivelContadores(
@@ -1517,7 +1531,14 @@ public sealed class MoodleGradingTools(
 
     public sealed record EntregaCorrigivelPermissoes(
         [property: JsonPropertyName("canCreateBatch")] bool CanCreateBatch,
-        [property: JsonPropertyName("canCommitToMoodle")] bool CanCommitToMoodle);
+        [property: JsonPropertyName("canCommitToMoodle")] bool CanCommitToMoodle,
+        [property: JsonPropertyName("commitStatus")] string CommitStatus,
+        [property: JsonPropertyName("commitReason")] string CommitReason);
+
+    public sealed record EntregaCorrigivelFalha(
+        [property: JsonPropertyName("assignmentId")] string AssignmentId,
+        [property: JsonPropertyName("errorCode")] string ErrorCode,
+        [property: JsonPropertyName("message")] string Message);
 
     public sealed record EntregaCorrigivelItem(
         [property: JsonPropertyName("courseId")] string CourseId,

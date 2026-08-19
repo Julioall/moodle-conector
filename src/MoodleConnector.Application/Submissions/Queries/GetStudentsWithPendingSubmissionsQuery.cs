@@ -167,6 +167,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         var feedbackStatusUnavailable = false;
 
         IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches;
+        var submissionFailures = new List<string>();
         try
         {
             submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
@@ -187,6 +188,13 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
 
         foreach (var batch in submissionBatches)
         {
+            if (!string.IsNullOrWhiteSpace(batch.ErrorCode))
+            {
+                submissionFailures.Add(
+                    $"{batch.AssignmentId} ({batch.ErrorCode})");
+                continue;
+            }
+
             if (!contextsByAssignmentId.TryGetValue(batch.AssignmentId, out var context))
             {
                 continue;
@@ -291,6 +299,16 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             warning = string.IsNullOrWhiteSpace(warning)
                 ? "Não foi possível confirmar todos os feedbacks das atividades extras; os itens sem confirmação foram omitidos da contagem."
                 : $"{warning} Não foi possível confirmar todos os feedbacks das atividades extras; os itens sem confirmação foram omitidos da contagem.";
+        }
+
+        if (submissionFailures.Count > 0)
+        {
+            var submissionWarning = "Não foi possível ler as submissões de " +
+                $"{submissionFailures.Count} atividade(s): {string.Join(", ", submissionFailures)}. " +
+                "As demais atividades foram processadas normalmente.";
+            warning = string.IsNullOrWhiteSpace(warning)
+                ? submissionWarning
+                : $"{warning} {submissionWarning}";
         }
 
         var suggestedRecipients = studentsWithPending.Select(s => s.StudentId).ToList();

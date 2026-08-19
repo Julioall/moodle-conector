@@ -56,4 +56,6 @@ public interface IMoodleAssignmentSubmissionsGateway
 
 public sealed record AssignmentSubmissionsBatch(
     string AssignmentId,
-    IReadOnlyList<AssignmentSubmissionRecord> Submissions);
+    IReadOnlyList<AssignmentSubmissionRecord> Submissions,
+    string? ErrorCode = null,
+    string? ErrorMessage = null);
