@@ -1,28 +1,26 @@
 ---
 name: moodle-students
-description: Resolve course participants, enrollment, groups and student activity context without changing membership.
+description: Resolver participantes, estudantes, matriculas, grupos, identidade e sinais de acesso no Moodle sem alterar membros ou preferencias.
 ---
 
 # moodle-students
 
-Use this skill for questions about students, participants, enrollment, groups, attendance context, and recent access. It is read-only and must not infer a student identity from a display name when Moodle returned an ambiguous match.
+Use para roster, estudantes, grupos, matricula, acesso recente e resolucao de identidade.
 
-## Routing
+## Roteamento
 
-- Course participants or enrolled users: `core_enrol_get_enrolled_users` through the participants flow.
-- Course roster or student-only view: specialized participants tool.
-- Groups and group membership: `core_group_get_course_groups` and the registered group flow.
-- User lookup: `core_enrol_search_users` or `core_user_get_users_by_field`, subject to the current connection capability.
-- Submission ownership: route to `moodle-assignments`; grades and risk decisions route to their respective skills.
+- Participantes: `list_course_participants`/`list_course_students` sobre `core_enrol_get_enrolled_users`.
+- Grupos: `list_course_groups` e `get_group_members` sobre `core_group_get_course_groups` e fluxos de grupo.
+- Busca de usuario: `core_enrol_search_users`, `core_user_get_users_by_field` ou `core_user_get_course_user_profiles`, se disponiveis.
+- Acesso recente: `list_students_without_recent_access`; o resultado depende do campo de ultimo acesso retornado pelo Moodle.
+- Entrega, nota, risco, follow-up e mensagem devem ser encaminhados as skills de dominio.
 
-## Identity and connection rules
+## Identidade
 
-Resolve the requested Moodle alias before querying. Preserve Moodle user IDs as the authoritative identity. If a name, email, or short identifier matches more than one person, return the ambiguity and ask the caller to refine it. Never use a user ID from another connection.
+Resolva a conexao antes de consultar e mantenha o Moodle `userid` como identificador autoritativo. Se nome, email ou identificador curto tiver mais de um resultado, retorne a ambiguidade e peca refinamento. Nunca reutilize um `userid` de outra conexao.
 
-## Completeness
+## Completude e classificacao
 
-Roster and group endpoints may paginate or return capability-dependent fields. Mark partial results, retain the source course and connection, and do not convert an absent row into “not enrolled” until the relevant pages are exhausted.
+Resultados de roster/grupos podem paginar e campos como roles, groups e lastaccess podem faltar. Diferencie `zero_observado`, `dado_indisponivel`, `funcao_indisponivel`, `sem_permissao` e `falha_parcial`. Nao trate ausencia de papel ou acesso como prova de que o aluno nao existe ou nao esta matriculado.
 
-## Boundaries
-
-This skill decides which student-oriented flow should answer. It does not authorize writes, expose credentials, or bypass `SafeReadExecutor`. Enrollment changes and preference updates belong to controlled write workflows and are denied by generic read execution.
+Nao altere matriculas, grupos ou preferencias por esta skill; escritas devem seguir fluxo controlado especifico.

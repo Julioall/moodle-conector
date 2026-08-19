@@ -57,7 +57,8 @@ env:
   POSTGRES_DB: ${{ vars.POSTGRES_DB || 'moodle_connector' }}
   POSTGRES_USER: ${{ vars.POSTGRES_USER || 'moodle_connector' }}
   COMPOSE_PROJECT_NAME: ${{ vars.COMPOSE_PROJECT_NAME || 'moodle-connector' }}
-  RESET_DATABASE_ON_DEPLOY: ${{ vars.RESET_DATABASE_ON_DEPLOY || 'true' }}
+  # Never delete the production database by default. A reset must be explicitly enabled per environment.
+  RESET_DATABASE_ON_DEPLOY: ${{ vars.RESET_DATABASE_ON_DEPLOY || 'false' }}
   VPS_AUTH_SECRET: ${{ secrets.VPS_SSH_KEY }}
 
 jobs:

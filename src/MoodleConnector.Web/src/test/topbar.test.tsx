@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { TopBar } from '../components/layout/TopBar';
 import { connectionsGateway } from '../features/connections/connections-gateway';
 import { SidebarProvider } from '../components/ui/sidebar';
+import { EditModeProvider } from '../components/layout/edit-mode';
 
 vi.mock('../features/connections/connections-gateway', () => ({
   connectionsGateway: { list: vi.fn() },
@@ -31,7 +32,7 @@ describe('TopBar', () => {
     const user = userEvent.setup();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-    render(<QueryClientProvider client={client}><SidebarProvider><MemoryRouter><TopBar /></MemoryRouter></SidebarProvider></QueryClientProvider>);
+    render(<QueryClientProvider client={client}><EditModeProvider><SidebarProvider><MemoryRouter><TopBar /></MemoryRouter></SidebarProvider></EditModeProvider></QueryClientProvider>);
 
     expect((await screen.findAllByText('SENAI Goiás')).length).toBeGreaterThan(0);
     expect(screen.getByRole('combobox', { name: 'Selecionar Moodle' })).toBeInTheDocument();

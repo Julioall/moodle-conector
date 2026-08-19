@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Classroom Audit"
+  short_description: "Audit Moodle classroom health and coverage"
+  default_prompt: "Use $moodle-classroom-audit to inspect Moodle classroom structure, checklist status, participation evidence, and coverage."

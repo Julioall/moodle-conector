@@ -6,21 +6,126 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Reports.Queries;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Infrastructure.Reports;
 
 namespace MoodleConnector.Presentation.Tools.Reports;
 
+public sealed record CourseGradesExcelExportResult(
+    string CourseId,
+    DateTimeOffset GeneratedAt,
+    string FileName,
+    string ContentType,
+    long FileSizeBytes,
+    int TotalStudents,
+    int StudentsWithGrade,
+    int StudentsWithoutGrade,
+    decimal? AveragePercentage,
+    string? Warning);
+
 /// <summary>
-/// Tools de relatÃ³rios pedagÃ³gicos para tutores SENAI CTM.
-/// Fase 10 â€” DomÃ­nio RelatÃ³rios.
+/// Tools de relatórios pedagógicos para tutores SENAI CTM.
+/// Fase 10 — Domínio Relatórios.
 /// </summary>
 [McpServerToolType]
 public sealed class MoodleReportTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver,
-    MoodleConnector.Application.Abstractions.IMoodleReportBuilderGateway reportBuilderClient)
+    IMoodleUserResolver moodleUserResolver)
 {
-    // â”€â”€ RelatÃ³rio semanal de desempenho â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    private const string ExcelContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    [McpServerTool(
+        Name = "generate_course_grades_report",
+        Title = "Generate Course Grades Report",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<GenerateCourseGradesReportResult>))]
+    [Description("Gera um relatorio estruturado de notas do curso por estudante. Usa o item total do curso retornado pelo Moodle; nao soma notas de atividades localmente. Para um arquivo Excel, use export_course_grades_excel.")]
+    public Task<CallToolResult> GerarRelatorioNotasCursoAsync(
+        [Description("Identificador do curso Moodle.")] string courseId,
+        [Description("Tamanho das paginas usadas na leitura de participantes. De 1 a 100. Padrao: 100.")] int pageSize = 100,
+        [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+        => ExecuteReportAsync<GenerateCourseGradesReportResult>(
+            courseId,
+            moodleAlias,
+            () => mediator.Send(new GenerateCourseGradesReportQuery(courseId, pageSize), cancellationToken),
+            result => $"Relatorio de notas - curso {courseId}: {result.TotalStudents} estudante(s), " +
+                      $"{result.StudentsWithGrade} com nota e {result.StudentsWithoutGrade} sem nota.",
+            cancellationToken);
+
+    [McpServerTool(
+        Name = "export_course_grades_excel",
+        Title = "Export Course Grades to Excel",
+        ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CourseGradesExcelExportResult>))]
+    [Description("Gera e entrega um arquivo Excel formatado com as notas totais do curso por estudante. O arquivo e anexado ao resultado MCP; a regra de notas e a mesma usada pelo relatorio Excel do frontend.")]
+    public async Task<CallToolResult> ExportarRelatorioNotasExcelAsync(
+        [Description("Identificador do curso Moodle.")] string courseId,
+        [Description("Tamanho das paginas usadas na leitura de participantes. De 1 a 100. Padrao: 100.")] int pageSize = 100,
+        [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+            return ToolResultHelper.Error<CourseGradesExcelExportResult>("Informe um identificador de curso valido.");
+
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+            return ToolResultHelper.Error<CourseGradesExcelExportResult>("Usuario nao autenticado.");
+
+        try
+        {
+            var report = await mediator.Send(
+                new GenerateCourseGradesReportQuery(courseId, pageSize),
+                cancellationToken);
+            var fileName = $"relatorio_notas_{Slugify(courseId)}_{report.GeneratedAt:yyyyMMdd-HHmmss}.xlsx";
+            var workbook = ExcelGradeReportBuilder.BuildWorkbook(
+                courseId,
+                report.GeneratedAt,
+                [new ExcelGradeUnit(courseId, courseId, report.Students, report.Warning)]);
+            var data = new CourseGradesExcelExportResult(
+                report.CourseId,
+                report.GeneratedAt,
+                fileName,
+                ExcelContentType,
+                workbook.LongLength,
+                report.TotalStudents,
+                report.StudentsWithGrade,
+                report.StudentsWithoutGrade,
+                report.AveragePercentage,
+                report.Warning);
+            var response = new ToolResponse<CourseGradesExcelExportResult>(
+                "ok",
+                data,
+                report.Warning is null ? [] : [report.Warning],
+                AuditId: null,
+                DateTimeOffset.UtcNow);
+            var resource = BlobResourceContents.FromBytes(
+                workbook,
+                $"mcp://moodle-connector/reports/{Guid.NewGuid():N}/{fileName}",
+                ExcelContentType);
+
+            return new CallToolResult
+            {
+                Content =
+                [
+                    new TextContentBlock { Text = $"Arquivo Excel de notas gerado: {fileName} ({report.TotalStudents} estudante(s))." },
+                    new EmbeddedResourceBlock { Resource = resource }
+                ],
+                StructuredContent = JsonSerializer.SerializeToElement(response),
+                IsError = false
+            };
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<CourseGradesExcelExportResult>(exception);
+        }
+    }
+
+    // â”€â”€ Relatório semanal de desempenho â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [McpServerTool(
         Name = "generate_weekly_performance_report",
@@ -28,12 +133,12 @@ public sealed class MoodleReportTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GenerateWeeklyPerformanceReportResult>))]
-    [Description("Gera relatÃ³rio semanal de desempenho da turma: cruza acesso ao AVA, notas por SA e entregas pendentes. Classifica cada estudante como 'ok', 'attention' ou 'risk'. Retorna 3 listas de destinatÃ¡rios sugeridos para envio de mensagem (acesso, nota e pendÃªncia). AVISO: uma consulta de boletim por estudante â€” pode ser lento para turmas grandes.")]
+    [Description("Gera relatório semanal de desempenho da turma: cruza acesso ao AVA, notas por SA e entregas pendentes. Classifica cada estudante como 'ok', 'attention' ou 'risk'. Retorna 3 listas de destinatários sugeridos para envio de mensagem (acesso, nota e pendência). AVISO: uma consulta de boletim por estudante — pode ser lento para turmas grandes.")]
     public Task<CallToolResult> GerarRelatorioSemanalDesempenhoAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
-        [Description("Nota mÃ­nima esperada em porcentagem (0-100). PadrÃ£o: 60.")] decimal minGradePercent = 60m,
-        [Description("Dias sem acesso para considerar inativo. PadrÃ£o: 7.")] int inactiveDaysThreshold = 7,
-        [Description("MÃ¡ximo de estudantes a analisar. PadrÃ£o: 60.")] int maxStudentsToAnalyze = 60,
+        [Description("Nota mínima esperada em porcentagem (0-100). Padrão: 60.")] decimal minGradePercent = 60m,
+        [Description("Dias sem acesso para considerar inativo. Padrão: 7.")] int inactiveDaysThreshold = 7,
+        [Description("Máximo de estudantes a analisar. Padrão: 60.")] int maxStudentsToAnalyze = 60,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<GenerateWeeklyPerformanceReportResult>(
@@ -41,12 +146,12 @@ public sealed class MoodleReportTools(
             () => mediator.Send(
                 new GenerateWeeklyPerformanceReportQuery(courseId, minGradePercent, inactiveDaysThreshold, maxStudentsToAnalyze),
                 cancellationToken),
-            result => $"RelatÃ³rio semanal â€” curso {courseId}: {result.TotalStudents} estudante(s). " +
-                      $"{result.StudentsAtRisk} em risco, {result.StudentsWithAttention} em atenÃ§Ã£o. " +
+            result => $"Relatório semanal — curso {courseId}: {result.TotalStudents} estudante(s). " +
+                      $"{result.StudentsAtRisk} em risco, {result.StudentsWithAttention} em atenção. " +
                       $"Gerado em: {result.GeneratedAt:dd/MM/yyyy HH:mm} UTC.",
             cancellationToken);
 
-    // â”€â”€ RelatÃ³rio de conselho de classe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Relatório de conselho de classe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [McpServerTool(
         Name = "generate_class_council_report",
@@ -54,12 +159,12 @@ public sealed class MoodleReportTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GenerateClassCouncilReportResult>))]
-    [Description("Gera relatÃ³rio de conselho de classe com situaÃ§Ã£o pedagÃ³gica indicativa de cada estudante: 'regular', 'attention', 'recovery_needed' ou 'at_risk'. ATENÃ‡ÃƒO: nÃ£o constitui decisÃ£o oficial de aprovaÃ§Ã£o ou reprovaÃ§Ã£o. Deve ser interpretado pelo tutor e docente presencial.")]
+    [Description("Gera relatório de conselho de classe com situação pedagógica indicativa de cada estudante: 'regular', 'attention', 'recovery_needed' ou 'at_risk'. ATENÇÃO: não constitui decisão oficial de aprovação ou reprovação. Deve ser interpretado pelo tutor e docente presencial.")]
     public Task<CallToolResult> GerarRelatorioConselhoClasseAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
-        [Description("Nota mÃ­nima esperada em porcentagem (0-100). PadrÃ£o: 60.")] decimal minGradePercent = 60m,
-        [Description("Dias sem acesso para considerar inativo. PadrÃ£o: 7.")] int inactiveDaysThreshold = 7,
-        [Description("MÃ¡ximo de estudantes a analisar. PadrÃ£o: 60.")] int maxStudentsToAnalyze = 60,
+        [Description("Nota mínima esperada em porcentagem (0-100). Padrão: 60.")] decimal minGradePercent = 60m,
+        [Description("Dias sem acesso para considerar inativo. Padrão: 7.")] int inactiveDaysThreshold = 7,
+        [Description("Máximo de estudantes a analisar. Padrão: 60.")] int maxStudentsToAnalyze = 60,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<GenerateClassCouncilReportResult>(
@@ -68,7 +173,7 @@ public sealed class MoodleReportTools(
                 new GenerateClassCouncilReportQuery(courseId, minGradePercent, inactiveDaysThreshold, maxStudentsToAnalyze),
                 cancellationToken),
             result => $"Conselho de classe - curso {courseId}: {result.TotalStudents} estudante(s). " +
-                      $"Regular: {result.Regular} | AtenÃ§Ã£o: {result.NeedAttention} | RecuperaÃ§Ã£o: {result.NeedRecovery} | Risco: {result.AtRisk}.",
+                      $"Regular: {result.Regular} | Atenção: {result.NeedAttention} | Recuperação: {result.NeedRecovery} | Risco: {result.AtRisk}.",
             cancellationToken);
 
 
@@ -78,11 +183,11 @@ public sealed class MoodleReportTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<CourseOverviewResult>))]
-    [Description("Gera resumo executivo e rÃ¡pido do curso: participantes ativos, acesso ao AVA e aÃ§Ãµes sugeridas. NÃ£o consulta boletim individual â€” use gerar_relatorio_semanal_desempenho para dados detalhados.")]
+    [Description("Gera resumo executivo e rápido do curso: participantes ativos, acesso ao AVA e ações sugeridas. Não consulta boletim individual — use gerar_relatorio_semanal_desempenho para dados detalhados.")]
     public Task<CallToolResult> GerarResumoCursoAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
-        [Description("Dias sem acesso para considerar inativo. PadrÃ£o: 7.")] int inactiveDaysThreshold = 7,
-        [Description("MÃ¡ximo de estudantes a analisar. PadrÃ£o: 100.")] int maxStudentsToAnalyze = 100,
+        [Description("Dias sem acesso para considerar inativo. Padrão: 7.")] int inactiveDaysThreshold = 7,
+        [Description("Máximo de estudantes a analisar. Padrão: 100.")] int maxStudentsToAnalyze = 100,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<CourseOverviewResult>(
@@ -92,10 +197,10 @@ public sealed class MoodleReportTools(
                 cancellationToken),
             result => $"Resumo - curso {courseId}: {result.TotalActiveStudents} estudante(s). " +
                       $"{result.StudentsWhoAccessed} acessaram, {result.StudentsNeverAccessed} nunca acessaram, " +
-                      $"{result.StudentsInactiveDays} inativos hÃ¡ +{result.InactiveDaysThreshold} dias.",
+                      $"{result.StudentsInactiveDays} inativos há +{result.InactiveDaysThreshold} dias.",
             cancellationToken);
 
-    // â”€â”€ RelatÃ³rio de pÃ³s-execuÃ§Ã£o â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Relatório de pós-execução â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [McpServerTool(
         Name = "generate_full_post_execution_report",
@@ -103,11 +208,11 @@ public sealed class MoodleReportTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GeneratePostExecutionReportResult>))]
-    [Description("Gera relatÃ³rio de pÃ³s-execuÃ§Ã£o com situaÃ§Ã£o provÃ¡vel de cada estudante ao fim do curso: 'likely_complete', 'pending_recovery', 'at_risk' ou 'unknown'. ATENÃ‡ÃƒO: indicativo â€” nÃ£o constitui decisÃ£o oficial. Deve ser validado pelo tutor e coordenaÃ§Ã£o.")]
+    [Description("Gera relatório de pós-execução com situação provável de cada estudante ao fim do curso: 'likely_complete', 'pending_recovery', 'at_risk' ou 'unknown'. ATENÇÃO: indicativo — não constitui decisão oficial. Deve ser validado pelo tutor e coordenação.")]
     public Task<CallToolResult> GerarRelatorioPosExecucaoCompletoAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
-        [Description("Nota mÃ­nima esperada em porcentagem (0-100). PadrÃ£o: 60.")] decimal minGradePercent = 60m,
-        [Description("MÃ¡ximo de estudantes a analisar. PadrÃ£o: 60.")] int maxStudentsToAnalyze = 60,
+        [Description("Nota mínima esperada em porcentagem (0-100). Padrão: 60.")] decimal minGradePercent = 60m,
+        [Description("Máximo de estudantes a analisar. Padrão: 60.")] int maxStudentsToAnalyze = 60,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<GeneratePostExecutionReportResult>(
@@ -115,30 +220,25 @@ public sealed class MoodleReportTools(
             () => mediator.Send(
                 new GeneratePostExecutionReportQuery(courseId, minGradePercent, maxStudentsToAnalyze),
                 cancellationToken),
-            result => $"PÃ³s-execuÃ§Ã£o â€” curso {courseId}: {result.TotalStudents} estudante(s). " +
-                      $"ProvÃ¡vel conclusÃ£o: {result.LikelyComplete} | RecuperaÃ§Ã£o: {result.PendingRecovery} | " +
+            result => $"Pós-execução — curso {courseId}: {result.TotalStudents} estudante(s). " +
+                      $"Provável conclusão: {result.LikelyComplete} | Recuperação: {result.PendingRecovery} | " +
                       $"Risco: {result.AtRisk} | Dados insuficientes: {result.Unknown}.",
             cancellationToken);
 
     
-    [McpServerTool(
-        Name = "download_moodle_builder_report",
-        Title = "Download Moodle Builder Report",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<MoodleConnector.Application.Abstractions.MoodleReportResult>))]
-    [Description("Baixa o JSON de qualquer relatÃ³rio personalizado do Moodle Report Builder acessÃ­vel ao usuÃ¡rio do token. Retorna os registros paginados limitados ao 'pageSize'.")]
+    [Description("Baixa o JSON de qualquer relatório personalizado do Moodle Report Builder acessível ao usuário do token. Retorna os registros paginados limitados ao 'pageSize'.")]
+ #if false
     public async Task<CallToolResult> BaixarRelatorioBuilderAsync(
-        [Description("Identificador numÃ©rico do relatÃ³rio.")] int reportId,
-        [Description("DicionÃ¡rio opcional de filtros em formato JSON (ex: '{\"user:firstname_operator\":2, \"user:firstname_value\":\"JoÃ£o\"}').")] string? filtersJson = null,
-        [Description("Quantidade mÃ¡xima de registros a retornar. PadrÃ£o: 5000.")] int pageSize = 5000,
+        [Description("Identificador numérico do relatório.")] int reportId,
+        [Description("Dicionário opcional de filtros em formato JSON (ex: '{\"user:firstname_operator\":2, \"user:firstname_value\":\"João\"}').")] string? filtersJson = null,
+        [Description("Quantidade máxima de registros a retornar. Padrão: 5000.")] int pageSize = 5000,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
-            return ToolResultHelper.Error<MoodleConnector.Application.Abstractions.MoodleReportResult>("UsuÃ¡rio nÃ£o autenticado.");
+            return ToolResultHelper.Error<MoodleConnector.Application.Abstractions.MoodleReportResult>("Usuário não autenticado.");
 
         MoodleConnector.Application.Abstractions.MoodleReportResult data;
         try
@@ -151,18 +251,30 @@ public sealed class MoodleReportTools(
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            return ToolResultHelper.Error<MoodleConnector.Application.Abstractions.MoodleReportResult>($"NÃ£o foi possÃ­vel baixar o relatÃ³rio: {ex.Message}");
+            return ToolResultHelper.Error<MoodleConnector.Application.Abstractions.MoodleReportResult>($"Não foi possível baixar o relatório: {ex.Message}");
         }
 
         var response = new ToolResponse<MoodleConnector.Application.Abstractions.MoodleReportResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = $"RelatÃ³rio {reportId} baixado com sucesso: {data.Rows.Count} registro(s) retornado(s)." }],
+            Content = [new TextContentBlock { Text = $"Relatório {reportId} baixado com sucesso: {data.Rows.Count} registro(s) retornado(s)." }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
     }
 
+
+ #endif
+
+    private static string Slugify(string value)
+    {
+        var slug = new string(value
+            .Trim()
+            .Select(character => char.IsLetterOrDigit(character) ? character : '_')
+            .ToArray());
+        slug = string.Join('_', slug.Split('_', StringSplitOptions.RemoveEmptyEntries));
+        return string.IsNullOrWhiteSpace(slug) ? "curso" : slug[..Math.Min(slug.Length, 60)];
+    }
 
     private async Task<CallToolResult> ExecuteReportAsync<TResult>(
         string courseId,
@@ -172,19 +284,19 @@ public sealed class MoodleReportTools(
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(courseId))
-            return ToolResultHelper.Error<TResult>("Informe um identificador de curso vÃ¡lido.");
+            return ToolResultHelper.Error<TResult>("Informe um identificador de curso válido.");
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
-            return ToolResultHelper.Error<TResult>("UsuÃ¡rio nÃ£o autenticado.");
+            return ToolResultHelper.Error<TResult>("Usuário não autenticado.");
 
         TResult data;
         try { data = await execute(); }
         catch (OperationCanceledException) { throw; }
         catch
         {
-            return ToolResultHelper.Error<TResult>("NÃ£o foi possÃ­vel gerar o relatÃ³rio neste momento.");
+            return ToolResultHelper.Error<TResult>("Não foi possível gerar o relatório neste momento.");
         }
 
         var response = new ToolResponse<TResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);

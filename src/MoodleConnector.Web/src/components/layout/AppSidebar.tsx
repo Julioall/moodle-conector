@@ -7,9 +7,7 @@ import {
   LayoutDashboard,
   LogOut,
   MessageSquare,
-  Plug,
   Settings,
-  Users,
   type LucideIcon,
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
@@ -30,6 +28,7 @@ import {
   useSidebar,
 } from '@/components/ui/sidebar';
 import { useSession } from '@/features/auth/useSession';
+import { useConnectionScope } from '@/features/connections/useConnectionScope';
 import { APP_PERMISSIONS } from '@/lib/access-control';
 
 type SidebarNavItem = {
@@ -39,22 +38,14 @@ type SidebarNavItem = {
   permission: string;
 };
 
-const operationalItems: SidebarNavItem[] = [
+const mainNavItems: SidebarNavItem[] = [
   { title: 'Resumo da Semana', url: '/', icon: LayoutDashboard, permission: APP_PERMISSIONS.DASHBOARD_VIEW },
   { title: 'Meus Cursos', url: '/meus-cursos', icon: BookOpen, permission: APP_PERMISSIONS.COURSES_CATALOG_VIEW },
   { title: 'Escolas', url: '/escolas', icon: Building2, permission: APP_PERMISSIONS.SCHOOLS_VIEW },
-  { title: 'Alunos', url: '/alunos', icon: Users, permission: APP_PERMISSIONS.STUDENTS_VIEW },
   { title: 'Tarefas', url: '/tarefas', icon: CheckSquare, permission: APP_PERMISSIONS.TASKS_VIEW },
   { title: 'Agenda', url: '/agenda', icon: CalendarDays, permission: APP_PERMISSIONS.AGENDA_VIEW },
-];
-
-const communicationItems: SidebarNavItem[] = [
   { title: 'Mensagens', url: '/mensagens', icon: MessageSquare, permission: APP_PERMISSIONS.MESSAGES_VIEW },
-];
-
-const managementItems: SidebarNavItem[] = [
   { title: 'Relatórios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
-  { title: 'Conexões Moodle', url: '/conexoes', icon: Plug, permission: APP_PERMISSIONS.SERVICES_VIEW },
 ];
 
 const settingsItems: SidebarNavItem[] = [
@@ -63,30 +54,28 @@ const settingsItems: SidebarNavItem[] = [
 
 export function AppSidebar() {
   const { user, logout, can } = useSession();
+  const { connectionRef } = useConnectionScope();
   const { state } = useSidebar();
   const isCollapsed = state === 'collapsed';
 
-  const visibleItems = (items: SidebarNavItem[]) =>
-    user ? items.filter((item) => can(item.permission)) : items;
-
-  const renderGroup = (label: string, items: SidebarNavItem[]) => {
-    const visible = visibleItems(items);
-    if (visible.length === 0) return null;
+  const renderGroup = (label: string | undefined, items: SidebarNavItem[]) => {
+    const visibleItems = user ? items.filter((item) => can(item.permission)) : items;
+    if (visibleItems.length === 0) return null;
 
     return (
       <SidebarGroup>
-        <SidebarGroupLabel className="px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-sidebar-foreground/45">
+        {label && <SidebarGroupLabel className="px-3 text-xs uppercase tracking-wider text-sidebar-foreground/50">
           {!isCollapsed && label}
-        </SidebarGroupLabel>
+        </SidebarGroupLabel>}
         <SidebarGroupContent>
           <SidebarMenu>
-            {visible.map((item) => (
+            {visibleItems.map((item) => (
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton asChild tooltip={item.title}>
                   <NavLink
-                    to={item.url}
+                    to={item.url === '/' && connectionRef ? `/?connectionRef=${encodeURIComponent(connectionRef)}` : item.url}
                     end={item.url === '/'}
-                    className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/75 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+                    className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
                     activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
@@ -110,20 +99,17 @@ export function AppSidebar() {
           </div>
           {!isCollapsed && (
             <div className="flex min-w-0 flex-col">
-              <span className="truncate font-semibold text-sidebar-foreground">Moodle Connector</span>
-              <span className="text-xs text-sidebar-foreground/60">App acadêmico</span>
+              <span className="truncate font-semibold text-primary">Claris</span>
+              <span className="text-xs text-sidebar-foreground/60">Central de Tutoria</span>
             </div>
           )}
         </div>
       </SidebarHeader>
 
       <SidebarContent>
-        {renderGroup('Operacional', operationalItems)}
+        {renderGroup('Menu Principal', mainNavItems)}
         <Separator className="my-2 bg-sidebar-border" />
-        {renderGroup('Comunicação', communicationItems)}
-        {renderGroup('Gestão', managementItems)}
-        <Separator className="my-2 bg-sidebar-border" />
-        {renderGroup('Configurações', settingsItems)}
+        {renderGroup(undefined, settingsItems)}
       </SidebarContent>
 
       <SidebarFooter className="p-4">
@@ -153,4 +139,3 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
-

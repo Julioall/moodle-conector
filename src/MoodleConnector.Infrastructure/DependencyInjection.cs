@@ -91,6 +91,7 @@ public static class DependencyInjection
         services.AddScoped<IUserMemoryDocumentRepository, UserMemoryDocumentRepository>();
         services.AddScoped<IAuthorizationAuditService, AuthorizationAuditService>();
         services.AddScoped<ICurrentUserContext, CurrentUserContext>();
+        services.AddScoped<IConnectorExecutionContext, ConnectorExecutionContext>();
         services.AddScoped<IMoodleUserResolver, MoodleUserResolver>();
         services
             .AddHttpClient<IMoodleRestClient, MoodleRestClient>(ConfigureMoodleApiClient)
@@ -162,6 +163,8 @@ public static class DependencyInjection
             .AddMoodleResilience(moodleProxyResilience);
 
         services.AddScoped<IAccountService, AccountService>();
+        services.AddScoped<ReportJobProcessor>();
+        services.AddHostedService<ReportJobWorkerService>();
         services.AddScoped<ITeamAccessService, TeamAccessService>();
         services.AddScoped<IPlatformPermissionService, PlatformPermissionService>();
 

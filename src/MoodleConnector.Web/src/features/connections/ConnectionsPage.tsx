@@ -1,131 +1,66 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { Badge } from '../../components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
-import { Skeleton } from '../../components/ui/skeleton';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, CheckCircle2, CloudCog, Link2, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, Wifi, WifiOff } from 'lucide-react';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Skeleton } from '@/components/ui/skeleton';
 import { connectionsGateway, type MoodleConnection } from './connections-gateway';
-import './connections-page.css';
 
-const statusLabels: Record<string, string> = {
-  active: 'Ativa',
-  inactive: 'Inativa',
-  unknown: 'Não testada',
-};
+const statusLabels: Record<string, string> = { active: 'Ativa', inactive: 'Inativa', unknown: 'Não testada' };
 
-function formatFreshness(value: string): string {
+function freshness(value?: string) {
+  if (!value) return 'Ainda não testada';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Atualização indisponível';
-  return `Atualizado em ${new Intl.DateTimeFormat('pt-BR', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)}`;
+  return Number.isNaN(date.getTime()) ? 'Atualização indisponível' : `Último teste em ${date.toLocaleString('pt-BR')}`;
 }
 
-function ConnectionCard({ connection, onValidate, onEdit, onRemove, validating }: { connection: MoodleConnection; onValidate: (connectionId: string) => void; onEdit: (connection: MoodleConnection) => void; onRemove: (connection: MoodleConnection) => void; validating: boolean }) {
-  return (
-    <Card className="connection-card">
-      <CardHeader>
-        <div className="connection-card-heading">
-          <div>
-            <CardTitle>{connection.alias}</CardTitle>
-            <span className="connection-ref">{connection.connectionRef}</span>
-          </div>
-          <Badge variant={connection.status === 'active' ? 'default' : 'outline'}>{statusLabels[connection.status] ?? connection.status}</Badge>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <p className="connection-host">{connection.host}</p>
-        <div className="connection-details">
-          {connection.isDefault && <Badge> padrão</Badge>}
-          {connection.capabilities.map((capability) => (
-            <Badge key={`${connection.connectionRef}-${capability}`}>{capability}</Badge>
-          ))}
-        </div>
-        <p className="connection-validation">{connection.lastValidatedAt ? `Último teste em ${formatFreshness(connection.lastValidatedAt).replace('Atualizado em ', '')}` : 'Ainda não testada nesta versão do app'}</p>
-        <div className="connection-actions">
-        <button type="button" className="connection-test" onClick={() => onValidate(connection.connectionId ?? connection.connectionRef)} disabled={validating}>
-          {validating ? 'Testando…' : 'Testar conexão'}
-        </button>
-        <button type="button" className="connection-action-secondary" onClick={() => onEdit(connection)}>Editar</button>
-        <button type="button" className="connection-action-danger" onClick={() => onRemove(connection)}>Remover</button>
-        </div>
-      </CardContent>
-    </Card>
-  );
+function ConnectionCard({ connection, onValidate, onEdit, onRemove, validating }: { connection: MoodleConnection; onValidate: (id: string) => void; onEdit: (connection: MoodleConnection) => void; onRemove: (connection: MoodleConnection) => void; validating: boolean }) {
+  const isOnline = connection.status === 'active';
+  return <Card className="card-interactive h-full"><CardHeader className="pb-4"><div className="flex items-start justify-between gap-3"><div className="flex min-w-0 items-start gap-3"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"><Link2 className="h-5 w-5" /></div><div className="min-w-0"><CardTitle className="truncate text-lg">{connection.alias}</CardTitle><CardDescription className="mt-1 font-mono text-xs">{connection.connectionRef}</CardDescription></div></div><Badge variant={isOnline ? 'default' : 'outline'} className="gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${isOnline ? 'bg-primary-foreground' : 'bg-muted-foreground'}`} />{statusLabels[connection.status] ?? connection.status}</Badge></div></CardHeader><CardContent className="space-y-4"><div className="rounded-md border bg-muted/20 p-3"><p className="truncate text-sm font-medium">{connection.host}</p><p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">{isOnline ? <Wifi className="h-3.5 w-3.5 text-status-success" /> : <WifiOff className="h-3.5 w-3.5" />}{freshness(connection.lastValidatedAt)}</p></div><div className="flex flex-wrap gap-1.5">{connection.isDefault && <Badge variant="secondary">Padrão</Badge>}{connection.capabilities.map((capability) => <Badge key={`${connection.connectionRef}-${capability}`} variant="outline">{capability}</Badge>)}</div><div className="flex flex-wrap gap-2 border-t pt-3"><Button type="button" variant="outline" size="sm" onClick={() => onValidate(connection.connectionId ?? connection.connectionRef)} disabled={validating}><RefreshCw className={validating ? 'animate-spin' : ''} />{validating ? 'Testando…' : 'Testar conexão'}</Button><Button type="button" variant="ghost" size="sm" onClick={() => onEdit(connection)}><Pencil />Editar</Button><Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => onRemove(connection)}><Trash2 />Remover</Button></div></CardContent></Card>;
 }
 
-export function ConnectionsPage() {
-  const queryClient = useQueryClient();
+export function ConnectionsPage({ embedded = false }: { embedded?: boolean }) {
+  const client = useQueryClient();
+  const query = useQuery({ queryKey: ['app', 'connections'], queryFn: connectionsGateway.list, staleTime: 60_000 });
+  const [formOpen, setFormOpen] = useState(false);
   const [alias, setAlias] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isDefault, setIsDefault] = useState(true);
   const [canWrite, setCanWrite] = useState(false);
-  const [success, setSuccess] = useState('');
-  const [validationError, setValidationError] = useState('');
-  const [validatingRef, setValidatingRef] = useState<string>();
   const [editingConnection, setEditingConnection] = useState<MoodleConnection>();
   const [removeTarget, setRemoveTarget] = useState<MoodleConnection>();
   const [removeSummary, setRemoveSummary] = useState<{ memories: number; documents: number; moodleUserLinks: number; auditLogsRetained: number }>();
   const [deleteLinkedData, setDeleteLinkedData] = useState(false);
   const [confirmationText, setConfirmationText] = useState('');
-  const query = useQuery({
-    queryKey: ['app', 'connections'],
-    queryFn: connectionsGateway.list,
-  });
-  const mutation = useMutation({ mutationFn: connectionsGateway.connect, onSuccess: () => { setSuccess('Conexão cadastrada com sucesso.'); setAlias(''); setBaseUrl(''); setUsername(''); setPassword(''); void queryClient.invalidateQueries({ queryKey: ['app', 'connections'] }); } });
-  const updateMutation = useMutation({ mutationFn: ({ id, input }: { id: string; input: Parameters<typeof connectionsGateway.update>[1] }) => connectionsGateway.update(id, input), onSuccess: () => { setSuccess('Conexão atualizada com sucesso.'); setEditingConnection(undefined); setAlias(''); setBaseUrl(''); setUsername(''); setPassword(''); void queryClient.invalidateQueries({ queryKey: ['app', 'connections'] }); } });
-  const validate = async (connectionRef: string) => {
-    setValidatingRef(connectionRef);
-    setValidationError('');
-    try { await connectionsGateway.validate(connectionRef); await queryClient.invalidateQueries({ queryKey: ['app', 'connections'] }); }
-    catch (error) { setValidationError(error instanceof Error ? error.message : 'Não foi possível testar a conexão.'); }
-    finally { setValidatingRef(undefined); }
-  };
-  const startEdit = (connection: MoodleConnection) => { setEditingConnection(connection); setAlias(connection.alias); setBaseUrl(connection.host); setUsername(''); setPassword(''); setSuccess(''); };
-  const getConnectionId = (connection: MoodleConnection) => connection.connectionId ?? connection.connectionRef;
-  const openRemove = async (connection: MoodleConnection) => { setRemoveTarget(connection); setDeleteLinkedData(false); setConfirmationText(''); setRemoveSummary(undefined); try { setRemoveSummary(await connectionsGateway.dataSummary(getConnectionId(connection))); } catch (error) { setValidationError(error instanceof Error ? error.message : 'Não foi possível consultar os dados associados.'); } };
-  const confirmRemove = async () => { if (!removeTarget) return; setValidationError(''); try { await connectionsGateway.remove(getConnectionId(removeTarget), deleteLinkedData, confirmationText || undefined); setRemoveTarget(undefined); await queryClient.invalidateQueries({ queryKey: ['app', 'connections'] }); } catch (error) { setValidationError(error instanceof Error ? error.message : 'Não foi possível remover a conexão.'); } };
+  const [validationError, setValidationError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [validatingId, setValidatingId] = useState<string>();
+  const mutation = useMutation({ mutationFn: connectionsGateway.connect, onSuccess: () => { setSuccess('Conexão cadastrada com sucesso.'); closeForm(); void client.invalidateQueries({ queryKey: ['app', 'connections'] }); } });
+  const updateMutation = useMutation({ mutationFn: ({ id, input }: { id: string; input: Parameters<typeof connectionsGateway.update>[1] }) => connectionsGateway.update(id, input), onSuccess: () => { setSuccess('Conexão atualizada com sucesso.'); closeForm(); void client.invalidateQueries({ queryKey: ['app', 'connections'] }); } });
 
-  return (
-    <main className="content-frame connections-page">
-      <header className="page-heading">
-        <div>
-          <p className="eyebrow">GESTÃO</p>
-          <h1>Conexões Moodle</h1>
-          <p>Consulte os Moodles disponíveis e o estado de cada conexão.</p>
-        </div>
-        {query.data?.meta.generatedAt && <span className="freshness">{formatFreshness(query.data.meta.generatedAt)}</span>}
-      </header>
+  function resetForm() { setAlias(''); setBaseUrl(''); setUsername(''); setPassword(''); setIsDefault(true); setCanWrite(false); setEditingConnection(undefined); }
+  function closeForm() { setFormOpen(false); resetForm(); }
+  function openCreate() { setSuccess(''); resetForm(); setFormOpen(true); }
+  function openEdit(connection: MoodleConnection) { setSuccess(''); setEditingConnection(connection); setAlias(connection.alias); setBaseUrl(connection.host); setUsername(''); setPassword(''); setIsDefault(connection.isDefault); setCanWrite(connection.capabilities.some((item) => item.toLowerCase().includes('write'))); setFormOpen(true); }
+  function connectionId(connection: MoodleConnection) { return connection.connectionId ?? connection.connectionRef; }
+  async function validate(id: string) { setValidatingId(id); setValidationError(''); try { await connectionsGateway.validate(id); await client.invalidateQueries({ queryKey: ['app', 'connections'] }); } catch (error) { setValidationError(error instanceof Error ? error.message : 'Não foi possível testar a conexão.'); } finally { setValidatingId(undefined); } }
+  async function openRemove(connection: MoodleConnection) { setRemoveTarget(connection); setDeleteLinkedData(false); setConfirmationText(''); setRemoveSummary(undefined); try { setRemoveSummary(await connectionsGateway.dataSummary(connectionId(connection))); } catch (error) { setValidationError(error instanceof Error ? error.message : 'Não foi possível consultar os dados associados.'); } }
+  async function confirmRemove() { if (!removeTarget) return; setValidationError(''); try { await connectionsGateway.remove(connectionId(removeTarget), deleteLinkedData, confirmationText || undefined); setRemoveTarget(undefined); await client.invalidateQueries({ queryKey: ['app', 'connections'] }); } catch (error) { setValidationError(error instanceof Error ? error.message : 'Não foi possível remover a conexão.'); } }
 
-      <Card className="connection-management"><CardHeader><CardTitle>{editingConnection ? 'Editar conexão Moodle' : 'Adicionar conexão Moodle'}</CardTitle><p>{editingConnection ? 'Atualize o nome, URL ou permissões. Uma nova URL será validada antes de salvar.' : 'Cadastre o acesso do Moodle que será usado pelo app.'}</p></CardHeader><CardContent><form className="connection-form" onSubmit={event => { event.preventDefault(); setSuccess(''); const input = { moodleAlias: alias, moodleBaseUrl: baseUrl, moodleUsername: username || undefined, moodlePassword: password || undefined, isDefault, canWrite }; if (editingConnection) updateMutation.mutate({ id: getConnectionId(editingConnection), input }); else mutation.mutate({ moodleAlias: alias, moodleBaseUrl: baseUrl, moodleUsername: username, moodlePassword: password, isDefault, canWrite }); }}><div className="form-grid"><label>Nome da conexão<input required value={alias} onChange={event => setAlias(event.target.value)} /></label><label>URL base do Moodle<input required type="url" placeholder="https://moodle.exemplo.com" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} /></label><label>Usuário Moodle<input required={!editingConnection} value={username} onChange={event => setUsername(event.target.value)} placeholder={editingConnection ? 'Deixe vazio para manter' : undefined} /></label><label>Senha Moodle<input required={!editingConnection} type="password" value={password} onChange={event => setPassword(event.target.value)} placeholder={editingConnection ? 'Deixe vazio para manter' : undefined} /></label></div><div className="form-checks"><label><input type="checkbox" checked={isDefault} onChange={event => setIsDefault(event.target.checked)} /> Usar como padrão</label><label><input type="checkbox" checked={canWrite} onChange={event => setCanWrite(event.target.checked)} /> Permitir operações de escrita</label></div>{(mutation.isError || updateMutation.isError) && <p className="auth-error" role="alert">{(mutation.error ?? updateMutation.error) instanceof Error ? (mutation.error ?? updateMutation.error)?.message : 'Não foi possível salvar a conexão.'}</p>}<div className="form-actions"><button className="auth-submit" type="submit" disabled={mutation.isPending || updateMutation.isPending}>{mutation.isPending || updateMutation.isPending ? 'Validando…' : editingConnection ? 'Salvar alterações' : 'Cadastrar conexão'}</button>{editingConnection && <button type="button" className="connection-action-secondary" onClick={() => { setEditingConnection(undefined); setAlias(''); setBaseUrl(''); setUsername(''); setPassword(''); }}>Cancelar</button>}{success && <p className="form-success" role="status">{success}</p>}</div></form></CardContent></Card>
+  const Container = embedded ? 'div' : 'main';
+  return <Container className={embedded ? 'space-y-6' : 'content-frame'} aria-labelledby="connections-title"><header className="page-heading"><div><p className="eyebrow">CONFIGURAÇÕES</p><h1 id="connections-title">Conexões Moodle</h1><p>Gerencie as conexões isoladas que alimentam o ambiente Claris.</p></div><div className="flex flex-wrap items-center gap-2">{query.data && <span className="freshness mr-2">Atualizado em {new Date(query.data.meta.generatedAt).toLocaleString('pt-BR')}</span>}<Button type="button" onClick={openCreate}><Plus />Adicionar conexão</Button></div></header>
+    <Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><CloudCog className="h-5 w-5 text-primary" />Acesso aos Moodles</CardTitle><CardDescription>Cada conexão tem identidade, credenciais e estado isolados.</CardDescription></CardHeader><CardContent className="grid gap-4 md:grid-cols-3"><div className="rounded-lg border bg-muted/20 p-4"><ShieldCheck className="h-5 w-5 text-status-success" /><p className="mt-3 font-medium">Credenciais protegidas</p><p className="mt-1 text-xs text-muted-foreground">O navegador envia dados apenas para o Moodle Connector.</p></div><div className="rounded-lg border bg-muted/20 p-4"><Link2 className="h-5 w-5 text-primary" /><p className="mt-3 font-medium">Escopo explícito</p><p className="mt-1 text-xs text-muted-foreground">A conexão selecionada define os dados exibidos nas telas.</p></div><div className="rounded-lg border bg-muted/20 p-4"><RefreshCw className="h-5 w-5 text-status-pending" /><p className="mt-3 font-medium">Validação sob demanda</p><p className="mt-1 text-xs text-muted-foreground">Teste uma conexão sem interromper as demais.</p></div></CardContent></Card>
+    {success && <div className="flex items-center gap-2 rounded-md border border-status-success/30 bg-status-success/5 p-3 text-sm text-status-success" role="status"><CheckCircle2 className="h-4 w-4" />{success}</div>}{validationError && <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive" role="alert"><AlertCircle className="h-4 w-4" />{validationError}</div>}
+    {query.isPending && <div className="grid gap-4 md:grid-cols-2"><Skeleton className="h-64 rounded-lg" /><Skeleton className="h-64 rounded-lg" /></div>}{query.isError && <Card><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar as conexões Moodle.</CardContent></Card>}{query.isSuccess && query.data.data.length === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><Link2 className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhuma conexão Moodle disponível</h2><p className="text-sm text-muted-foreground">Adicione uma conexão para começar a consultar cursos e alunos.</p><Button type="button" variant="outline" onClick={openCreate}><Plus />Adicionar conexão</Button></CardContent></Card>}{query.isSuccess && query.data.data.length > 0 && <section className="grid gap-4 md:grid-cols-2" aria-label="Conexões Moodle">{query.data.data.map((connection) => <ConnectionCard key={connectionId(connection)} connection={connection} onValidate={validate} onEdit={openEdit} onRemove={openRemove} validating={validatingId === connectionId(connection)} />)}</section>}
 
-      {validationError && <p className="auth-error" role="alert">{validationError}</p>}
-
-      {query.isPending && (
-        <div className="connections-grid" aria-label="Carregando conexões">
-          <Skeleton className="connection-skeleton" />
-          <Skeleton className="connection-skeleton" />
-        </div>
-      )}
-
-      {query.isError && (
-        <Card><CardContent><p role="alert">Não foi possível carregar as conexões Moodle.</p></CardContent></Card>
-      )}
-
-      {query.isSuccess && query.data.data.length === 0 && (
-        <Card><CardContent><p>Nenhuma conexão Moodle disponível.</p></CardContent></Card>
-      )}
-
-      {query.isSuccess && query.data.data.length > 0 && (
-        <section className="connections-grid" aria-label="Conexões Moodle">
-          {query.data.data.map((connection) => <ConnectionCard key={getConnectionId(connection)} connection={connection} onValidate={validate} onEdit={startEdit} onRemove={openRemove} validating={validatingRef === getConnectionId(connection)} />)}
-        </section>
-      )}
-
-      {removeTarget && <div className="connection-dialog-backdrop" role="presentation"><section className="connection-dialog" role="dialog" aria-modal="true" aria-labelledby="remove-connection-title"><h2 id="remove-connection-title">Remover {removeTarget.alias}?</h2><p>A conexão será removida do app. Escolha o que fazer com os dados associados.</p>{removeSummary ? <div className="connection-summary"><p><strong>{removeSummary.memories + removeSummary.documents + removeSummary.moodleUserLinks}</strong> registros de contexto serão afetados.</p><p><strong>{removeSummary.auditLogsRetained}</strong> registros de auditoria serão preservados.</p></div> : <p>Consultando dados associados…</p>}<label className="connection-radio"><input type="radio" name="remove-policy" checked={!deleteLinkedData} onChange={() => { setDeleteLinkedData(false); setConfirmationText(''); }} /> Remover somente a conexão</label><label className="connection-radio"><input type="radio" name="remove-policy" checked={deleteLinkedData} onChange={() => setDeleteLinkedData(true)} /> Remover a conexão e os dados associados</label>{deleteLinkedData && <label className="connection-confirm">Digite <strong>EXCLUIR CONEXÃO E DADOS</strong><input value={confirmationText} onChange={event => setConfirmationText(event.target.value)} /></label>}<div className="connection-dialog-actions"><button type="button" className="connection-action-secondary" onClick={() => setRemoveTarget(undefined)}>Cancelar</button><button type="button" className="connection-action-danger" disabled={deleteLinkedData && confirmationText.trim() !== 'EXCLUIR CONEXÃO E DADOS'} onClick={() => void confirmRemove()}>Remover</button></div></section></div>}
-    </main>
-  );
+    <Dialog open={formOpen} onOpenChange={(open) => { if (!open) closeForm(); }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>{editingConnection ? 'Editar conexão Moodle' : 'Adicionar conexão Moodle'}</DialogTitle><DialogDescription>{editingConnection ? 'Atualize os dados da conexão. Credenciais vazias serão mantidas.' : 'Cadastre o acesso do Moodle que será usado pelo portal.'}</DialogDescription></DialogHeader><form className="grid gap-4" onSubmit={(event) => { event.preventDefault(); const input = { moodleAlias: alias.trim(), moodleBaseUrl: baseUrl.trim(), moodleUsername: username.trim() || undefined, moodlePassword: password || undefined, isDefault, canWrite }; if (editingConnection) updateMutation.mutate({ id: connectionId(editingConnection), input }); else if (username.trim() && password) mutation.mutate({ moodleAlias: alias.trim(), moodleBaseUrl: baseUrl.trim(), moodleUsername: username.trim(), moodlePassword: password, isDefault, canWrite }); }}><div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-1.5 text-sm font-medium">Nome da conexão<Input value={alias} onChange={(event) => setAlias(event.target.value)} required /></label><label className="grid gap-1.5 text-sm font-medium">URL base do Moodle<Input type="url" placeholder="https://moodle.exemplo.com" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} required /></label><label className="grid gap-1.5 text-sm font-medium">Usuário Moodle<Input value={username} onChange={(event) => setUsername(event.target.value)} placeholder={editingConnection ? 'Deixe vazio para manter' : undefined} required={!editingConnection} /></label><label className="grid gap-1.5 text-sm font-medium">Senha Moodle<Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={editingConnection ? 'Deixe vazio para manter' : undefined} required={!editingConnection} /></label></div><div className="grid gap-2 sm:grid-cols-2"><label className="flex items-center gap-2 rounded-md border p-3 text-sm"><input type="checkbox" checked={isDefault} onChange={(event) => setIsDefault(event.target.checked)} />Usar como conexão padrão</label><label className="flex items-center gap-2 rounded-md border p-3 text-sm"><input type="checkbox" checked={canWrite} onChange={(event) => setCanWrite(event.target.checked)} />Permitir operações de escrita</label></div>{(mutation.isError || updateMutation.isError) && <p className="text-sm text-destructive" role="alert">{String((mutation.error ?? updateMutation.error) instanceof Error ? (mutation.error ?? updateMutation.error)?.message : 'Não foi possível salvar a conexão.')}</p>}<DialogFooter><Button type="button" variant="outline" onClick={closeForm}>Cancelar</Button><Button type="submit" disabled={mutation.isPending || updateMutation.isPending}>{mutation.isPending || updateMutation.isPending ? 'Validando…' : editingConnection ? 'Salvar alterações' : 'Cadastrar conexão'}</Button></DialogFooter></form></DialogContent></Dialog>
+    <Dialog open={Boolean(removeTarget)} onOpenChange={(open) => { if (!open) setRemoveTarget(undefined); }}><DialogContent><DialogHeader><DialogTitle>Remover {removeTarget?.alias}?</DialogTitle><DialogDescription>Escolha se deseja remover apenas a conexão ou também os dados associados.</DialogDescription></DialogHeader>{removeSummary ? <div className="rounded-md bg-muted/40 p-3 text-sm"><p><strong>{removeSummary.memories + removeSummary.documents + removeSummary.moodleUserLinks}</strong> registros de contexto serão afetados.</p><p className="mt-1"><strong>{removeSummary.auditLogsRetained}</strong> registros de auditoria serão preservados.</p></div> : <p className="text-sm text-muted-foreground">Consultando dados associados…</p>}<RadioGroup value={deleteLinkedData ? 'all' : 'connection'} onValueChange={(value) => { const next = value === 'all'; setDeleteLinkedData(next); if (!next) setConfirmationText(''); }}><label className="flex items-start gap-3 rounded-md border p-3 text-sm"><RadioGroupItem value="connection" className="mt-0.5" /><span><strong>Remover somente a conexão</strong><span className="mt-1 block text-muted-foreground">Preserva os dados já sincronizados.</span></span></label><label className="flex items-start gap-3 rounded-md border p-3 text-sm"><RadioGroupItem value="all" className="mt-0.5" /><span><strong>Remover conexão e dados associados</strong><span className="mt-1 block text-muted-foreground">Esta ação exige confirmação explícita.</span></span></label></RadioGroup>{deleteLinkedData && <label className="grid gap-1.5 text-sm font-medium">Digite <span className="font-mono text-xs">EXCLUIR CONEXÃO E DADOS</span><Input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} /></label>}<DialogFooter><Button type="button" variant="outline" onClick={() => setRemoveTarget(undefined)}>Cancelar</Button><Button type="button" variant="destructive" disabled={deleteLinkedData && confirmationText.trim() !== 'EXCLUIR CONEXÃO E DADOS'} onClick={() => void confirmRemove()}>Remover</Button></DialogFooter></DialogContent></Dialog>
+  </Container>;
 }
-

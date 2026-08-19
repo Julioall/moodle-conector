@@ -18,7 +18,36 @@ public sealed class AppDashboardContractTests
     {
         Assert.InRange(AppDashboardBudget.MaxCoursesRead, 1, 50);
         Assert.InRange(AppDashboardBudget.MaxParticipantsRead, 1, 100);
+        Assert.InRange(AppDashboardBudget.MaxAssignmentsRead, 1, 50);
         Assert.InRange(AppDashboardBudget.MaxPriorities, 1, 20);
+    }
+
+    [Fact]
+    public void Week_filter_normalizes_unknown_values_to_current_without_fabricating_history()
+    {
+        Assert.Equal(AppDashboardWeekFilter.Last, AppDashboardWeekFilter.Normalize("last"));
+        Assert.Equal(AppDashboardWeekFilter.Current, AppDashboardWeekFilter.Normalize("unexpected"));
+        Assert.Equal(AppDashboardWeekFilter.Current, AppDashboardWeekFilter.Normalize(null));
+    }
+
+    [Fact]
+    public void Claris_indicators_keep_unavailable_values_explicit()
+    {
+        var summary = new AppDashboardSummaryDto(1, 4, 0, 2, 2)
+        {
+            TodayEvents = 3,
+            TodayTasks = 1,
+            ActivitiesToReview = 4,
+            ActiveNormalStudents = 8,
+            PendingSubmissionAssignments = 4,
+            PendingCorrectionAssignments = null,
+            NewAtRiskThisWeek = null,
+        };
+
+        Assert.Equal(3, summary.TodayEvents);
+        Assert.Equal(8, summary.ActiveNormalStudents);
+        Assert.Null(summary.PendingCorrectionAssignments);
+        Assert.Null(summary.NewAtRiskThisWeek);
     }
 }
 

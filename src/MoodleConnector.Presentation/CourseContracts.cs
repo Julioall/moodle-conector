@@ -12,7 +12,11 @@ public sealed record AppActivityDto(
     string ConnectionRef, string CourseId, string ActivityId, string? InstanceId,
     string ActivityType, string Name, string? Url, bool? Visible, bool? UserVisible,
     string? Description, string? AvailabilityInfo, bool HasDates, bool HasDeadline,
-    DateTimeOffset? OpenAt, DateTimeOffset? DueAt, DateTimeOffset? CloseAt, int FileCount);
+    DateTimeOffset? OpenAt, DateTimeOffset? DueAt, DateTimeOffset? CloseAt, int FileCount)
+{
+    public int PendingSubmissionCount { get; init; }
+    public int AwaitingGradingCount { get; init; }
+}
 
 public static class AppCourseContractMapper
 {

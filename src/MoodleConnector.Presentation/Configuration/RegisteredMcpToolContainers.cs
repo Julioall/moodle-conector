@@ -7,6 +7,7 @@ using MoodleConnector.Presentation.Tools.Memory;
 using MoodleConnector.Presentation.Tools.Messages;
 using MoodleConnector.Presentation.Tools.Monitor;
 using MoodleConnector.Presentation.Tools.Pedagogy;
+using MoodleConnector.Presentation.Tools.Portal;
 using MoodleConnector.Presentation.Tools.Reports;
 using MoodleConnector.Presentation.Tools.Risk;
 using MoodleConnector.Presentation.Tools.Submissions;
@@ -46,7 +47,9 @@ public static class RegisteredMcpToolContainers
         typeof(MoodleMonitorTools),
         typeof(MoodleMemoryTools),
         typeof(MoodleMemoryDocumentTools),
-        typeof(MoodlePedagogyTools)
+        typeof(MoodlePedagogyTools),
+        typeof(PortalTaskTools),
+        typeof(PortalAgendaTools)
     ];
 
     public static IReadOnlyList<ConditionalMcpToolContainer> Conditional { get; } =

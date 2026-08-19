@@ -9,6 +9,13 @@ public sealed record AssignmentSettingsSummary(
 
 public interface IMoodleAssignmentSettingsGateway
 {
+    Task<IReadOnlyDictionary<string, AssignmentSettingsSummary>> GetCourseAssignmentSettingsAsync(
+        string userExternalId,
+        string courseId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyDictionary<string, AssignmentSettingsSummary>>(
+            new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal));
+
     Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
         string userExternalId,
         string courseId,

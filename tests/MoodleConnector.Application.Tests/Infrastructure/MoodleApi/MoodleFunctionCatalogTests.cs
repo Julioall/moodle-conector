@@ -62,7 +62,7 @@ public sealed class MoodleFunctionCatalogTests
         {
             Calls++;
             var payload = connection.ConnectionId == "goias"
-                ? "{\"sitename\":\"GoiÃ¡s\",\"release\":\"4.5\",\"userid\":7,\"functions\":[{\"name\":\"core_enrol_get_users_courses\"}]}"
+                ? "{\"sitename\":\"Goiás\",\"release\":\"4.5\",\"userid\":7,\"functions\":[{\"name\":\"core_enrol_get_users_courses\"}]}"
                 : "{\"sitename\":\"Nacional\",\"release\":\"5.1.2\",\"userid\":8,\"functions\":[{\"name\":\"core_course_get_enrolled_courses_by_timeline_classification\"}]}";
             using var document = JsonDocument.Parse(payload);
             return Task.FromResult(document.RootElement.Clone());

@@ -213,4 +213,107 @@
   .background-activity-line {
     animation: background-activity-line 1.5s ease-in-out infinite;
   }
+
+  /* Claris page primitives used by the operational modules. Keeping these
+     tokens here avoids page-specific CSS and keeps the visual rhythm stable. */
+  .content-frame {
+    @apply mx-auto w-full max-w-7xl space-y-6;
+  }
+
+  .page-heading {
+    @apply flex flex-col gap-4 md:flex-row md:items-center md:justify-between;
+  }
+
+  .page-heading h1 {
+    @apply text-2xl font-bold tracking-tight;
+  }
+
+  .page-heading p:not(.eyebrow):not(.freshness) {
+    @apply mt-1 text-sm text-muted-foreground;
+  }
+
+  .eyebrow {
+    @apply hidden;
+  }
+
+  .freshness {
+    @apply text-left text-xs text-muted-foreground sm:text-right;
+  }
+
+  .student-grid {
+    @apply grid gap-4 md:grid-cols-2 xl:grid-cols-3;
+  }
+
+  .student-card-heading {
+    @apply flex items-start justify-between gap-3;
+  }
+
+  .student-card-heading h2 {
+    @apply text-base font-semibold;
+  }
+
+  .student-card-heading p,
+  .student-card-meta {
+    @apply text-sm text-muted-foreground;
+  }
+
+  .student-card-meta {
+    @apply mt-4 flex items-center justify-between gap-3 border-t pt-3;
+  }
+
+  .task-form {
+    @apply grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(170px,220px)_auto];
+  }
+
+  .task-form textarea {
+    @apply min-h-24 md:col-span-2;
+  }
+
+  .task-form input,
+  .task-form select,
+  .task-form textarea,
+  .form-grid input,
+  .form-grid select,
+  .form-grid textarea,
+  .ui-input {
+    @apply flex min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+  }
+
+  .form-grid {
+    @apply grid gap-4 md:grid-cols-2;
+  }
+
+  .form-grid label {
+    @apply grid gap-1.5 text-sm font-medium;
+  }
+
+  .dashboard-stats {
+    @apply grid gap-4 sm:grid-cols-2 lg:grid-cols-4;
+  }
+
+  .dashboard-stats strong {
+    @apply text-3xl font-bold tracking-tight;
+  }
+
+  .dashboard-row {
+    @apply flex items-start justify-between gap-4 border-b py-3 last:border-0;
+  }
+
+  .dashboard-row div {
+    @apply grid gap-1;
+  }
+
+  .dashboard-row span {
+    @apply text-sm text-muted-foreground;
+  }
+
+  @media (max-width: 640px) {
+    .task-form {
+      @apply grid-cols-1;
+    }
+
+    .task-form textarea {
+      @apply col-span-1;
+    }
+  }
 }

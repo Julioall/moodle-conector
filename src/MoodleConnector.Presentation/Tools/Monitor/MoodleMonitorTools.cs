@@ -11,7 +11,7 @@ namespace MoodleConnector.Presentation.Tools.Monitor;
 
 /// <summary>
 /// Tools de suporte administrativo para o monitor SENAI CTM.
-/// Fase 20 â€” DomÃ­nio Monitor.
+/// Fase 20 — Domínio Monitor.
 /// </summary>
 [McpServerToolType]
 public sealed class MoodleMonitorTools(
@@ -26,7 +26,7 @@ public sealed class MoodleMonitorTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AuditVirtualClassroomChecklistResult>))]
-    [Description("Audita a sala virtual do AVA contra o checklist padrÃ£o do Guia do Tutor SENAI CTM. Verifica presenÃ§a de: Guia do Estudante, CritÃ©rios de CertificaÃ§Ã£o, Plano de Estudo/Cronograma, FÃ³rum de ApresentaÃ§Ã£o, FÃ³rum de DÃºvidas, conteÃºdo interativo (SCORM), SituaÃ§Ã£o de Aprendizagem (SA), datas configuradas e visibilidade da sala. Retorna status por item: ok, ausente, incompleto ou nao_verificavel.")]
+    [Description("Audita a sala virtual do AVA contra o checklist padrão do Guia do Tutor SENAI CTM. Verifica presença de: Guia do Estudante, Critérios de Certificação, Plano de Estudo/Cronograma, Fórum de Apresentação, Fórum de Dúvidas, conteúdo interativo (SCORM), Situação de Aprendizagem (SA), datas configuradas e visibilidade da sala. Retorna status por item: ok, ausente, incompleto ou nao_verificavel.")]
     public Task<CallToolResult> AuditarChecklistSalaVirtualAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
@@ -36,10 +36,10 @@ public sealed class MoodleMonitorTools(
             () => mediator.Send(new AuditVirtualClassroomChecklistQuery(courseId), cancellationToken),
             result => $"Checklist da sala - curso {courseId}: {result.TotalItems} itens. " +
                       $"? OK: {result.OkCount} | ? Ausente: {result.AusenteCount} | " +
-                      $"âš ï¸ Incompleto: {result.IncompletoCount} | â“ NÃ£o verificÃ¡vel: {result.NaoVerificavelCount}.",
+                      $"⚠️ Incompleto: {result.IncompletoCount} | ❓ Não verificável: {result.NaoVerificavelCount}.",
             cancellationToken);
 
-    // â”€â”€ RelatÃ³rio administrativo da turma â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // â”€â”€ Relatório administrativo da turma â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [McpServerTool(
         Name = "generate_monitor_class_report",
@@ -47,11 +47,11 @@ public sealed class MoodleMonitorTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GenerateMonitorTurmaReportResult>))]
-    [Description("Gera relatÃ³rio administrativo da turma para o monitor: estudantes que nunca acessaram o AVA e estudantes inativos hÃ¡ mais de N dias. NÃƒO inclui notas ou submissÃµes â€” essas informaÃ§Ãµes sÃ£o responsabilidade do tutor. Foco em acesso e matrÃ­cula.")]
+    [Description("Gera relatório administrativo da turma para o monitor: estudantes que nunca acessaram o AVA e estudantes inativos há mais de N dias. NÃO inclui notas ou submissões — essas informações são responsabilidade do tutor. Foco em acesso e matrícula.")]
     public Task<CallToolResult> GerarRelatorioMonitorTurmaAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
-        [Description("Dias sem acesso para considerar inativo. PadrÃ£o: 7.")] int inactiveDaysThreshold = 7,
-        [Description("MÃ¡ximo de estudantes a analisar. PadrÃ£o: 100.")] int maxStudentsToAnalyze = 100,
+        [Description("Dias sem acesso para considerar inativo. Padrão: 7.")] int inactiveDaysThreshold = 7,
+        [Description("Máximo de estudantes a analisar. Padrão: 100.")] int maxStudentsToAnalyze = 100,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)
         => ExecuteMonitorAsync<GenerateMonitorTurmaReportResult>(
@@ -59,7 +59,7 @@ public sealed class MoodleMonitorTools(
             () => mediator.Send(
                 new GenerateMonitorTurmaReportQuery(courseId, inactiveDaysThreshold, maxStudentsToAnalyze),
                 cancellationToken),
-            result => $"RelatÃ³rio monitor â€” curso {courseId}: {result.TotalEnrolled} matriculado(s). " +
+            result => $"Relatório monitor — curso {courseId}: {result.TotalEnrolled} matriculado(s). " +
                       $"Acessaram: {result.StudentsWhoAccessed} | Nunca acessaram: {result.StudentsNeverAccessed} | " +
                       $"Inativos +{result.InactiveDaysThreshold}d: {result.StudentsInactiveDays}.",
             cancellationToken);
@@ -73,19 +73,19 @@ public sealed class MoodleMonitorTools(
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(courseId))
-            return ToolResultHelper.Error<TResult>("Informe um identificador de curso vÃ¡lido.");
+            return ToolResultHelper.Error<TResult>("Informe um identificador de curso válido.");
 
         moodleSelection.Alias = moodleAlias;
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         if (moodleUserId is null)
-            return ToolResultHelper.Error<TResult>("UsuÃ¡rio nÃ£o autenticado.");
+            return ToolResultHelper.Error<TResult>("Usuário não autenticado.");
 
         TResult data;
         try { data = await execute(); }
         catch (OperationCanceledException) { throw; }
         catch
         {
-            return ToolResultHelper.Error<TResult>("NÃ£o foi possÃ­vel gerar o relatÃ³rio de monitor neste momento.");
+            return ToolResultHelper.Error<TResult>("Não foi possível gerar o relatório de monitor neste momento.");
         }
 
         var response = new ToolResponse<TResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);

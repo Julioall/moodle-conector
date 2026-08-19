@@ -6,49 +6,92 @@ namespace MoodleConnector.Infrastructure;
 
 internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : IPlatformPermissionService
 {
+    private static readonly DefaultPermissionGroupDefinition[] CommonGroups =
+    [
+        new(
+            "tutor",
+            "Tutor",
+            "Acompanhamento acadêmico, comunicação e leitura de indicadores.",
+            ["dashboard.view", "courses.view", "schools.view", "students.view", "students.followup.write", "reports.view", "grading.view", "messages.prepare"]),
+        new(
+            "monitor",
+            "Monitor",
+            "Leitura de cursos, alunos e indicadores para monitoramento da operação.",
+            ["dashboard.view", "courses.view", "schools.view", "students.view", "reports.view"]),
+    ];
+
     public async Task EnsureDefaultPermissionsAsync(Guid userId, CancellationToken cancellationToken)
     {
         var existingMembership = await dbContext.PermissionGroupMemberships
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
-        if (existingMembership is not null)
+        var changed = false;
+
+        if (existingMembership is null)
         {
-            // Existing groups are user-managed authorization state. Never
-            // expand them on login when the catalog changes.
-            return;
+            var group = new PermissionGroupEntity
+            {
+                Id = Guid.NewGuid(),
+                Name = "Acesso inicial",
+                Description = "Permissões básicas de leitura e gerenciamento da própria conexão.",
+                CreatedByUserId = userId
+            };
+            dbContext.PermissionGroups.Add(group);
+            // A new account receives only the ability to configure its own
+            // permission groups. Tool access must be granted explicitly by the
+            // user through groups or direct overrides.
+            dbContext.PermissionGroupPermissions.Add(new PermissionGroupPermissionEntity
+            {
+                Id = Guid.NewGuid(), GroupId = group.Id, Permission = PlatformPermissionCatalog.PermissionGroupsManage
+            });
+            dbContext.PermissionGroupMemberships.Add(new PermissionGroupMembershipEntity
+            {
+                Id = Guid.NewGuid(), GroupId = group.Id, UserId = userId
+            });
+            changed = true;
         }
 
-        var group = new PermissionGroupEntity
+        // Common roles are created as editable definitions, but are not
+        // assigned automatically. This keeps the least-privilege baseline
+        // intact while giving administrators a useful starting point.
+        foreach (var definition in CommonGroups)
         {
-            Id = Guid.NewGuid(),
-            Name = "Acesso inicial",
-            Description = "Permissões básicas de leitura e gerenciamento da própria conexão.",
-            CreatedByUserId = userId
-        };
-        dbContext.PermissionGroups.Add(group);
-        // A new account receives only the ability to configure its own
-        // permission groups. Tool access must be granted explicitly by the
-        // user through groups or direct overrides.
-        dbContext.PermissionGroupPermissions.Add(new PermissionGroupPermissionEntity
-        {
-            Id = Guid.NewGuid(), GroupId = group.Id, Permission = PlatformPermissionCatalog.PermissionGroupsManage
-        });
-        dbContext.PermissionGroupMemberships.Add(new PermissionGroupMembershipEntity
-        {
-            Id = Guid.NewGuid(), GroupId = group.Id, UserId = userId
-        });
-        await dbContext.SaveChangesAsync(cancellationToken);
+            var exists = await dbContext.PermissionGroups
+                .AsNoTracking()
+                .AnyAsync(item => item.CreatedByUserId == userId &&
+                    (item.CommonRoleKey == definition.Key || item.Name == definition.Name), cancellationToken);
+            if (exists) continue;
+
+            var group = new PermissionGroupEntity
+            {
+                Id = Guid.NewGuid(),
+                Name = definition.Name,
+                Description = definition.Description,
+                CommonRoleKey = definition.Key,
+                CreatedByUserId = userId
+            };
+            dbContext.PermissionGroups.Add(group);
+            dbContext.PermissionGroupPermissions.AddRange(definition.Permissions.Select(permission => new PermissionGroupPermissionEntity
+            {
+                Id = Guid.NewGuid(), GroupId = group.Id, Permission = permission
+            }));
+            changed = true;
+        }
+
+        if (changed) await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<PermissionGroupDto> CreateGroupAsync(CreatePermissionGroupRequest request, CancellationToken cancellationToken)
     {
         await EnsureCanManageGroupsAsync(request.ActorUserId, cancellationToken);
+        var name = NormalizeGroupName(request.Name);
+        var description = NormalizeGroupDescription(request.Description);
         var permissions = NormalizePermissions(request.Permissions);
         var group = new PermissionGroupEntity
         {
             Id = Guid.NewGuid(),
-            Name = request.Name.Trim(),
-            Description = request.Description?.Trim() ?? string.Empty,
+            Name = name,
+            Description = description,
             CreatedByUserId = request.ActorUserId
         };
         dbContext.PermissionGroups.Add(group);
@@ -57,6 +100,33 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
             Id = Guid.NewGuid(),
             GroupId = group.Id,
             Permission = permission
+        }));
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return new PermissionGroupDto(group.Id, group.Name, group.Description, permissions);
+    }
+
+    public async Task<PermissionGroupDto> UpdateGroupAsync(UpdatePermissionGroupRequest request, CancellationToken cancellationToken)
+    {
+        await EnsureCanManageGroupsAsync(request.ActorUserId, cancellationToken);
+        var group = await dbContext.PermissionGroups
+            .FirstOrDefaultAsync(item => item.Id == request.GroupId &&
+                (item.CreatedByUserId == request.ActorUserId || dbContext.PermissionGroupMemberships.Any(member => member.GroupId == item.Id && member.UserId == request.ActorUserId)), cancellationToken);
+        if (group is null) throw new InvalidOperationException("Grupo de permissões não encontrado.");
+
+        var name = NormalizeGroupName(request.Name);
+        var description = NormalizeGroupDescription(request.Description);
+        var permissions = NormalizePermissions(request.Permissions);
+        var currentPermissions = await dbContext.PermissionGroupPermissions
+            .Where(item => item.GroupId == group.Id)
+            .ToArrayAsync(cancellationToken);
+
+        group.Name = name;
+        group.Description = description;
+        group.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        dbContext.PermissionGroupPermissions.RemoveRange(currentPermissions);
+        dbContext.PermissionGroupPermissions.AddRange(permissions.Select(permission => new PermissionGroupPermissionEntity
+        {
+            Id = Guid.NewGuid(), GroupId = group.Id, Permission = permission
         }));
         await dbContext.SaveChangesAsync(cancellationToken);
         return new PermissionGroupDto(group.Id, group.Name, group.Description, permissions);
@@ -114,12 +184,19 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
 
     public async Task<IReadOnlyList<PermissionGroupDto>> GetGroupsAsync(Guid userId, CancellationToken cancellationToken)
     {
-        var rows = await (from membership in dbContext.PermissionGroupMemberships.AsNoTracking()
-                          join teamGroup in dbContext.PermissionGroups.AsNoTracking() on membership.GroupId equals teamGroup.Id
+        var rows = await (from teamGroup in dbContext.PermissionGroups.AsNoTracking()
                           join permission in dbContext.PermissionGroupPermissions.AsNoTracking() on teamGroup.Id equals permission.GroupId into permissions
-                          where membership.UserId == userId
+                          where teamGroup.CreatedByUserId == userId || dbContext.PermissionGroupMemberships.Any(membership => membership.GroupId == teamGroup.Id && membership.UserId == userId)
                           select new { teamGroup, permissions }).ToArrayAsync(cancellationToken);
-        return rows.Select(row => new PermissionGroupDto(row.teamGroup.Id, row.teamGroup.Name, row.teamGroup.Description, row.permissions.Select(item => item.Permission).ToArray())).ToArray();
+        return rows
+            .GroupBy(row => row.teamGroup.Id)
+            .Select(group =>
+            {
+                var row = group.First();
+                return new PermissionGroupDto(row.teamGroup.Id, row.teamGroup.Name, row.teamGroup.Description, row.permissions.Select(item => item.Permission).ToArray());
+            })
+            .OrderBy(group => group.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private async Task EnsureCanManageGroupsAsync(Guid userId, CancellationToken cancellationToken)
@@ -132,6 +209,20 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
     private static IReadOnlyCollection<string> NormalizePermissions(IEnumerable<string> permissions) =>
         permissions.Select(NormalizePermission).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
+    private static string NormalizeGroupName(string name)
+    {
+        var value = name.Trim();
+        if (value.Length is 0 or > 120) throw new ArgumentException("O nome do grupo deve ter entre 1 e 120 caracteres.", nameof(name));
+        return value;
+    }
+
+    private static string NormalizeGroupDescription(string? description)
+    {
+        var value = description?.Trim() ?? string.Empty;
+        if (value.Length > 500) throw new ArgumentException("A descrição do grupo deve ter no máximo 500 caracteres.", nameof(description));
+        return value;
+    }
+
     private static string NormalizePermission(string permission)
     {
         var value = permission.Trim().ToLowerInvariant();
@@ -139,6 +230,8 @@ internal sealed class PlatformPermissionService(ConnectorDbContext dbContext) : 
             throw new ArgumentException("Permissão de plataforma inválida.", nameof(permission));
         return value;
     }
+
+    private sealed record DefaultPermissionGroupDefinition(string Key, string Name, string Description, IReadOnlyCollection<string> Permissions);
 }
 
 public static class PlatformPermissionCatalog
@@ -148,8 +241,8 @@ public static class PlatformPermissionCatalog
     public const string TeamsManage = "tool.teams.manage";
     public static readonly string[] PortalPermissions =
     [
-        "dashboard.view", "courses.view", "students.view", "students.followup.write",
-        "tasks.manage", "agenda.manage", "messages.prepare", "reports.view",
+        "dashboard.view", "courses.view", "schools.view", "students.view", "students.followup.write",
+        "tasks.manage", "agenda.manage", "messages.prepare", "grading.view", "grading.manage", "reports.view",
         "connections.manage", "settings.view", "admin.view"
     ];
     public static readonly string[] AllRead =

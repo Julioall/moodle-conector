@@ -8,6 +8,7 @@ public sealed class TaskEntity
     public string? Description { get; set; }
     public string Status { get; set; } = "todo";
     public string Priority { get; set; } = "medium";
+    public DateTimeOffset? StartAt { get; set; }
     public DateTimeOffset? DueAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

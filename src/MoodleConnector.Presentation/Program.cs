@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using MoodleConnector.Application;
@@ -32,6 +33,7 @@ using MoodleConnector.Application.Activities;
 using MoodleConnector.Application.Risk.Queries;
 using MoodleConnector.Application.Participants;
 using MoodleConnector.Application.Submissions.Queries;
+using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
 using MoodleConnector.Presentation.Configuration;
@@ -55,6 +57,7 @@ using System.Threading.RateLimiting;
 using MediatR;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Messages;
+using MoodleConnector.Application.Forums;
 using MoodleConnector.Application.Reports.Queries;
 using MoodleConnector.Presentation;
 using MoodleConnector.Presentation.Health;
@@ -70,10 +73,14 @@ if (builder.Environment.IsEnvironment("Testing"))
 {
     builder.Logging.ClearProviders();
     builder.Logging.AddConsole();
-    var testKeyPath = Path.Combine(Path.GetTempPath(), "moodle-connector-tests", "keys");
-    Directory.CreateDirectory(testKeyPath);
-    builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(testKeyPath));
 }
+
+var dataProtectionKeyPath = builder.Environment.IsEnvironment("Testing")
+    ? Path.Combine(Path.GetTempPath(), "moodle-connector-tests", "keys")
+    : builder.Configuration["DataProtection:KeyStoragePath"]
+      ?? Path.Combine(builder.Environment.ContentRootPath, "data", "keys");
+Directory.CreateDirectory(dataProtectionKeyPath);
+builder.Services.AddDataProtection().PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeyPath));
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAntiforgery(options =>
@@ -306,6 +313,10 @@ builder.Services.AddOpenIddict()
 var mcpServerBuilder = builder.Services
     .AddApplication()
     .AddInfrastructure(builder.Configuration)
+    .AddScoped<DashboardPendingSnapshotBuilder>()
+    .AddSingleton<DashboardOverviewRefreshQueue>()
+    .AddSingleton<IDashboardOverviewRefreshQueue>(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
+    .AddHostedService(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
     .AddMcpServer(options => options.ServerInstructions = MoodleConnectorInstructions.Text)
     .WithHttpTransport()
     .WithRequestFilters(filters =>
@@ -320,7 +331,7 @@ var mcpServerBuilder = builder.Services
                     string.IsNullOrWhiteSpace(metadata.RequiredPlatformPermission))
                 {
                     return ToolResultHelper.Error<object>(
-                        "Esta tool nÃ£o possui uma permissÃ£o de plataforma configurada e foi bloqueada.",
+                        "Esta tool não possui uma permissão de plataforma configurada e foi bloqueada.",
                         errorCode: "platform_permission_not_configured");
                 }
 
@@ -328,7 +339,7 @@ var mcpServerBuilder = builder.Services
                 if (!HasPlatformToolPermission(httpContext?.User, metadata.RequiredPlatformPermission))
                 {
                     return ToolResultHelper.Error<object>(
-                        $"O usuÃ¡rio nÃ£o possui a permissÃ£o de plataforma '{metadata.RequiredPlatformPermission}'.",
+                        $"O usuário não possui a permissão de plataforma '{metadata.RequiredPlatformPermission}'.",
                         errorCode: "platform_permission_denied");
                 }
 
@@ -483,7 +494,7 @@ app.Use(async (context, next) =>
             error = new
             {
                 code = "csrf_invalid",
-                message = "Token CSRF ausente, invÃ¡lido ou expirado. Atualize a pÃ¡gina e tente novamente."
+                message = "Token CSRF ausente, inválido ou expirado. Atualize a página e tente novamente."
             }
         });
     }
@@ -598,7 +609,7 @@ app.Use(async (context, next) =>
                 await TryWriteMcpOauthToolChallengeAsync(
                     context,
                     "invalid_token",
-                    "API key invalida. FaÃ§a login via OAuth para continuar."))
+                    "API key invalida. Faça login via OAuth para continuar."))
             {
                 return;
             }
@@ -623,7 +634,7 @@ app.Use(async (context, next) =>
             if (await TryWriteMcpOauthToolChallengeAsync(
                     context,
                     "invalid_token",
-                    "JWT ausente, expirado ou rejeitado pelo broker OAuth. FaÃ§a login novamente."))
+                    "JWT ausente, expirado ou rejeitado pelo broker OAuth. Faça login novamente."))
             {
                 return;
             }
@@ -668,7 +679,7 @@ app.Use(async (context, next) =>
             if (await TryWriteMcpOauthToolChallengeAsync(
                     context,
                     "invalid_token",
-                    "AutenticaÃ§Ã£o OAuth necessÃ¡ria para usar as tools do Moodle Connector."))
+                    "Autenticação OAuth necessária para usar as tools do Moodle Connector."))
             {
                 return;
             }
@@ -690,7 +701,7 @@ app.Use(async (context, next) =>
             if (await TryWriteMcpOauthToolChallengeAsync(
                     context,
                     "invalid_token",
-                    "AutenticaÃ§Ã£o OAuth necessÃ¡ria para usar as tools do Moodle Connector."))
+                    "Autenticação OAuth necessária para usar as tools do Moodle Connector."))
             {
                 return;
             }
@@ -751,7 +762,7 @@ app.Use(async (context, next) =>
             app.Logger,
             ex,
             "invalid_mcp_request",
-            "RequisiÃ§Ã£o MCP invalida. Envie um payload JSON-RPC 2.0 valido.");
+            "Requisição MCP invalida. Envie um payload JSON-RPC 2.0 valido.");
     }
     catch (BadHttpRequestException ex) when (context.Request.Path.StartsWithSegments(mcpPath, StringComparison.OrdinalIgnoreCase))
     {
@@ -767,7 +778,7 @@ app.Use(async (context, next) =>
             app.Logger,
             ex,
             "invalid_mcp_request",
-            "RequisiÃ§Ã£o MCP invalida. Nao foi possivel ler o payload recebido.");
+            "Requisição MCP invalida. Nao foi possivel ler o payload recebido.");
     }
 });
 
@@ -933,7 +944,7 @@ app.MapGet("/api/tasks", async (HttpContext context, ConnectorDbContext dbContex
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status);
     if (!string.IsNullOrWhiteSpace(priority)) query = query.Where(x => x.Priority == priority);
     var total = await query.CountAsync(cancellationToken);
-    var items = await query.OrderBy(x => x.DueAt).ThenByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new TaskDto(x.Id, x.Title, x.Description, x.Status, x.Priority, x.DueAt, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
+    var items = await query.OrderBy(x => x.DueAt).ThenByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new TaskDto(x.Id, x.Title, x.Description, x.Status, x.Priority, x.StartAt, x.DueAt, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
     return Results.Ok(new AppListEnvelope<TaskDto>(items, new AppListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -941,22 +952,68 @@ app.MapGet("/api/agenda", async (HttpContext context, ConnectorDbContext dbConte
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
-    var start = from ?? DateTimeOffset.UtcNow.Date;
+    var start = from ?? GetBrazilTodayStart(DateTimeOffset.UtcNow);
     var end = to ?? start.AddDays(30);
     var events = await dbContext.CalendarEvents.AsNoTracking().Where(x => x.OwnerId == identity.Id && x.StartAt >= start && x.StartAt < end).OrderBy(x => x.StartAt).Select(x => new CalendarEventDto(x.Id, x.Title, x.Description, x.StartAt, x.EndAt, x.Type, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
     return Results.Ok(new AppEnvelope<IReadOnlyList<CalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbContext, string? studentRef = null, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default) =>
+app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbContext, string? studentRef = null, string? connectionRef = null, string? courseId = null, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     page = Math.Max(1, page); pageSize = Math.Clamp(pageSize, 1, 100);
-    var query = dbContext.Followups.AsNoTracking().Where(x => x.OwnerId == identity.Id);
+    var teamIds = await dbContext.TeamMemberships.AsNoTracking()
+        .Where(item => item.UserId == identity.Id && item.IsActive)
+        .Select(item => item.TeamId)
+        .ToArrayAsync(cancellationToken);
+    var collaboratorIds = teamIds.Length == 0
+        ? [identity.Id]
+        : await dbContext.TeamMemberships.AsNoTracking()
+            .Where(item => teamIds.Contains(item.TeamId) && item.IsActive)
+            .Select(item => item.UserId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+    var query = dbContext.Followups.AsNoTracking().Where(x => collaboratorIds.Contains(x.OwnerId));
     if (!string.IsNullOrWhiteSpace(studentRef)) query = query.Where(x => x.StudentRef == studentRef);
+    if (!string.IsNullOrWhiteSpace(courseId))
+    {
+        var normalizedCourseId = courseId.Trim();
+        var scopedCourseRef = string.IsNullOrWhiteSpace(connectionRef) ? null : $"{connectionRef.Trim()}:{normalizedCourseId}";
+        query = query.Where(x => x.CourseRef == normalizedCourseId || (scopedCourseRef != null && x.CourseRef == scopedCourseRef));
+    }
     var total = await query.CountAsync(cancellationToken);
-    var items = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new FollowupDto(x.Id, x.StudentRef, x.CourseRef, x.Kind, x.Notes, x.OccurredAt, x.CreatedAt)).ToListAsync(cancellationToken);
-    return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
+    var rows = await query.OrderByDescending(x => x.OccurredAt).Skip((page - 1) * pageSize).Take(pageSize)
+        .Select(x => new
+        {
+            x.Id,
+            x.OwnerId,
+            x.StudentRef,
+            x.StudentName,
+            x.CourseRef,
+            x.Kind,
+            x.Reason,
+            x.Action,
+            x.Status,
+            x.Notes,
+            x.OccurredAt,
+            x.CreatedAt,
+        })
+        .ToListAsync(cancellationToken);
+    var ownerIds = rows.Select(item => item.OwnerId).Distinct().ToArray();
+    var actorNames = ownerIds.Length == 0
+        ? new Dictionary<Guid, string>()
+        : await dbContext.UserAccounts.AsNoTracking()
+            .Where(item => ownerIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => item.Name, cancellationToken);
+    var items = rows.Select(item => new FollowupDto(item.Id, item.StudentRef, item.StudentName, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt)
+    {
+        Reason = item.Reason,
+        Action = item.Action,
+        Status = item.Status,
+        ActorName = actorNames.GetValueOrDefault(item.OwnerId) ?? "Usuário",
+    }).ToArray();
+    return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Length, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/reports/operational", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
@@ -1003,7 +1060,7 @@ app.MapGet("/api/reports/course-overview/{connectionRef}/{courseId}", async (
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var report = await mediator.Send(new GenerateCourseOverviewQuery(courseId), cancellationToken);
     var now = DateTimeOffset.UtcNow;
     return Results.Ok(new AppEnvelope<AppCourseOverviewReportDto>(
@@ -1026,7 +1083,7 @@ app.MapGet("/api/reports/weekly/{connectionRef}/{courseId}", async (
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var report = await mediator.Send(new GenerateWeeklyPerformanceReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
     return Results.Ok(new AppEnvelope<AppWeeklyReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.StudentsWithAttention,
@@ -1047,7 +1104,7 @@ app.MapGet("/api/reports/completion/{connectionRef}/{courseId}", async (
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var report = await mediator.Send(new GeneratePostExecutionReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
     return Results.Ok(new AppEnvelope<AppCompletionReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.LikelyComplete,
@@ -1055,13 +1112,237 @@ app.MapGet("/api/reports/completion/{connectionRef}/{courseId}", async (
         new(report.GeneratedAt, connectionRef)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
+app.MapGet("/api/reports/jobs", async (
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMoodleCoursesGateway coursesGateway,
+    IMoodleConnectionSelection connectionSelection,
+    int page = 1,
+    int pageSize = 20,
+    CancellationToken cancellationToken = default) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    var storageUsedBytes = await ReportStorageCalculator.GetUsedBytesAsync(dbContext, identity.Id, cancellationToken);
+    var storageAvailableBytes = Math.Max(0L, ReportStorageCalculator.LimitBytes - storageUsedBytes);
+    var currentPage = Math.Max(page, 1);
+    var size = Math.Clamp(pageSize, 1, 50);
+    var query = dbContext.ReportJobs.AsNoTracking().Where(job => job.OwnerId == identity.Id);
+    var total = await query.CountAsync(cancellationToken);
+    var jobs = await query
+        .OrderByDescending(job => job.UpdatedAt)
+        .Skip((currentPage - 1) * size)
+        .Take(size)
+        .Select(job => new
+        {
+            job.Id,
+            job.ReportType,
+            job.ScopeType,
+            job.ConnectionAlias,
+            job.CategoryPath,
+            job.CourseId,
+            job.CourseIdsJson,
+            job.CourseNamesJson,
+            job.Status,
+            job.ProgressPercent,
+            job.TotalCourses,
+            job.ProcessedCourses,
+            job.FileName,
+            job.ContentType,
+            job.FileSizeBytes,
+            job.ErrorMessage,
+            job.RequestedAt,
+            job.StartedAt,
+            job.CompletedAt,
+            job.UpdatedAt
+        })
+        .ToArrayAsync(cancellationToken);
+    var data = new List<AppReportJobDto>(jobs.Length);
+    foreach (var job in jobs)
+    {
+        var courses = DeserializeReportCourses(job.CourseNamesJson);
+        if (courses.Count == 0 && job.Status is not "failed")
+        {
+            courses = await ResolveReportCourseMetadataAsync(
+                job.ScopeType,
+                job.CategoryPath,
+                job.CourseId,
+                job.CourseIdsJson,
+                identity.Id.ToString(),
+                job.ConnectionAlias,
+                coursesGateway,
+                connectionSelection,
+                cancellationToken);
+
+            if (courses.Count > 0)
+            {
+                var entity = await dbContext.ReportJobs
+                    .SingleOrDefaultAsync(item => item.Id == job.Id && item.OwnerId == identity.Id, cancellationToken);
+                if (entity is not null && string.IsNullOrWhiteSpace(entity.CourseNamesJson))
+                {
+                    entity.CourseNamesJson = JsonSerializer.Serialize(courses);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+            }
+        }
+
+        data.Add(new AppReportJobDto(
+            job.Id,
+            job.ReportType,
+            job.ScopeType,
+            job.ConnectionAlias,
+            job.CategoryPath,
+            job.CourseId,
+            job.Status,
+            job.ProgressPercent,
+            job.TotalCourses,
+            job.ProcessedCourses,
+            job.FileName,
+            job.ContentType,
+            job.FileSizeBytes,
+            job.ErrorMessage,
+            job.RequestedAt,
+            job.StartedAt,
+            job.CompletedAt,
+            job.UpdatedAt,
+            job.Status == "completed" ? $"/api/reports/jobs/{job.Id}/download" : null,
+            courses));
+    }
+    return Results.Ok(new AppReportJobsEnvelope(
+        data,
+        new(currentPage, size, data.Count, currentPage * size < total, DateTimeOffset.UtcNow, null, null, total,
+            storageUsedBytes, ReportStorageCalculator.LimitBytes, storageAvailableBytes)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPost("/api/reports/jobs", async (
+    CreateReportJobInput? input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (input is null) return Results.BadRequest(new { error = new { code = "invalid_report_job", message = "Informe os parâmetros do relatório." } });
+
+    var reportType = input.ReportType.Trim().ToLowerInvariant();
+    var scopeType = input.ScopeType.Trim().ToLowerInvariant();
+    if (reportType != "grades")
+        return Results.BadRequest(new { error = new { code = "invalid_report_type", message = "O único relatório disponível no momento é o relatório de notas." } });
+    if (scopeType is not ("category" or "course" or "courses"))
+        return Results.BadRequest(new { error = new { code = "invalid_report_scope", message = "Selecione um ou mais cursos, ou uma categoria de cursos." } });
+
+    var connectionRef = input.ConnectionRef?.Trim();
+    if (string.IsNullOrWhiteSpace(connectionRef))
+        return Results.BadRequest(new { error = new { code = "connection_required", message = "Selecione uma conexão Moodle." } });
+    var courseIds = (input.CourseIds ?? []).Select(courseId => courseId?.Trim()).Where(courseId => !string.IsNullOrWhiteSpace(courseId)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    if (scopeType == "category" && string.IsNullOrWhiteSpace(input.CategoryPath))
+        return Results.BadRequest(new { error = new { code = "category_required", message = "Selecione uma categoria de cursos." } });
+    if (scopeType == "course" && string.IsNullOrWhiteSpace(input.CourseId))
+        return Results.BadRequest(new { error = new { code = "course_required", message = "Selecione um curso." } });
+    if (scopeType == "courses" && (courseIds.Length == 0 || courseIds.Length > 500))
+        return Results.BadRequest(new { error = new { code = "courses_required", message = "Selecione entre 1 e 500 cursos." } });
+
+    var storageUsedBytes = await ReportStorageCalculator.GetUsedBytesAsync(dbContext, identity.Id, cancellationToken);
+    if (storageUsedBytes >= ReportStorageCalculator.LimitBytes)
+    {
+        return Results.Conflict(new
+        {
+            error = new
+            {
+                code = "report_storage_limit_exceeded",
+                message = $"O limite de {ReportStorageCalculator.FormatBytes(ReportStorageCalculator.LimitBytes)} por usuário foi atingido. Exclua relatórios antigos antes de gerar outro arquivo.",
+                usedBytes = storageUsedBytes,
+                limitBytes = ReportStorageCalculator.LimitBytes,
+                availableBytes = 0L,
+            },
+        });
+    }
+
+    try
+    {
+        if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
+            return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    }
+    catch (MoodleApiException exception)
+    {
+        return AppErrorResults.NotFound(exception.ErrorCode, exception.Message);
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var job = new ReportJobEntity
+    {
+        Id = Guid.NewGuid(),
+        OwnerId = identity.Id,
+        ClientId = identity.ConnectorClientId ?? identity.Id.ToString(),
+        ConnectionAlias = connectionRef,
+        ReportType = reportType,
+        ScopeType = scopeType,
+        CategoryPath = scopeType == "category" ? input.CategoryPath?.Trim() : null,
+        CourseId = scopeType == "course" ? input.CourseId?.Trim() : null,
+        CourseIdsJson = scopeType == "courses" ? JsonSerializer.Serialize(courseIds) : null,
+        Status = "queued",
+        RequestedAt = now,
+        UpdatedAt = now,
+    };
+    dbContext.ReportJobs.Add(job);
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Accepted($"/api/reports/jobs/{job.Id}", ToAppReportJobDto(job));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/reports/jobs/{id:guid}/download", async (
+    Guid id,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var job = await dbContext.ReportJobs.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id && item.OwnerId == identity.Id, cancellationToken);
+    if (job is null) return Results.NotFound();
+    if (job.Status != "completed" || (string.IsNullOrEmpty(job.ContentBase64) && string.IsNullOrEmpty(job.ContentText)))
+        return Results.Conflict(new { error = new { code = "report_not_ready", message = "O relatório ainda não está disponível para download." } });
+    if (!string.IsNullOrEmpty(job.ContentBase64))
+    {
+        return Results.File(Convert.FromBase64String(job.ContentBase64), job.ContentType ?? "application/octet-stream", job.FileName ?? "relatorio.xlsx");
+    }
+
+    return Results.File(Encoding.UTF8.GetBytes(job.ContentText!), job.ContentType ?? "text/csv; charset=utf-8", job.FileName ?? "relatorio.csv");
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapDelete("/api/reports/jobs/{id:guid}", async (
+    Guid id,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+
+    var job = await dbContext.ReportJobs.SingleOrDefaultAsync(item => item.Id == id && item.OwnerId == identity.Id, cancellationToken);
+    if (job is null) return Results.NotFound();
+    if (job.Status is "queued" or "running")
+    {
+        return Results.Conflict(new { error = new { code = "report_in_progress", message = "Aguarde o relatório terminar antes de excluí-lo." } });
+    }
+
+    dbContext.ReportJobs.Remove(job);
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.NoContent();
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
 app.MapPost("/api/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, AppMessagePrepareInput input, CancellationToken cancellationToken) =>
 {
     if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
-    if (!Enum.TryParse<TutorMessageType>(input.MessageType, true, out var messageType)) return Results.BadRequest(new { error = new { code = "invalid_message_type", message = "Tipo de mensagem invÃ¡lido." } });
-    if (input.RecipientIds is null || input.RecipientIds.Count == 0 || input.RecipientIds.Count > 100) return Results.BadRequest(new { error = new { code = "invalid_recipients", message = "Informe de 1 a 100 destinatÃ¡rios explÃ­citos." } });
+    if (!Enum.TryParse<TutorMessageType>(input.MessageType, true, out var messageType)) return Results.BadRequest(new { error = new { code = "invalid_message_type", message = "Tipo de mensagem inválido." } });
+    if (input.RecipientIds is null || input.RecipientIds.Count == 0 || input.RecipientIds.Count > 100) return Results.BadRequest(new { error = new { code = "invalid_recipients", message = "Informe de 1 a 100 destinatários explícitos." } });
     try
     {
         var preview = await mediator.Send(new PrepareTutorMessageCommand(input.CourseId, messageType, input.RecipientIds, input.CustomText), cancellationToken);
@@ -1077,9 +1358,107 @@ app.MapPost("/api/messages/confirm", async (HttpContext context, ConnectorDbCont
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
-    if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText)) return Results.BadRequest(new { error = new { code = "invalid_confirmation", message = "ConfirmaÃ§Ã£o explÃ­cita Ã© obrigatÃ³ria." } });
-    var result = await mediator.Send(new ConfirmTutorMessageCommand(input.PendingActionId, input.ConfirmationText), cancellationToken);
-    return Results.Ok(new AppEnvelope<TutorMessageSendResult>(result, new(DateTimeOffset.UtcNow, null)));
+    if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText)) return Results.BadRequest(new { error = new { code = "invalid_confirmation", message = "Confirmação explícita é obrigatória." } });
+    try
+    {
+        var result = await mediator.Send(new ConfirmTutorMessageCommand(input.PendingActionId, input.ConfirmationText), cancellationToken);
+        return Results.Ok(new AppEnvelope<TutorMessageSendResult>(result, new(DateTimeOffset.UtcNow, null)));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(new { error = new { code = "message_confirmation_failed", message = ex.Message } });
+    }
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/messages/conversations", async (
+    string? connectionRef,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleMessageGateway messageGateway,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null)
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var result = await messageGateway.GetConversationsAsync(cancellationToken);
+    var data = new AppMoodleConversationsDto(
+        ContractVersion: 1,
+        CurrentMoodleUserId: result.CurrentMoodleUserId,
+        Items: result.Items.Select(MapConversation).ToArray());
+    return Results.Ok(new AppEnvelope<AppMoodleConversationsDto>(data, new(DateTimeOffset.UtcNow, resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/messages/conversations/{moodleUserId:long}", async (
+    long moodleUserId,
+    string? connectionRef,
+    int? limit,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleMessageGateway messageGateway,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (moodleUserId <= 0) return Results.BadRequest(new { error = new { code = "invalid_moodle_user", message = "O usuário Moodle informado é inválido." } });
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null)
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var result = await messageGateway.GetMessagesAsync(moodleUserId, Math.Clamp(limit ?? 50, 1, 100), cancellationToken);
+    var data = new AppMoodleMessagesDto(
+        ContractVersion: 1,
+        ConversationId: result.ConversationId,
+        CurrentMoodleUserId: result.CurrentMoodleUserId,
+        Items: result.Items.Select(item => new AppMoodleMessageDto(
+            item.Id, item.Text, item.CreatedAtUnix, item.SenderMoodleUserId, item.SenderType)).ToArray());
+    return Results.Ok(new AppEnvelope<AppMoodleMessagesDto>(data, new(DateTimeOffset.UtcNow, resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPost("/api/messages/conversations/{moodleUserId:long}/prepare", async (
+    long moodleUserId,
+    string? connectionRef,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    AppMoodleDirectMessageInput input,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    if (moodleUserId <= 0 || string.IsNullOrWhiteSpace(input.Message) || input.Message.Trim().Length > 4000)
+        return Results.BadRequest(new { error = new { code = "invalid_message", message = "Informe uma mensagem entre 1 e 4000 caracteres." } });
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null)
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    try
+    {
+        var preview = await mediator.Send(new PrepareDirectMoodleMessageCommand(moodleUserId, input.Message), cancellationToken);
+        return Results.Ok(new AppEnvelope<TutorMessagePreview>(preview, new(DateTimeOffset.UtcNow, resolved.Alias)));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = new { code = "invalid_message", message = ex.Message } });
+    }
+    catch (KeyNotFoundException ex)
+    {
+        return AppErrorResults.NotFound("conversation_target_not_found", ex.Message);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(new { error = new { code = "message_disabled", message = ex.Message } });
+    }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/followups", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, FollowupInput input, CancellationToken cancellationToken) =>
@@ -1088,11 +1467,31 @@ app.MapPost("/api/followups", async (HttpContext context, ConnectorDbContext dbC
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
-    if (string.IsNullOrWhiteSpace(input.StudentRef) || string.IsNullOrWhiteSpace(input.Notes)) return Results.BadRequest(new { error = new { code = "invalid_followup", message = "Aluno e registro sÃ£o obrigatÃ³rios." } });
+    if (string.IsNullOrWhiteSpace(input.StudentRef) || string.IsNullOrWhiteSpace(input.Notes)) return Results.BadRequest(new { error = new { code = "invalid_followup", message = "Aluno e registro são obrigatórios." } });
     var now = DateTimeOffset.UtcNow;
-    var item = new FollowupEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, StudentRef = input.StudentRef.Trim(), CourseRef = input.CourseRef?.Trim(), Kind = NormalizeFollowupKind(input.Kind), Notes = input.Notes.Trim(), OccurredAt = input.OccurredAt ?? now, CreatedAt = now };
+    var item = new FollowupEntity
+    {
+        Id = Guid.NewGuid(),
+        OwnerId = identity.Id,
+        StudentRef = input.StudentRef.Trim(),
+        StudentName = input.StudentName?.Trim(),
+        CourseRef = input.CourseRef?.Trim(),
+        Kind = NormalizeFollowupKind(input.Kind),
+        Reason = NormalizeFollowupReason(input.Reason),
+        Action = NormalizeFollowupAction(input.Action),
+        Status = NormalizeFollowupStatus(input.Status),
+        Notes = input.Notes.Trim(),
+        OccurredAt = input.OccurredAt ?? now,
+        CreatedAt = now,
+    };
     dbContext.Followups.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/followups/{item.Id}", new AppEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt), new(now, null)));
+    return Results.Created($"/api/followups/{item.Id}", new AppEnvelope<FollowupDto>(new(item.Id, item.StudentRef, item.StudentName, item.CourseRef, item.Kind, item.Notes, item.OccurredAt, item.CreatedAt)
+    {
+        Reason = item.Reason,
+        Action = item.Action,
+        Status = item.Status,
+        ActorName = identity.Name,
+    }, new(now, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/agenda", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CalendarEventInput input, CancellationToken cancellationToken) =>
@@ -1101,7 +1500,7 @@ app.MapPost("/api/agenda", async (HttpContext context, ConnectorDbContext dbCont
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
-    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "TÃ­tulo Ã© obrigatÃ³rio." } });
+    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
     var now = DateTimeOffset.UtcNow;
     var item = new CalendarEventEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), StartAt = input.StartAt, EndAt = input.EndAt, Type = NormalizeCalendarEventType(input.Type), CreatedAt = now, UpdatedAt = now };
     dbContext.CalendarEvents.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
@@ -1119,17 +1518,36 @@ app.MapDelete("/api/agenda/{id:guid}", async (Guid id, HttpContext context, Conn
     dbContext.CalendarEvents.Remove(item); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
+app.MapPatch("/api/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CalendarEventUpdateInput input, CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.AgendaManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
+    var item = await dbContext.CalendarEvents.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
+    if (item is null) return Results.NotFound();
+    item.Title = input.Title.Trim();
+    item.Description = input.Description?.Trim();
+    item.StartAt = input.StartAt;
+    item.EndAt = input.EndAt;
+    item.Type = NormalizeCalendarEventType(input.Type);
+    item.UpdatedAt = DateTimeOffset.UtcNow;
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt), new(item.UpdatedAt, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
 app.MapPost("/api/tasks", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
 {
     if (!HasAppPermission(context, AppPermissionCatalog.TasksManage)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
-    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "TÃ­tulo Ã© obrigatÃ³rio." } });
+    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
     var now = DateTimeOffset.UtcNow;
-    var task = new TaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), Status = NormalizeTaskStatus(input.Status), Priority = NormalizeTaskPriority(input.Priority), DueAt = input.DueAt, CreatedAt = now, UpdatedAt = now };
+    var task = new TaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), Status = NormalizeTaskStatus(input.Status), Priority = NormalizeTaskPriority(input.Priority), StartAt = input.StartAt, DueAt = input.DueAt, CreatedAt = now, UpdatedAt = now };
     dbContext.Tasks.Add(task); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/tasks/{task.Id}", new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(now, null)));
+    return Results.Created($"/api/tasks/{task.Id}", new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt), new(now, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPatch("/api/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
@@ -1144,9 +1562,41 @@ app.MapPatch("/api/tasks/{id:guid}", async (Guid id, HttpContext context, Connec
     if (input.Description is not null) task.Description = input.Description.Trim();
     if (input.Status is not null) task.Status = NormalizeTaskStatus(input.Status);
     if (input.Priority is not null) task.Priority = NormalizeTaskPriority(input.Priority);
+    if (input.StartAt is not null) task.StartAt = input.StartAt;
     if (input.DueAt is not null) task.DueAt = input.DueAt;
     task.UpdatedAt = DateTimeOffset.UtcNow; await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Ok(new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.DueAt, task.CreatedAt, task.UpdatedAt), new(task.UpdatedAt, null)));
+    return Results.Ok(new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt), new(task.UpdatedAt, null)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapDelete("/api/tasks", async (
+    [FromBody] TaskBulkDeleteInput? input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.TasksManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+
+    var ids = input?.Ids?
+        .Where(id => id != Guid.Empty)
+        .Distinct()
+        .ToArray() ?? Array.Empty<Guid>();
+    if (ids.Length == 0 || ids.Length > 100)
+    {
+        return Results.BadRequest(new { error = new { code = "invalid_task_ids", message = "Informe entre 1 e 100 tarefas para remover." } });
+    }
+
+    var tasks = await dbContext.Tasks
+        .Where(task => task.OwnerId == identity.Id && ids.Contains(task.Id))
+        .ToListAsync(cancellationToken);
+    dbContext.Tasks.RemoveRange(tasks);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    var now = DateTimeOffset.UtcNow;
+    return Results.Ok(new AppEnvelope<TaskBulkDeleteResult>(new(ids.Length, tasks.Count), new(now, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapDelete("/api/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
@@ -1246,7 +1696,7 @@ app.MapPost("/api/connections", async (
         if (connection is null)
         {
             return Results.Problem(
-                "A conexÃ£o foi registrada, mas nÃ£o pÃ´de ser relida com seguranÃ§a.",
+                "A conexão foi registrada, mas não pôde ser relida com segurança.",
                 statusCode: StatusCodes.Status500InternalServerError);
         }
 
@@ -1364,21 +1814,21 @@ app.MapGet("/api/pending", async (
     {
         return Results.Ok(new AppListEnvelope<AppPendingDto>(
             Array.Empty<AppPendingDto>(), new(currentPage, size, 0, false, generatedAt, null,
-                ["Nenhuma conexÃ£o Moodle foi configurada para esta conta."])));
+                ["Nenhuma conexão Moodle foi configurada para esta conta."])));
     }
-    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     if (string.IsNullOrWhiteSpace(courseId))
     {
         return Results.Ok(new AppListEnvelope<AppPendingDto>(
             Array.Empty<AppPendingDto>(), new(currentPage, size, 0, false, generatedAt, effectiveConnectionRef,
-                ["Selecione um curso para consultar pendÃªncias; nenhuma consulta agregada foi executada."])));
+                ["Selecione um curso para consultar pendências; nenhuma consulta agregada foi executada."])));
     }
 
     var userId = identity.Id.ToString();
     var participants = await mediator.Send(new ListCourseParticipantsQuery(
         userId, courseId, ParticipantStatusFilter.Active, 1, 100, true, false), cancellationToken);
-    if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
 
     var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(courseId, 0, 100), cancellationToken);
     var inactivityDays = Math.Clamp(periodDays ?? 14, 1, 3650);
@@ -1407,9 +1857,301 @@ app.MapGet("/api/pending", async (
             pending.Warning is null ? null : [pending.Warning], filtered.Length)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
+app.MapGet("/api/submissions", async (
+    string? connectionRef,
+    string courseId,
+    string assignmentId,
+    string? status,
+    int? page,
+    int? pageSize,
+    DateTimeOffset? since,
+    DateTimeOffset? before,
+    bool? includeLate,
+    bool? includeUngraded,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    if (string.IsNullOrWhiteSpace(courseId) || string.IsNullOrWhiteSpace(assignmentId))
+        return Results.BadRequest(new { error = new { code = "invalid_submission_scope", message = "Curso e atividade são obrigatórios." } });
+
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 25, 1, 100);
+    var filter = ParseAssignmentSubmissionFilter(status);
+    var result = await mediator.Send(new ListAssignmentSubmissionsQuery(
+        currentUserId.ToString(),
+        courseId.Trim(),
+        assignmentId.Trim(),
+        filter,
+        currentPage,
+        size,
+        since,
+        before,
+        includeLate ?? true,
+        includeUngraded ?? true), cancellationToken);
+    if (result is null) return AppErrorResults.NotFound("assignment_not_found", "Atividade não encontrada neste curso.");
+
+    var generatedAt = DateTimeOffset.UtcNow;
+    return Results.Ok(new AppEnvelope<AppSubmissionsPageDto>(
+        AppSubmissionContractMapper.ToPage(result),
+        new(generatedAt, connectionRef ?? resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/submissions/{courseId}/{assignmentId}/{studentId}", async (
+    string courseId,
+    string assignmentId,
+    string studentId,
+    string? connectionRef,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleAssignmentGradeReadGateway gradeReadGateway,
+    IMoodleCourseContentsGateway contentsGateway,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var result = await mediator.Send(new GetStudentSubmissionQuery(
+        currentUserId.ToString(), courseId, assignmentId, studentId), cancellationToken);
+    var gradeAssignmentId = assignmentId;
+    try
+    {
+        var contents = await contentsGateway.GetCourseContentsAsync(
+            currentUserId.ToString(), courseId, ["assign"], includeHidden: true, onlyWithFiles: false, cancellationToken);
+        var module = contents.Sections
+            .SelectMany(section => section.Modules)
+            .FirstOrDefault(item =>
+                string.Equals(item.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(item.ModuleId, assignmentId, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(item.InstanceId, assignmentId, StringComparison.OrdinalIgnoreCase)));
+        if (!string.IsNullOrWhiteSpace(module?.InstanceId)) gradeAssignmentId = module.InstanceId!;
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        // Keep the route useful when the optional normalization lookup is unavailable.
+    }
+
+    MoodleConnector.Application.Grading.AssignmentExistingGrade? existingGrade = null;
+    try
+    {
+        existingGrade = await gradeReadGateway.GetExistingGradeAsync(
+            currentUserId.ToString(), gradeAssignmentId, studentId, cancellationToken);
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        // The submission remains useful even when the optional grade read is unavailable.
+    }
+    return result is null
+        ? AppErrorResults.NotFound("submission_not_found", "Submissão não encontrada para este estudante.")
+        : Results.Ok(new AppEnvelope<AppSubmissionDto>(
+            AppSubmissionContractMapper.ToDto(result, existingGrade),
+            new(DateTimeOffset.UtcNow, connectionRef ?? resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/evidence", async (
+    string? connectionRef,
+    string? courseId,
+    string? studentId,
+    int? page,
+    int? pageSize,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 30, 1, 100);
+    var query = dbContext.PortalEvidence.AsNoTracking().Where(item => item.OwnerId == identity.Id);
+    if (!string.IsNullOrWhiteSpace(connectionRef)) query = query.Where(item => item.ConnectionAlias == connectionRef);
+    if (!string.IsNullOrWhiteSpace(courseId)) query = query.Where(item => item.CourseId == courseId);
+    if (!string.IsNullOrWhiteSpace(studentId)) query = query.Where(item => item.StudentId == studentId);
+    var total = await query.CountAsync(cancellationToken);
+    var items = await query.OrderByDescending(item => item.ObservedAt).Skip((currentPage - 1) * size).Take(size).ToArrayAsync(cancellationToken);
+    var data = items.Select(item => new AppEvidenceDto(item.Id, item.ConnectionAlias, item.CourseId, item.StudentId, item.ActivityId, item.Kind, item.Title, item.Details, item.Source, item.ObservedAt, item.CreatedAt)).ToArray();
+    return Results.Ok(new AppListEnvelope<AppEvidenceDto>(data, new(currentPage, size, data.Length, currentPage * size < total, DateTimeOffset.UtcNow, connectionRef, null, total)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/dashboard/{metric}", async (
+    string metric,
+    string? connectionRef,
+    bool? refresh,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    IMoodleParticipantsGateway participantsGateway,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IDashboardOverviewRefreshQueue dashboardRefreshQueue,
+    DashboardPendingSnapshotBuilder pendingSnapshotBuilder,
+    IMemoryCache memoryCache,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return (IResult)Results.Unauthorized();
+
+    var normalizedMetric = metric.Trim().ToLowerInvariant();
+    var generatedAt = DateTimeOffset.UtcNow;
+    MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
+    try
+    {
+        resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    }
+    catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
+    {
+        const string warning = "Nenhuma conexão Moodle foi configurada para esta conta.";
+        var emptySummary = new AppDashboardSummaryDto(0, 0, 0, 0, 0);
+        return normalizedMetric switch
+        {
+            "summary" => (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(
+                new(emptySummary, [warning]), new(generatedAt, null))),
+            "pending" => (IResult)Results.Ok(new AppEnvelope<AppDashboardPendingMetricDto>(
+                new(emptySummary, [], [], [], [], [warning]), new(generatedAt, null))),
+            "access" => (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(
+                new(emptySummary, [], [warning]), new(generatedAt, null))),
+            "courses" => (IResult)Results.Ok(new AppEnvelope<AppDashboardCoursesMetricDto>(
+                new([], [warning]), new(generatedAt, null))),
+            _ => (IResult)AppErrorResults.NotFound("dashboard_metric_not_found", "Métrica de dashboard não encontrada."),
+        };
+    }
+    if (resolved is null) return (IResult)AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var effectiveConnectionRef = resolved.Alias;
+    var cacheKey = $"dashboard-metric:{identity.Id}:{effectiveConnectionRef}:{normalizedMetric}";
+    var courseScopeCacheKey = $"dashboard-course-scope:{identity.Id}:{effectiveConnectionRef}";
+
+    if (normalizedMetric != "pending" && refresh != true && memoryCache.TryGetValue(cacheKey, out object? cached) && cached is not null)
+    {
+        return normalizedMetric switch
+        {
+            "summary" when cached is AppDashboardSummaryMetricDto summary => (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(summary, new(generatedAt, effectiveConnectionRef))),
+            "pending" when cached is AppDashboardPendingMetricDto pending => (IResult)Results.Ok(new AppEnvelope<AppDashboardPendingMetricDto>(pending, new(generatedAt, effectiveConnectionRef))),
+            "access" when cached is AppDashboardAccessMetricDto access => (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(access, new(generatedAt, effectiveConnectionRef))),
+            "courses" when cached is AppDashboardCoursesMetricDto coursesMetric => (IResult)Results.Ok(new AppEnvelope<AppDashboardCoursesMetricDto>(coursesMetric, new(generatedAt, effectiveConnectionRef))),
+            _ => null
+        } ?? (IResult)AppErrorResults.NotFound("dashboard_metric_not_found", "Métrica de dashboard não encontrada.");
+    }
+
+    IReadOnlyList<CourseSummary> courses;
+    if (refresh == true)
+    {
+        courses = await GetDashboardCourseScopeAsync(identity.Id.ToString(), effectiveConnectionRef, dbContext, mediator, cancellationToken);
+        memoryCache.Set(courseScopeCacheKey, courses, AppDashboardBudget.CourseScopeCacheDuration);
+    }
+    else
+    {
+        courses = await memoryCache.GetOrCreateAsync<IReadOnlyList<CourseSummary>>(courseScopeCacheKey, async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = AppDashboardBudget.CourseScopeCacheDuration;
+            return await GetDashboardCourseScopeAsync(identity.Id.ToString(), effectiveConnectionRef, dbContext, mediator, cancellationToken);
+        }) ?? [];
+    }
+    if (normalizedMetric == "courses")
+    {
+        var result = new AppDashboardCoursesMetricDto(
+            courses.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray(),
+            courses.Count == 0 ? ["Nenhum curso em andamento foi encontrado em Meus Cursos."] : []);
+        memoryCache.Set(cacheKey, result, AppDashboardBudget.MetricCacheDuration);
+        return (IResult)Results.Ok(new AppEnvelope<AppDashboardCoursesMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
+    }
+
+    if (normalizedMetric == "summary")
+    {
+        var todayStart = GetBrazilTodayStart(generatedAt);
+        var todayEnd = todayStart.AddDays(1);
+        var todayEvents = await dbContext.CalendarEvents.AsNoTracking()
+            .CountAsync(item => item.OwnerId == identity.Id && item.StartAt >= todayStart && item.StartAt < todayEnd, cancellationToken);
+        var todayTasks = await dbContext.Tasks.AsNoTracking()
+            .CountAsync(item => item.OwnerId == identity.Id && item.Status != "done" && item.DueAt >= todayStart && item.DueAt < todayEnd, cancellationToken);
+        var result = new AppDashboardSummaryMetricDto(
+            new AppDashboardSummaryDto(courses.Count, 0, 0, 0, 0)
+            {
+                TodayEvents = todayEvents,
+                TodayTasks = todayTasks,
+            },
+            courses.Count == 0 ? ["Nenhum curso em andamento foi encontrado em Meus Cursos."] : []);
+        memoryCache.Set(cacheKey, result, AppDashboardBudget.MetricCacheDuration);
+        return (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
+    }
+
+    if (normalizedMetric == "pending")
+    {
+        var isQueued = dashboardRefreshQueue.IsQueued(identity.Id, effectiveConnectionRef);
+        if (refresh == true || !memoryCache.TryGetValue(cacheKey, out AppDashboardPendingMetricDto? cachedPending) || cachedPending is null)
+        {
+            isQueued = isQueued || dashboardRefreshQueue.Enqueue(new DashboardOverviewRefreshRequest(
+                    identity.Id,
+                    identity.ConnectorClientId ?? string.Empty,
+                    effectiveConnectionRef,
+                    courses));
+        }
+
+        AppDashboardPendingMetricDto response;
+        if (memoryCache.TryGetValue(cacheKey, out AppDashboardPendingMetricDto? existingPending) && existingPending is not null)
+        {
+            response = existingPending with
+            {
+                IsRefreshing = isQueued || dashboardRefreshQueue.IsQueued(identity.Id, effectiveConnectionRef),
+                CoursesInScope = courses.Count,
+                CoursesAnalyzed = existingPending.CoursesAnalyzed == 0
+                    ? existingPending.Summary.ActiveCourses
+                    : existingPending.CoursesAnalyzed,
+            };
+        }
+        else
+        {
+            response = await pendingSnapshotBuilder.CreateRefreshingAsync(identity.Id, courses.Count, cancellationToken);
+            if (!isQueued)
+            {
+                response = response with
+                {
+                    Warnings = ["Não foi possível iniciar a atualização da visão geral neste momento."]
+                };
+            }
+        }
+
+        return (IResult)Results.Ok(new AppEnvelope<AppDashboardPendingMetricDto>(response, new(generatedAt, effectiveConnectionRef)));
+    }
+
+    if (normalizedMetric == "access")
+    {
+        var access = await ReadDashboardAccessAsync(courses, participantsGateway, currentUserIdGateway, cancellationToken);
+        var result = new AppDashboardAccessMetricDto(
+            new AppDashboardSummaryDto(courses.Count, 0, 0, access.StudentsWithoutAccess14Days, access.StudentsWithoutAccess14Days)
+            {
+                ActiveStudents = access.TotalStudents,
+                ActiveNormalStudents = access.StudentsAccessedLast7Days,
+                NeverAccessedStudents = access.StudentsNeverAccessed,
+            },
+            access.Segments,
+            access.Warnings);
+        memoryCache.Set(cacheKey, result, AppDashboardBudget.MetricCacheDuration);
+        return (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
+    }
+
+    return (IResult)AppErrorResults.NotFound("dashboard_metric_not_found", "Métrica de dashboard não encontrada.");
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
 app.MapGet("/api/dashboard", async (
     string? connectionRef,
     string? courseId,
+    bool? activityOnly,
+    string? week,
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
@@ -1420,6 +2162,8 @@ app.MapGet("/api/dashboard", async (
     if (identity is null) return Results.Unauthorized();
 
     var generatedAt = DateTimeOffset.UtcNow;
+    var selectedWeek = AppDashboardWeekFilter.Normalize(week);
+    var weekPeriod = GetBrazilWeekPeriod(generatedAt, selectedWeek);
     MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
     try
     {
@@ -1427,13 +2171,56 @@ app.MapGet("/api/dashboard", async (
     }
     catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_connection_not_found")
     {
+        var emptyDashboard = AppDashboardContractMapper.Empty(null, ["Nenhuma conexão Moodle foi configurada para esta conta."]) with
+        {
+            Week = selectedWeek,
+            WeekStartsAt = weekPeriod.Start,
+            WeekEndsAt = weekPeriod.End,
+        };
         return Results.Ok(new AppEnvelope<AppDashboardDto>(
-            AppDashboardContractMapper.Empty(null, ["Nenhuma conexÃ£o Moodle foi configurada para esta conta."]),
+            emptyDashboard,
             new(generatedAt, null)));
     }
-    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var userId = identity.Id.ToString();
+
+    if (activityOnly == true)
+    {
+        var activitySince = generatedAt.AddDays(-7);
+        var taskActivity = await dbContext.Tasks.AsNoTracking()
+            .Where(item => item.OwnerId == identity.Id && item.UpdatedAt >= activitySince)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Take(AppDashboardBudget.MaxActivities)
+            .Select(item => new AppDashboardActivityDto($"task:{item.Id}", "Tarefa atualizada", item.Title, item.UpdatedAt, null, null))
+            .ToListAsync(cancellationToken);
+        var eventActivity = await dbContext.CalendarEvents.AsNoTracking()
+            .Where(item => item.OwnerId == identity.Id && item.UpdatedAt >= activitySince)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Take(AppDashboardBudget.MaxActivities)
+            .Select(item => new AppDashboardActivityDto($"event:{item.Id}", "Evento atualizado", item.Title, item.UpdatedAt, null, null))
+            .ToListAsync(cancellationToken);
+        var recentActivity = taskActivity.Concat(eventActivity)
+            .OrderByDescending(item => item.OccurredAt)
+            .Take(AppDashboardBudget.MaxActivities)
+            .ToArray();
+        var activityDashboard = AppDashboardContractMapper.Empty(effectiveConnectionRef, [], recentActivity) with
+        {
+            Week = selectedWeek,
+            WeekStartsAt = weekPeriod.Start,
+            WeekEndsAt = weekPeriod.End,
+        };
+        return Results.Ok(new AppEnvelope<AppDashboardDto>(
+            activityDashboard,
+            new(generatedAt, effectiveConnectionRef)));
+    }
+
+    var todayStart = GetBrazilTodayStart(generatedAt);
+    var todayEnd = todayStart.AddDays(1);
+    var todayEvents = await dbContext.CalendarEvents.AsNoTracking()
+        .CountAsync(item => item.OwnerId == identity.Id && item.StartAt >= todayStart && item.StartAt < todayEnd, cancellationToken);
+    var todayTasks = await dbContext.Tasks.AsNoTracking()
+        .CountAsync(item => item.OwnerId == identity.Id && item.Status != "done" && item.DueAt >= todayStart && item.DueAt < todayEnd, cancellationToken);
 
     // Bounded dashboard rule: without an explicit course, only read the course list.
     // Pending/risk indicators require a course scope and are intentionally not fanned out.
@@ -1442,47 +2229,112 @@ app.MapGet("/api/dashboard", async (
         var courses = await mediator.Send(new ListMyCoursesQuery(userId, AppDashboardBudget.MaxCoursesRead, 1), cancellationToken);
         var activeCourses = courses.Items.Count(course => course.Visible != false);
         var warnings = new List<string>();
-        if (courses.HasNextPage) warnings.Add("O resumo de cursos estÃ¡ limitado a uma pÃ¡gina para manter o orÃ§amento de leitura.");
-        warnings.Add("Selecione um curso para consultar pendÃªncias e indicadores de risco detalhados; nenhuma consulta por aluno foi executada.");
+        if (courses.HasNextPage) warnings.Add("O resumo de cursos está limitado a uma página para manter o orçamento de leitura.");
+        warnings.Add("Selecione um curso para consultar pendências e indicadores de risco detalhados; nenhuma consulta por aluno foi executada.");
         return Results.Ok(new AppEnvelope<AppDashboardDto>(
-            new(new AppDashboardSummaryDto(activeCourses, 0, 0, 0, 0), [], [], [], effectiveConnectionRef, warnings),
+            new AppDashboardDto(new AppDashboardSummaryDto(activeCourses, 0, 0, 0, 0)
+            {
+                TodayEvents = todayEvents,
+                TodayTasks = todayTasks,
+                ActivitiesToReview = null,
+                PendingSubmissionAssignments = null,
+                ActiveNormalStudents = null,
+                PendingCorrectionAssignments = null,
+            }, [], [], [], effectiveConnectionRef, warnings)
+            {
+                Week = selectedWeek,
+                WeekStartsAt = weekPeriod.Start,
+                WeekEndsAt = weekPeriod.End,
+            },
             new(generatedAt, effectiveConnectionRef)));
     }
 
     var course = await mediator.Send(new GetCourseQuery(userId, courseId), cancellationToken);
-    if (course is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (course is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
 
     var participants = await mediator.Send(new ListCourseParticipantsQuery(
         userId, courseId, ParticipantStatusFilter.Active, 1, AppDashboardBudget.MaxParticipantsRead, true, false), cancellationToken);
-    if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
 
     var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
-        courseId, 0, AppDashboardBudget.MaxParticipantsRead), cancellationToken);
+        courseId, 0, AppDashboardBudget.MaxParticipantsRead, IncludeAwaitingGrading: true, MaxAssignmentsToAnalyze: AppDashboardBudget.MaxAssignmentsRead), cancellationToken);
+    var gradingRows = pending.AwaitingGrading
+        .Select(item => new AppDashboardPriorityDto(
+            $"{effectiveConnectionRef}:{courseId}:{item.StudentId}:{item.Item.AssignmentId}:grading",
+            "Atividade para corrigir",
+            $"{item.FullName} · {item.Item.AssignmentName}",
+            "attention", courseId, item.StudentId))
+        .OrderBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
+        .Take(AppDashboardBudget.MaxPriorities)
+        .ToArray();
     var pendingRows = pending.Students
         .SelectMany(student => student.PendingAssignments.Select(activity => new AppDashboardPriorityDto(
             $"{effectiveConnectionRef}:{courseId}:{student.StudentId}:{activity.AssignmentId}",
             "Entrega pendente",
-            $"{student.FullName} Â· {activity.AssignmentName}",
+            $"{student.FullName} · {activity.AssignmentName}",
             activity.IsOverdue ? "risk" : "attention", courseId, student.StudentId)))
         .OrderByDescending(item => item.Level == "risk")
         .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
         .Take(AppDashboardBudget.MaxPriorities)
         .ToArray();
-    var inactive = participants.Participants.Count(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < generatedAt.AddDays(-14));
+    var inactiveStudentIds = participants.Participants
+        .Where(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < generatedAt.AddDays(-14))
+        .Select(student => student.UserId)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var pendingSubmissionAssignments = pending.Students.Sum(student => student.PendingAssignments.Count);
+    var pendingCorrectionAssignments = pending.AwaitingGrading.Count;
+    var pendingStudentIds = pending.Students
+        .Select(student => student.StudentId)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var overdueStudentIds = pending.Students
+        .Where(student => student.PendingAssignments.Any(activity => activity.IsOverdue))
+        .Select(student => student.StudentId)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var studentsAtRisk = inactiveStudentIds.Union(overdueStudentIds, StringComparer.OrdinalIgnoreCase).Count();
+    var studentsNeedingAttention = inactiveStudentIds.Union(pendingStudentIds, StringComparer.OrdinalIgnoreCase).Count();
+    var priorityRows = participants.Participants
+        .Where(student => inactiveStudentIds.Contains(student.UserId))
+        .Select(student => new AppDashboardPriorityDto(
+            $"{effectiveConnectionRef}:{courseId}:{student.UserId}:risk",
+            "Aluno em risco",
+            $"{student.FullName} · sem acesso recente",
+            "risk", courseId, student.UserId))
+        .Concat(pendingRows)
+        .Concat(gradingRows)
+        .OrderByDescending(item => item.Level == "risk")
+        .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
+        .Take(AppDashboardBudget.MaxPriorities)
+        .ToArray();
     var dashboardWarnings = new List<string>();
-    if (participants.HasMore) dashboardWarnings.Add("O indicador de alunos estÃ¡ limitado ao orÃ§amento de leitura do dashboard.");
+    if (participants.HasMore) dashboardWarnings.Add("O indicador de alunos está limitado ao orçamento de leitura do dashboard.");
     if (pending.Warning is not null) dashboardWarnings.Add(pending.Warning);
+    dashboardWarnings.Add("Risco calculado por acesso e pendências; notas e conclusão não foram consultadas para preservar o desempenho.");
     var summary = new AppDashboardSummaryDto(
         course.Visible == false ? 0 : 1,
-        pending.Students.Sum(student => student.PendingAssignments.Count),
-        0,
-        inactive,
-        inactive);
+        pendingSubmissionAssignments,
+        pendingCorrectionAssignments,
+        studentsAtRisk,
+        studentsNeedingAttention)
+    {
+        TodayEvents = todayEvents,
+        TodayTasks = todayTasks,
+        ActivitiesToReview = pendingCorrectionAssignments,
+        ActiveNormalStudents = Math.Max(0, participants.Participants.Count - studentsNeedingAttention),
+        PendingSubmissionAssignments = pendingSubmissionAssignments,
+        PendingCorrectionAssignments = pendingCorrectionAssignments,
+        NewAtRiskThisWeek = null,
+        ActiveStudents = participants.Participants.Count,
+    };
     var recent = pendingRows.Take(AppDashboardBudget.MaxActivities)
         .Select(item => new AppDashboardActivityDto(item.Key, item.Title, item.Detail, null, item.CourseId, item.StudentId))
         .ToArray();
     return Results.Ok(new AppEnvelope<AppDashboardDto>(
-        new(summary, pendingRows, pendingRows, recent, effectiveConnectionRef, dashboardWarnings),
+        new AppDashboardDto(summary, priorityRows, gradingRows, recent, effectiveConnectionRef, dashboardWarnings)
+        {
+            Week = selectedWeek,
+            WeekStartsAt = weekPeriod.Start,
+            WeekEndsAt = weekPeriod.End,
+        },
         new(generatedAt, effectiveConnectionRef)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -1547,14 +2399,93 @@ app.MapGet("/api/courses", async (
     {
         return Results.Ok(new AppListEnvelope<AppCourseDto>(
             Array.Empty<AppCourseDto>(), new(currentPage, size, 0, false, DateTimeOffset.UtcNow, null,
-                ["Nenhuma conexÃ£o Moodle foi configurada para esta conta."])));
+                ["Nenhuma conexão Moodle foi configurada para esta conta."])));
     }
-    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var data = result.Items.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
     return Results.Ok(new AppListEnvelope<AppCourseDto>(data,
         new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, effectiveConnectionRef, null, result.TotalCount)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/course-preferences/ignored", async (
+    string? connectionRef,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var ignoredCourseIds = await dbContext.UserIgnoredCourses
+        .AsNoTracking()
+        .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias)
+        .OrderBy(item => item.CourseId)
+        .Select(item => item.CourseId)
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(new AppEnvelope<IReadOnlyList<string>>(
+        ignoredCourseIds,
+        new(DateTimeOffset.UtcNow, resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPut("/api/course-preferences/ignored", async (
+    UpdateIgnoredCoursesInput? input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (input is null || input.CourseIds is null)
+        return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe os cursos que devem ser atualizados." } });
+
+    const int maxCourseIdsPerRequest = 1000;
+    var courseIds = input.CourseIds
+        .Where(courseId => !string.IsNullOrWhiteSpace(courseId))
+        .Select(courseId => courseId.Trim())
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+    if (courseIds.Length == 0 || courseIds.Length > maxCourseIdsPerRequest || courseIds.Any(courseId => courseId.Length > 64))
+        return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe entre 1 e 1000 IDs de cursos válidos." } });
+
+    var resolved = await connectionRegistry.ResolveConnectionAsync(input.ConnectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var existing = await dbContext.UserIgnoredCourses
+        .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias && courseIds.Contains(item.CourseId))
+        .ToDictionaryAsync(item => item.CourseId, StringComparer.Ordinal, cancellationToken);
+    var now = DateTimeOffset.UtcNow;
+
+    if (input.Ignored)
+    {
+        foreach (var courseId in courseIds)
+        {
+            if (existing.ContainsKey(courseId)) continue;
+            dbContext.UserIgnoredCourses.Add(new UserIgnoredCourseEntity
+            {
+                Id = Guid.NewGuid(),
+                OwnerId = identity.Id,
+                ConnectionAlias = resolved.Alias,
+                CourseId = courseId,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+    }
+    else
+    {
+        foreach (var preference in existing.Values)
+            dbContext.UserIgnoredCourses.Remove(preference);
+    }
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new AppEnvelope<bool>(true, new(now, resolved.Alias)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
@@ -1564,52 +2495,94 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
-    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var course = await mediator.Send(new GetCourseQuery(identity.Id.ToString(), courseId), cancellationToken);
     return course is null
-        ? AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.")
+        ? AppErrorResults.NotFound("course_not_found", "Curso não encontrado.")
         : Results.Ok(new AppEnvelope<AppCourseDto>(AppCourseContractMapper.ToDto(course, connectionRef), new(DateTimeOffset.UtcNow, connectionRef)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
-    string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
+    string connectionRef, string courseId, int? page, int? pageSize, bool? includeActionSummary, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
-    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var result = await mediator.Send(new ListCourseActivitiesQuery(identity.Id.ToString(), courseId, CourseActivityModuleTypes.All, false), cancellationToken);
-    if (result is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    if (result is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
-    var data = result.Activities.Skip((currentPage - 1) * size).Take(size)
-        .Select(activity => AppCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray();
+    var pageActivities = result.Activities.Skip((currentPage - 1) * size).Take(size).ToArray();
+    var submissionCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    var gradingCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    if (includeActionSummary == true)
+    {
+        var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+            courseId, 0, AppDashboardBudget.MaxParticipantsRead, IncludeAwaitingGrading: true,
+            MaxAssignmentsToAnalyze: AppDashboardBudget.MaxAssignmentsRead), cancellationToken);
+        foreach (var item in pending.Students.SelectMany(student => student.PendingAssignments))
+            submissionCounts[item.AssignmentId] = submissionCounts.GetValueOrDefault(item.AssignmentId) + 1;
+        foreach (var item in pending.AwaitingGrading)
+            gradingCounts[item.Item.AssignmentId] = gradingCounts.GetValueOrDefault(item.Item.AssignmentId) + 1;
+    }
+    var data = pageActivities.Select(activity =>
+    {
+        var dto = AppCourseContractMapper.ToDto(activity, connectionRef, courseId);
+        var keys = new[] { activity.InstanceId, activity.ActivityId }.Where(key => !string.IsNullOrWhiteSpace(key)).Cast<string>();
+        return dto with
+        {
+            PendingSubmissionCount = keys.Select(key => submissionCounts.GetValueOrDefault(key)).FirstOrDefault(value => value > 0),
+            AwaitingGradingCount = keys.Select(key => gradingCounts.GetValueOrDefault(key)).FirstOrDefault(value => value > 0),
+        };
+    }).ToArray();
     return Results.Ok(new AppListEnvelope<AppActivityDto>(data,
         new(currentPage, size, data.Length, currentPage * size < result.Total, DateTimeOffset.UtcNow, connectionRef, null, result.Total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
-    string connectionRef, string courseId, int? page, int? pageSize, HttpContext context,
+    string connectionRef, string courseId, int? page, int? pageSize, bool? includePending, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    try
+    {
     var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, currentPage, size, true, true), cancellationToken);
-    if (paged is null) return AppErrorResults.NotFound("course_not_found", "Curso nÃ£o encontrado.");
+    var pendingByStudent = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    if (includePending == true)
+    {
+        var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+            courseId, 0, AppDashboardBudget.MaxParticipantsRead, IncludeAwaitingGrading: false,
+            MaxAssignmentsToAnalyze: AppDashboardBudget.MaxAssignmentsRead), cancellationToken);
+        pendingByStudent = pending.Students.ToDictionary(
+            student => student.StudentId,
+            student => student.PendingAssignments.Count,
+            StringComparer.OrdinalIgnoreCase);
+    }
+    if (paged is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
     var data = paged.Participants
         .Select(participant => StudentContractMapper.ToDto(connectionRef, participant,
             new[] { new StudentCourseDto(connectionRef, courseId, courseId, null,
                 participant.Suspended == true ? "suspenso" : "ativo", null,
-                participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) }))
+                participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) }) with
+        {
+            PendingCount = pendingByStudent.GetValueOrDefault(participant.UserId),
+        })
         .ToArray();
     return Results.Ok(new AppListEnvelope<StudentDto>(data,
         new(currentPage, size, data.Length, paged.HasMore,
             DateTimeOffset.UtcNow, connectionRef, null, null)));
+    }
+    catch (MoodleApiException exception) when (exception.ErrorCode == "moodle_permission_denied")
+    {
+        return Results.Json(new { error = new { code = "moodle_permission_denied", message = "A conexão Moodle não permite consultar os participantes deste curso." } }, statusCode: StatusCodes.Status502BadGateway);
+    }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/students/{studentId}", async (
@@ -1619,10 +2592,10 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/students/{studentId}", async
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
-        return AppErrorResults.NotFound("connection_not_found", "ConexÃ£o Moodle nÃ£o encontrada.");
+        return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, 1, 1000, true, true), cancellationToken);
     var participant = paged?.Participants.FirstOrDefault(p => p.UserId == studentId);
-    if (participant is null) return AppErrorResults.NotFound("student_not_found", "Aluno nÃ£o encontrado neste curso.");
+    if (participant is null) return AppErrorResults.NotFound("student_not_found", "Aluno não encontrado neste curso.");
     var gradeItems = await mediator.Send(new GetStudentGradeItemsQuery(courseId, studentId), cancellationToken);
     var courseDtos = new[] { new StudentCourseDto(connectionRef, courseId, courseId, null,
         participant.Suspended == true ? "suspenso" : "ativo", null,
@@ -1706,7 +2679,7 @@ app.MapPost("/api/account/register", async (
     if (string.IsNullOrWhiteSpace(input.Name) ||
         string.IsNullOrWhiteSpace(input.Email) ||
         string.IsNullOrWhiteSpace(input.Password))
-        return Results.BadRequest(new { ok = false, error = "Preencha todos os campos obrigatÃ³rios." });
+        return Results.BadRequest(new { ok = false, error = "Preencha todos os campos obrigatórios." });
 
     if (input.Password.Length < 12)
         return Results.BadRequest(new { ok = false, error = "A senha deve ter pelo menos 12 caracteres." });
@@ -1755,7 +2728,7 @@ app.MapPost("/api/account/login", async (
     if (account is null)
     {
         return Results.Json(
-            new { ok = false, error = "E-mail ou senha invÃ¡lidos." },
+            new { ok = false, error = "E-mail ou senha inválidos." },
             statusCode: StatusCodes.Status401Unauthorized);
     }
 
@@ -1880,6 +2853,7 @@ app.MapGet("/api/permission-groups", async (
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await permissionService.EnsureDefaultPermissionsAsync(identity.Id, cancellationToken);
     var groups = await permissionService.GetGroupsAsync(identity.Id, cancellationToken);
     return Results.Ok(new { ok = true, groups });
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
@@ -1915,6 +2889,28 @@ app.MapPost("/api/permission-groups", async (
     }
     catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
     catch (InvalidOperationException) { return Results.Forbid(); }
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPut("/api/permission-groups/{groupId:guid}", async (
+    Guid groupId,
+    UpdatePermissionGroupInput input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IPlatformPermissionService permissionService,
+    IAntiforgery antiforgery,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    try
+    {
+        var group = await permissionService.UpdateGroupAsync(
+            new UpdatePermissionGroupRequest(identity.Id, groupId, input.Name, input.Description ?? string.Empty, input.Permissions ?? []), cancellationToken);
+        return Results.Ok(new { ok = true, group });
+    }
+    catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+    catch (InvalidOperationException) { return Results.NotFound(new { ok = false, error = "Grupo de permissões não encontrado." }); }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/permission-groups/{groupId:guid}/members", async (
@@ -2094,7 +3090,7 @@ app.MapDelete("/api/account", async (
             new DeleteAccountRequest(identity.Id, input.Password, input.ConfirmationText),
             cancellationToken);
         await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-        return Results.Ok(new { ok = true, message = "Conta excluÃ­da definitivamente." });
+        return Results.Ok(new { ok = true, message = "Conta excluída definitivamente." });
     }
     catch (InvalidOperationException ex)
     {
@@ -2147,6 +3143,7 @@ app.MapGet("/api/grading/batches", async (
     IGradingReviewRepository gradingRepository,
     CancellationToken cancellationToken) =>
 {
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
@@ -2174,6 +3171,7 @@ app.MapGet("/api/grading/batches/{id:guid}", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
@@ -2196,6 +3194,7 @@ app.MapGet("/api/grading/items/{id:guid}", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
 
@@ -2219,8 +3218,10 @@ app.MapPut("/api/grading/items/{id:guid}/review", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingManage)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
 
     try
     {
@@ -2249,8 +3250,10 @@ app.MapPost("/api/grading/batches/{id:guid}/preview", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingManage)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
 
     try
     {
@@ -2277,8 +3280,10 @@ app.MapPost("/api/grading/batches/{id:guid}/confirm", async (
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingManage)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
 
     if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText))
     {
@@ -2297,6 +3302,118 @@ app.MapPost("/api/grading/batches/{id:guid}/confirm", async (
     catch (InvalidOperationException ex)
     {
         return Results.BadRequest(new { ok = false, error = ex.Message });
+    }
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/courses/{connectionRef}/{courseId}/forums", async (
+    string connectionRef,
+    string courseId,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleForumGateway forumGateway,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.CoursesView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var userId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var forums = await forumGateway.GetForumsByCoursesAsync(userId.ToString(), courseId, cancellationToken);
+    var data = forums.Select(AppForumContractMapper.ToDto).ToArray();
+    return Results.Ok(new AppListEnvelope<AppForumDto>(data, new(1, data.Length, data.Length, false, DateTimeOffset.UtcNow, connectionRef)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/courses/{connectionRef}/{courseId}/forums/{forumId}", async (
+    string connectionRef,
+    string courseId,
+    string forumId,
+    int? page,
+    int? pageSize,
+    bool? includePosts,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.CoursesView)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var userId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var result = await mediator.Send(new ReadForumQuery(
+        userId.ToString(), courseId, forumId, Math.Max(page ?? 1, 1), Math.Clamp(pageSize ?? 10, 1, 25), "timemodified", "DESC", includePosts ?? true, 10), cancellationToken);
+    return result is null
+        ? AppErrorResults.NotFound("forum_not_found", "Fórum não encontrado neste curso.")
+        : Results.Ok(new AppEnvelope<AppForumReadDto>(AppForumContractMapper.ToDto(result), new(DateTimeOffset.UtcNow, connectionRef)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPost("/api/grading/individual/prepare", async (
+    PrepareIndividualGradeInput input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
+    var resolved = await connectionRegistry.ResolveConnectionAsync(input.ConnectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    try
+    {
+        var result = await mediator.Send(new PrepareIndividualGradeCommand(
+            input.CourseId,
+            input.AssignmentId,
+            input.StudentId,
+            input.ProposedGrade,
+            input.FeedbackText,
+            input.JustificationText), cancellationToken);
+        return Results.Ok(new AppEnvelope<IndividualGradePrepareResult>(result, new(DateTimeOffset.UtcNow, input.ConnectionRef ?? resolved.Alias)));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { ok = false, error = new { code = "invalid_grade_request", message = ex.Message } });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(new { ok = false, error = new { code = "grade_prepare_failed", message = ex.Message } });
+    }
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPost("/api/grading/individual/confirm", async (
+    ConfirmIndividualGradeInput input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    IMediator mediator,
+    CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.GradingManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await context.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context);
+    if (input.PendingActionId == Guid.Empty || string.IsNullOrWhiteSpace(input.ConfirmationText))
+        return Results.BadRequest(new { ok = false, error = new { code = "invalid_confirmation", message = "A ação pendente e o texto exato de confirmação são obrigatórios." } });
+    var resolved = await connectionRegistry.ResolveConnectionAsync(input.ConnectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    try
+    {
+        var result = await mediator.Send(new ConfirmIndividualGradeCommand(input.PendingActionId, input.ConfirmationText), cancellationToken);
+        return Results.Ok(new AppEnvelope<IndividualGradeSendResult>(result, new(DateTimeOffset.UtcNow, input.ConnectionRef ?? resolved.Alias)));
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Conflict(new { ok = false, error = new { code = "grade_confirm_failed", message = ex.Message } });
     }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -2381,6 +3498,35 @@ if (appV2Enabled)
 
 app.Run();
 
+static AppMoodleConversationDto MapConversation(MoodleConversationSummary item) => new(
+    item.Id,
+    new AppMoodleMessageMemberDto(item.Member.Id, item.Member.FullName, item.Member.ProfileImageUrl),
+    item.LastMessage is null
+        ? null
+        : new AppMoodleConversationLastMessageDto(item.LastMessage.Text, item.LastMessage.CreatedAtUnix),
+    item.UnreadCount,
+    item.StudentId);
+
+static DateTimeOffset GetBrazilTodayStart(DateTimeOffset value)
+{
+    var saoPaulo = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+    var local = TimeZoneInfo.ConvertTime(value, saoPaulo);
+    return new DateTimeOffset(local.Date, local.Offset).ToUniversalTime();
+}
+
+static (DateTimeOffset Start, DateTimeOffset End) GetBrazilWeekPeriod(DateTimeOffset value, string week)
+{
+    var saoPaulo = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
+    var local = TimeZoneInfo.ConvertTime(value, saoPaulo);
+    var daysSinceMonday = ((int)local.DayOfWeek + 6) % 7;
+    var startDate = local.Date.AddDays(-daysSinceMonday);
+    if (string.Equals(week, AppDashboardWeekFilter.Last, StringComparison.Ordinal))
+        startDate = startDate.AddDays(-7);
+
+    var start = new DateTimeOffset(startDate, local.Offset).ToUniversalTime();
+    return (start, start.AddDays(7));
+}
+
 static bool ConstantTimeEquals(string provided, string expected)
 {
     var providedBytes = Encoding.UTF8.GetBytes(provided);
@@ -2413,6 +3559,24 @@ static string NormalizeFollowupKind(string? value) => value switch
 {
     "contato" or "orientacao" or "pendencia_conferida" or "ligacao" or "resposta_aluno" or "acompanhamento" => value,
     _ => "acompanhamento"
+};
+
+static string? NormalizeFollowupReason(string? value) => value switch
+{
+    "falta_acesso" or "atividade_pendente" or "desempenho" or "participacao" or "duvida" or "outro" => value,
+    _ => null,
+};
+
+static string? NormalizeFollowupAction(string? value) => value switch
+{
+    "mensagem" or "ligacao" or "orientacao" or "conversa_presencial" or "verificacao" or "outro" => value,
+    _ => null,
+};
+
+static string NormalizeFollowupStatus(string? value) => value switch
+{
+    "em_acompanhamento" or "aguardando_aluno" or "resolvido" => value,
+    _ => "em_acompanhamento",
 };
 
 static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
@@ -2963,7 +4127,7 @@ static void ValidateProductionSecuritySettings(
         var connStrLower = postgres.ConnectionString.ToLowerInvariant();
         if (connStrLower.Contains("password=postgres") || connStrLower.Contains("username=postgres"))
         {
-            throw new InvalidOperationException("SeguranÃ§a de ProduÃ§Ã£o: Postgres ConnectionString nÃ£o pode utilizar o usuÃ¡rio ou senha padrÃ£o 'postgres' em ambiente de produÃ§Ã£o.");
+            throw new InvalidOperationException("Segurança de Produção: Postgres ConnectionString não pode utilizar o usuário ou senha padrão 'postgres' em ambiente de produção.");
         }
     }
 
@@ -2972,7 +4136,7 @@ static void ValidateProductionSecuritySettings(
         const string defaultKey = "MDEyMzQ1Njc4OUFCQ0RFRjAxMjM0NTY3ODlBQkNERUY=";
         if (secrets.EncryptionKeyBase64 == defaultKey)
         {
-            throw new InvalidOperationException("SeguranÃ§a de ProduÃ§Ã£o: ConnectorSecrets:EncryptionKeyBase64 nÃ£o pode utilizar a chave AES de exemplo em ambiente de produÃ§Ã£o.");
+            throw new InvalidOperationException("Segurança de Produção: ConnectorSecrets:EncryptionKeyBase64 não pode utilizar a chave AES de exemplo em ambiente de produção.");
         }
     }
 
@@ -2983,7 +4147,7 @@ static void ValidateProductionSecuritySettings(
             apiKeyLower.Contains("change-me") ||
             apiKeyLower.Contains("troque-este-valor"))
         {
-            throw new InvalidOperationException("SeguranÃ§a de ProduÃ§Ã£o: AdminApi:ApiKey nÃ£o pode utilizar o valor padrÃ£o ou conter expressÃµes como 'change-me' ou 'troque-este-valor' em ambiente de produÃ§Ã£o.");
+            throw new InvalidOperationException("Segurança de Produção: AdminApi:ApiKey não pode utilizar o valor padrão ou conter expressões como 'change-me' ou 'troque-este-valor' em ambiente de produção.");
         }
     }
 }
@@ -3115,6 +4279,126 @@ static async Task<AppIdentity?> ResolveAppIdentityAsync(
     return null;
 }
 
+static AppReportJobDto ToAppReportJobDto(ReportJobEntity job) => new(
+    job.Id,
+    job.ReportType,
+    job.ScopeType,
+    job.ConnectionAlias,
+    job.CategoryPath,
+    job.CourseId,
+    job.Status,
+    job.ProgressPercent,
+    job.TotalCourses,
+    job.ProcessedCourses,
+    job.FileName,
+    job.ContentType,
+    job.FileSizeBytes,
+    job.ErrorMessage,
+    job.RequestedAt,
+    job.StartedAt,
+    job.CompletedAt,
+    job.UpdatedAt,
+    job.Status == "completed" ? $"/api/reports/jobs/{job.Id}/download" : null,
+    DeserializeReportCourses(job.CourseNamesJson));
+
+static IReadOnlyList<AppReportCourseDto> DeserializeReportCourses(string? json)
+{
+    if (string.IsNullOrWhiteSpace(json))
+    {
+        return [];
+    }
+
+    try
+    {
+        return JsonSerializer.Deserialize<AppReportCourseDto[]>(json) ?? [];
+    }
+    catch (JsonException)
+    {
+        return [];
+    }
+}
+
+static async Task<IReadOnlyList<AppReportCourseDto>> ResolveReportCourseMetadataAsync(
+    string scopeType,
+    string? categoryPath,
+    string? courseId,
+    string? courseIdsJson,
+    string userExternalId,
+    string connectionAlias,
+    IMoodleCoursesGateway coursesGateway,
+    IMoodleConnectionSelection connectionSelection,
+    CancellationToken cancellationToken)
+{
+    var previousAlias = connectionSelection.Alias;
+    try
+    {
+        connectionSelection.Alias = connectionAlias;
+        var courses = new List<CourseSummary>();
+        if (scopeType == "category" && !string.IsNullOrWhiteSpace(categoryPath))
+        {
+            var page = 1;
+            const int pageSize = 100;
+            while (true)
+            {
+                var result = await coursesGateway.GetMyCoursesByCategoryAsync(
+                    userExternalId,
+                    categoryPath,
+                    pageSize,
+                    page,
+                    cancellationToken);
+                courses.AddRange(result.Items);
+                if (!result.HasNextPage || result.Items.Count == 0)
+                {
+                    break;
+                }
+
+                page++;
+            }
+        }
+        else
+        {
+            var courseIds = scopeType == "course"
+                ? (string.IsNullOrWhiteSpace(courseId) ? Array.Empty<string>() : [courseId])
+                : DeserializeStringArray(courseIdsJson);
+            foreach (var id in courseIds.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var course = await coursesGateway.GetMyCourseAsync(userExternalId, id, cancellationToken);
+                if (course is not null)
+                {
+                    courses.Add(course);
+                }
+            }
+        }
+
+        return courses
+            .Select(course => new AppReportCourseDto(course.DisplayName ?? course.FullName, course.CategoryName))
+            .GroupBy(course => $"{course.Name}\u001f{course.CategoryName}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+    }
+    finally
+    {
+        connectionSelection.Alias = previousAlias;
+    }
+}
+
+static IReadOnlyList<string> DeserializeStringArray(string? json)
+{
+    if (string.IsNullOrWhiteSpace(json))
+    {
+        return [];
+    }
+
+    try
+    {
+        return JsonSerializer.Deserialize<string[]>(json) ?? [];
+    }
+    catch (JsonException)
+    {
+        return [];
+    }
+}
+
 static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext dbContext, IPlatformPermissionService platformPermissionService, Guid id, string name, string email, CancellationToken cancellationToken)
 {
     // Existing accounts may predate the platform-permission groups. Reconcile the
@@ -3156,6 +4440,143 @@ static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext 
 }
 
 
+
+static async Task<IReadOnlyList<CourseSummary>> GetDashboardCourseScopeAsync(
+    string userExternalId,
+    string connectionAlias,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    CancellationToken cancellationToken)
+{
+    var allCourses = new List<CourseSummary>();
+    var page = 1;
+    PagedCourses current;
+    do
+    {
+        current = await mediator.Send(new ListMyCoursesQuery(userExternalId, 100, page), cancellationToken);
+        allCourses.AddRange(current.Items);
+        page++;
+    }
+    while (current.HasNextPage);
+
+    var ignoredCourseIds = await dbContext.UserIgnoredCourses
+        .AsNoTracking()
+        .Where(item => item.OwnerId == Guid.Parse(userExternalId) && item.ConnectionAlias == connectionAlias)
+        .Select(item => item.CourseId)
+        .ToHashSetAsync(StringComparer.Ordinal, cancellationToken);
+
+    var now = DateTimeOffset.UtcNow;
+    return NormalizeDashboardCourseEndDates(allCourses)
+        .Where(course =>
+            !ignoredCourseIds.Contains(course.CourseId) &&
+            (course.StartDate is null || course.StartDate <= now) &&
+            (course.EndDate is null || course.EndDate >= now))
+        .ToArray();
+}
+
+static IReadOnlyList<CourseSummary> NormalizeDashboardCourseEndDates(IReadOnlyList<CourseSummary> courses)
+{
+    var adjustedEndDates = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+    var groups = courses
+        .Where(course => !string.IsNullOrWhiteSpace(course.CategoryName))
+        .GroupBy(course => course.CategoryName!.Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => part.ToLowerInvariant())
+            .ToArray() is { Length: > 0 } parts ? string.Join(" > ", parts) : string.Empty)
+        .Where(group => !string.IsNullOrWhiteSpace(group.Key));
+
+    foreach (var group in groups)
+    {
+        if (group.Count() < 2) continue;
+        var endDates = group.Select(course => course.EndDate).Where(date => date.HasValue).Select(date => date!.Value).Distinct().ToArray();
+        if (endDates.Length < 2) continue;
+        var starts = group.Select(course => course.StartDate).Where(date => date.HasValue).Select(date => date!.Value).Distinct().OrderBy(date => date).ToArray();
+        if (starts.Length < 2) continue;
+
+        foreach (var course in group)
+        {
+            if (course.StartDate is not { } start) continue;
+            var nextStart = starts.FirstOrDefault(candidate => candidate > start);
+            if (nextStart > start) adjustedEndDates[course.CourseId] = nextStart;
+        }
+    }
+
+    return courses
+        .Select(course => adjustedEndDates.TryGetValue(course.CourseId, out var endDate)
+            ? course with { EndDate = endDate }
+            : course)
+        .ToArray();
+}
+
+static async Task<DashboardAccessRead> ReadDashboardAccessAsync(
+    IReadOnlyList<CourseSummary> courses,
+    IMoodleParticipantsGateway participantsGateway,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    CancellationToken cancellationToken)
+{
+    var userExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
+    using var limiter = new SemaphoreSlim(4, 4);
+    var warnings = new System.Collections.Concurrent.ConcurrentBag<string>();
+    var students = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset?>(StringComparer.OrdinalIgnoreCase);
+    var tasks = courses.Select(async course =>
+    {
+        await limiter.WaitAsync(cancellationToken);
+        try
+        {
+            var page = 1;
+            while (page <= 20)
+            {
+                var result = await participantsGateway.GetCourseParticipantsAsync(
+                    userExternalId,
+                    course.CourseId,
+                    ParticipantStatusFilter.Active,
+                    page,
+                    AppDashboardBudget.MaxParticipantsRead,
+                    studentsOnly: true,
+                    includeEmail: false,
+                    groupId: null,
+                    cancellationToken);
+                foreach (var participant in result.Participants)
+                {
+                    students.AddOrUpdate(
+                        participant.UserId,
+                        participant.LastCourseAccessAt,
+                        (_, current) => current is null || participant.LastCourseAccessAt > current ? participant.LastCourseAccessAt : current);
+                }
+
+                if (!result.HasMore) break;
+                page++;
+            }
+
+            if (page > 20)
+            {
+                warnings.Add($"A leitura de alunos do curso {course.FullName} foi limitada para preservar o desempenho.");
+            }
+        }
+        catch
+        {
+            warnings.Add($"Não foi possível carregar os acessos do curso {course.FullName}.");
+        }
+        finally
+        {
+            limiter.Release();
+        }
+    });
+    await Task.WhenAll(tasks);
+
+    var now = DateTimeOffset.UtcNow;
+    var accessedLast7Days = students.Values.Count(access => access is not null && access >= now.AddDays(-7));
+    var lowAccess = students.Values.Count(access => access is not null && access < now.AddDays(-7) && access >= now.AddDays(-14));
+    var withoutAccess14Days = students.Values.Count(access => access is not null && access < now.AddDays(-14));
+    var neverAccessed = students.Values.Count(access => access is null);
+    var segments = new[]
+    {
+        new AppDashboardAccessSegmentDto("recent", "Acesso recente · 0–7 dias", accessedLast7Days, "success"),
+        new AppDashboardAccessSegmentDto("low", "Baixo acesso · 8–14 dias", lowAccess, "warning"),
+        new AppDashboardAccessSegmentDto("stale", "Sem acesso · 14+ dias", withoutAccess14Days, "risk"),
+        new AppDashboardAccessSegmentDto("never", "Nunca acessaram", neverAccessed, "risk"),
+    };
+    return new DashboardAccessRead(students.Count, accessedLast7Days, withoutAccess14Days, neverAccessed, segments, warnings.Distinct(StringComparer.Ordinal).ToArray());
+}
 
 static bool IsLocalReturnUrl(string? returnUrl)
 {
@@ -3248,6 +4669,19 @@ static bool HasAppPermission(HttpContext context, string permission)
         .Any(x => string.Equals(x.Value, permission, StringComparison.OrdinalIgnoreCase) ||
                   (platformPermission is not null && string.Equals(x.Value, platformPermission, StringComparison.OrdinalIgnoreCase)));
 }
+
+static AssignmentSubmissionFilter ParseAssignmentSubmissionFilter(string? value)
+{
+    return value?.Trim().ToLowerInvariant() switch
+    {
+        "submitted" => AssignmentSubmissionFilter.Submitted,
+        "not_submitted" or "notsubmitted" => AssignmentSubmissionFilter.NotSubmitted,
+        "late" => AssignmentSubmissionFilter.Late,
+        "needs_grading" or "awaiting_grading" or "needsgrading" => AssignmentSubmissionFilter.NeedsGrading,
+        _ => AssignmentSubmissionFilter.All
+    };
+}
+
 static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permission)
 {
     if (principal is null) return false;
@@ -3268,6 +4702,13 @@ static bool HasRequiredOAuthScopes(ClaimsPrincipal principal, string toolName, M
 }
 
 public sealed record AppIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);
+public sealed record DashboardAccessRead(
+    int TotalStudents,
+    int StudentsAccessedLast7Days,
+    int StudentsWithoutAccess14Days,
+    int StudentsNeverAccessed,
+    IReadOnlyList<AppDashboardAccessSegmentDto> Segments,
+    IReadOnlyList<string> Warnings);
 public sealed record AppEnvelope<T>(T Data, AppMeta Meta);
 public sealed record AppListEnvelope<T>(IReadOnlyList<T> Data, AppListMeta Meta);
 public sealed record AppMeta(DateTimeOffset GeneratedAt, string? ConnectionRef);
@@ -3292,6 +4733,8 @@ public static class AppPermissionCatalog
     public const string TasksManage = "tasks.manage";
     public const string AgendaManage = "agenda.manage";
     public const string MessagesPrepare = "messages.prepare";
+    public const string GradingView = "grading.view";
+    public const string GradingManage = "grading.manage";
     public const string ReportsView = "reports.view";
     public const string ConnectionsManage = "connections.manage";
     public const string SettingsView = "settings.view";
@@ -3299,7 +4742,7 @@ public static class AppPermissionCatalog
 
     private static readonly string[] All = [
         DashboardView, CoursesView, StudentsView, StudentsFollowupWrite, TasksManage,
-        AgendaManage, MessagesPrepare, ReportsView, ConnectionsManage, SettingsView, AdminView];
+        AgendaManage, MessagesPrepare, GradingView, GradingManage, ReportsView, ConnectionsManage, SettingsView, AdminView];
 }
 public sealed record AppConnectionDto(string ConnectionId, string ConnectionRef, string Alias, string Host, string Status, bool IsDefault, IReadOnlyList<string> Capabilities, DateTimeOffset? LastValidatedAt);
 public sealed record AppDeleteConnectionInput(bool DeleteLinkedData, string? ConfirmationText);
@@ -3324,7 +4767,9 @@ public sealed record UpdateMoodleInput(string MoodleAlias, string MoodleBaseUrl,
 public sealed record TeamInvitationInput(string Email, string Role, string[]? Scopes = null, int? ExpiresInHours = null);
 public sealed record TeamInvitationAcceptInput(string Token);
 public sealed record CreatePermissionGroupInput(string Name, string? Description, string[]? Permissions = null);
+public sealed record UpdatePermissionGroupInput(string Name, string? Description, string[]? Permissions = null);
 public sealed record PermissionGroupMemberInput(Guid UserId);
+public sealed record UpdateIgnoredCoursesInput(string? ConnectionRef, IReadOnlyList<string>? CourseIds, bool Ignored);
 public sealed record SetUserPermissionInput(string Permission, bool IsAllowed);
 
 public sealed record ReviewGradingItemInput(decimal? FinalGrade, string? FinalFeedback, string? TeacherDecision, string? ReviewNotes, string? ExpectedReviewStatus);

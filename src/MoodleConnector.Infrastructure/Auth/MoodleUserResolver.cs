@@ -6,7 +6,8 @@ namespace MoodleConnector.Infrastructure;
 public sealed class MoodleUserResolver(
     IHttpContextAccessor httpContextAccessor,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
-    IMoodleConnectionSelection? connectionSelection = null) : IMoodleUserResolver
+    IMoodleConnectionSelection? connectionSelection = null,
+    IConnectorExecutionContext? executionContext = null) : IMoodleUserResolver
 {
     private static readonly string[] MoodleUserIdClaimTypes =
     [
@@ -19,14 +20,14 @@ public sealed class MoodleUserResolver(
     public async Task<long?> ResolveMoodleUserIdAsync(CancellationToken cancellationToken)
     {
         var principal = httpContextAccessor.HttpContext?.User;
-        if (principal?.Identity?.IsAuthenticated != true)
+        if (principal?.Identity?.IsAuthenticated != true && (executionContext is null || string.IsNullOrWhiteSpace(executionContext.Subject)))
         {
             return null;
         }
 
         // Moodle user ids are local to a Moodle installation. A global claim can
         // only be trusted when no explicit multi-Moodle connection was selected.
-        if (string.IsNullOrWhiteSpace(connectionSelection?.Alias))
+        if (principal?.Identity?.IsAuthenticated == true && string.IsNullOrWhiteSpace(connectionSelection?.Alias))
         {
             foreach (var claimType in MoodleUserIdClaimTypes)
             {

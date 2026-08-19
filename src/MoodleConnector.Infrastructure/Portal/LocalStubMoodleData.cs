@@ -82,14 +82,14 @@ internal static class LocalStubMoodleData
     public static IReadOnlyList<AssignmentSubmissionRecord> Submissions(string assignmentId, string? status)
     {
         if (!string.Equals(assignmentId, AssignmentId, StringComparison.Ordinal) ||
-            !string.Equals(status, "notsubmitted", StringComparison.OrdinalIgnoreCase))
+            (status is not null && !string.Equals(status, "notsubmitted", StringComparison.OrdinalIgnoreCase)))
         {
             return [];
         }
 
         return Participants
             .Select((participant, index) => new AssignmentSubmissionRecord(
-                $"stub-submission-{index + 1}", participant.UserId, "new", null, null, null, null, 0, false, []))
+                $"stub-submission-{index + 1}", participant.UserId, "notsubmitted", null, null, null, null, 0, false, []))
             .ToArray();
     }
 

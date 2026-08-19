@@ -5,6 +5,7 @@
     "Description" varchar(4000),
     "Status" varchar(32) NOT NULL,
     "Priority" varchar(32) NOT NULL,
+    "StartAt" timestamp with time zone,
     "DueAt" timestamp with time zone,
     "CreatedAt" timestamp with time zone NOT NULL,
     "UpdatedAt" timestamp with time zone NOT NULL,

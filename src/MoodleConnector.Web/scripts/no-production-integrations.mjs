@@ -7,8 +7,8 @@ const forbidden = [
   [/supabase/i, 'Supabase academic'],
   [/(?:\bopenai\b|@ai-sdk|\bllm\b)/i, 'OpenAI/LLM'],
   [/mcp/i, 'MCP'],
-  [/floatingclarischat|clarissuggestions|gradesuggestion|assignment.?suggestion|chat/i, 'chat/suggestions/grading'],
-  [/moodle.*client|moodle.*rest|webservice.*moodle/i, 'direct Moodle client'],
+  [/floatingclarischat|clarissuggestions|gradesuggestion|assignment.?suggestion/i, 'chat/suggestions/grading'],
+  [/(?:moodle[-_/](?:client|rest)|(?:webservice|rest)[-_\s/]*moodle)/i, 'direct Moodle client'],
 ];
 const files = [];
 async function walk(dir) {

@@ -3,6 +3,55 @@
 public sealed record AppOperationalReportDto(int OpenTasks, int CompletedTasks, int UpcomingEvents, int FollowupsRecorded, DateTimeOffset GeneratedAt);
 public sealed record AppAuditReportDto(int TotalActions, int CompletedActions, int FailedActions, int ConfirmedActions, DateTimeOffset GeneratedAt);
 
+public sealed record CreateReportJobInput(
+    string ReportType,
+    string ScopeType,
+    string ConnectionRef,
+    string? CategoryPath,
+    string? CourseId,
+    IReadOnlyList<string>? CourseIds = null);
+
+public sealed record AppReportJobDto(
+    Guid Id,
+    string ReportType,
+    string ScopeType,
+    string ConnectionRef,
+    string? CategoryPath,
+    string? CourseId,
+    string Status,
+    int ProgressPercent,
+    int TotalCourses,
+    int ProcessedCourses,
+    string? FileName,
+    string? ContentType,
+    long FileSizeBytes,
+    string? ErrorMessage,
+    DateTimeOffset RequestedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt,
+    DateTimeOffset UpdatedAt,
+    string? DownloadUrl,
+    IReadOnlyList<AppReportCourseDto>? Courses = null);
+
+public sealed record AppReportCourseDto(string Name, string? CategoryName);
+
+public sealed record AppReportJobsEnvelope(
+    IReadOnlyList<AppReportJobDto> Data,
+    AppReportJobsMeta Meta);
+
+public sealed record AppReportJobsMeta(
+    int Page,
+    int PageSize,
+    int Returned,
+    bool HasMore,
+    DateTimeOffset GeneratedAt,
+    string? ConnectionRef,
+    IReadOnlyList<string>? Warnings,
+    int? Total,
+    long StorageUsedBytes,
+    long StorageLimitBytes,
+    long StorageAvailableBytes);
+
 public sealed record AppCourseOverviewReportDto(
     string ConnectionRef, string CourseId, DateTimeOffset GeneratedAt, int TotalActiveStudents,
     int StudentsWhoAccessed, int StudentsNeverAccessed, int StudentsInactiveDays,

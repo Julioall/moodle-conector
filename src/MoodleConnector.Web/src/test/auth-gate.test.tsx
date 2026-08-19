@@ -21,9 +21,9 @@ describe('AuthGate', () => {
   it('keeps the operational shell behind the Claris auth page when anonymous', async () => {
     getSession.mockResolvedValue({ data: { authenticated: false }, meta: { generatedAt: new Date().toISOString() } });
     renderWithQuery(<AuthGate><h1>Resumo protegido</h1></AuthGate>);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Entrar na sua conta' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Entrar na Claris' })).toBeInTheDocument());
     expect(screen.queryByRole('heading', { name: 'Resumo protegido' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Criar conta' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Entrar' })).toBeInTheDocument();
   });
 
   it('releases the shell only after an authenticated session', async () => {

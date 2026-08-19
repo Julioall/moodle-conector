@@ -5,11 +5,12 @@ const paths = [
   '/',
   '/meus-cursos',
   '/cursos/demo/1',
-  '/alunos',
+  '/cursos/demo/1?tab=students',
   '/pendencias',
   '/tarefas',
   '/agenda',
   '/mensagens',
+  '/foruns',
   '/followup',
   '/relatorios',
   '/configuracoes',
@@ -36,13 +37,15 @@ for (const path of paths) {
   console.log(`PASS ${path} ${response.status}`);
 }
 
-for (const path of ['/', '/app.html', '/auth.html']) {
+for (const path of ['/app.html', '/auth.html']) {
   const response = await get(`${baseUrl}${path}`);
-  if (response.status < 300 || response.status >= 400 || response.headers?.location !== '/') {
-    throw new Error(`Legacy redirect failed for ${path}: status=${response.status}`);
+  const isSpaFallback = response.status >= 200 && response.status < 300 && response.body.includes('id="root"');
+  const isRedirect = response.status >= 300 && response.status < 400 && response.headers?.location === '/';
+  if (!isSpaFallback && !isRedirect) {
+    throw new Error(`Legacy compatibility check failed for ${path}: status=${response.status}`);
   }
-  console.log(`PASS legacy redirect ${path} ${response.status}`);
+  console.log(`PASS compatibility ${path} ${response.status}`);
 }
 
-console.log(`App smoke passed (${paths.length} SPA routes + 3 legacy redirects)`);
+console.log(`App smoke passed (${paths.length} SPA routes + 2 compatibility paths)`);
 

@@ -59,7 +59,8 @@ public sealed record TutorMessagePendingPayload(
     [property: JsonPropertyName("courseId")] string CourseId,
     [property: JsonPropertyName("senderExternalId")] string SenderExternalId,
     [property: JsonPropertyName("recipientIds")] IReadOnlyList<string> RecipientIds,
-    [property: JsonPropertyName("messageText")] string MessageText);
+    [property: JsonPropertyName("messageText")] string MessageText,
+    [property: JsonPropertyName("connectionAlias")] string? ConnectionAlias = null);
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +72,14 @@ public sealed record PrepareTutorMessageCommand(
     TutorMessageType MessageType,
     IReadOnlyList<string> RecipientIds,
     string? CustomText = null) : IRequest<TutorMessagePreview>;
+
+/// <summary>
+/// Prepara uma mensagem individual para um destinatário já disponível nas
+/// conversas da conta Moodle selecionada.
+/// </summary>
+public sealed record PrepareDirectMoodleMessageCommand(
+    long RecipientId,
+    string MessageText) : IRequest<TutorMessagePreview>;
 
 /// <summary>
 /// Confirma e envia a mensagem previamente preparada.
@@ -96,7 +105,8 @@ public sealed class PrepareTutorMessageCommandHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IPendingActionService pendingActions,
-    IOptions<MessageWriteFeatureOptions> features)
+    IOptions<MessageWriteFeatureOptions> features,
+    IMoodleConnectionSelection? connectionSelection = null)
     : IRequestHandler<PrepareTutorMessageCommand, TutorMessagePreview>
 {
     private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(10);
@@ -153,7 +163,8 @@ public sealed class PrepareTutorMessageCommandHandler(
             CourseId: request.CourseId,
             SenderExternalId: senderExternalId,
             RecipientIds: recipientIds,
-            MessageText: messageText);
+            MessageText: messageText,
+            ConnectionAlias: connectionSelection?.Alias);
 
         var preview = new TutorMessagePreview(
             MessageType: request.MessageType.ToString(),
@@ -307,6 +318,85 @@ public sealed class PrepareTutorMessageCommandHandler(
     }
 }
 
+public sealed class PrepareDirectMoodleMessageCommandHandler(
+    IMoodleMessageGateway messageGateway,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IPendingActionService pendingActions,
+    IOptions<MessageWriteFeatureOptions> features,
+    IMoodleConnectionSelection? connectionSelection = null)
+    : IRequestHandler<PrepareDirectMoodleMessageCommand, TutorMessagePreview>
+{
+    private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(10);
+
+    public async Task<TutorMessagePreview> Handle(
+        PrepareDirectMoodleMessageCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (!features.Value.MessagesWriteEnabled)
+        {
+            throw new InvalidOperationException("O envio de mensagens está desabilitado. Habilite MessagesWriteEnabled na configuração.");
+        }
+
+        if (request.RecipientId <= 0)
+        {
+            throw new ArgumentException("O destinatário Moodle informado é inválido.", nameof(request.RecipientId));
+        }
+
+        var messageText = request.MessageText?.Trim();
+        if (string.IsNullOrWhiteSpace(messageText) || messageText.Length > 4000)
+        {
+            throw new ArgumentException("Informe uma mensagem entre 1 e 4000 caracteres.", nameof(request.MessageText));
+        }
+
+        var conversations = await messageGateway.GetConversationsAsync(cancellationToken);
+        var conversation = conversations.Items.FirstOrDefault(item => item.Member.Id == request.RecipientId);
+        if (conversation is null)
+        {
+            throw new KeyNotFoundException("O destinatário não está disponível nas conversas Moodle desta conta.");
+        }
+
+        var senderExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken))
+            .ToString(CultureInfo.InvariantCulture);
+        var recipientId = request.RecipientId.ToString(CultureInfo.InvariantCulture);
+        var confirmationText = "CONFIRMAR ENVIO MENSAGEM MOODLE 1 DESTINATÁRIO";
+        var expiresAt = DateTimeOffset.UtcNow.Add(PendingActionExpiration);
+        var payload = new TutorMessagePendingPayload(
+            MessageType: "MoodleDirect",
+            CourseId: string.Empty,
+            SenderExternalId: senderExternalId,
+            RecipientIds: [recipientId],
+            MessageText: messageText,
+            ConnectionAlias: connectionSelection?.Alias);
+        var preview = new TutorMessagePreview(
+            MessageType: "MoodleDirect",
+            CourseId: string.Empty,
+            RecipientCount: 1,
+            Recipients: [new MessagePreviewRecipient(recipientId, conversation.Member.FullName)],
+            MessageText: messageText,
+            SelectionCriteria: "Destinatário selecionado na lista de conversas Moodle.",
+            ConfirmationText: confirmationText,
+            ExpiresAt: expiresAt,
+            Risks:
+            [
+                "A mensagem será enviada pelo canal nativo do Moodle.",
+                "A ação não pode ser desfeita após a confirmação.",
+                "Revise o destinatário e o texto antes de confirmar."
+            ]);
+
+        var pending = await pendingActions.CreatePendingActionAsync(
+            toolName: "preparar_mensagem_moodle_direta",
+            riskLevel: ToolRiskLevel.HumanConfirmedWrite,
+            payload: payload,
+            preview: preview,
+            confirmationText: confirmationText,
+            expiresIn: PendingActionExpiration,
+            courseId: null,
+            cancellationToken: cancellationToken);
+
+        return preview with { PendingActionId = pending.PendingActionId };
+    }
+}
+
 // ── Confirm Handler ───────────────────────────────────────────────────────────
 
 public sealed class ConfirmTutorMessageCommandHandler(
@@ -314,7 +404,8 @@ public sealed class ConfirmTutorMessageCommandHandler(
     IActionConfirmationService confirmationService,
     IPendingMoodleActionRepository pendingActionRepository,
     IMoodleAuditLogRepository auditLogRepository,
-    IOptions<MessageWriteFeatureOptions> features)
+    IOptions<MessageWriteFeatureOptions> features,
+    IMoodleConnectionSelection? connectionSelection = null)
     : IRequestHandler<ConfirmTutorMessageCommand, TutorMessageSendResult>
 {
     private const string CommitToolName = "confirmar_mensagem_tutor";
@@ -401,6 +492,11 @@ public sealed class ConfirmTutorMessageCommandHandler(
         var userExternalId = action.CreatedByMoodleUserId?.ToString() ?? action.CreatedBySubject;
 
         // 3. Send messages via Moodle
+        var previousConnectionAlias = connectionSelection?.Alias;
+        if (connectionSelection is not null && !string.IsNullOrWhiteSpace(payload.ConnectionAlias))
+        {
+            connectionSelection.Alias = payload.ConnectionAlias;
+        }
         try
         {
             var sendResult = await messageGateway.SendMessagesToUsersAsync(
@@ -453,6 +549,13 @@ public sealed class ConfirmTutorMessageCommandHandler(
                 AuditId: confirmation.AuditId,
                 Warnings: [ex.Message]);
         }
+        finally
+        {
+            if (connectionSelection is not null)
+            {
+                connectionSelection.Alias = previousConnectionAlias;
+            }
+        }
     }
 
     private Task RecordAuditAsync(
@@ -473,6 +576,7 @@ public sealed class ConfirmTutorMessageCommandHandler(
             ActorEmail = action.CreatedByEmail,
             ActorMoodleUserId = action.CreatedByMoodleUserId,
             CourseId = action.CourseId,
+            MoodleConnectionAlias = payload.ConnectionAlias,
             MoodleFunction = "core_message_send_instant_messages",
             RequestSanitizedJson = Auditing.AuditPayloadSanitizer.SerializeSanitized(
                 new { messageType = payload.MessageType, courseId = payload.CourseId, recipientCount = payload.RecipientIds.Count }),

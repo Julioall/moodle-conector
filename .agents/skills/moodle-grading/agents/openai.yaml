@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Grading"
+  short_description: "Review and confirm Moodle grade changes"
+  default_prompt: "Use $moodle-grading to read grades, prepare grading review, or execute a human-confirmed Moodle grade change."

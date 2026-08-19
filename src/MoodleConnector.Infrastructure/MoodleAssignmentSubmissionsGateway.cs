@@ -12,7 +12,64 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
     IMoodleConnectorCredentialsProvider credentialsProvider,
     IMoodleRestClient restClient) : IMoodleAssignmentSubmissionsGateway
 {
+    private const int MaxAssignmentIdsPerRequest = 50;
     private readonly MoodleApiOptions _options = options.Value;
+
+    public async Task<IReadOnlyList<AssignmentSubmissionsBatch>> GetAssignmentSubmissionsBatchAsync(
+        string userExternalId,
+        IReadOnlyCollection<string> assignmentIds,
+        string? status,
+        DateTimeOffset? since,
+        DateTimeOffset? before,
+        CancellationToken cancellationToken)
+    {
+        if (_options.UseStubData)
+        {
+            throw new InvalidOperationException("UseStubData esta desativado para fluxos reais. Ajuste a configuracao para usar Moodle real.");
+        }
+
+        var normalizedAssignmentIds = assignmentIds
+            .Select(id => int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && value > 0
+                ? value.ToString(CultureInfo.InvariantCulture)
+                : null)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedAssignmentIds.Length == 0)
+        {
+            return [];
+        }
+
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var result = new List<AssignmentSubmissionsBatch>(normalizedAssignmentIds.Length);
+
+        foreach (var chunk in normalizedAssignmentIds.Chunk(MaxAssignmentIdsPerRequest))
+        {
+            var parameters = chunk
+                .Select((assignmentId, index) => new KeyValuePair<string, object?>(
+                    $"assignmentids[{index}]",
+                    assignmentId))
+                .ToDictionary(pair => pair.Key, pair => pair.Value);
+            AddOptionalParameters(parameters, status, since, before);
+
+            var payload = await restClient.CallAsync(
+                credentials,
+                "mod_assign_get_submissions",
+                parameters,
+                cancellationToken);
+            var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
+
+            foreach (var assignment in submissions?.Assignments ?? [])
+            {
+                result.Add(new AssignmentSubmissionsBatch(
+                    ToIdString(assignment.AssignmentId),
+                    (assignment.Submissions ?? []).Select(ToRecord).ToArray()));
+            }
+        }
+
+        return result;
+    }
 
     public async Task<IReadOnlyList<AssignmentSubmissionRecord>> GetAssignmentSubmissionsAsync(
         string userExternalId,
@@ -30,11 +87,31 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
         var normalizedAssignmentId = ParseMoodleId(assignmentId, "assignmentId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
 
-        var parameters = new Dictionary<string, string>
+        var parameters = new Dictionary<string, object?>
         {
             ["assignmentids[0]"] = normalizedAssignmentId.ToString(CultureInfo.InvariantCulture)
         };
+        AddOptionalParameters(parameters, status, since, before);
 
+        var payload = await restClient.CallAsync(
+            credentials,
+            "mod_assign_get_submissions",
+            parameters,
+            cancellationToken);
+
+        var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
+        return (submissions?.Assignments ?? [])
+            .SelectMany(assignment => assignment.Submissions ?? [])
+            .Select(ToRecord)
+            .ToArray();
+    }
+
+    private static void AddOptionalParameters(
+        IDictionary<string, object?> parameters,
+        string? status,
+        DateTimeOffset? since,
+        DateTimeOffset? before)
+    {
         if (!string.IsNullOrWhiteSpace(status))
         {
             parameters["status"] = status;
@@ -49,18 +126,6 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
         {
             parameters["before"] = before.Value.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
         }
-
-        var payload = await restClient.CallAsync(
-            credentials,
-            "mod_assign_get_submissions",
-            parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
-            cancellationToken);
-
-        var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
-        return (submissions?.Assignments ?? [])
-            .SelectMany(assignment => assignment.Submissions ?? [])
-            .Select(ToRecord)
-            .ToArray();
     }
 
     private static AssignmentSubmissionRecord ToRecord(SubmissionDto dto)

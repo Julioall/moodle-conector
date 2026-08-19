@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Pedagogy"
+  short_description: "Retrieve pedagogical guidance for academic workflows"
+  default_prompt: "Use $moodle-pedagogy to retrieve relevant pedagogical guidance before evaluation, feedback, follow-up, forum, or report work."

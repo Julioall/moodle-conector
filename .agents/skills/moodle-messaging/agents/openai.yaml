@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Messaging"
+  short_description: "Prepare safe Moodle student messages"
+  default_prompt: "Use $moodle-messaging to prepare, review, and confirm a targeted Moodle message with auditable safeguards."

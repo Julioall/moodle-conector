@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Assignments"
+  short_description: "Read submissions and assignment status"
+  default_prompt: "Use $moodle-assignments to inspect Moodle assignments, submissions, deadlines, and grading context without changing submissions."

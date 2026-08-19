@@ -13,6 +13,12 @@ export const accessGateway = (client: AppClient = createAppClient()) => ({
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input)
     });
   },
+  updateGroup: async (groupId: string, input: { name: string; description?: string; permissions: string[] }) => {
+    await client.get('/api/csrf');
+    return client.request<{ group: PermissionGroup }>(`/api/permission-groups/${encodeURIComponent(groupId)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input)
+    });
+  },
   invite: async (teamId: string, input: { email: string; role: string }) => {
     await client.get('/api/csrf');
     return client.request(`/api/teams/${encodeURIComponent(teamId)}/invitations`, {

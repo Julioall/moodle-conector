@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Follow-up"
+  short_description: "Prioritize student follow-up from evidence"
+  default_prompt: "Use $moodle-follow-up to identify students or activities needing follow-up from observable Moodle evidence."

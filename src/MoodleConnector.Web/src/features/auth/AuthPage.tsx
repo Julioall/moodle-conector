@@ -1,15 +1,29 @@
 import { FormEvent, useState } from 'react';
-import { authGateway } from './auth-gateway';
-import './auth-page.css';
+import { Eye, EyeOff } from 'lucide-react';
 
-type Mode = 'login' | 'register';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ClarisLogo } from '@/components/ui/claris-logo';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
+import { authGateway } from './auth-gateway';
+
+type AuthMode = 'login' | 'register' | 'moodle';
 
 export function AuthPage() {
   const initialParams = new URLSearchParams(window.location.search);
-  const [mode, setMode] = useState<Mode>(initialParams.get('tab') === 'register' ? 'register' : 'login');
+  const initialMode: AuthMode = initialParams.get('tab') === 'register' ? 'register' : 'login';
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordConfirmation, setPasswordConfirmation] = useState('');
+  const [moodleAlias, setMoodleAlias] = useState('');
+  const [moodleBaseUrl, setMoodleBaseUrl] = useState('');
+  const [moodleUsername, setMoodleUsername] = useState('');
+  const [moodlePassword, setMoodlePassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(initialParams.get('error') ?? '');
   const [pending, setPending] = useState(false);
 
@@ -17,43 +31,102 @@ export function AuthPage() {
     event.preventDefault();
     setError('');
     setPending(true);
+
     try {
-      if (mode === 'register') await authGateway.register(name, email, password);
-      else await authGateway.login(email, password);
-      // Keep the user inside the V2 SPA after the shared account cookie is issued.
+      if (mode === 'moodle') {
+        if (!moodleAlias.trim() || !moodleBaseUrl.trim() || !moodleUsername.trim() || !moodlePassword) {
+          setError('Preencha todos os dados do Moodle.');
+          return;
+        }
+
+        await authGateway.connectMoodle({
+          moodleAlias: moodleAlias.trim(),
+          moodleBaseUrl: moodleBaseUrl.trim(),
+          moodleUsername: moodleUsername.trim(),
+          moodlePassword,
+          isDefault: true,
+          canWrite: false,
+        });
+        window.location.assign('/configuracoes?tab=acesso&section=grupos');
+        return;
+      }
+
+      if (!email.trim() || !password || (mode === 'register' && !name.trim())) {
+        setError('Preencha todos os campos.');
+        return;
+      }
+
+      if (mode === 'register') {
+        if (password.length < 12) {
+          setError('A senha deve ter pelo menos 12 caracteres.');
+          return;
+        }
+        if (password !== passwordConfirmation) {
+          setError('As senhas não coincidem.');
+          return;
+        }
+        await authGateway.register(name.trim(), email.trim(), password);
+        setMode('moodle');
+        return;
+      }
+
+      const response = await authGateway.login(email.trim(), password);
+      if (response.hasMoodleConnected === false) {
+        setMode('moodle');
+        return;
+      }
       window.location.assign('/');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Não foi possível concluir a operação.');
+      setError(cause instanceof Error ? cause.message : 'Não foi possível concluir o acesso.');
     } finally {
       setPending(false);
     }
   };
 
-  return <main className="auth-page">
-    <section className="auth-brand-panel" aria-label="Moodle Connector">
-      <div className="brand-mark">M</div>
-      <p className="auth-kicker">Moodle Connector</p>
-      <h1>Central de tutoria</h1>
-      <p>Organize cursos, alunos e acompanhamentos em um espaço operacional simples.</p>
-    </section>
-    <section className="auth-card" aria-labelledby="auth-title">
-      <div className="auth-card-header">
-        <span className="auth-label">App operacional</span>
-        <h2 id="auth-title">{mode === 'login' ? 'Entrar na sua conta' : 'Criar sua conta'}</h2>
-        <p>{mode === 'login' ? 'Acesse seu espaço de acompanhamento.' : 'Comece a configurar seu espaço Moodle Connector.'}</p>
-      </div>
-      <div className="auth-tabs" role="tablist" aria-label="Autenticação">
-        <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setError(''); }}>Entrar</button>
-        <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setError(''); }}>Criar conta</button>
-      </div>
-      <form className="auth-form" onSubmit={submit}>
-        {mode === 'register' && <label>Nome<input required value={name} onChange={event => setName(event.target.value)} autoComplete="name" /></label>}
-        <label>E-mail<input required type="email" value={email} onChange={event => setEmail(event.target.value)} autoComplete="email" /></label>
-        <label>Senha<input required minLength={12} type="password" value={password} onChange={event => setPassword(event.target.value)} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /><small>Mínimo de 12 caracteres.</small></label>
-        {error && <p className="auth-error" role="alert">{error}</p>}
-        <button className="auth-submit" type="submit" disabled={pending}>{pending ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Criar conta'}</button>
-      </form>
-    </section>
-  </main>;
-}
+  const isLogin = mode === 'login';
+  const isRegister = mode === 'register';
+  const isMoodle = mode === 'moodle';
 
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4">
+      <div className="w-full max-w-md space-y-6 animate-fade-in">
+        <ClarisLogo className="mx-auto w-60 text-primary" />
+        <Card className="border-0 shadow-lg">
+          <CardHeader className="space-y-1 pb-4">
+            <CardTitle className="text-xl">{isMoodle ? 'Conectar o primeiro Moodle' : isRegister ? 'Criar conta na Claris' : 'Entrar na Claris'}</CardTitle>
+            <CardDescription>
+              {isMoodle
+                ? 'A conexão será usada somente pelo Moodle Connector e começa em modo de leitura.'
+                : isRegister
+                  ? 'Crie sua conta para acessar o portal operacional.'
+                  : 'Use o e-mail e a senha exclusivos da sua conta Claris.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={submit} className="space-y-4">
+              {!isMoodle && isRegister && <div className="space-y-2"><Label htmlFor="name">Nome</Label><Input id="name" required value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></div>}
+              {!isMoodle && <>
+                <div className="space-y-2"><Label htmlFor="email">E-mail</Label><Input id="email" required type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></div>
+                <div className="space-y-2"><Label htmlFor="password">Senha</Label><div className="relative"><Input id="password" required minLength={isRegister ? 12 : undefined} type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} className="pr-10" /><Button type="button" variant="ghost" size="icon" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} className="absolute right-0 top-0 h-full" onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button></div></div>
+                {isRegister && <div className="space-y-2"><Label htmlFor="password-confirmation">Confirmar senha</Label><Input id="password-confirmation" required minLength={12} type="password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" /></div>}
+              </>}
+              {isMoodle && <>
+                <div className="rounded-md border border-primary/20 bg-primary/[0.03] p-3 text-sm text-muted-foreground">Depois de conectar, você poderá criar grupos de acesso em Configurações. Nenhuma operação de escrita no Moodle será habilitada nesta etapa.</div>
+                <div className="space-y-2"><Label htmlFor="moodle-alias">Nome da conexão</Label><Input id="moodle-alias" required value={moodleAlias} onChange={(event) => setMoodleAlias(event.target.value)} placeholder="Ex.: Campus principal" /></div>
+                <div className="space-y-2"><Label htmlFor="moodle-base-url">URL base do Moodle</Label><Input id="moodle-base-url" required type="url" value={moodleBaseUrl} onChange={(event) => setMoodleBaseUrl(event.target.value)} placeholder="https://moodle.exemplo.com" /></div>
+                <div className="space-y-2"><Label htmlFor="moodle-username">Usuário Moodle</Label><Input id="moodle-username" required value={moodleUsername} onChange={(event) => setMoodleUsername(event.target.value)} autoComplete="username" /></div>
+                <div className="space-y-2"><Label htmlFor="moodle-password">Senha Moodle</Label><Input id="moodle-password" required type="password" value={moodlePassword} onChange={(event) => setMoodlePassword(event.target.value)} autoComplete="current-password" /></div>
+              </>}
+              {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+              <Button type="submit" className="w-full" size="lg" disabled={pending}>
+                {pending ? <><Spinner className="mr-2 h-4 w-4" onAccent />{isMoodle ? 'Conectando…' : isRegister ? 'Criando conta…' : 'Entrando…'}</> : isMoodle ? 'Conectar Moodle' : isRegister ? 'Criar conta' : 'Entrar'}
+              </Button>
+            </form>
+            {!isMoodle && <div className="mt-4 text-center text-sm text-muted-foreground"><button type="button" className="text-primary hover:underline" onClick={() => { setError(''); setMode(isLogin ? 'register' : 'login'); }}>{isLogin ? 'Ainda não tenho uma conta' : 'Já tenho uma conta'}</button></div>}
+          </CardContent>
+        </Card>
+        <p className="text-center text-xs text-muted-foreground">Acesso protegido pelo Moodle Connector. Suas credenciais não são compartilhadas com o Moodle.</p>
+      </div>
+    </div>
+  );
+}

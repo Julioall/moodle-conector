@@ -1,0 +1,4 @@
+interface:
+  display_name: "Moodle Core"
+  short_description: "Resolve Moodle capabilities and safe flows"
+  default_prompt: "Use $moodle-core to resolve a Moodle connection, inspect capabilities, choose a safe flow, or route a controlled write."

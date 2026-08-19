@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
@@ -12,6 +14,7 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
     IMoodleRestClient restClient) : IMoodleAssignmentSubmissionStatusGateway
 {
     private const string MoodleFunction = "mod_assign_get_submission_status";
+    private static readonly Regex HtmlTagRegex = new("<[^>]*>", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly MoodleApiOptions _options = options.Value;
 
     public async Task<AssignmentSubmissionAttemptStatus?> GetSubmissionStatusAsync(
@@ -42,7 +45,7 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
         return ParseStatus(payload.GetRawText(), assignmentIdNumber, studentIdNumber);
     }
 
-    private static AssignmentSubmissionAttemptStatus? ParseStatus(
+    internal static AssignmentSubmissionAttemptStatus? ParseStatus(
         string payload,
         long assignmentId,
         long studentId)
@@ -110,20 +113,50 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
                 : null;
     }
 
-    private static bool HasExistingFeedback(JsonElement root)
+    internal static bool HasExistingFeedback(JsonElement root)
     {
-        if (!root.TryGetProperty("feedback", out var feedback) ||
-            feedback.ValueKind != JsonValueKind.Object)
+        // O contrato oficial de mod_assign_get_submission_status expõe os
+        // plugins de feedback diretamente em `feedbackplugins`. Mantemos
+        // também as formas legadas/nested para conexões Moodle customizadas.
+        if (HasFeedbackPlugins(root, "feedbackplugins") ||
+            HasNestedFeedbackPlugins(root, "feedback") ||
+            (root.TryGetProperty("lastattempt", out var lastAttempt) &&
+             lastAttempt.ValueKind == JsonValueKind.Object &&
+             (HasFeedbackPlugins(lastAttempt, "feedbackplugins") ||
+              HasNestedFeedbackPlugins(lastAttempt, "feedback"))))
         {
-            return false;
+            return true;
         }
 
-        if (!feedback.TryGetProperty("plugins", out var plugins) ||
+        return false;
+    }
+
+    private static bool HasFeedbackPlugins(JsonElement container, string propertyName)
+    {
+        if (container.ValueKind != JsonValueKind.Object ||
+            !container.TryGetProperty(propertyName, out var plugins) ||
             plugins.ValueKind != JsonValueKind.Array)
         {
             return false;
         }
 
+        return HasFeedbackPluginContent(plugins);
+    }
+
+    private static bool HasNestedFeedbackPlugins(JsonElement container, string propertyName)
+    {
+        if (container.ValueKind != JsonValueKind.Object ||
+            !container.TryGetProperty(propertyName, out var feedback) ||
+            feedback.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        return HasFeedbackPlugins(feedback, "plugins");
+    }
+
+    private static bool HasFeedbackPluginContent(JsonElement plugins)
+    {
         foreach (var plugin in plugins.EnumerateArray())
         {
             if (plugin.TryGetProperty("editorfields", out var editorFields) &&
@@ -133,15 +166,38 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
                 {
                     if (field.TryGetProperty("text", out var text) &&
                         text.ValueKind == JsonValueKind.String &&
-                        !string.IsNullOrWhiteSpace(text.GetString()))
+                        HasMeaningfulFeedbackText(text.GetString()))
                     {
                         return true;
                     }
                 }
             }
+
+            if (plugin.TryGetProperty("fileareas", out var fileAreas) &&
+                fileAreas.ValueKind == JsonValueKind.Array &&
+                fileAreas.EnumerateArray().Any(fileArea =>
+                    fileArea.TryGetProperty("files", out var files) &&
+                    files.ValueKind == JsonValueKind.Array &&
+                    files.GetArrayLength() > 0))
+            {
+                return true;
+            }
         }
 
         return false;
+    }
+
+    private static bool HasMeaningfulFeedbackText(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var decoded = WebUtility.HtmlDecode(value)
+            .Replace('\u00A0', ' ');
+        var withoutMarkup = HtmlTagRegex.Replace(decoded, string.Empty);
+        return !string.IsNullOrWhiteSpace(withoutMarkup);
     }
 
     private static long ParseMoodleId(string value, string parameterName)

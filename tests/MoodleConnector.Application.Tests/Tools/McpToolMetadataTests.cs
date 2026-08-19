@@ -9,6 +9,7 @@ using MoodleConnector.Presentation.Tools.Gradebook;
 using MoodleConnector.Presentation.Tools.Memory;
 using MoodleConnector.Presentation.Tools.Pedagogy;
 using MoodleConnector.Presentation.Tools.Risk;
+using MoodleConnector.Presentation.Tools.Reports;
 
 namespace MoodleConnector.Application.Tests.Tools;
 
@@ -185,6 +186,7 @@ public sealed class McpToolMetadataTests
             typeof(MoodleGradebookTools),
             typeof(MoodleCompletionTools),
             typeof(MoodleRiskAnalysisTools),
+            typeof(MoodleReportTools),
             typeof(MoodleGradingContextDiagnosticsTools),
             typeof(MoodleGradingReviewAppTools),
             typeof(MoodleMemoryTools),

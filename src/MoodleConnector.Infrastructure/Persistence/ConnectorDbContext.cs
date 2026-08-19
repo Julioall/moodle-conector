@@ -19,8 +19,11 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<PermissionGroupMembershipEntity> PermissionGroupMemberships => Set<PermissionGroupMembershipEntity>();
     public DbSet<UserPermissionOverrideEntity> UserPermissionOverrides => Set<UserPermissionOverrideEntity>();
     public DbSet<TaskEntity> Tasks => Set<TaskEntity>();
+    public DbSet<ReportJobEntity> ReportJobs => Set<ReportJobEntity>();
     public DbSet<CalendarEventEntity> CalendarEvents => Set<CalendarEventEntity>();
     public DbSet<FollowupEntity> Followups => Set<FollowupEntity>();
+    public DbSet<PortalEvidenceEntity> PortalEvidence => Set<PortalEvidenceEntity>();
+    public DbSet<UserIgnoredCourseEntity> UserIgnoredCourses => Set<UserIgnoredCourseEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -113,6 +116,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         permissionGroup.HasKey(x => x.Id);
         permissionGroup.Property(x => x.Name).HasMaxLength(120).IsRequired();
         permissionGroup.Property(x => x.Description).HasMaxLength(500).IsRequired();
+        permissionGroup.Property(x => x.CommonRoleKey).HasMaxLength(64);
         permissionGroup.Property(x => x.CreatedByUserId).IsRequired();
         permissionGroup.Property(x => x.CreatedAtUtc).IsRequired();
         permissionGroup.Property(x => x.UpdatedAtUtc).IsRequired();
@@ -147,6 +151,29 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         appTask.Property(x => x.UpdatedAt).IsRequired();
         appTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
 
+        var reportJob = modelBuilder.Entity<ReportJobEntity>();
+        reportJob.ToTable("report_jobs");
+        reportJob.HasKey(x => x.Id);
+        reportJob.Property(x => x.ClientId).HasMaxLength(200).IsRequired();
+        reportJob.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        reportJob.Property(x => x.ReportType).HasMaxLength(64).IsRequired();
+        reportJob.Property(x => x.ScopeType).HasMaxLength(32).IsRequired();
+        reportJob.Property(x => x.CategoryPath).HasMaxLength(500);
+        reportJob.Property(x => x.CourseId).HasMaxLength(64);
+        reportJob.Property(x => x.CourseIdsJson);
+        reportJob.Property(x => x.CourseNamesJson);
+        reportJob.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        reportJob.Property(x => x.FileName).HasMaxLength(240);
+        reportJob.Property(x => x.ContentType).HasMaxLength(120);
+        reportJob.Property(x => x.FileSizeBytes).IsRequired();
+        reportJob.Property(x => x.ContentText);
+        reportJob.Property(x => x.ContentBase64);
+        reportJob.Property(x => x.ErrorMessage).HasMaxLength(4000);
+        reportJob.Property(x => x.RequestedAt).IsRequired();
+        reportJob.Property(x => x.UpdatedAt).IsRequired();
+        reportJob.HasIndex(x => new { x.OwnerId, x.UpdatedAt });
+        reportJob.HasIndex(x => new { x.Status, x.RequestedAt });
+
         var calendarEvent = modelBuilder.Entity<CalendarEventEntity>();
         calendarEvent.ToTable("app_calendar_events");
         calendarEvent.HasKey(x => x.Id);
@@ -162,12 +189,42 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         followup.ToTable("app_followups");
         followup.HasKey(x => x.Id);
         followup.Property(x => x.StudentRef).HasMaxLength(200).IsRequired();
+        followup.Property(x => x.StudentName).HasMaxLength(240);
         followup.Property(x => x.CourseRef).HasMaxLength(200);
         followup.Property(x => x.Kind).HasMaxLength(64).IsRequired();
+        followup.Property(x => x.Reason).HasMaxLength(64);
+        followup.Property(x => x.Action).HasMaxLength(64);
+        followup.Property(x => x.Status).HasMaxLength(64);
         followup.Property(x => x.Notes).HasMaxLength(4000).IsRequired();
         followup.Property(x => x.OccurredAt).IsRequired();
         followup.Property(x => x.CreatedAt).IsRequired();
         followup.HasIndex(x => new { x.OwnerId, x.OccurredAt });
+
+        var evidence = modelBuilder.Entity<PortalEvidenceEntity>();
+        evidence.ToTable("portal_evidence");
+        evidence.HasKey(x => x.Id);
+        evidence.Property(x => x.ConnectionAlias).HasMaxLength(64);
+        evidence.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        evidence.Property(x => x.StudentId).HasMaxLength(64);
+        evidence.Property(x => x.ActivityId).HasMaxLength(64);
+        evidence.Property(x => x.Kind).HasMaxLength(64).IsRequired();
+        evidence.Property(x => x.Title).HasMaxLength(240).IsRequired();
+        evidence.Property(x => x.Details).HasMaxLength(4000).IsRequired();
+        evidence.Property(x => x.Source).HasMaxLength(64).IsRequired();
+        evidence.Property(x => x.ObservedAt).IsRequired();
+        evidence.Property(x => x.CreatedAt).IsRequired();
+        evidence.HasIndex(x => new { x.OwnerId, x.CourseId, x.ObservedAt });
+        evidence.HasIndex(x => new { x.OwnerId, x.StudentId, x.Kind, x.ActivityId });
+
+        var ignoredCourse = modelBuilder.Entity<UserIgnoredCourseEntity>();
+        ignoredCourse.ToTable("user_ignored_courses");
+        ignoredCourse.HasKey(x => x.Id);
+        ignoredCourse.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        ignoredCourse.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        ignoredCourse.Property(x => x.CreatedAt).IsRequired();
+        ignoredCourse.Property(x => x.UpdatedAt).IsRequired();
+        ignoredCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.CourseId }).IsUnique();
+        ignoredCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias });
 
         var pendingAction = modelBuilder.Entity<PendingMoodleAction>();
         pendingAction.ToTable("moodle_pending_actions");
