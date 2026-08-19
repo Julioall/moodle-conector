@@ -154,7 +154,8 @@ public sealed class GeneratePostExecutionReportQueryHandler(
 {
     private const string Disclaimer =
         "Este relatório é indicativo e não constitui decisão oficial de conclusão, reprovação ou evasão. " +
-        "Os dados são baseados na API Moodle e devem ser validados pelo tutor e pela coordenação.";
+        "Os dados são baseados na API Moodle e devem ser validados pelo tutor e pela coordenação. " +
+        "Atividades cujo nome indica recuperação não são tratadas como pendência geral.";
 
     public async Task<GeneratePostExecutionReportResult> Handle(
         GeneratePostExecutionReportQuery request,
@@ -204,17 +205,26 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                     request.CourseId, student.UserId, cancellationToken);
 
                 var activityItems = gradebook.Items
-                    .Where(GradebookMappingHelper.IsActivityItem)
+                    .Where(GradebookMappingHelper.IsDerivedReportActivityItem)
                     .ToList();
 
                 totalGradedItems = activityItems.Count;
-                hasGradebookData = totalGradedItems > 0;
+                hasGradebookData = gradebook.Items.Any(GradebookMappingHelper.IsDerivedReportItem);
 
                 var gradeItems = activityItems
                     .Select(i => GradebookMappingHelper.ToStudentGradeItem(i, request.MinGradePercent))
                     .ToList();
 
                 belowMinimumCount = gradeItems.Count(i => i.BelowMinimum);
+                var courseTotal = gradebook.Items.FirstOrDefault(GradebookMappingHelper.IsCourseTotalItem);
+                if (courseTotal is not null)
+                {
+                    var courseTotalItem = GradebookMappingHelper.ToStudentGradeItem(courseTotal, request.MinGradePercent);
+                    if (courseTotalItem.BelowMinimum)
+                    {
+                        belowMinimumCount++;
+                    }
+                }
                 pendingCount = gradeItems.Count(i => !i.GradeRaw.HasValue);
             }
             catch { /* partial data */ }

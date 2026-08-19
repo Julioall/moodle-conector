@@ -752,6 +752,8 @@ public sealed class MoodleGradingTools(
 
         var items = new List<EntregaCorrigivelItem>();
         var warnings = new List<string>();
+        var failedAssignmentCount = 0;
+        Exception? firstFailure = null;
 
         foreach (var assignmentId in normalizedAssignmentIds)
         {
@@ -779,14 +781,17 @@ public sealed class MoodleGradingTools(
                 {
                     throw;
                 }
-                catch
+                catch (Exception exception)
                 {
+                    failedAssignmentCount++;
+                    firstFailure ??= exception;
                     warnings.Add($"Nao foi possivel listar entregas da tarefa {assignmentId} neste momento.");
                     break;
                 }
 
                 if (submissions is null)
                 {
+                    failedAssignmentCount++;
                     warnings.Add($"Tarefa {assignmentId} nao encontrada para o usuario atual.");
                     break;
                 }
@@ -851,8 +856,18 @@ public sealed class MoodleGradingTools(
             warnings.Add("Os nomes dos estudantes nao estao disponiveis. Isso pode ocorrer por restricao de privacidade do Moodle ou por limitacao do token de acesso. Os estudantes sao identificados apenas pelo ID.");
         }
 
+        if (failedAssignmentCount == normalizedAssignmentIds.Length)
+        {
+            return firstFailure is null
+                ? ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
+                    warnings.FirstOrDefault() ?? "Nao foi possivel listar entregas corrigiveis neste momento.")
+                : ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(firstFailure);
+        }
+
+        var responseStatus = failedAssignmentCount > 0 ? "partial_failure" : "ok";
+
         var response = new ToolResponse<ListarEntregasCorrigiveisResponse>(
-            "ok",
+            responseStatus,
             data,
             warnings,
             AuditId: null,

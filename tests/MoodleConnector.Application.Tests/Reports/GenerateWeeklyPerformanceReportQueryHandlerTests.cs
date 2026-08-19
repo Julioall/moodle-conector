@@ -117,6 +117,37 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_UsesCourseTotalAndDoesNotTreatRecoveryAsPending()
+    {
+        var students = new[] { MakeStudent("4", "Lavinia", DateTimeOffset.UtcNow.AddDays(-1)) };
+        var grades = new Dictionary<string, IReadOnlyList<GradebookItem>>
+        {
+            ["4"] =
+            [
+                new GradebookItem("course", "Total do curso", "course", "", null,
+                    47m, "47", 0m, 100m, null, null, null, null, null, null),
+                new GradebookItem("zero", "Momento presencial", "assign", "activity", null,
+                    0m, "0", 0m, 26m, null, null, null, null, null, null),
+                new GradebookItem("recovery", "SAP Recuperação", "assign", "activity", null,
+                    null, null, 0m, 100m, null, null, null, null, null, null)
+            ]
+        };
+
+        var handler = CreateHandler(students, grades);
+        var result = await handler.Handle(
+            new GenerateWeeklyPerformanceReportQuery("course1", MinGradePercent: 60m),
+            CancellationToken.None);
+
+        var row = Assert.Single(result.Students);
+        Assert.Equal(2, row.BelowMinimumCount); // course total 47% and the launched zero
+        Assert.Contains(row.BelowMinimumItems, item => item.ItemType == "course");
+        Assert.Equal(1, row.TotalAssignments); // recovery is optional, not a universal pending item
+        Assert.Equal(1, row.SubmittedCount);
+        Assert.Equal(0, row.PendingCount);
+        Assert.Empty(result.SuggestedRecipientIdsForPending);
+    }
+
+    [Fact]
     public async Task Handle_RiskStudentSortedBeforeOkStudent()
     {
         var now = DateTimeOffset.UtcNow;

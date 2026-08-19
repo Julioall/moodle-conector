@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Infrastructure;
@@ -147,23 +148,30 @@ internal sealed class MoodleParticipantsGateway(
 
         var normalizedCourseId = ParseMoodleId(courseId, "courseId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var payload = await restClient.CallAsync(
-            credentials,
-            "core_group_get_course_groups",
-            new Dictionary<string, string>
-            {
-                ["courseid"] = normalizedCourseId.ToString(CultureInfo.InvariantCulture)
-            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
-            cancellationToken);
+        try
+        {
+            var payload = await restClient.CallAsync(
+                credentials,
+                "core_group_get_course_groups",
+                new Dictionary<string, string>
+                {
+                    ["courseid"] = normalizedCourseId.ToString(CultureInfo.InvariantCulture)
+                }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+                cancellationToken);
 
-        var groups = JsonSerializer.Deserialize<List<GroupDto>>(payload.GetRawText()) ?? [];
-        return groups
-            .Select(group => new CourseGroupSummary(
-                ToIdString(group.Id),
-                ToIdString(group.CourseId),
-                group.Name ?? string.Empty,
-                string.IsNullOrWhiteSpace(group.IdNumber) ? null : group.IdNumber))
-            .ToArray();
+            return MapGroups(
+                JsonSerializer.Deserialize<List<GroupDto>>(payload.GetRawText()) ?? [],
+                normalizedCourseId.ToString(CultureInfo.InvariantCulture));
+        }
+        catch (MoodleApiException exception) when (IsPermissionDenied(exception))
+        {
+            // Some Moodle roles can see groups embedded in enrolled users but
+            // are not allowed to call core_group_get_course_groups directly.
+            return await GetCourseGroupsFromParticipantsAsync(
+                credentials,
+                normalizedCourseId,
+                cancellationToken);
+        }
     }
 
     private async Task<IReadOnlyList<ParticipantDto>> GetParticipantsBatchAsync(
@@ -187,10 +195,9 @@ internal sealed class MoodleParticipantsGateway(
             ("userfields", BuildUserFields(includeEmail))
         };
 
-        if (statusFilter == ParticipantStatusFilter.Active)
-        {
-            options.Add(("onlyactive", "1"));
-        }
+        // Do not send onlyactive=1 here. The SENAI service exposes
+        // core_enrol_get_enrolled_users but denies this option for the current
+        // role. The suspended flag is already requested and filtered locally.
 
         if (groupId is not null)
         {
@@ -207,6 +214,81 @@ internal sealed class MoodleParticipantsGateway(
 
         return JsonSerializer.Deserialize<List<ParticipantDto>>(payload.GetRawText()) ?? [];
     }
+
+    private async Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsFromParticipantsAsync(
+        MoodleConnectorCredentials credentials,
+        int courseId,
+        CancellationToken cancellationToken)
+    {
+        var groups = new Dictionary<string, CourseGroupSummary>(StringComparer.Ordinal);
+        var offset = 0;
+
+        while (true)
+        {
+            var participants = await GetParticipantsBatchAsync(
+                credentials,
+                courseId,
+                ParticipantStatusFilter.All,
+                includeEmail: false,
+                groupId: null,
+                offset,
+                ParticipantFetchBatchSize,
+                cancellationToken);
+
+            if (participants.Count == 0)
+            {
+                break;
+            }
+
+            foreach (var participant in participants)
+            {
+                foreach (var group in participant.Groups ?? [])
+                {
+                    var groupId = ToIdString(group.Id);
+                    if (string.IsNullOrWhiteSpace(groupId))
+                    {
+                        continue;
+                    }
+
+                    groups.TryAdd(
+                        groupId,
+                        new CourseGroupSummary(
+                            groupId,
+                            courseId.ToString(CultureInfo.InvariantCulture),
+                            group.Name ?? string.Empty,
+                            string.IsNullOrWhiteSpace(group.IdNumber) ? null : group.IdNumber));
+                }
+            }
+
+            offset += participants.Count;
+            if (participants.Count < ParticipantFetchBatchSize)
+            {
+                break;
+            }
+        }
+
+        return groups.Values
+            .OrderBy(group => group.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.GroupId, StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<CourseGroupSummary> MapGroups(
+        IReadOnlyList<GroupDto> groups,
+        string defaultCourseId) => groups
+        .Select(group => new CourseGroupSummary(
+            ToIdString(group.Id),
+            string.IsNullOrWhiteSpace(ToIdString(group.CourseId))
+                ? defaultCourseId
+                : ToIdString(group.CourseId),
+            group.Name ?? string.Empty,
+            string.IsNullOrWhiteSpace(group.IdNumber) ? null : group.IdNumber))
+        .Where(group => !string.IsNullOrWhiteSpace(group.GroupId))
+        .ToArray();
+
+    private static bool IsPermissionDenied(MoodleApiException exception) =>
+        MoodleErrorContract.NormalizeCode(exception.ErrorCode) == MoodleErrorContract.PermissionDenied ||
+        MoodleErrorContract.NormalizeCode(exception.RemoteErrorCode) == MoodleErrorContract.PermissionDenied;
 
     private static CourseParticipantSummary ToParticipant(ParticipantDto dto, bool includeEmail)
     {

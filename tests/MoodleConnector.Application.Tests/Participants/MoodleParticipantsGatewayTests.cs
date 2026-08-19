@@ -30,6 +30,37 @@ public sealed class MoodleParticipantsGatewayTests
     }
 
     [Fact]
+    public async Task Filtra_ativos_localmente_sem_enviar_opcao_onlyactive()
+    {
+        var handler = new JsonHandler(
+            "[{\"id\":123,\"fullname\":\"Aluno\",\"suspended\":false,\"roles\":[],\"groups\":[]}]" );
+        var sut = CreateGateway(handler);
+
+        var result = await sut.GetCourseParticipantsAsync(
+            "42", "10", ParticipantStatusFilter.Active, 1, 20, false, false, null, CancellationToken.None);
+
+        var body = Uri.UnescapeDataString(handler.LastRequestBody);
+        Assert.DoesNotContain("onlyactive", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(result.Participants);
+    }
+
+    [Fact]
+    public async Task Usa_grupos_embutidos_quando_funcao_de_grupos_e_negada()
+    {
+        var handler = new JsonHandler(
+            "{\"exception\":\"required_capability_exception\",\"errorcode\":\"nopermissions\",\"message\":\"Sem permissao\"}",
+            "[{\"id\":123,\"fullname\":\"Aluno\",\"suspended\":false,\"roles\":[],\"groups\":[{\"id\":9,\"name\":\"Turma A\"}]}]");
+        var sut = CreateGateway(handler);
+
+        var result = await sut.GetCourseGroupsAsync("42", "10", CancellationToken.None);
+
+        var group = Assert.Single(result);
+        Assert.Equal("9", group.GroupId);
+        Assert.Equal("10", group.CourseId);
+        Assert.Equal("Turma A", group.Name);
+    }
+
+    [Fact]
     public async Task Inclui_participante_sem_roles_quando_students_only()
     {
         var sut = CreateGateway(new JsonHandler("""
@@ -76,8 +107,15 @@ public sealed class MoodleParticipantsGatewayTests
                 NullLogger<MoodleRestClient>.Instance));
     }
 
-    private sealed class JsonHandler(string json) : HttpMessageHandler
+    private sealed class JsonHandler : HttpMessageHandler
     {
+        private readonly Queue<string> _responses;
+
+        public JsonHandler(params string[] responses)
+        {
+            _responses = new Queue<string>(responses);
+        }
+
         public Uri? LastRequestUri { get; private set; }
         public string LastRequestBody { get; private set; } = string.Empty;
 
@@ -89,6 +127,7 @@ public sealed class MoodleParticipantsGatewayTests
             LastRequestBody = request.Content is null
                 ? string.Empty
                 : await request.Content.ReadAsStringAsync(cancellationToken);
+            var json = _responses.Count > 1 ? _responses.Dequeue() : _responses.Peek();
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
