@@ -134,6 +134,39 @@ public sealed class MoodleGradingToolsTests
         Assert.Equal(1, data.GetProperty("counters").GetProperty("awaitingGrading").GetInt32());
         Assert.Equal(1, data.GetProperty("items").GetArrayLength());
         Assert.Equal("501", data.GetProperty("items")[0].GetProperty("assignmentId").GetString());
+        Assert.False(data.GetProperty("permissions").GetProperty("canCommitToMoodle").GetBoolean());
+        Assert.Equal("requires_sandbox_validation", data.GetProperty("permissions").GetProperty("commitStatus").GetString());
+        Assert.Empty(data.GetProperty("failedAssignments").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Deve_preservar_entregas_validas_e_expor_falha_por_tarefa()
+    {
+        var mediator = new FakeMediator
+        {
+            FailingAssignmentIds = new HashSet<string>(["502"], StringComparer.Ordinal),
+        };
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321));
+
+        var result = await sut.ListarEntregasCorrigiveisAsync(
+            "10",
+            ["501", "502"],
+            onlyAwaitingGrading: true,
+            page: 1,
+            perPage: 25);
+
+        Assert.False(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("partial_failure", structured.GetProperty("status").GetString());
+
+        var data = structured.GetProperty("data");
+        Assert.Equal(1, data.GetProperty("totalItems").GetInt32());
+        var failure = Assert.Single(data.GetProperty("failedAssignments").EnumerateArray());
+        Assert.Equal("502", failure.GetProperty("assignmentId").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(failure.GetProperty("errorCode").GetString()));
     }
 
     [Fact]
@@ -428,6 +461,8 @@ public sealed class MoodleGradingToolsTests
     {
         public bool ThrowOnListAssignmentSubmissions { get; init; }
 
+        public IReadOnlySet<string> FailingAssignmentIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
         public DiscoverMoodleGradingCapabilitiesQuery? LastQuery { get; private set; }
 
         public GradingTechnicalDiscoveryQuery? LastTechnicalDiscovery { get; private set; }
@@ -493,16 +528,16 @@ public sealed class MoodleGradingToolsTests
                     Warnings: []));
             }
 
-            if (request is ListAssignmentSubmissionsQuery)
+            if (request is ListAssignmentSubmissionsQuery submissionQuery)
             {
-                if (ThrowOnListAssignmentSubmissions)
+                if (ThrowOnListAssignmentSubmissions || FailingAssignmentIds.Contains(submissionQuery.AssignmentId))
                 {
                     throw new InvalidOperationException("simulated submission lookup failure");
                 }
 
                 return Task.FromResult((TResponse)(object)new AssignmentSubmissionsPage(
                     "10",
-                    "501",
+                    submissionQuery.AssignmentId,
                     "42",
                     "Tarefa 1",
                     Page: 1,

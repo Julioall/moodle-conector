@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Infrastructure;
@@ -53,18 +54,60 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
                 .ToDictionary(pair => pair.Key, pair => pair.Value);
             AddOptionalParameters(parameters, status, since, before);
 
-            var payload = await restClient.CallAsync(
-                credentials,
-                "mod_assign_get_submissions",
-                parameters,
-                cancellationToken);
-            var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
-
-            foreach (var assignment in submissions?.Assignments ?? [])
+            try
             {
-                result.Add(new AssignmentSubmissionsBatch(
-                    ToIdString(assignment.AssignmentId),
-                    (assignment.Submissions ?? []).Select(ToRecord).ToArray()));
+                var payload = await restClient.CallAsync(
+                    credentials,
+                    "mod_assign_get_submissions",
+                    parameters,
+                    cancellationToken);
+                var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
+                var returnedAssignments = (submissions?.Assignments ?? [])
+                    .Select(assignment => new AssignmentSubmissionsBatch(
+                        ToIdString(assignment.AssignmentId),
+                        (assignment.Submissions ?? []).Select(ToRecord).ToArray()))
+                    .ToDictionary(batch => batch.AssignmentId, StringComparer.Ordinal);
+
+                // Moodle may reject the whole multi-assignment request when a
+                // single activity is unavailable to the current role. Retry
+                // omitted IDs individually so one bad Extra activity does not
+                // erase valid submissions from the remaining activities.
+                foreach (var assignmentId in chunk)
+                {
+                    if (returnedAssignments.TryGetValue(assignmentId, out var batch))
+                    {
+                        result.Add(batch);
+                        continue;
+                    }
+
+                    result.Add(await GetSingleAssignmentBatchAsync(
+                        credentials,
+                        assignmentId,
+                        status,
+                        since,
+                        before,
+                        cancellationToken));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // A single invalid/hidden assignment can make Moodle reject
+                // the complete array. Fall back to isolated calls and retain
+                // a structured failure for assignments that still fail.
+                foreach (var assignmentId in chunk)
+                {
+                    result.Add(await GetSingleAssignmentBatchAsync(
+                        credentials,
+                        assignmentId,
+                        status,
+                        since,
+                        before,
+                        cancellationToken));
+                }
             }
         }
 
@@ -87,23 +130,75 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
         var normalizedAssignmentId = ParseMoodleId(assignmentId, "assignmentId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
 
+        var batch = await GetSingleAssignmentBatchAsync(
+            credentials,
+            normalizedAssignmentId.ToString(CultureInfo.InvariantCulture),
+            status,
+            since,
+            before,
+            cancellationToken);
+        if (batch.ErrorCode is not null)
+        {
+            throw new MoodleApiException(
+                batch.ErrorCode,
+                batch.ErrorMessage ?? MoodleErrorContract.SafeMessage(batch.ErrorCode),
+                functionName: "mod_assign_get_submissions");
+        }
+
+        return batch.Submissions;
+    }
+
+    private async Task<AssignmentSubmissionsBatch> GetSingleAssignmentBatchAsync(
+        MoodleConnectorCredentials credentials,
+        string assignmentId,
+        string? status,
+        DateTimeOffset? since,
+        DateTimeOffset? before,
+        CancellationToken cancellationToken)
+    {
         var parameters = new Dictionary<string, object?>
         {
-            ["assignmentids[0]"] = normalizedAssignmentId.ToString(CultureInfo.InvariantCulture)
+            ["assignmentids[0]"] = assignmentId
         };
         AddOptionalParameters(parameters, status, since, before);
 
-        var payload = await restClient.CallAsync(
-            credentials,
-            "mod_assign_get_submissions",
-            parameters,
-            cancellationToken);
+        try
+        {
+            var payload = await restClient.CallAsync(
+                credentials,
+                "mod_assign_get_submissions",
+                parameters,
+                cancellationToken);
+            var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
+            var assignment = (submissions?.Assignments ?? [])
+                .FirstOrDefault(item => string.Equals(
+                    ToIdString(item.AssignmentId),
+                    assignmentId,
+                    StringComparison.Ordinal));
 
-        var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
-        return (submissions?.Assignments ?? [])
-            .SelectMany(assignment => assignment.Submissions ?? [])
-            .Select(ToRecord)
-            .ToArray();
+            return assignment is null
+                ? new AssignmentSubmissionsBatch(
+                    assignmentId,
+                    [],
+                    "assignment_not_found",
+                    "A tarefa nao foi encontrada ou nao esta acessivel para o usuario atual.")
+                : new AssignmentSubmissionsBatch(
+                    assignmentId,
+                    (assignment.Submissions ?? []).Select(ToRecord).ToArray());
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var failure = MoodleErrorContract.Describe(exception);
+            return new AssignmentSubmissionsBatch(
+                assignmentId,
+                [],
+                failure.ErrorCode,
+                failure.Message);
+        }
     }
 
     private static void AddOptionalParameters(
