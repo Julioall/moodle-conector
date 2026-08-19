@@ -93,6 +93,24 @@ public sealed class GetStudentGradeItemsQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_DerivesPercentageForZeroGradeWhenMoodleOmitsIt()
+    {
+        var sut = CreateHandler([
+            new GradebookItem("1", "SA1", "mod", "assign", "1",
+                GradeRaw: 0m, GradeFormatted: "0", GradeMin: 0m, GradeMax: 10m,
+                PercentageFormatted: null, Feedback: null, FeedbackFormat: null,
+                GradedDateSubmitted: null, GradedDateGraded: null, GraderId: null)
+        ]);
+
+        var result = await sut.Handle(
+            new GetStudentGradeItemsQuery("10", "99", MinGradePercent: 60m),
+            CancellationToken.None);
+
+        Assert.True(Assert.Single(result.Items).BelowMinimum);
+        Assert.Equal(0m, result.Items[0].PercentageFormatted);
+    }
+
+    [Fact]
     public async Task Handle_MinGradePercentAtExactBoundary_IsNotBelowMinimum()
     {
         // exactly at 60% should not flag as below minimum

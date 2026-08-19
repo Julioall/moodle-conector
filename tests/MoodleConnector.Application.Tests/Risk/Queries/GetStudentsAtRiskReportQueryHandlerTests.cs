@@ -24,6 +24,8 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
         Assert.Equal(RiskLevel.Alto, result.Reports[0].RiskLevel); // Multiple factors: inactive, low grade, low completion
         Assert.Equal(1, result.ParticipantsAnalyzedCount);
         Assert.Equal(1, result.ClassificationDiagnostics.IncludedByFallbackCount);
+        Assert.Equal(50m, result.Reports[0].CurrentGrade);
+        Assert.Contains(result.Reports[0].Factors, factor => factor.Contains("Nota atual", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -120,7 +122,7 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
                 CourseId: courseId,
                 StudentId: studentId,
                 Items: [
-                    new GradebookItem("1", "Course Total", "course", "", "", 50, "50,00", 0, 100, 50, "", "", 0, 0, "")
+                    new GradebookItem("1", "Course Total", "course", "", "", 50, "50,00", 0, 100, null, "", "", 0, 0, "")
                 ]));
         }
     }

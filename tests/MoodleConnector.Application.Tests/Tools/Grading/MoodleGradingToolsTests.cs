@@ -137,6 +137,29 @@ public sealed class MoodleGradingToolsTests
     }
 
     [Fact]
+    public async Task Nao_deve_transformar_falha_total_em_zero_resultados()
+    {
+        var mediator = new FakeMediator { ThrowOnListAssignmentSubmissions = true };
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321));
+
+        var result = await sut.ListarEntregasCorrigiveisAsync(
+            "10",
+            ["501"],
+            onlyAwaitingGrading: true,
+            page: 1,
+            perPage: 25);
+
+        Assert.True(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("error", structured.GetProperty("status").GetString());
+        Assert.Null(structured.GetProperty("data").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(structured.GetProperty("warnings")[0].GetString()));
+    }
+
+    [Fact]
     public async Task Deve_consultar_status_lote_correcao()
     {
         var mediator = new FakeMediator();
@@ -403,6 +426,8 @@ public sealed class MoodleGradingToolsTests
 
     private sealed class FakeMediator : IMediator
     {
+        public bool ThrowOnListAssignmentSubmissions { get; init; }
+
         public DiscoverMoodleGradingCapabilitiesQuery? LastQuery { get; private set; }
 
         public GradingTechnicalDiscoveryQuery? LastTechnicalDiscovery { get; private set; }
@@ -470,6 +495,11 @@ public sealed class MoodleGradingToolsTests
 
             if (request is ListAssignmentSubmissionsQuery)
             {
+                if (ThrowOnListAssignmentSubmissions)
+                {
+                    throw new InvalidOperationException("simulated submission lookup failure");
+                }
+
                 return Task.FromResult((TResponse)(object)new AssignmentSubmissionsPage(
                     "10",
                     "501",
@@ -680,6 +710,11 @@ public sealed class MoodleGradingToolsTests
 
             if (request is ListAssignmentSubmissionsQuery)
             {
+                if (ThrowOnListAssignmentSubmissions)
+                {
+                    throw new InvalidOperationException("simulated submission lookup failure");
+                }
+
                 return Task.FromResult<object?>(new AssignmentSubmissionsPage(
                     "10",
                     "501",
