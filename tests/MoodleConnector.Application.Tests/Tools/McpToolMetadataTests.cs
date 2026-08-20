@@ -135,6 +135,12 @@ public sealed class McpToolMetadataTests
         Assert.Contains("setWidgetState", html);
         Assert.Contains("privateContent", html);
         Assert.Contains("get_batch_grading_ui_state", html);
+        Assert.Contains("update_grading_drafts_batch", html);
+        Assert.Contains("create_batch_grade_launch_preview", html);
+        Assert.Contains("confirm_batch_grade_launch", html);
+        Assert.DoesNotContain("atualizar_rascunhos_correcao_lote", html);
+        Assert.DoesNotContain("criar_previa_lancamento_lote", html);
+        Assert.DoesNotContain("confirmar_lancamento_lote_moodle", html);
         Assert.Contains("hydration-error", html);
         Assert.Contains("O lote não foi marcado como vazio", html);
         Assert.Contains("empty-state", html);

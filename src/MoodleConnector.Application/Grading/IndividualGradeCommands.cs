@@ -140,7 +140,7 @@ public sealed class PrepareIndividualGradeCommandHandler(
             var page = await participantsGateway.GetCourseParticipantsAsync(
                 currentUserExternalId, request.CourseId,
                 ParticipantStatusFilter.Active,
-                page: 0, pageSize: 200,
+                page: 1, pageSize: 200,
                 studentsOnly: false, includeEmail: false,
                 groupId: null, cancellationToken: cancellationToken);
             var student = page.Participants.FirstOrDefault(p => p.UserId == request.StudentId);

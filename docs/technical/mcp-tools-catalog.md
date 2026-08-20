@@ -1336,7 +1336,8 @@ Metadados MCP:
 Descricao:
 
 - MCP Resource (nao tool): expoe a interface SPA de revisao de correcao assistida como HTML servido pelo servidor.
-- Acessivel via URI `ui://grading-review/app.html`.
+- Acessivel via URI `ui://grading-review/v2/app.html`.
+- A URI legada `ui://grading-review/app.html` permanece disponivel para clientes com descriptor MCP em cache.
 - Nao executa escrita no Moodle e nao requer autenticacao adicional alem do token MCP.
 
 ## Planejado

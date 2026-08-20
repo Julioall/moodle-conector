@@ -78,7 +78,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             userExternalId: currentUserExternalId,
             courseId: request.CourseId,
             statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
+            page: 1,
             pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
             studentsOnly: true,
             includeEmail: false,

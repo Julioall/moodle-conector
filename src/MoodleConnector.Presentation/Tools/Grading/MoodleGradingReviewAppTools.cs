@@ -447,6 +447,23 @@ public sealed class MoodleGradingReviewAppResources
         };
     }
 
+    // Keep the pre-v2 URI readable so clients with a cached tool descriptor can
+    // finish an already-open review instead of failing with "resource not found".
+    [McpServerResource(
+        UriTemplate = MoodleGradingReviewAppMetadata.LegacyResourceUri,
+        Name = "grading-review-app",
+        Title = "Interface de Revisão de Feedbacks (compatibilidade)",
+        MimeType = MoodleGradingReviewAppMetadata.ResourceMimeType)]
+    [Description("URI legada da interface HTML de revisão de feedbacks de correção assistida.")]
+    public IEnumerable<ResourceContents> GetLegacyReviewApp()
+    {
+        foreach (var resource in GetReviewApp())
+        {
+            resource.Uri = MoodleGradingReviewAppMetadata.LegacyResourceUri;
+            yield return resource;
+        }
+    }
+
     private static string LoadResourceHtml()
     {
         var assembly = Assembly.GetExecutingAssembly();
@@ -472,6 +489,7 @@ public static class MoodleGradingReviewAppMetadata
 {
     public const string ToolName = "review_batch_feedbacks";
     public const string ResourceUri = "ui://grading-review/v2/app.html";
+    public const string LegacyResourceUri = "ui://grading-review/app.html";
     public const string ResourceMimeType = "text/html;profile=mcp-app";
 
     public static JsonObject CreateToolMeta()
