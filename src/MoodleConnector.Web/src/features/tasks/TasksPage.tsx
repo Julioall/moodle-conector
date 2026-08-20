@@ -36,6 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { TaskDetailDrawer } from './components/TaskDetailDrawer';
 import { tasksGateway, type Task, type TaskInput, type TaskPriority, type TaskStatus } from './tasks-gateway';
+import { PlannerReferenceTags } from './PlannerReferenceTags';
 
 type ViewMode = 'list' | 'kanban';
 type StatusFilter = 'all' | TaskStatus;
@@ -141,6 +142,7 @@ function TaskCard({
           <div className="min-w-0 flex-1">
             <p className={cn('line-clamp-2 text-sm font-medium leading-snug', task.status === 'done' && 'text-muted-foreground line-through')}>{task.title}</p>
             {task.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{task.description}</p>}
+            <PlannerReferenceTags references={task.references} compact />
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium', priorityStyles[task.priority])}>{priorityLabels[task.priority]}</span>
               <span className="inline-flex items-center gap-1 text-muted-foreground"><Calendar className="h-3 w-3" />Início: {formatStartDate(task.startAt)}</span>

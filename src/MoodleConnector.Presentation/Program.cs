@@ -50,6 +50,7 @@ using MoodleConnector.Presentation.Tools.Reports;
 using MoodleConnector.Presentation.Tools.Monitor;
 using MoodleConnector.Presentation.Tools.Memory;
 using MoodleConnector.Presentation.Tools.Pedagogy;
+using MoodleConnector.Presentation.Tools.Portal;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
 using System.Reflection;
@@ -314,6 +315,7 @@ var mcpServerBuilder = builder.Services
     .AddApplication()
     .AddInfrastructure(builder.Configuration)
     .AddScoped<DashboardPendingSnapshotBuilder>()
+    .AddScoped<PortalMcpIdentityResolver>()
     .AddSingleton<DashboardOverviewRefreshQueue>()
     .AddSingleton<IDashboardOverviewRefreshQueue>(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
     .AddHostedService(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
@@ -944,7 +946,9 @@ app.MapGet("/api/tasks", async (HttpContext context, ConnectorDbContext dbContex
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status);
     if (!string.IsNullOrWhiteSpace(priority)) query = query.Where(x => x.Priority == priority);
     var total = await query.CountAsync(cancellationToken);
-    var items = await query.OrderBy(x => x.DueAt).ThenByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new TaskDto(x.Id, x.Title, x.Description, x.Status, x.Priority, x.StartAt, x.DueAt, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
+    var taskEntities = await query.OrderBy(x => x.DueAt).ThenByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);
+    var taskReferences = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, taskEntities.Select(item => item.Id).ToArray(), cancellationToken);
+    var items = taskEntities.Select(x => new TaskDto(x.Id, x.Title, x.Description, x.Status, x.Priority, x.StartAt, x.DueAt, x.CreatedAt, x.UpdatedAt, taskReferences.GetValueOrDefault(x.Id, []), x.ActionType, x.ScheduleHint)).ToList();
     return Results.Ok(new AppListEnvelope<TaskDto>(items, new AppListMeta(page, pageSize, items.Count, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -954,7 +958,9 @@ app.MapGet("/api/agenda", async (HttpContext context, ConnectorDbContext dbConte
     if (identity is null) return Results.Unauthorized();
     var start = from ?? GetBrazilTodayStart(DateTimeOffset.UtcNow);
     var end = to ?? start.AddDays(30);
-    var events = await dbContext.CalendarEvents.AsNoTracking().Where(x => x.OwnerId == identity.Id && x.StartAt >= start && x.StartAt < end).OrderBy(x => x.StartAt).Select(x => new CalendarEventDto(x.Id, x.Title, x.Description, x.StartAt, x.EndAt, x.Type, x.CreatedAt, x.UpdatedAt)).ToListAsync(cancellationToken);
+    var eventEntities = await dbContext.CalendarEvents.AsNoTracking().Where(x => x.OwnerId == identity.Id && x.StartAt >= start && x.StartAt < end).OrderBy(x => x.StartAt).ToListAsync(cancellationToken);
+    var eventReferences = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, eventEntities.Select(item => item.Id).ToArray(), cancellationToken);
+    var events = eventEntities.Select(x => new CalendarEventDto(x.Id, x.Title, x.Description, x.StartAt, x.EndAt, x.Type, x.CreatedAt, x.UpdatedAt, eventReferences.GetValueOrDefault(x.Id, []))).ToList();
     return Results.Ok(new AppEnvelope<IReadOnlyList<CalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -1014,6 +1020,90 @@ app.MapGet("/api/followups", async (HttpContext context, ConnectorDbContext dbCo
         ActorName = actorNames.GetValueOrDefault(item.OwnerId) ?? "Usuário",
     }).ToArray();
     return Results.Ok(new AppListEnvelope<FollowupDto>(items, new(page, pageSize, items.Length, page * pageSize < total, DateTimeOffset.UtcNow, null, null, total)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/agenda/export.ics", async (HttpContext context, ConnectorDbContext dbContext, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var start = from ?? GetBrazilTodayStart(DateTimeOffset.UtcNow).AddDays(-365);
+    var end = to ?? start.AddDays(730);
+    if (end <= start) return Results.BadRequest(new { error = new { code = "invalid_calendar_range", message = "O fim deve ser posterior ao início." } });
+
+    var eventEntities = await dbContext.CalendarEvents.AsNoTracking().Where(item => item.OwnerId == identity.Id && item.StartAt >= start && item.StartAt < end).OrderBy(item => item.StartAt).ToListAsync(cancellationToken);
+    var taskEntities = await dbContext.Tasks.AsNoTracking().Where(item => item.OwnerId == identity.Id && ((item.StartAt != null && item.StartAt >= start && item.StartAt < end) || (item.DueAt != null && item.DueAt >= start && item.DueAt < end))).OrderBy(item => item.DueAt ?? item.StartAt).ToListAsync(cancellationToken);
+    var eventReferences = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, eventEntities.Select(item => item.Id).ToArray(), cancellationToken);
+    var taskReferences = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, taskEntities.Select(item => item.Id).ToArray(), cancellationToken);
+    var events = eventEntities.Select(item => new CalendarEventDto(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt, eventReferences.GetValueOrDefault(item.Id, []))).ToArray();
+    var tasks = taskEntities.Select(item => new TaskDto(item.Id, item.Title, item.Description, item.Status, item.Priority, item.StartAt, item.DueAt, item.CreatedAt, item.UpdatedAt, taskReferences.GetValueOrDefault(item.Id, []), item.ActionType, item.ScheduleHint)).ToArray();
+    var content = PlannerIcsService.Export(events, tasks);
+    return Results.File(Encoding.UTF8.GetBytes(content), "text/calendar; charset=utf-8", "moodle-connector-agenda.ics");
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPost("/api/agenda/import", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, IFormFile? file, CancellationToken cancellationToken) =>
+{
+    if (!HasAppPermission(context, AppPermissionCatalog.AgendaManage)) return Results.Forbid();
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
+    if (file is null || file.Length == 0 || file.Length > 5_000_000) return Results.BadRequest(new { error = new { code = "invalid_calendar_file", message = "Envie um arquivo .ics de até 5 MB." } });
+    try
+    {
+        using var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var imported = PlannerIcsService.Parse(await reader.ReadToEndAsync(cancellationToken));
+        var warnings = new List<string>();
+        var created = 0;
+        var updated = 0;
+        var skipped = 0;
+        foreach (var item in imported)
+        {
+            if (item.StartAt is null || string.IsNullOrWhiteSpace(item.Uid)) { skipped++; warnings.Add($"'{item.Title}' não possui início e foi ignorado."); continue; }
+            if (item.IsTask)
+            {
+                var task = await dbContext.Tasks.SingleOrDefaultAsync(existing => existing.OwnerId == identity.Id && existing.ExternalSource == "ical" && existing.ExternalUid == item.Uid, cancellationToken);
+                if (task is null) { task = new TaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, ExternalSource = "ical", ExternalUid = item.Uid, CreatedAt = DateTimeOffset.UtcNow }; dbContext.Tasks.Add(task); created++; }
+                else updated++;
+                task.Title = item.Title[..Math.Min(item.Title.Length, 240)]; task.Description = item.Description?[..Math.Min(item.Description.Length, 4000)]; task.Status = NormalizeTaskStatus(item.Status); task.Priority = NormalizeTaskPriority(item.Priority); task.StartAt = item.StartAt; task.DueAt = item.EndAt ?? item.StartAt; task.ActionType = NormalizePlannerAction(item.ActionType); task.ScheduleHint = NormalizePlannerSchedule(item.ScheduleHint); task.UpdatedAt = DateTimeOffset.UtcNow;
+                await PlannerReferenceStore.ReplaceForTaskAsync(dbContext, identity.Id, task.Id, item.References, cancellationToken);
+            }
+            else
+            {
+                var calendarEvent = await dbContext.CalendarEvents.SingleOrDefaultAsync(existing => existing.OwnerId == identity.Id && existing.ExternalSource == "ical" && existing.ExternalUid == item.Uid, cancellationToken);
+                if (calendarEvent is null) { calendarEvent = new CalendarEventEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, ExternalSource = "ical", ExternalUid = item.Uid, CreatedAt = DateTimeOffset.UtcNow }; dbContext.CalendarEvents.Add(calendarEvent); created++; }
+                else updated++;
+                calendarEvent.Title = item.Title[..Math.Min(item.Title.Length, 240)]; calendarEvent.Description = item.Description?[..Math.Min(item.Description.Length, 4000)]; calendarEvent.StartAt = item.StartAt.Value; calendarEvent.EndAt = item.EndAt; calendarEvent.Type = "other"; calendarEvent.UpdatedAt = DateTimeOffset.UtcNow;
+                await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, calendarEvent.Id, item.References, cancellationToken);
+            }
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Results.Ok(new AppEnvelope<PlannerImportResultDto>(new(imported.Count, updated, skipped, warnings), new(DateTimeOffset.UtcNow, null)));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = new { code = "invalid_icalendar", message = exception.Message } });
+    }
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/planner/history", async (HttpContext context, ConnectorDbContext dbContext, string referenceType, string referenceId, string? connectionRef = null, int limit = 100, CancellationToken cancellationToken = default) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var normalizedType = referenceType.Trim().ToLowerInvariant();
+    if (!new[] { "course", "student", "class", "school" }.Contains(normalizedType) || string.IsNullOrWhiteSpace(referenceId)) return Results.BadRequest(new { error = new { code = "invalid_planner_reference", message = "Informe referenceType e referenceId válidos." } });
+    limit = Math.Clamp(limit, 1, 200);
+    var linksQuery = dbContext.PlannerLinks.AsNoTracking().Where(item => item.OwnerId == identity.Id && item.ReferenceType == normalizedType && item.ReferenceId == referenceId.Trim());
+    if (!string.IsNullOrWhiteSpace(connectionRef)) linksQuery = linksQuery.Where(item => item.ConnectionRef == connectionRef.Trim());
+    var links = await linksQuery.ToListAsync(cancellationToken);
+    var taskIds = links.Where(item => item.TaskId != null).Select(item => item.TaskId!.Value).Distinct().ToArray();
+    var eventIds = links.Where(item => item.CalendarEventId != null).Select(item => item.CalendarEventId!.Value).Distinct().ToArray();
+    var taskRows = await dbContext.Tasks.AsNoTracking().Where(item => taskIds.Contains(item.Id) && item.Status == "done").ToListAsync(cancellationToken);
+    var eventRows = await dbContext.CalendarEvents.AsNoTracking().Where(item => eventIds.Contains(item.Id) && item.StartAt <= DateTimeOffset.UtcNow).ToListAsync(cancellationToken);
+    var taskRefs = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, taskRows.Select(item => item.Id).ToArray(), cancellationToken);
+    var eventRefs = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, eventRows.Select(item => item.Id).ToArray(), cancellationToken);
+    var history = taskRows.Select(item => new PlannerHistoryItemDto("task", item.Id, item.Title, item.Description, item.Status, item.StartAt, item.DueAt, taskRefs.GetValueOrDefault(item.Id, [])))
+        .Concat(eventRows.Select(item => new PlannerHistoryItemDto("event", item.Id, item.Title, item.Description, "done", item.StartAt, item.EndAt, eventRefs.GetValueOrDefault(item.Id, []))))
+        .OrderByDescending(item => item.EndsAt ?? item.StartsAt).Take(limit).ToArray();
+    return Results.Ok(new AppListEnvelope<PlannerHistoryItemDto>(history, new(1, limit, history.Length, false, DateTimeOffset.UtcNow, null, null, history.Length)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/reports/operational", async (HttpContext context, ConnectorDbContext dbContext, CancellationToken cancellationToken) =>
@@ -1503,8 +1593,11 @@ app.MapPost("/api/agenda", async (HttpContext context, ConnectorDbContext dbCont
     if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
     var now = DateTimeOffset.UtcNow;
     var item = new CalendarEventEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), StartAt = input.StartAt, EndAt = input.EndAt, Type = NormalizeCalendarEventType(input.Type), CreatedAt = now, UpdatedAt = now };
-    dbContext.CalendarEvents.Add(item); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/agenda/{item.Id}", new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt), new(now, null)));
+    dbContext.CalendarEvents.Add(item);
+    if (input.References is not null) await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, item.Id, input.References, cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
+    var eventReferences = input.References is null ? Array.Empty<PlannerReferenceDto>() : PlannerReferenceStore.Normalize(input.References).Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, reference.ParentReferenceType, reference.ParentReferenceId, reference.ParentReferenceName)).ToArray();
+    return Results.Created($"/api/agenda/{item.Id}", new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt, eventReferences), new(now, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapDelete("/api/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
@@ -1515,6 +1608,7 @@ app.MapDelete("/api/agenda/{id:guid}", async (Guid id, HttpContext context, Conn
     await antiforgery.ValidateRequestAsync(context);
     var item = await dbContext.CalendarEvents.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
     if (item is null) return Results.NotFound();
+    dbContext.PlannerLinks.RemoveRange(await dbContext.PlannerLinks.Where(link => link.OwnerId == identity.Id && link.CalendarEventId == id).ToListAsync(cancellationToken));
     dbContext.CalendarEvents.Remove(item); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -1532,9 +1626,11 @@ app.MapPatch("/api/agenda/{id:guid}", async (Guid id, HttpContext context, Conne
     item.StartAt = input.StartAt;
     item.EndAt = input.EndAt;
     item.Type = NormalizeCalendarEventType(input.Type);
+    if (input.References is not null) await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, item.Id, input.References, cancellationToken);
     item.UpdatedAt = DateTimeOffset.UtcNow;
     await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Ok(new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt), new(item.UpdatedAt, null)));
+    var eventReferences = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, [item.Id], cancellationToken);
+    return Results.Ok(new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt, eventReferences.GetValueOrDefault(item.Id, [])), new(item.UpdatedAt, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPost("/api/tasks", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
@@ -1545,9 +1641,12 @@ app.MapPost("/api/tasks", async (HttpContext context, ConnectorDbContext dbConte
     await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
     var now = DateTimeOffset.UtcNow;
-    var task = new TaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), Status = NormalizeTaskStatus(input.Status), Priority = NormalizeTaskPriority(input.Priority), StartAt = input.StartAt, DueAt = input.DueAt, CreatedAt = now, UpdatedAt = now };
-    dbContext.Tasks.Add(task); await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Created($"/api/tasks/{task.Id}", new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt), new(now, null)));
+    var task = new TaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), Status = NormalizeTaskStatus(input.Status), Priority = NormalizeTaskPriority(input.Priority), StartAt = input.StartAt, DueAt = input.DueAt, ActionType = NormalizePlannerAction(input.ActionType), ScheduleHint = NormalizePlannerSchedule(input.ScheduleHint), CreatedAt = now, UpdatedAt = now };
+    dbContext.Tasks.Add(task);
+    if (input.References is not null) await PlannerReferenceStore.ReplaceForTaskAsync(dbContext, identity.Id, task.Id, input.References, cancellationToken);
+    await dbContext.SaveChangesAsync(cancellationToken);
+    var taskReferences = input.References is null ? Array.Empty<PlannerReferenceDto>() : PlannerReferenceStore.Normalize(input.References).Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, reference.ParentReferenceType, reference.ParentReferenceId, reference.ParentReferenceName)).ToArray();
+    return Results.Created($"/api/tasks/{task.Id}", new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt, taskReferences, task.ActionType, task.ScheduleHint), new(now, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPatch("/api/tasks/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, TaskInput input, CancellationToken cancellationToken) =>
@@ -1564,8 +1663,12 @@ app.MapPatch("/api/tasks/{id:guid}", async (Guid id, HttpContext context, Connec
     if (input.Priority is not null) task.Priority = NormalizeTaskPriority(input.Priority);
     if (input.StartAt is not null) task.StartAt = input.StartAt;
     if (input.DueAt is not null) task.DueAt = input.DueAt;
+    if (input.ActionType is not null) task.ActionType = NormalizePlannerAction(input.ActionType);
+    if (input.ScheduleHint is not null) task.ScheduleHint = NormalizePlannerSchedule(input.ScheduleHint);
+    if (input.References is not null) await PlannerReferenceStore.ReplaceForTaskAsync(dbContext, identity.Id, task.Id, input.References, cancellationToken);
     task.UpdatedAt = DateTimeOffset.UtcNow; await dbContext.SaveChangesAsync(cancellationToken);
-    return Results.Ok(new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt), new(task.UpdatedAt, null)));
+    var taskReferences = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, [task.Id], cancellationToken);
+    return Results.Ok(new AppEnvelope<TaskDto>(new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt, taskReferences.GetValueOrDefault(task.Id, []), task.ActionType, task.ScheduleHint), new(task.UpdatedAt, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapDelete("/api/tasks", async (
@@ -1592,6 +1695,7 @@ app.MapDelete("/api/tasks", async (
     var tasks = await dbContext.Tasks
         .Where(task => task.OwnerId == identity.Id && ids.Contains(task.Id))
         .ToListAsync(cancellationToken);
+    dbContext.PlannerLinks.RemoveRange(await dbContext.PlannerLinks.Where(link => link.OwnerId == identity.Id && link.TaskId != null && ids.Contains(link.TaskId.Value)).ToListAsync(cancellationToken));
     dbContext.Tasks.RemoveRange(tasks);
     await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -1607,6 +1711,7 @@ app.MapDelete("/api/tasks/{id:guid}", async (Guid id, HttpContext context, Conne
     await antiforgery.ValidateRequestAsync(context);
     var task = await dbContext.Tasks.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
     if (task is null) return Results.NotFound();
+    dbContext.PlannerLinks.RemoveRange(await dbContext.PlannerLinks.Where(link => link.OwnerId == identity.Id && link.TaskId == id).ToListAsync(cancellationToken));
     dbContext.Tasks.Remove(task); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -1614,6 +1719,7 @@ app.MapGet("/api/session", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
@@ -1625,6 +1731,17 @@ app.MapGet("/api/session", async (
 
     var profile = await accountService.GetProfileAsync(identity.Id, cancellationToken);
     if (profile is null) return Results.NotFound();
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        foreach (var connection in profile.MoodleConnections.Where(item => string.Equals(item.Status, "active", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Status, "unknown", StringComparison.OrdinalIgnoreCase)))
+        {
+            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(
+                identity.Id,
+                identity.ConnectorClientId,
+                connection.Alias,
+                identity.Id.ToString()));
+        }
+    }
     context.Response.Headers.CacheControl = "no-store";
     var roles = context.User.FindAll(ClaimTypes.Role).Select(x => x.Value)
         .Concat(context.User.FindAll("role").Select(x => x.Value))
@@ -2131,6 +2248,14 @@ app.MapGet("/api/dashboard/{metric}", async (
     if (normalizedMetric == "access")
     {
         var access = await ReadDashboardAccessAsync(courses, participantsGateway, currentUserIdGateway, cancellationToken);
+        var snapshots = await SaveDashboardAccessSnapshotAndReadHistoryAsync(
+            dbContext,
+            identity.Id,
+            effectiveConnectionRef,
+            courses.Count,
+            access,
+            generatedAt,
+            cancellationToken);
         var result = new AppDashboardAccessMetricDto(
             new AppDashboardSummaryDto(courses.Count, 0, 0, access.StudentsWithoutAccess14Days, access.StudentsWithoutAccess14Days)
             {
@@ -2139,7 +2264,10 @@ app.MapGet("/api/dashboard/{metric}", async (
                 NeverAccessedStudents = access.StudentsNeverAccessed,
             },
             access.Segments,
-            access.Warnings);
+            access.Warnings)
+        {
+            Snapshots = snapshots,
+        };
         memoryCache.Set(cacheKey, result, AppDashboardBudget.MetricCacheDuration);
         return (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
     }
@@ -2384,6 +2512,8 @@ app.MapGet("/api/courses", async (
     ConnectorDbContext dbContext,
     IMediator mediator,
     IConnectionRegistry connectionRegistry,
+    IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
@@ -2402,8 +2532,21 @@ app.MapGet("/api/courses", async (
                 ["Nenhuma conexão Moodle foi configurada para esta conta."])));
     }
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
+    var snapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
+    if (snapshot is not null && snapshot.Data.Count > 0)
+    {
+        if (snapshot.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+        var snapshotItems = snapshot.Data.Skip((currentPage - 1) * size).Take(size).ToArray();
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            snapshotItems.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray(),
+            new(currentPage, size, snapshotItems.Length, currentPage * size < snapshot.Data.Count, snapshot.UpdatedAt, effectiveConnectionRef,
+                snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, snapshot.Data.Count)));
+    }
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+    var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
     var data = result.Items.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
     return Results.Ok(new AppListEnvelope<AppCourseDto>(data,
         new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, effectiveConnectionRef, null, result.TotalCount)));
@@ -2490,12 +2633,23 @@ app.MapPut("/api/course-preferences/ignored", async (
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
     string connectionRef, string courseId, HttpContext context, ConnectorDbContext dbContext,
-    IMediator mediator, IConnectionRegistry connectionRegistry, CancellationToken cancellationToken) =>
+    IMediator mediator, IConnectionRegistry connectionRegistry, IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue, CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var snapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
+    var cachedCourse = snapshot?.Data.FirstOrDefault(item => string.Equals(item.CourseId, courseId, StringComparison.OrdinalIgnoreCase) || string.Equals(item.ShortName, courseId, StringComparison.OrdinalIgnoreCase) || string.Equals(item.IdNumber, courseId, StringComparison.OrdinalIgnoreCase));
+    if (cachedCourse is not null)
+    {
+        if (snapshot!.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+        return Results.Ok(new AppEnvelope<AppCourseDto>(AppCourseContractMapper.ToDto(cachedCourse, connectionRef), new(snapshot.UpdatedAt, connectionRef)));
+    }
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
     var course = await mediator.Send(new GetCourseQuery(identity.Id.ToString(), courseId), cancellationToken);
     return course is null
         ? AppErrorResults.NotFound("course_not_found", "Curso não encontrado.")
@@ -2505,12 +2659,27 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
 app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
     string connectionRef, string courseId, int? page, int? pageSize, bool? includeActionSummary, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
+    IMoodleSnapshotStore snapshotStore, IMoodleSnapshotSyncQueue snapshotSyncQueue,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var snapshot = await snapshotStore.GetActivitiesAsync(identity.Id, resolved.Alias, courseId, cancellationToken);
+    var cachedActivities = snapshot is null ? null : ToCourseActivitiesSummary(snapshot.Data);
+    if (cachedActivities is not null && includeActionSummary != true)
+    {
+        if (snapshot!.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+        var cachedPage = cachedActivities.Activities.Skip((Math.Max(page ?? 1, 1) - 1) * Math.Clamp(pageSize ?? 20, 1, 100)).Take(Math.Clamp(pageSize ?? 20, 1, 100)).ToArray();
+        var cachedPageNumber = Math.Max(page ?? 1, 1); var cachedPageSize = Math.Clamp(pageSize ?? 20, 1, 100);
+        return Results.Ok(new AppListEnvelope<AppActivityDto>(cachedPage.Select(activity => AppCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray(),
+            new(cachedPageNumber, cachedPageSize, cachedPage.Length, cachedPageNumber * cachedPageSize < cachedActivities.Total, snapshot.UpdatedAt,
+                connectionRef, snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, cachedActivities.Total)));
+    }
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
     var result = await mediator.Send(new ListCourseActivitiesQuery(identity.Id.ToString(), courseId, CourseActivityModuleTypes.All, false), cancellationToken);
     if (result is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
@@ -2544,15 +2713,33 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
 app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
     string connectionRef, string courseId, int? page, int? pageSize, bool? includePending, HttpContext context,
     ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
+    IMoodleSnapshotStore snapshotStore, IMoodleSnapshotSyncQueue snapshotSyncQueue,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
         return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
     try
     {
+    var snapshot = includePending == true || resolved is null ? null : await snapshotStore.GetStudentsAsync(identity.Id, resolved.Alias, courseId, cancellationToken);
+    if (snapshot is not null)
+    {
+        if (snapshot.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved!.Alias, identity.Id.ToString()));
+        var cached = snapshot.Data;
+        var cachedItems = cached.Participants.ToArray();
+        var cachedPage = cachedItems.Skip((currentPage - 1) * size).Take(size).ToArray();
+        var cachedData = cachedPage.Select(participant => StudentContractMapper.ToDto(connectionRef, participant,
+            new[] { new StudentCourseDto(connectionRef, courseId, courseId, null, participant.Suspended == true ? "suspenso" : "ativo", null, participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) })).ToArray();
+        return Results.Ok(new AppListEnvelope<StudentDto>(cachedData,
+            new(currentPage, size, cachedData.Length, currentPage * size < cachedItems.Length, snapshot.UpdatedAt,
+                connectionRef, snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, cachedItems.Length)));
+    }
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved!.Alias, identity.Id.ToString()));
     var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, currentPage, size, true, true), cancellationToken);
     var pendingByStudent = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     if (includePending == true)
@@ -3548,6 +3735,20 @@ static string NormalizeTaskPriority(string? value) => value switch
     "urgent" => "urgent",
     _ => "medium"
 };
+
+static string? NormalizePlannerAction(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return null;
+    var normalized = value.Trim().ToLowerInvariant();
+    return normalized.Length > 80 ? normalized[..80] : normalized;
+}
+
+static string? NormalizePlannerSchedule(string? value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return null;
+    var normalized = value.Trim();
+    return normalized.Length > 240 ? normalized[..240] : normalized;
+}
 
 static string NormalizeCalendarEventType(string? value) => value switch
 {
@@ -4586,6 +4787,73 @@ static async Task<DashboardAccessRead> ReadDashboardAccessAsync(
     return new DashboardAccessRead(students.Count, accessedLast7Days, withoutAccess14Days, neverAccessed, segments, warnings.Distinct(StringComparer.Ordinal).ToArray());
 }
 
+static async Task<IReadOnlyList<AppDashboardAccessSnapshotDto>> SaveDashboardAccessSnapshotAndReadHistoryAsync(
+    ConnectorDbContext dbContext,
+    Guid ownerId,
+    string connectionAlias,
+    int coursesInScope,
+    DashboardAccessRead access,
+    DateTimeOffset generatedAt,
+    CancellationToken cancellationToken)
+{
+    var snapshotDate = GetBrazilDate(generatedAt);
+    var recent = access.Segments.FirstOrDefault(item => item.Key == "recent")?.Students ?? 0;
+    var low = access.Segments.FirstOrDefault(item => item.Key == "low")?.Students ?? 0;
+    var stale = access.Segments.FirstOrDefault(item => item.Key == "stale")?.Students ?? 0;
+
+    var snapshot = await dbContext.DashboardAccessSnapshots
+        .SingleOrDefaultAsync(item => item.OwnerId == ownerId &&
+                                      item.ConnectionAlias == connectionAlias &&
+                                      item.SnapshotDate == snapshotDate,
+            cancellationToken);
+    if (snapshot is null)
+    {
+        snapshot = new DashboardAccessSnapshotEntity
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = ownerId,
+            ConnectionAlias = connectionAlias,
+            SnapshotDate = snapshotDate,
+        };
+        snapshot.CoursesInScope = coursesInScope;
+        snapshot.TotalStudents = access.TotalStudents;
+        snapshot.RecentStudents = recent;
+        snapshot.LowAccessStudents = low;
+        snapshot.StaleStudents = stale;
+        snapshot.NeverAccessedStudents = access.StudentsNeverAccessed;
+        snapshot.StudentsAtRisk = access.StudentsWithoutAccess14Days;
+        snapshot.GeneratedAt = generatedAt;
+        dbContext.DashboardAccessSnapshots.Add(snapshot);
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    var cutoff = snapshotDate.AddDays(-14);
+    return await dbContext.DashboardAccessSnapshots
+        .AsNoTracking()
+        .Where(item => item.OwnerId == ownerId &&
+                       item.ConnectionAlias == connectionAlias &&
+                       item.SnapshotDate >= cutoff &&
+                       item.SnapshotDate <= snapshotDate)
+        .OrderBy(item => item.SnapshotDate)
+        .Select(item => new AppDashboardAccessSnapshotDto(
+            item.SnapshotDate,
+            item.TotalStudents,
+            item.RecentStudents,
+            item.LowAccessStudents,
+            item.StaleStudents,
+            item.NeverAccessedStudents,
+            item.StudentsAtRisk))
+        .ToArrayAsync(cancellationToken);
+}
+
+static DateOnly GetBrazilDate(DateTimeOffset value)
+{
+    var brazil = TimeZoneInfo.FindSystemTimeZoneById(
+        OperatingSystem.IsWindows() ? "E. South America Standard Time" : "America/Sao_Paulo");
+    var local = TimeZoneInfo.ConvertTime(value, brazil);
+    return new DateOnly(local.Year, local.Month, local.Day);
+}
+
 static bool IsLocalReturnUrl(string? returnUrl)
 {
     return !string.IsNullOrWhiteSpace(returnUrl) &&
@@ -4655,6 +4923,47 @@ static async Task SeedChatGptOAuthClientAsync(
     }
 
     await manager.UpdateAsync(existing, descriptor);
+}
+
+static CourseActivitiesSummary ToCourseActivitiesSummary(CourseContentsSummary contents)
+{
+    var activities = contents.Sections
+        .SelectMany(section => section.Modules)
+        .Where(module => CourseActivityModuleTypes.All.Contains(module.ModuleType, StringComparer.OrdinalIgnoreCase))
+        .Select(module =>
+        {
+            var dates = module.Dates ?? [];
+            DateTimeOffset? FindDate(params string[] labels) => dates.FirstOrDefault(item => labels.Any(label => item.Label.Contains(label, StringComparison.OrdinalIgnoreCase))) is { } match ? match.Date : null;
+            var openAt = FindDate("open", "abertura", "start", "início");
+            var dueAt = FindDate("due", "deadline", "entrega", "prazo");
+            var closeAt = FindDate("close", "encerramento", "end", "fim");
+            return new CourseActivitySummary(
+                module.ModuleId,
+                module.InstanceId,
+                module.ModuleType,
+                module.Name,
+                module.Url,
+                module.Visible,
+                module.UserVisible,
+                module.Description,
+                module.AvailabilityInfo,
+                dates.Count > 0,
+                dueAt is not null,
+                openAt,
+                dueAt,
+                closeAt,
+                dates,
+                module.Files.Count);
+        })
+        .ToArray();
+    return new CourseActivitiesSummary(
+        contents.CourseId,
+        contents.ModuleTypeFilters,
+        contents.IncludeHidden,
+        activities.Length,
+        activities.Count(item => !item.HasDates),
+        activities.Count(item => !item.HasDeadline),
+        activities);
 }
 
 static bool HasAppPermission(HttpContext context, string permission)

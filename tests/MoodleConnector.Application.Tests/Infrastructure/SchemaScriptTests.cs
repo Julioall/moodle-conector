@@ -108,4 +108,60 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (6, 'user memory documents'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task DashboardAccessSnapshotsSchemaScript_DeveConterIndiceDiarioEAgregados()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "032_dashboard_access_snapshots.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de snapshots nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("dashboard_access_snapshots", sql, StringComparison.Ordinal);
+        Assert.Contains("SnapshotDate", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE UNIQUE INDEX", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("VALUES (32, 'daily dashboard access and risk snapshots'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task PlannerLinksSchemaScript_DeveConterTagsEIdsExternos()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "033_planner_links_and_external_ids.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de vínculos nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("planner_links", sql, StringComparison.Ordinal);
+        Assert.Contains("ReferenceType", sql, StringComparison.Ordinal);
+        Assert.Contains("ExternalUid", sql, StringComparison.Ordinal);
+        Assert.Contains("moodle_connector_schema_versions", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (33, 'planner links and calendar external ids'", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PersistentSnapshotsSchemaScript_DeveConterSnapshotsEstadosEIndiceUnico()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "034_moodle_persistent_snapshots.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de snapshots persistentes nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("moodle_snapshots", sql, StringComparison.Ordinal);
+        Assert.Contains("moodle_sync_states", sql, StringComparison.Ordinal);
+        Assert.Contains("PayloadJson", sql, StringComparison.Ordinal);
+        Assert.Contains("SnapshotType", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_moodle_snapshots_scope", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (34, 'persistent Moodle snapshots and sync state'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

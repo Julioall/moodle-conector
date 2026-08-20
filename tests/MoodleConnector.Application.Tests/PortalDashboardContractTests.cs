@@ -49,5 +49,30 @@ public sealed class AppDashboardContractTests
         Assert.Null(summary.PendingCorrectionAssignments);
         Assert.Null(summary.NewAtRiskThisWeek);
     }
+
+    [Fact]
+    public void Access_snapshot_contract_keeps_daily_aggregate_history_explicit()
+    {
+        var snapshot = new AppDashboardAccessSnapshotDto(
+            new DateOnly(2026, 8, 20),
+            TotalStudents: 10,
+            RecentStudents: 6,
+            LowAccessStudents: 2,
+            StaleStudents: 1,
+            NeverAccessedStudents: 1,
+            StudentsAtRisk: 2);
+        var metric = new AppDashboardAccessMetricDto(
+            new(1, 0, 0, 2, 2),
+            [],
+            [])
+        {
+            Snapshots = [snapshot],
+        };
+
+        Assert.Single(metric.Snapshots);
+        Assert.Equal(new DateOnly(2026, 8, 20), metric.Snapshots[0].Date);
+        Assert.Equal(10, metric.Snapshots[0].TotalStudents);
+        Assert.Equal(2, metric.Snapshots[0].StudentsAtRisk);
+    }
 }
 

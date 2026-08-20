@@ -84,7 +84,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var tools = await GetToolsListAsync(_factory, "Production");
 
-        Assert.Equal(104, tools.Count);
+        Assert.Equal(106, tools.Count);
         Assert.Contains("moodle_execute_read", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_prepare_write", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_confirm_write", tools, StringComparer.OrdinalIgnoreCase);
@@ -92,9 +92,63 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.Contains("fetch", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("generate_course_grades_report", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("export_course_grades_excel", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("resolve_planner_tags", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("create_tasks_for_references", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("prepare_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirm_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("future_unregistered_tool", tools, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("list_tasks")]
+    [InlineData("list_agenda_events")]
+    public async Task Portal_list_tools_accept_empty_arguments_without_invalid_argument(string toolName)
+    {
+        var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+            {
+                configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["MCP_EXPOSURE_PROFILE"] = "Production",
+                    ["McpServerSecurity:RequireApiKey"] = "true",
+                    ["McpServerSecurity:RequireJwt"] = "false"
+                });
+            });
+        });
+
+        var apiKey = await RegisterClientAsync(canWrite: true, customFactory);
+        var client = customFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Mcp-Api-Key", apiKey);
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+        var sessionId = await InitializeMcpSessionAsync(client);
+        await NotifyInitializedAsync(client, sessionId);
+
+        var payload = $$"""
+        {
+          "jsonrpc": "2.0",
+          "id": "portal-list-{{toolName}}",
+          "method": "tools/call",
+          "params": {
+            "name": "{{toolName}}",
+            "arguments": {}
+          }
+        }
+        """;
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        if (!string.IsNullOrWhiteSpace(sessionId))
+            request.Headers.Add("Mcp-Session-Id", sessionId);
+
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.DoesNotContain("INVALID_ARGUMENT", body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("unexpected_connector_error", body, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<IReadOnlyList<string>> GetToolsListAsync(WebApplicationFactory<Program> factory, string exposureProfile)

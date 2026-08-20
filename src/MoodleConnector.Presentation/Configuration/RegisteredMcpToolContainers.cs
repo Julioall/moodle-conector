@@ -49,7 +49,8 @@ public static class RegisteredMcpToolContainers
         typeof(MoodleMemoryDocumentTools),
         typeof(MoodlePedagogyTools),
         typeof(PortalTaskTools),
-        typeof(PortalAgendaTools)
+        typeof(PortalAgendaTools),
+        typeof(PortalPlannerTagTools)
     ];
 
     public static IReadOnlyList<ConditionalMcpToolContainer> Conditional { get; } =

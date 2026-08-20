@@ -1,6 +1,6 @@
-import { type FormEvent, useMemo, useState } from 'react';
+import { type FormEvent, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertCircle, CalendarDays, CalendarRange, CheckSquare, ChevronLeft, ChevronRight, Clock3, List, Pencil, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, CalendarDays, CalendarRange, CheckSquare, ChevronLeft, ChevronRight, Clock3, Download, List, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { TaskDetailDrawer } from '../tasks/components/TaskDetailDrawer';
 import { agendaGateway, type AgendaEvent, type AgendaInput } from './agenda-gateway';
 import { tasksGateway, type Task, type TaskPriority, type TaskStatus } from '../tasks/tasks-gateway';
+import { PlannerReferenceTags } from '../tasks/PlannerReferenceTags';
 
 type ViewMode = 'calendar' | 'list';
 type AgendaItem =
@@ -64,6 +65,7 @@ function AgendaEventCard({ event, onDelete, onEdit }: { event: AgendaEvent; onDe
             <Badge variant="outline">{eventTypeLabels[event.type] ?? event.type}</Badge>
           </div>
           {event.description && <p className="mt-3 text-sm text-muted-foreground">{event.description}</p>}
+          <PlannerReferenceTags references={event.references} compact />
           <div className="mt-3 flex justify-end gap-1 border-t pt-3"><Button type="button" variant="ghost" size="sm" className="text-muted-foreground" onClick={() => onEdit(event)}><Pencil className="h-3.5 w-3.5" />Editar</Button><Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => onDelete(event.id)}><Trash2 className="h-3.5 w-3.5" />Remover</Button></div>
         </div>
       </div>
@@ -144,6 +146,7 @@ export function AgendaPage() {
   const [startAt, setStartAt] = useState('');
   const [endAt, setEndAt] = useState('');
   const [type, setType] = useState('manual');
+  const fileInput = useRef<HTMLInputElement>(null);
   const agendaItems = useMemo<AgendaItem[]>(() => [
     ...(eventsQuery.data?.data ?? []).map((event) => ({ kind: 'event' as const, id: event.id, date: event.startAt, event })),
     ...(tasksQuery.data?.data ?? []).filter((task) => Boolean(task.dueAt)).map((task) => ({ kind: 'task' as const, id: task.id, date: task.dueAt!, task })),
@@ -155,6 +158,7 @@ export function AgendaPage() {
   const create = useMutation({ mutationFn: (input: AgendaInput) => agendaGateway.create(input), onSuccess: handleSaved });
   const update = useMutation({ mutationFn: ({ id, input }: { id: string; input: AgendaInput }) => agendaGateway.update(id, input), onSuccess: handleSaved });
   const remove = useMutation({ mutationFn: agendaGateway.remove, onSuccess: () => { setDeleteId(null); void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); } });
+  const importIcs = useMutation({ mutationFn: agendaGateway.importIcs, onSuccess: () => { void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); } });
   const updateTask = useMutation({ mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => tasksGateway.update(id, { status }), onSuccess: (response) => { setDetailTask(response.data); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); } });
   const openCreate = (date?: Date) => { resetForm(); if (date) { const next = new Date(date); next.setHours(9, 0, 0, 0); setStartAt(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}T09:00`); } setFormOpen(true); };
   const openEdit = (event: AgendaEvent) => { setEditingEvent(event); setTitle(event.title); setDescription(event.description ?? ''); setStartAt(toDateTimeLocal(event.startAt)); setEndAt(event.endAt ? toDateTimeLocal(event.endAt) : ''); setType(event.type); setFormOpen(true); };
@@ -164,7 +168,7 @@ export function AgendaPage() {
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="agenda-title">
-      <header className="flex items-start justify-between gap-4"><div><h1 id="agenda-title" className="flex items-center gap-2 text-2xl font-bold tracking-tight"><CalendarDays className="h-6 w-6 text-primary" />Agenda</h1><p className="mt-1 text-sm text-muted-foreground">Compromissos, reuniões, WebAulas, entregas e prazos importantes.</p></div><div className="flex items-center gap-2"><div className="flex overflow-hidden rounded-md border"><Button type="button" variant={viewMode === 'calendar' ? 'default' : 'ghost'} size="sm" className="h-9 gap-1.5 rounded-none px-3 text-xs" onClick={() => setViewMode('calendar')}><CalendarRange className="h-3.5 w-3.5" />Calendário</Button><Button type="button" variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" className="h-9 gap-1.5 rounded-none px-3 text-xs" onClick={() => setViewMode('list')}><List className="h-3.5 w-3.5" />Lista</Button></div><Button type="button" onClick={() => openCreate()} className="shrink-0"><Plus className="mr-1.5 h-4 w-4" />Novo evento</Button></div></header>
+      <header className="flex items-start justify-between gap-4"><div><h1 id="agenda-title" className="flex items-center gap-2 text-2xl font-bold tracking-tight"><CalendarDays className="h-6 w-6 text-primary" />Agenda</h1><p className="mt-1 text-sm text-muted-foreground">Compromissos, reuniões, WebAulas, entregas e prazos importantes.</p></div><div className="flex flex-wrap items-center justify-end gap-2"><input ref={fileInput} type="file" accept=".ics,text/calendar" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importIcs.mutate(file); event.target.value = ''; }} /><Button type="button" variant="outline" size="sm" onClick={() => fileInput.current?.click()} disabled={importIcs.isPending}><Upload className="mr-1.5 h-4 w-4" />{importIcs.isPending ? 'Importando…' : 'Importar .ics'}</Button><Button type="button" variant="outline" size="sm" onClick={() => window.open('/api/agenda/export.ics', '_blank', 'noopener,noreferrer')}><Download className="mr-1.5 h-4 w-4" />Exportar Outlook</Button><div className="flex overflow-hidden rounded-md border"><Button type="button" variant={viewMode === 'calendar' ? 'default' : 'ghost'} size="sm" className="h-9 gap-1.5 rounded-none px-3 text-xs" onClick={() => setViewMode('calendar')}><CalendarRange className="h-3.5 w-3.5" />Calendário</Button><Button type="button" variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" className="h-9 gap-1.5 rounded-none px-3 text-xs" onClick={() => setViewMode('list')}><List className="h-3.5 w-3.5" />Lista</Button></div><Button type="button" onClick={() => openCreate()} className="shrink-0"><Plus className="mr-1.5 h-4 w-4" />Novo evento</Button></div></header>
       {isLoading && <Card><CardContent className="flex items-center justify-center p-12 text-sm text-muted-foreground">Carregando agenda…</CardContent></Card>}
       {isError && <Card className="border-destructive/30"><CardContent className="flex items-start gap-3 p-6 text-sm" role="alert"><AlertCircle className="h-4 w-4 text-destructive" />Não foi possível carregar a agenda.</CardContent></Card>}
       {!isLoading && !isError && viewMode === 'calendar' && <MonthCalendar month={month} items={agendaItems} onCreateOnDate={openCreate} onSetMonth={(nextMonth) => setMonth((current) => new Date(current.getFullYear(), nextMonth, 1))} onSetYear={(nextYear) => setMonth((current) => new Date(nextYear, current.getMonth(), 1))} onNavigate={(offset) => setMonth((current) => new Date(current.getFullYear(), current.getMonth() + offset, 1))} onToday={() => setMonth(new Date())} onOpenTask={setDetailTask} onEditEvent={openEdit} />}

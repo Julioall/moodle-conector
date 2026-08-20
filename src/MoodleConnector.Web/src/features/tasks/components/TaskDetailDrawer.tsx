@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
 import type { Task, TaskPriority, TaskStatus } from '../tasks-gateway';
+import { PlannerReferenceTags } from '../PlannerReferenceTags';
 
 const statusLabels: Record<TaskStatus, string> = {
   todo: 'A fazer',
@@ -73,6 +74,7 @@ export function TaskDetailDrawer({ task, onClose, onEdit, onDelete, onStatusChan
           </div>
           <div className="flex-1 space-y-4 overflow-auto px-6 py-5">
             <div><h3 className="text-sm font-semibold">Descrição</h3><p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{task.description || 'Esta tarefa não possui descrição.'}</p></div>
+            {task.references?.length ? <div><h3 className="text-sm font-semibold">Vínculos</h3><div className="mt-2"><PlannerReferenceTags references={task.references} /></div></div> : null}
             <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground"><p className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />Status: {statusLabels[task.status]}</p><p className="mt-1">Criada em {new Date(task.createdAt).toLocaleString('pt-BR')}</p><p className="mt-1">Atualizada em {new Date(task.updatedAt).toLocaleString('pt-BR')}</p></div>
           </div>
           {(onEdit || onDelete) && <div className="flex gap-2 border-t px-6 py-4">{onEdit && <Button type="button" className="flex-1" onClick={() => onEdit(task)}><Edit2 className="mr-2 h-4 w-4" />Editar tarefa</Button>}{onDelete && <Button type="button" variant="outline" onClick={() => onDelete(task.id)}><Trash2 className="mr-2 h-4 w-4" />Remover</Button>}</div>}

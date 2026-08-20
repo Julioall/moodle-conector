@@ -90,13 +90,25 @@ public sealed record AppDashboardTodayItemDto(
 public sealed record AppDashboardAccessMetricDto(
     AppDashboardSummaryDto Summary,
     IReadOnlyList<AppDashboardAccessSegmentDto> Segments,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings)
+{
+    public IReadOnlyList<AppDashboardAccessSnapshotDto> Snapshots { get; init; } = [];
+}
 
 public sealed record AppDashboardAccessSegmentDto(
     string Key,
     string Label,
     int Students,
     string Tone);
+
+public sealed record AppDashboardAccessSnapshotDto(
+    DateOnly Date,
+    int TotalStudents,
+    int RecentStudents,
+    int LowAccessStudents,
+    int StaleStudents,
+    int NeverAccessedStudents,
+    int StudentsAtRisk);
 
 public sealed record AppDashboardCoursesMetricDto(
     IReadOnlyList<AppCourseDto> Courses,

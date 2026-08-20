@@ -12,7 +12,8 @@
     "guard": "node scripts/no-production-integrations.mjs",
     "smoke": "node scripts/app-smoke.mjs",
     "smoke:api": "node scripts/app-api-smoke.mjs",
-    "smoke:e2e": "node scripts/app-e2e-smoke.mjs"
+    "smoke:e2e": "node scripts/app-e2e-smoke.mjs",
+    "perf:portal": "node scripts/portal-performance.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

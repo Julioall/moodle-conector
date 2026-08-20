@@ -9,6 +9,8 @@ public sealed class CalendarEventEntity
     public DateTimeOffset StartAt { get; set; }
     public DateTimeOffset? EndAt { get; set; }
     public string Type { get; set; } = "other";
+    public string? ExternalUid { get; set; }
+    public string? ExternalSource { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

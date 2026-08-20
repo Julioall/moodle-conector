@@ -1,8 +1,10 @@
 ﻿import { createAppClient, type AppClient } from '../../integrations/http/api-client';
 export type TaskStatus = 'todo' | 'in_progress' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
-export type Task = { id: string; title: string; description?: string; status: TaskStatus; priority: TaskPriority; startAt?: string; dueAt?: string; createdAt: string; updatedAt: string };
-export type TaskInput = { title?: string; description?: string; status?: TaskStatus; priority?: TaskPriority; startAt?: string; dueAt?: string };
+export type PlannerReferenceType = 'course' | 'student' | 'class' | 'school';
+export type PlannerReference = { referenceType: PlannerReferenceType; referenceId: string; referenceName?: string; connectionRef?: string; parentReferenceType?: PlannerReferenceType; parentReferenceId?: string; parentReferenceName?: string };
+export type Task = { id: string; title: string; description?: string; status: TaskStatus; priority: TaskPriority; startAt?: string; dueAt?: string; createdAt: string; updatedAt: string; references?: PlannerReference[]; actionType?: string; scheduleHint?: string };
+export type TaskInput = { title?: string; description?: string; status?: TaskStatus; priority?: TaskPriority; startAt?: string; dueAt?: string; references?: PlannerReference[]; actionType?: string; scheduleHint?: string };
 export type TaskList = { data: Task[]; meta: { page: number; pageSize: number; returned: number; total?: number; hasMore: boolean; generatedAt: string } };
 export type TaskResponse = { data: Task; meta: { generatedAt: string } };
 export const createTasksGateway = (client: AppClient = createAppClient()) => ({

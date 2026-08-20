@@ -26,7 +26,7 @@ describe('DashboardPage', () => {
     });
     vi.mocked(dashboardGateway.getMetric).mockImplementation(async (metric) => {
       if (metric === 'pending') return { data: { summary: { activeCourses: 1, pendingDeliveries: 3, awaitingGrading: 1, studentsAtRisk: 1, studentsNeedingAttention: 2, pendingCorrectionAssignments: 1 }, priorities: [], activitiesToReview: [], courseSummaries: [{ courseId: '42', courseName: 'Curso de demonstração', pendingCorrectionActivities: 1, pendingCorrectionSubmissions: 2, pendingSubmissionActivities: 1, pendingSubmissions: 3, studentsAwaitingCorrection: 2, studentsWithPendingSubmissions: 3, overdueSubmissions: 1, isTruncated: false }], todayItems: [], warnings: [] }, meta: { generatedAt: '2026-08-10T00:00:00Z' } };
-      if (metric === 'access') return { data: { summary: { activeCourses: 1, pendingDeliveries: 0, awaitingGrading: 0, studentsAtRisk: 1, studentsNeedingAttention: 1, activeStudents: 4, activeNormalStudents: 3 }, segments: [{ key: 'recent', label: 'Acesso recente · 0–7 dias', students: 3, tone: 'success' }, { key: 'low', label: 'Baixo acesso · 8–14 dias', students: 0, tone: 'warning' }, { key: 'none', label: 'Sem acesso · 14+ dias ou nunca', students: 1, tone: 'risk' }], warnings: [] }, meta: { generatedAt: '2026-08-10T00:00:00Z' } };
+      if (metric === 'access') return { data: { summary: { activeCourses: 1, pendingDeliveries: 0, awaitingGrading: 0, studentsAtRisk: 1, studentsNeedingAttention: 1, activeStudents: 4, activeNormalStudents: 3 }, segments: [{ key: 'recent', label: 'Acesso recente · 0–7 dias', students: 3, tone: 'success' }, { key: 'low', label: 'Baixo acesso · 8–14 dias', students: 0, tone: 'warning' }, { key: 'none', label: 'Sem acesso · 14+ dias ou nunca', students: 1, tone: 'risk' }], snapshots: [{ date: '2026-08-10', totalStudents: 4, recentStudents: 3, lowAccessStudents: 0, staleStudents: 0, neverAccessedStudents: 1, studentsAtRisk: 1 }], warnings: [] }, meta: { generatedAt: '2026-08-10T00:00:00Z' } };
       return { data: { summary: { activeCourses: 1, pendingDeliveries: 0, awaitingGrading: 0, studentsAtRisk: 0, studentsNeedingAttention: 0, todayEvents: 2, todayTasks: 1 }, warnings: [] }, meta: { generatedAt: '2026-08-10T00:00:00Z' } };
     });
     vi.mocked(coursesGateway.listAll).mockResolvedValue({ data: [], meta: { page: 1, pageSize: 100, returned: 0, hasMore: false, generatedAt: '2026-08-10T00:00:00Z' } });
@@ -38,6 +38,7 @@ describe('DashboardPage', () => {
     await waitFor(() => expect(screen.getByText('Pendências por curso')).toBeInTheDocument());
     expect(screen.getByText('Cursos acompanhados')).toBeInTheDocument();
     expect(screen.getByText('Curso de demonstração')).toBeInTheDocument();
+    expect(screen.getByText('Evolução diária · últimos 15 dias')).toBeInTheDocument();
     expect(dashboardGateway.getMetric).toHaveBeenCalledWith('summary', 'demo');
     expect(dashboardGateway.getMetric).toHaveBeenCalledWith('pending', 'demo');
     expect(dashboardGateway.getMetric).toHaveBeenCalledWith('access', 'demo');

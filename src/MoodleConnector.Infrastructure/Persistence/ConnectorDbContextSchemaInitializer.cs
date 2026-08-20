@@ -36,6 +36,9 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "029_report_job_excel_output.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "030_report_job_file_size.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "031_report_job_course_names.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "032_dashboard_access_snapshots.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "033_planner_links_and_external_ids.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "034_moodle_persistent_snapshots.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

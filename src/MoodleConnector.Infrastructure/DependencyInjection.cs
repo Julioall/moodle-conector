@@ -80,6 +80,10 @@ public static class DependencyInjection
         });
 
         services.AddMemoryCache();
+        services.AddScoped<IMoodleSnapshotStore, MoodleSnapshotStore>();
+        services.AddSingleton<MoodleSnapshotSyncQueue>();
+        services.AddSingleton<IMoodleSnapshotSyncQueue>(sp => sp.GetRequiredService<MoodleSnapshotSyncQueue>());
+        services.AddHostedService(sp => sp.GetRequiredService<MoodleSnapshotSyncQueue>());
         services.AddPolicyRegistry();
         services.AddSingleton<IMoodleEndpointValidator, MoodleEndpointValidator>();
         services.AddSingleton<IPedagogicGuidanceSearch>(_ =>

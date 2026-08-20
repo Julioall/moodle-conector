@@ -23,6 +23,10 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<CalendarEventEntity> CalendarEvents => Set<CalendarEventEntity>();
     public DbSet<FollowupEntity> Followups => Set<FollowupEntity>();
     public DbSet<PortalEvidenceEntity> PortalEvidence => Set<PortalEvidenceEntity>();
+    public DbSet<DashboardAccessSnapshotEntity> DashboardAccessSnapshots => Set<DashboardAccessSnapshotEntity>();
+    public DbSet<MoodleSnapshotEntity> MoodleSnapshots => Set<MoodleSnapshotEntity>();
+    public DbSet<MoodleSyncStateEntity> MoodleSyncStates => Set<MoodleSyncStateEntity>();
+    public DbSet<PlannerLinkEntity> PlannerLinks => Set<PlannerLinkEntity>();
     public DbSet<UserIgnoredCourseEntity> UserIgnoredCourses => Set<UserIgnoredCourseEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
@@ -149,7 +153,12 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         appTask.Property(x => x.Priority).HasMaxLength(32).IsRequired();
         appTask.Property(x => x.CreatedAt).IsRequired();
         appTask.Property(x => x.UpdatedAt).IsRequired();
+        appTask.Property(x => x.ActionType).HasMaxLength(80);
+        appTask.Property(x => x.ScheduleHint).HasMaxLength(240);
+        appTask.Property(x => x.ExternalUid).HasMaxLength(240);
+        appTask.Property(x => x.ExternalSource).HasMaxLength(80);
         appTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
+        appTask.HasIndex(x => new { x.OwnerId, x.ExternalSource, x.ExternalUid }).IsUnique();
 
         var reportJob = modelBuilder.Entity<ReportJobEntity>();
         reportJob.ToTable("report_jobs");
@@ -183,7 +192,25 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         calendarEvent.Property(x => x.StartAt).IsRequired();
         calendarEvent.Property(x => x.CreatedAt).IsRequired();
         calendarEvent.Property(x => x.UpdatedAt).IsRequired();
+        calendarEvent.Property(x => x.ExternalUid).HasMaxLength(240);
+        calendarEvent.Property(x => x.ExternalSource).HasMaxLength(80);
         calendarEvent.HasIndex(x => new { x.OwnerId, x.StartAt });
+        calendarEvent.HasIndex(x => new { x.OwnerId, x.ExternalSource, x.ExternalUid }).IsUnique();
+
+        var plannerLink = modelBuilder.Entity<PlannerLinkEntity>();
+        plannerLink.ToTable("planner_links");
+        plannerLink.HasKey(x => x.Id);
+        plannerLink.Property(x => x.ReferenceType).HasMaxLength(32).IsRequired();
+        plannerLink.Property(x => x.ReferenceId).HasMaxLength(200).IsRequired();
+        plannerLink.Property(x => x.ReferenceName).HasMaxLength(240);
+        plannerLink.Property(x => x.ConnectionRef).HasMaxLength(64);
+        plannerLink.Property(x => x.ParentReferenceType).HasMaxLength(32);
+        plannerLink.Property(x => x.ParentReferenceId).HasMaxLength(200);
+        plannerLink.Property(x => x.ParentReferenceName).HasMaxLength(240);
+        plannerLink.Property(x => x.CreatedAt).IsRequired();
+        plannerLink.HasIndex(x => new { x.OwnerId, x.TaskId });
+        plannerLink.HasIndex(x => new { x.OwnerId, x.CalendarEventId });
+        plannerLink.HasIndex(x => new { x.OwnerId, x.ReferenceType, x.ReferenceId });
 
         var followup = modelBuilder.Entity<FollowupEntity>();
         followup.ToTable("app_followups");
@@ -215,6 +242,43 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         evidence.Property(x => x.CreatedAt).IsRequired();
         evidence.HasIndex(x => new { x.OwnerId, x.CourseId, x.ObservedAt });
         evidence.HasIndex(x => new { x.OwnerId, x.StudentId, x.Kind, x.ActivityId });
+
+        var dashboardAccessSnapshot = modelBuilder.Entity<DashboardAccessSnapshotEntity>();
+        dashboardAccessSnapshot.ToTable("dashboard_access_snapshots");
+        dashboardAccessSnapshot.HasKey(x => x.Id);
+        dashboardAccessSnapshot.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.SnapshotDate).HasColumnType("date").IsRequired();
+        dashboardAccessSnapshot.Property(x => x.CoursesInScope).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.TotalStudents).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.RecentStudents).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.LowAccessStudents).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.StaleStudents).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.NeverAccessedStudents).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.StudentsAtRisk).IsRequired();
+        dashboardAccessSnapshot.Property(x => x.GeneratedAt).IsRequired();
+        dashboardAccessSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.SnapshotDate }).IsUnique();
+
+        var moodleSnapshot = modelBuilder.Entity<MoodleSnapshotEntity>();
+        moodleSnapshot.ToTable("moodle_snapshots");
+        moodleSnapshot.HasKey(x => x.Id);
+        moodleSnapshot.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        moodleSnapshot.Property(x => x.SnapshotType).HasMaxLength(32).IsRequired();
+        moodleSnapshot.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        moodleSnapshot.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
+        moodleSnapshot.Property(x => x.Tier).HasMaxLength(16).IsRequired();
+        moodleSnapshot.Property(x => x.UpdatedAt).IsRequired();
+        moodleSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.SnapshotType, x.CourseId }).IsUnique();
+        moodleSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.UpdatedAt });
+
+        var moodleSyncState = modelBuilder.Entity<MoodleSyncStateEntity>();
+        moodleSyncState.ToTable("moodle_sync_states");
+        moodleSyncState.HasKey(x => x.Id);
+        moodleSyncState.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        moodleSyncState.Property(x => x.Dataset).HasMaxLength(32).IsRequired();
+        moodleSyncState.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        moodleSyncState.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        moodleSyncState.Property(x => x.LastError).HasMaxLength(4000);
+        moodleSyncState.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.Dataset, x.CourseId }).IsUnique();
 
         var ignoredCourse = modelBuilder.Entity<UserIgnoredCourseEntity>();
         ignoredCourse.ToTable("user_ignored_courses");

@@ -49,16 +49,17 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
                 throw new ArgumentException("O fim do intervalo deve ser posterior ao início.", nameof(to));
 
             limit = Math.Clamp(limit, 1, 200);
-            var events = await dbContext.CalendarEvents
+            var eventEntities = await dbContext.CalendarEvents
                 .AsNoTracking()
                 .Where(item => item.OwnerId == identity.Id && item.StartAt >= start && item.StartAt < end)
                 .OrderBy(item => item.StartAt)
                 .Take(limit)
-                .Select(item => ToDto(item))
                 .ToListAsync(cancellationToken);
+            var links = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, eventEntities.Select(item => item.Id).ToArray(), cancellationToken);
+            var events = eventEntities.Select(item => ToDto(item, links.GetValueOrDefault(item.Id, []))).ToArray();
 
-            return Success(new PortalAgendaListResponse(events, events.Count, start, end),
-                $"{events.Count} evento(s) retornado(s).");
+            return Success(new PortalAgendaListResponse(events, events.Length, start, end),
+                $"{events.Length} evento(s) retornado(s).");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -89,6 +90,7 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
         [Description("Fim opcional do evento em ISO 8601.")] DateTimeOffset? endAt = null,
         [Description("Descrição opcional.")] string? description = null,
         [Description("Tipo: meeting, alignment, delivery, training, webclass ou other.")] string? type = null,
+        [Description("Vínculos com objetos Moodle: course, student, class ou school. Para turmas, informe parentReferenceId com o curso.")] IReadOnlyList<PlannerReferenceInput>? references = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -110,8 +112,10 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
             };
 
             dbContext.CalendarEvents.Add(calendarEvent);
+            if (references is not null) await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, calendarEvent.Id, references, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
-            return Success(new PortalAgendaWriteResponse("created", ToDto(calendarEvent)), "Evento criado na agenda.");
+            var links = references is null ? Array.Empty<PlannerReferenceDto>() : PlannerReferenceStore.Normalize(references).Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, reference.ParentReferenceType, reference.ParentReferenceId, reference.ParentReferenceName)).ToArray();
+            return Success(new PortalAgendaWriteResponse("created", ToDto(calendarEvent, links)), "Evento criado na agenda.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -144,6 +148,7 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
         [Description("Nova descrição; envie texto vazio para limpar.")] string? description = null,
         [Description("Novo tipo do evento.")] string? type = null,
         [Description("Limpa o fim do evento quando true.")] bool clearEndAt = false,
+        [Description("Substitui os vínculos quando informado: course, student, class ou school.")] IReadOnlyList<PlannerReferenceInput>? references = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -171,10 +176,13 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
                 calendarEvent.EndAt = nextEnd;
             if (type is not null)
                 calendarEvent.Type = PortalMcpValueNormalizer.NormalizeCalendarEventType(type);
+            if (references is not null)
+                await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, calendarEvent.Id, references, cancellationToken);
 
             calendarEvent.UpdatedAt = DateTimeOffset.UtcNow;
             await dbContext.SaveChangesAsync(cancellationToken);
-            return Success(new PortalAgendaWriteResponse("updated", ToDto(calendarEvent)), "Evento atualizado.");
+            var links = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, [calendarEvent.Id], cancellationToken);
+            return Success(new PortalAgendaWriteResponse("updated", ToDto(calendarEvent, links.GetValueOrDefault(calendarEvent.Id, []))), "Evento atualizado.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -230,8 +238,8 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
             throw new ArgumentException("O fim do evento deve ser posterior ao início.", nameof(endAt));
     }
 
-    private static CalendarEventDto ToDto(CalendarEventEntity calendarEvent) =>
-        new(calendarEvent.Id, calendarEvent.Title, calendarEvent.Description, calendarEvent.StartAt, calendarEvent.EndAt, calendarEvent.Type, calendarEvent.CreatedAt, calendarEvent.UpdatedAt);
+    private static CalendarEventDto ToDto(CalendarEventEntity calendarEvent, IReadOnlyList<PlannerReferenceDto>? references = null) =>
+        new(calendarEvent.Id, calendarEvent.Title, calendarEvent.Description, calendarEvent.StartAt, calendarEvent.EndAt, calendarEvent.Type, calendarEvent.CreatedAt, calendarEvent.UpdatedAt, references ?? []);
 
     private static CallToolResult Success<T>(T data, string message)
     {
