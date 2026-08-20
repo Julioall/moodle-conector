@@ -1,5 +1,6 @@
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Gradebook.Queries;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Application.Risk.Queries;
@@ -61,7 +62,7 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
 
                 if (courseGradeItem != null)
                 {
-                    currentGrade = courseGradeItem.PercentageFormatted;
+                    currentGrade = GradebookMappingHelper.ResolvePercentage(courseGradeItem);
                     if (currentGrade.HasValue && currentGrade.Value < request.MinGradePercentage)
                     {
                         factors.Add($"Nota atual ({currentGrade.Value:F1}%) abaixo da media minima esperada ({request.MinGradePercentage:F1}%).");

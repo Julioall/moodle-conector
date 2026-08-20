@@ -65,7 +65,8 @@ public sealed class GenerateClassCouncilReportQueryHandler(
     private const string Disclaimer =
         "Este relatório é indicativo e não constitui decisão oficial de aprovação, reprovação ou evasão. " +
         "Os dados devem ser interpretados pelo tutor e pelo docente presencial. " +
-        "Situações de recuperação paralela devem ser tratadas conforme as normas pedagógicas vigentes.";
+        "Situações de recuperação paralela devem ser tratadas conforme as normas pedagógicas vigentes. " +
+        "Atividades cujo nome indica recuperação não são tratadas como pendência geral.";
 
     public async Task<GenerateClassCouncilReportResult> Handle(
         GenerateClassCouncilReportQuery request,
@@ -118,7 +119,7 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                     request.CourseId, student.UserId, cancellationToken);
 
                 var activityItems = gradebook.Items
-                    .Where(GradebookMappingHelper.IsActivityItem)
+                    .Where(GradebookMappingHelper.IsDerivedReportActivityItem)
                     .ToList();
                 totalGradedItems = activityItems.Count;
 
@@ -127,6 +128,15 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                     .ToList();
 
                 belowMinimumItems = gradeItems.Where(i => i.BelowMinimum).ToList();
+                var courseTotal = gradebook.Items.FirstOrDefault(GradebookMappingHelper.IsCourseTotalItem);
+                if (courseTotal is not null)
+                {
+                    var courseTotalItem = GradebookMappingHelper.ToStudentGradeItem(courseTotal, request.MinGradePercent);
+                    if (courseTotalItem.BelowMinimum)
+                    {
+                        belowMinimumItems = [courseTotalItem, ..belowMinimumItems];
+                    }
+                }
                 pendingItemsCount = gradeItems.Count(i => !i.GradeRaw.HasValue);
             }
             catch { /* partial data */ }

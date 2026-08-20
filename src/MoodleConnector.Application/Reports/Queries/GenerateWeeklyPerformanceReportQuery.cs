@@ -71,6 +71,7 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
         "Relatório gerado com base nos dados disponíveis na API Moodle. " +
         "Notas sem lançamento aparecem como 'sem nota'. " +
         "Acesso ao AVA depende do campo lastcourseaccess disponível no Moodle. " +
+        "Atividades cujo nome indica recuperação não são tratadas como pendência geral. " +
         "Para turmas grandes o relatório pode ser lento (uma consulta de boletim por estudante).";
 
     public async Task<GenerateWeeklyPerformanceReportResult> Handle(
@@ -147,7 +148,7 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                     request.CourseId, student.UserId, cancellationToken);
 
                 var activityItems = gradebook.Items
-                    .Where(GradebookMappingHelper.IsActivityItem)
+                    .Where(GradebookMappingHelper.IsDerivedReportActivityItem)
                     .ToList();
 
                 totalAssignments = activityItems.Count;
@@ -157,6 +158,16 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                     .ToList();
 
                 belowMinimumItems = gradeItems.Where(i => i.BelowMinimum).ToList();
+
+                var courseTotal = gradebook.Items.FirstOrDefault(GradebookMappingHelper.IsCourseTotalItem);
+                if (courseTotal is not null)
+                {
+                    var courseTotalItem = GradebookMappingHelper.ToStudentGradeItem(courseTotal, request.MinGradePercent);
+                    if (courseTotalItem.BelowMinimum)
+                    {
+                        belowMinimumItems = [courseTotalItem, ..belowMinimumItems];
+                    }
+                }
 
                 // Items with no grade = pending (estimation)
                 var pending = gradeItems.Where(i => !i.GradeRaw.HasValue).ToList();
