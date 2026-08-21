@@ -66,8 +66,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
-    IMoodleAssignmentSettingsGateway assignmentSettingsGateway,
-    IMoodleAssignmentSubmissionStatusGateway submissionStatusGateway)
+    IMoodleAssignmentSettingsGateway assignmentSettingsGateway)
     : IRequestHandler<GetStudentsWithPendingSubmissionsQuery, GetStudentsWithPendingSubmissionsResult>
 {
     public async Task<GetStudentsWithPendingSubmissionsResult> Handle(
@@ -178,11 +177,10 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         }
 
         var canClassifyNoGradeActivities = assignmentSettings.Count > 0;
-        // O Moodle recebe uma chamada por envio para descobrir feedback em
-        // atividades sem nota. O limite evita que a leitura global de vários
-        // cursos cause rajadas de chamadas e respostas incompletas.
-        using var feedbackStatusLimiter = new SemaphoreSlim(4);
-        var feedbackStatusUnavailable = false;
+        // Atividades sem nota exigiriam uma leitura Moodle por envio para
+        // confirmar feedback. Elas ficam fora do contador agregado para que a
+        // atualização diária permaneça previsível mesmo em turmas grandes.
+        var noGradeFeedbackSkipped = false;
         var submissionReadFailed = false;
 
         IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches = [];
@@ -250,33 +248,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                     var needsFeedback = IsAwaitingGrading(record.GradingStatus);
                     if (isNoGradeActivity)
                     {
-                        try
-                        {
-                            await feedbackStatusLimiter.WaitAsync(cancellationToken);
-                            var status = await submissionStatusGateway.GetSubmissionStatusAsync(
-                                currentUserExternalId,
-                                module.InstanceId!,
-                                record.UserId,
-                                cancellationToken);
-                            needsFeedback = status is null || !status.HasFeedback;
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch
-                        {
-                            // Sem confirmação não afirmamos que existe uma
-                            // pendência: isso evita falsos positivos quando o
-                            // Moodle limita ou interrompe uma chamada. O aviso
-                            // abaixo deixa o dado incompleto explícito.
-                            needsFeedback = false;
-                            feedbackStatusUnavailable = true;
-                        }
-                        finally
-                        {
-                            feedbackStatusLimiter.Release();
-                        }
+                        noGradeFeedbackSkipped = true;
+                        continue;
                     }
 
                     if (needsFeedback && gradingByStudent.TryGetValue(record.UserId, out var gradingList))
@@ -326,11 +299,11 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             warning = $"A análise foi limitada às {request.MaxAssignmentsToAnalyze} primeiras atividades avaliativas para preservar o desempenho.";
         }
 
-        if (feedbackStatusUnavailable)
+        if (noGradeFeedbackSkipped)
         {
             warning = string.IsNullOrWhiteSpace(warning)
-                ? "Não foi possível confirmar todos os feedbacks das atividades extras; os itens sem confirmação foram omitidos da contagem."
-                : $"{warning} Não foi possível confirmar todos os feedbacks das atividades extras; os itens sem confirmação foram omitidos da contagem.";
+                ? "Atividades sem nota foram omitidas do contador de correções para evitar consultas individuais por envio."
+                : $"{warning} Atividades sem nota foram omitidas do contador de correções para evitar consultas individuais por envio.";
         }
 
         if (submissionFailures.Count > 0)
@@ -370,7 +343,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             Warning: warning)
         {
             AwaitingGrading = awaitingGrading,
-            IsComplete = !feedbackStatusUnavailable && !submissionReadFailed && submissionFailures.Count == 0,
+            IsComplete = !submissionReadFailed && submissionFailures.Count == 0,
         };
     }
 

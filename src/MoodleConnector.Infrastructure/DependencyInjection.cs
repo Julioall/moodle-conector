@@ -81,6 +81,7 @@ public static class DependencyInjection
 
         services.AddMemoryCache();
         services.AddSingleton<MoodleSnapshotMetrics>();
+        services.AddSingleton<IMoodleCallTelemetry, MoodleCallMetrics>();
         services.AddScoped<IMoodleSnapshotStore, MoodleSnapshotStore>();
         services.AddSingleton<MoodleSnapshotSyncQueue>();
         services.AddSingleton<IMoodleSnapshotSyncQueue>(sp => sp.GetRequiredService<MoodleSnapshotSyncQueue>());

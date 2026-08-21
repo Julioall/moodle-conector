@@ -2,8 +2,8 @@
 
 export type Course = { connectionRef: string; courseId: string; shortName?: string; fullName: string; displayName?: string; categoryName?: string; startDate?: string; endDate?: string; visible?: boolean; viewUrl?: string; courseImage?: string; progress?: number; lastAccessAt?: string };
 export type Activity = { connectionRef: string; courseId: string; activityId: string; instanceId?: string; activityType: string; name: string; url?: string; visible?: boolean; userVisible?: boolean; hasDates: boolean; hasDeadline: boolean; dueAt?: string; openAt?: string; closeAt?: string; fileCount: number; pendingSubmissionCount?: number; awaitingGradingCount?: number };
-export type ListResponse<T> = { data: T[]; meta: { page: number; pageSize: number; returned: number; total?: number | null; hasMore: boolean; generatedAt: string; connectionRef?: string } };
-export type CourseResponse = { data: Course; meta: { generatedAt: string; connectionRef?: string } };
+export type ListResponse<T> = { data: T[]; meta: { page: number; pageSize: number; returned: number; total?: number | null; hasMore: boolean; generatedAt: string; connectionRef?: string; warnings?: string[]; source?: string; snapshotAt?: string; ageSeconds?: number; stale?: boolean; refreshQueued?: boolean; complete?: boolean } };
+export type CourseResponse = { data: Course; meta: { generatedAt: string; connectionRef?: string; source?: string; snapshotAt?: string; ageSeconds?: number; stale?: boolean; refreshQueued?: boolean; complete?: boolean } };
 export type CourseHierarchyNode = { path: string; name: string; level: number; courseCount: number };
 
 export const createCoursesGateway = (client = createAppClient()) => {
@@ -54,8 +54,8 @@ export const createCoursesGateway = (client = createAppClient()) => {
   listAllByCategory,
   list,
   listAll,
-  get: (connectionRef: string, courseId: string) => client.get<CourseResponse>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}`),
-  activities: (connectionRef: string, courseId: string, page = 1, pageSize = 20, includeActionSummary = false) => client.get<ListResponse<Activity>>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/activities?page=${page}&pageSize=${pageSize}${includeActionSummary ? '&includeActionSummary=true' : ''}`),
+  get: (connectionRef: string, courseId: string, refresh = false) => client.get<CourseResponse>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}${refresh ? '?refresh=true' : ''}`),
+  activities: (connectionRef: string, courseId: string, page = 1, pageSize = 20, includeActionSummary = false, refresh = false) => client.get<ListResponse<Activity>>(`/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(courseId)}/activities?page=${page}&pageSize=${pageSize}${includeActionSummary ? '&includeActionSummary=true' : ''}${refresh ? '&refresh=true' : ''}`),
   };
 };
 export const coursesGateway = createCoursesGateway();

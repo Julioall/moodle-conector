@@ -147,6 +147,47 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
+        Name = "start_pending_grading_run",
+        Title = "Start Pending Grading Run",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = false,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<StartPendingGradingRunResult>))]
+    [Description("Inicia o fluxo de correcao de todas as entregas pendentes em todos os cursos acessiveis. Percorre os cursos, cria um sublote por curso com entregas aguardando correcao e continua quando um curso ou uma atividade falhar. Nao gera nota nem escreve no Moodle. Para cada batchJobId retornado, prepare a IA, salve rascunhos, revise com o professor e confirme o lancamento. Ao final use export_pending_grading_run_report com todos os batchJobIds.")]
+    public Task<CallToolResult> IniciarFluxoCorrecaoPendentesAsync(
+        [Description("Numero maximo de cursos a percorrer. Use 0 para todos os cursos acessiveis.")]
+        int maxCourses = 0,
+        [Description("Numero maximo de entregas por sublote, de 1 a 400. A ferramenta cria sublotes adicionais ate percorrer todas as entregas pendentes.")]
+        int maxItemsPerBatch = 400,
+        [Description("Quando true, inclui contexto de rubrica na montagem dos sublotes.")]
+        bool includeRubric = true,
+        [Description("Quando true, baixa e extrai arquivos das entregas.")]
+        bool includeSubmissionFiles = true,
+        [Description("Quando true, inclui materiais próximos do curso como contexto auxiliar.")]
+        bool includeCourseMaterials = false,
+        [Description("Instrucoes adicionais do professor/tutor para orientar a correcao.")]
+        string? teacherInstructions = null,
+        [Description("Prioridade sugerida: low, normal ou high.")]
+        string priority = "normal",
+        [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return StartPendingGradingRunCoreAsync(
+            maxCourses,
+            maxItemsPerBatch,
+            includeRubric,
+            includeSubmissionFiles,
+            includeCourseMaterials,
+            teacherInstructions,
+            priority,
+            moodleAlias,
+            cancellationToken);
+    }
+
+    [McpServerTool(
         Name = "get_grading_batch_status",
         Title = "Get Grading Batch Status",
         ReadOnly = true,
@@ -184,6 +225,62 @@ public sealed class MoodleGradingTools(
         CancellationToken cancellationToken = default)
     {
         return GetCoordinationReportCoreAsync(batchJobId, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "export_pending_grading_run_report",
+        Title = "Export Pending Grading Run Report",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<PendingGradingRunReportResult>))]
+    [Description("Consolida o resultado final de varios sublotes criados por start_pending_grading_run. Retorna listas completas das entregas corrigidas e lancadas no Moodle e das nao corrigidas, com o motivo para ajuste manual. Nao escreve no Moodle.")]
+    public async Task<CallToolResult> ExportarRelatorioFluxoCorrecaoPendentesAsync(
+        [Description("Todos os batchJobIds retornados por start_pending_grading_run.")]
+        Guid[] batchJobIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobIds.Length == 0 || batchJobIds.All(id => id == Guid.Empty))
+        {
+            return ToolResultHelper.Error<PendingGradingRunReportResult>("Informe ao menos um lote de correcao valido.");
+        }
+
+        PendingGradingRunReportResult data;
+        try
+        {
+            data = await mediator.Send(new GetPendingGradingRunReportQuery(batchJobIds), cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolResultHelper.Error<PendingGradingRunReportResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ToolResultHelper.Error<PendingGradingRunReportResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<PendingGradingRunReportResult>("Nao foi possivel consolidar o relatorio final de correcoes pendentes neste momento.");
+        }
+
+        var response = new ToolResponse<PendingGradingRunReportResult>(
+            "ok",
+            data,
+            [],
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildPendingGradingRunReportNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
     }
 
     [McpServerTool(
@@ -704,6 +801,66 @@ public sealed class MoodleGradingTools(
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = BuildCreateBatchNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private async Task<CallToolResult> StartPendingGradingRunCoreAsync(
+        int maxCourses,
+        int maxItemsPerBatch,
+        bool includeRubric,
+        bool includeSubmissionFiles,
+        bool includeCourseMaterials,
+        string? teacherInstructions,
+        string priority,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return ToolResultHelper.Error<StartPendingGradingRunResult>("Usuario nao autenticado para iniciar a correcao de pendencias.");
+        }
+
+        StartPendingGradingRunResult data;
+        try
+        {
+            data = await mediator.Send(
+                new StartPendingGradingRunCommand(
+                    moodleUserId.Value.ToString(),
+                    maxCourses,
+                    maxItemsPerBatch,
+                    includeRubric,
+                    includeSubmissionFiles,
+                    includeCourseMaterials,
+                    teacherInstructions,
+                    priority),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            return ToolResultHelper.Error<StartPendingGradingRunResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<StartPendingGradingRunResult>("Nao foi possivel iniciar o fluxo de correcao de pendencias neste momento.");
+        }
+
+        var response = new ToolResponse<StartPendingGradingRunResult>(
+            data.Warnings.Count == 0 ? "ok" : "partial_failure",
+            data,
+            data.Warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildStartPendingGradingRunNarration(data) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
@@ -1369,7 +1526,23 @@ public sealed class MoodleGradingTools(
 
     private static string BuildCreateBatchNarration(CreateAssistedGradingBatchResult response)
     {
+        if (response.BatchJobId == Guid.Empty)
+        {
+            return "Nenhuma entrega aguardando correcao foi encontrada; nenhum lote foi criado.";
+        }
+
         return $"Lote de correcao assistida criado com {response.AcceptedItems} item(ns) aceito(s). BatchJobId: {response.BatchJobId}.";
+    }
+
+    private static string BuildStartPendingGradingRunNarration(StartPendingGradingRunResult response)
+    {
+        if (response.Batches.Count == 0)
+        {
+            return $"Nenhuma entrega pendente elegivel foi encontrada em {response.CoursesScanned} curso(s).";
+        }
+
+        return $"Fluxo de correcoes pendentes iniciado: {response.TotalItems} entrega(s) em {response.Batches.Count} curso(s). " +
+               "Prossiga pelos batchJobIds retornados, sem interromper o fluxo pelos cursos ou itens bloqueados.";
     }
 
     private static string BuildListarEntregasCorrigiveisNarration(ListarEntregasCorrigiveisResponse response)
@@ -1397,6 +1570,12 @@ public sealed class MoodleGradingTools(
             ? $" {awaitingAi} item(ns) aguardam analise da IA."
             : string.Empty;
         return $"Relatorio consolidado do lote {response.BatchJobId}: {response.TotalItems} item(ns), {response.ReviewedItems} revisado(s), {response.PendingReviewItems} com revisao pendente, {response.AttentionItems.Count} item(ns) exigem atencao.{awaitingNote}";
+    }
+
+    private static string BuildPendingGradingRunReportNarration(PendingGradingRunReportResult response)
+    {
+        return $"Relatorio final de correcoes pendentes: {response.CorrectedCount} entrega(s) corrigida(s) e lancada(s) no Moodle; " +
+               $"{response.NotCorrectedCount} nao corrigida(s) com motivo para ajuste manual.";
     }
 
     private static string BuildCancelBatchNarration(CancelAssistedGradingBatchResult response)

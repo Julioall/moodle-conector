@@ -95,17 +95,46 @@ describe('CoursePanelPage', () => {
 
     await userEvent.click(screen.getByRole('tab', { name: 'Alunos' }));
 
-    await waitFor(() => expect(studentsGateway.byCourse).toHaveBeenCalledWith('demo', '42', 1, 25, true));
+    await waitFor(() => expect(studentsGateway.byCourse).toHaveBeenCalledWith('demo', '42', 1, 25));
   });
 
-  it('shows correction status inside Activities without exposing a corrections tab', async () => {
+  it('shows the activity list without expensive correction counters', async () => {
     renderPage('/cursos/demo/42?tab=activities');
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Atividades' })).toBeInTheDocument());
 
-    expect(screen.getByText('2 para corrigir')).toBeInTheDocument();
+    expect(screen.queryByText('2 para corrigir')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Com pendência' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Pendências e correções' })).not.toBeInTheDocument();
     expect(dashboardGateway.get).toHaveBeenCalledWith('demo', '42');
+  });
+
+  it('refreshes the course data manually', async () => {
+    renderPage('/cursos/demo/42?tab=activities');
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Atualizar' })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Atualizar' }));
+
+    await waitFor(() => expect(coursesGateway.activities).toHaveBeenLastCalledWith('demo', '42', 1, 20, false, true));
+    expect(dashboardGateway.get).toHaveBeenLastCalledWith('demo', '42', false, 'current', true);
+    expect(coursesGateway.get).toHaveBeenLastCalledWith('demo', '42', true);
+  });
+
+  it('explains when the activity snapshot is still being prepared', async () => {
+    vi.mocked(coursesGateway.activities).mockResolvedValue({
+      data: [],
+      meta: {
+        page: 1, pageSize: 20, returned: 0, total: 0, hasMore: false,
+        generatedAt: '2026-08-14T00:00:00Z',
+        warnings: ['A lista de atividades está sendo preparada em segundo plano. Tente novamente em instantes.'],
+        source: 'background', complete: false,
+      },
+    });
+
+    renderPage('/cursos/demo/42?tab=activities');
+
+    await waitFor(() => expect(screen.getByText('A lista será exibida assim que a atualização terminar.')).toBeInTheDocument());
+    expect(screen.queryByText('Nenhuma atividade encontrada nesta página.')).not.toBeInTheDocument();
   });
 
   it('keeps the course workspace focused and opens contextual follow-up', async () => {

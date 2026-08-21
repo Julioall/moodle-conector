@@ -33,7 +33,7 @@ internal sealed class MoodleRestClient(
         }
 
         var normalizedFunction = functionName.Trim();
-        telemetry?.RecordMoodleWebServiceCall(connection.Alias);
+        telemetry?.RecordMoodleWebServiceCall(connection.Alias, normalizedFunction);
         _ = allowServiceToken; // Tenant-scoped reads always use the selected connection credentials.
         var endpoint = BuildEndpoint(connection);
         var auditId = Guid.NewGuid().ToString("N");
@@ -140,6 +140,7 @@ internal sealed class MoodleRestClient(
                 normalizedFunction,
                 (int)response.StatusCode,
                 stopwatch.ElapsedMilliseconds);
+            telemetry?.RecordMoodleWebServiceCompleted(connection.Alias, normalizedFunction, stopwatch.Elapsed.TotalMilliseconds);
             return parsed;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -256,6 +257,11 @@ internal sealed class MoodleRestClient(
             stableCode == MoodleErrorContract.InvalidResponse
                 ? MoodleIntegrationStage.ResponseParsing
                 : MoodleIntegrationStage.MoodleRequest);
+        telemetry?.RecordMoodleWebServiceFailure(
+            connection.Alias,
+            functionName,
+            failure.ErrorCode,
+            failure.DurationMs ?? 0);
         logger.LogWarning(
             innerException,
             "Moodle read failed. AuditId={AuditId} ErrorCode={ErrorCode} RemoteErrorCode={RemoteErrorCode} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint} Function={Function} HttpStatus={HttpStatus} DurationMs={DurationMs}",

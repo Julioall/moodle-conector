@@ -220,7 +220,7 @@ internal sealed class DashboardOverviewRefreshQueue(
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.Status, "completed")
                 .SetProperty(item => item.LastCompletedAt, now)
-                .SetProperty(item => item.NextSyncAt, now.Add(AppDashboardBudget.MetricCacheDuration))
+                .SetProperty(item => item.NextSyncAt, GetNextBrazilMidnight(now))
                 .SetProperty(item => item.LastError, (string?)null)
                 .SetProperty(item => item.LeaseUntil, (DateTimeOffset?)null)
                 .SetProperty(item => item.RecordsSynced, 0)
@@ -270,8 +270,9 @@ internal sealed class DashboardOverviewRefreshQueue(
             var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
             var persistedState = await db.MoodleSyncStates.SingleAsync(item => item.Id == state.Id, cancellationToken);
             persistedState.Status = "completed";
-            persistedState.LastCompletedAt = DateTimeOffset.UtcNow;
-            persistedState.NextSyncAt = DateTimeOffset.UtcNow.Add(AppDashboardBudget.MetricCacheDuration);
+            var completedAt = DateTimeOffset.UtcNow;
+            persistedState.LastCompletedAt = completedAt;
+            persistedState.NextSyncAt = GetNextBrazilMidnight(completedAt);
             persistedState.LastError = snapshotError;
             persistedState.LeaseUntil = null;
             persistedState.RecordsSynced = snapshot.CoursesAnalyzed;
@@ -386,6 +387,21 @@ internal sealed class DashboardOverviewRefreshQueue(
 
     private static string GetKey(Guid ownerId, string connectionAlias) =>
         $"{ownerId}:{connectionAlias}";
+
+    private static DateTimeOffset GetNextBrazilMidnight(DateTimeOffset now)
+    {
+        var timeZone = ResolveBrazilTimeZone();
+        var localNow = TimeZoneInfo.ConvertTime(now, timeZone);
+        var nextLocalMidnight = localNow.Date.AddDays(1);
+        return new DateTimeOffset(nextLocalMidnight, timeZone.GetUtcOffset(nextLocalMidnight)).ToUniversalTime();
+    }
+
+    private static TimeZoneInfo ResolveBrazilTimeZone()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById("E. South America Standard Time"); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"); }
+        catch (InvalidTimeZoneException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"); }
+    }
 }
 
 internal sealed class DashboardPendingSnapshotBuilder(
@@ -415,6 +431,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
             cancellationToken);
         var pendingRows = pendingResults.SelectMany(item => item.Rows).ToArray();
         var gradingRows = pendingResults.SelectMany(item => item.GradingRows).ToArray();
+        var pendingItems = pendingResults.SelectMany(item => item.PendingItems).ToArray();
         var pendingStudentIds = pendingResults
             .SelectMany(item => item.Rows.Select(row => row.StudentId))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -473,6 +490,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
             CoursesInScope = courses.Count,
             CoursesAnalyzed = coursesAnalyzed,
             SnapshotGeneratedAt = DateTimeOffset.UtcNow,
+            PendingItems = pendingItems,
         };
     }
 
@@ -528,10 +546,9 @@ internal sealed class DashboardPendingSnapshotBuilder(
         string userExternalId,
         CancellationToken cancellationToken)
     {
-        // Cada curso pode consultar vários status de feedback em paralelo.
-        // Quatro cursos simultâneos reduzem o tempo total sem liberar uma
-        // rajada ilimitada contra o Moodle. Conteúdos e alunos são lidos dos
-        // snapshots persistentes quando disponíveis.
+        // Cada curso consulta lotes de submissões em background. Quatro cursos
+        // simultâneos reduzem o tempo total sem liberar uma rajada ilimitada
+        // contra o Moodle; conteúdos e alunos vêm dos snapshots quando existem.
         using var limiter = new SemaphoreSlim(AppDashboardBudget.PendingCourseConcurrency);
         var tasks = courses.Select(async course =>
         {
@@ -583,6 +600,17 @@ internal sealed class DashboardPendingSnapshotBuilder(
                         student.StudentId,
                         activity.IsOverdue ? "risk" : "attention")))
                     .ToArray();
+                var pendingItems = pending.Students
+                    .SelectMany(student => student.PendingAssignments.Select(activity => new AppDashboardPendingItemDto(
+                        course.CourseId,
+                        student.StudentId,
+                        student.FullName,
+                        student.LastCourseAccessAt,
+                        activity.AssignmentId,
+                        activity.AssignmentName,
+                        activity.DueDate,
+                        activity.IsOverdue)))
+                    .ToArray();
                 var priorityRows = pending.Students
                     .SelectMany(student => student.PendingAssignments.Select(activity => new AppDashboardPriorityDto(
                         $"{course.CourseId}:{student.StudentId}:{activity.AssignmentId}",
@@ -617,6 +645,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     course.CourseId,
                     course.FullName,
                     rows,
+                    pendingItems,
                     priorityRows,
                     gradingRows,
                     pendingActivities,
@@ -629,6 +658,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
                 return new DashboardPendingRead(
                     course.CourseId,
                     course.FullName,
+                    [],
                     [],
                     [],
                     [],
@@ -684,6 +714,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
         string CourseId,
         string CourseName,
         IReadOnlyList<DashboardPendingRow> Rows,
+        IReadOnlyList<AppDashboardPendingItemDto> PendingItems,
         IReadOnlyList<AppDashboardPriorityDto> PriorityRows,
         IReadOnlyList<AppDashboardPriorityDto> GradingRows,
         int PendingActivities,

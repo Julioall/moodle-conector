@@ -23,7 +23,8 @@ public sealed record CreateAssistedGradingBatchCommand(
     bool IncludeSubmissionFiles = true,
     bool IncludeCourseMaterials = false,
     string? TeacherInstructions = null,
-    string Priority = "normal") : IRequest<CreateAssistedGradingBatchResult>;
+    string Priority = "normal",
+    IReadOnlyList<AssignmentSubmissionSummary>? PrefetchedSubmissions = null) : IRequest<CreateAssistedGradingBatchResult>;
 
 public sealed record CreateAssistedGradingBatchResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -215,6 +216,13 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             throw new ArgumentException("Informe pelo menos uma tarefa.", nameof(request.AssignmentIds));
         }
 
+        if (request.PrefetchedSubmissions is not null && assignmentIds.Length != 1)
+        {
+            throw new ArgumentException(
+                "Entregas pre-carregadas exigem exatamente uma tarefa no lote.",
+                nameof(request.AssignmentIds));
+        }
+
         var safeMaxItems = Math.Clamp(request.MaxItems, 1, 400);
         var selectedSubmissionIds = request.SubmissionIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -224,61 +232,113 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         string? resolvedCourseId = null;
         var warnings = new List<string>();
 
-        foreach (var assignmentId in assignmentIds)
+        if (request.PrefetchedSubmissions is not null)
         {
-            var page = 1;
-            while (selectedItems.Count < safeMaxItems)
+            foreach (var submission in request.PrefetchedSubmissions)
             {
-                var remaining = safeMaxItems - selectedItems.Count;
-                var submissionsPage = await mediator.Send(
-                    new ListAssignmentSubmissionsQuery(
-                        request.UserExternalId,
-                        request.CourseId,
-                        assignmentId,
-                        request.OnlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : AssignmentSubmissionFilter.All,
-                        page,
-                        Math.Min(remaining, 100),
-                        Since: null,
-                        Before: null,
-                        IncludeLate: true,
-                        IncludeUngraded: true),
-                    cancellationToken);
-
-                if (submissionsPage is null)
+                if (selectedItems.Count >= safeMaxItems ||
+                    (selectedSubmissionIds.Count > 0 &&
+                     (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId))))
                 {
-                    warnings.Add($"Tarefa {assignmentId} nao encontrada para o usuario atual.");
-                    break;
+                    continue;
                 }
 
-                resolvedCourseId ??= submissionsPage.CourseId;
-                foreach (var submission in submissionsPage.Submissions)
+                selectedItems.Add(new AssistedGradingItemSeed(
+                    request.CourseId,
+                    assignmentIds[0],
+                    submission.SubmissionId,
+                    submission.UserId,
+                    submission.AttemptNumber,
+                    submission.Files ?? []));
+                resolvedCourseId ??= request.CourseId;
+            }
+        }
+        else
+        {
+            foreach (var assignmentId in assignmentIds)
+            {
+                var page = 1;
+                while (selectedItems.Count < safeMaxItems)
                 {
-                    if (selectedSubmissionIds.Count > 0 &&
-                        (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId)))
+                    var remaining = safeMaxItems - selectedItems.Count;
+                    AssignmentSubmissionsPage? submissionsPage;
+                    try
                     {
-                        continue;
+                        submissionsPage = await mediator.Send(
+                            new ListAssignmentSubmissionsQuery(
+                                request.UserExternalId,
+                                request.CourseId,
+                                assignmentId,
+                                request.OnlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : AssignmentSubmissionFilter.All,
+                                page,
+                                Math.Min(remaining, 100),
+                                Since: null,
+                                Before: null,
+                                IncludeLate: true,
+                                IncludeUngraded: true),
+                            cancellationToken);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Uma tarefa indisponivel nao impede a preparacao das demais do curso.
+                        warnings.Add($"Nao foi possivel listar as entregas da tarefa {assignmentId}: {ex.Message}");
+                        break;
                     }
 
-                    selectedItems.Add(new AssistedGradingItemSeed(
-                        submissionsPage.CourseId,
-                        submissionsPage.AssignmentId,
-                        submission.SubmissionId,
-                        submission.UserId,
-                        submission.AttemptNumber,
-                        submission.Files ?? []));
-                    if (selectedItems.Count >= safeMaxItems)
+                    if (submissionsPage is null)
+                    {
+                        warnings.Add($"Tarefa {assignmentId} nao encontrada para o usuario atual.");
+                        break;
+                    }
+
+                    resolvedCourseId ??= submissionsPage.CourseId;
+                    foreach (var submission in submissionsPage.Submissions)
+                    {
+                        if (selectedSubmissionIds.Count > 0 &&
+                            (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId)))
+                        {
+                            continue;
+                        }
+
+                        selectedItems.Add(new AssistedGradingItemSeed(
+                            submissionsPage.CourseId,
+                            submissionsPage.AssignmentId,
+                            submission.SubmissionId,
+                            submission.UserId,
+                            submission.AttemptNumber,
+                            submission.Files ?? []));
+                        if (selectedItems.Count >= safeMaxItems)
+                        {
+                            break;
+                        }
+                    }
+
+                    if (!submissionsPage.HasMore)
                     {
                         break;
                     }
-                }
 
-                if (!submissionsPage.HasMore)
-                {
-                    break;
+                    page++;
                 }
-
-                page++;
             }
+        }
+
+        if (selectedItems.Count == 0)
+        {
+            warnings.Add("Nenhuma entrega elegivel para correcao foi encontrada nas tarefas informadas.");
+            return new CreateAssistedGradingBatchResult(
+                Guid.Empty,
+                resolvedCourseId ?? request.CourseId,
+                assignmentIds,
+                TotalItems: 0,
+                AcceptedItems: 0,
+                BlockedItems: 0,
+                Status: "NoPendingSubmissions",
+                Warnings: warnings);
         }
 
         var courseId = ParsePositiveLong(resolvedCourseId ?? request.CourseId, "courseId");
@@ -1666,8 +1726,22 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
         var items = await LoadAllBatchItemsAsync(batch.Id, cancellationToken);
         var packageItems = new List<AiGradingBatchItemPackage>();
+        var eligibleItems = items
+            .Where(item => item.Status == GradingItemStatus.AwaitingAiAnalysis)
+            .ToArray();
+        var skippedByStatus = items
+            .Where(item => item.Status != GradingItemStatus.AwaitingAiAnalysis)
+            .GroupBy(item => item.Status.ToString())
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => $"{group.Count()} {FormatSkippedStatus(group.Key)}")
+            .ToArray();
+        if (skippedByStatus.Length > 0)
+        {
+            globalWarnings.Add(
+                $"Itens fora da pre-validacao da IA foram ignorados: {string.Join(", ", skippedByStatus)}.");
+        }
 
-        foreach (var item in items)
+        foreach (var item in eligibleItems)
         {
             var itemWarnings = new List<string>();
             var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
@@ -1769,7 +1843,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
 
         if (packageItems.Count == 0)
         {
-            globalWarnings.Add("Nenhum item encontrado no lote.");
+            globalWarnings.Add("Nenhum item apto para analise pela IA foi encontrado no lote.");
         }
 
         var instructions =
@@ -1806,6 +1880,17 @@ public sealed class PrepareAiGradingBatchQueryHandler(
     {
         return GradingItemProcessor.LoadAllBatchItemsAsync(repository, batchId, cancellationToken);
     }
+
+    private static string FormatSkippedStatus(string status) => status switch
+    {
+        "Blocked" => "bloqueado(s)",
+        "Failed" => "falho(s)",
+        "Pending" => "aguardando processamento",
+        "DraftReady" => "com rascunho para revisao",
+        "ReadyToCommit" => "aguardando lancamento",
+        "Committed" => "ja lancado(s) no Moodle",
+        _ => status
+    };
 }
 
 // ============================================================
@@ -1895,10 +1980,26 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     continue;
                 }
 
+                // Itens bloqueados ou falhos permanecem no relatorio manual;
+                // um rascunho da IA nao pode reabrir uma submissao sem leitura valida.
+                if (item.Status is GradingItemStatus.Blocked or GradingItemStatus.Failed)
+                {
+                    warnings.Add($"Item {input.GradingItemId} ignorado: status {item.Status} ({item.DraftFeedback ?? item.CommitError ?? "sem detalhe"}).");
+                    skippedCount++;
+                    continue;
+                }
+
                 // Pular itens que já foram revisados ou commitados
                 if (item.Status is GradingItemStatus.ReadyToCommit or GradingItemStatus.Committed)
                 {
                     warnings.Add($"Item {input.GradingItemId} ja foi revisado/commitado. Ignorado.");
+                    skippedCount++;
+                    continue;
+                }
+
+                if (item.Status is not (GradingItemStatus.AwaitingAiAnalysis or GradingItemStatus.DraftReady))
+                {
+                    warnings.Add($"Item {input.GradingItemId} ignorado: aguardando pre-validacao antes da analise pela IA.");
                     skippedCount++;
                     continue;
                 }

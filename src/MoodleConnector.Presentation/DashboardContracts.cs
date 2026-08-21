@@ -65,6 +65,7 @@ public sealed record AppDashboardPendingMetricDto(
     public int CoursesInScope { get; init; }
     public int CoursesAnalyzed { get; init; }
     public DateTimeOffset? SnapshotGeneratedAt { get; init; }
+    public IReadOnlyList<AppDashboardPendingItemDto> PendingItems { get; init; } = [];
 }
 
 public sealed record AppDashboardCoursePendingSummaryDto(
@@ -86,6 +87,16 @@ public sealed record AppDashboardTodayItemDto(
     string Title,
     string? Detail,
     DateTimeOffset? StartsAt);
+
+public sealed record AppDashboardPendingItemDto(
+    string CourseId,
+    string StudentId,
+    string StudentName,
+    DateTimeOffset? LastCourseAccessAt,
+    string AssignmentId,
+    string AssignmentName,
+    DateTimeOffset? DueAt,
+    bool IsOverdue);
 
 public sealed record AppDashboardAccessMetricDto(
     AppDashboardSummaryDto Summary,
@@ -127,6 +138,7 @@ public static class AppDashboardBudget
 {
     public static readonly TimeSpan MetricCacheDuration = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan CourseScopeCacheDuration = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan PendingSnapshotFreshness = TimeSpan.FromHours(24);
     public const int MaxCoursesRead = 50;
     // The pending overview runs asynchronously, so it can afford a broader
     // read budget than the synchronous course screens.

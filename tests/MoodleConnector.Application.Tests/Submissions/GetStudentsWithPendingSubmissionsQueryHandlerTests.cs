@@ -43,7 +43,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
     }
 
     [Fact]
-    public async Task Marks_feedback_confirmation_failure_as_incomplete_and_omits_item()
+    public async Task Omits_no_grade_feedback_without_per_submission_reads()
     {
         var fixture = new Fixture
         {
@@ -64,16 +64,15 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             {
                 ["assign-1"] = new("assign-1", 0, "Atividade extra"),
             },
-            ThrowOnFeedbackRead = true,
         };
 
         var result = await fixture.CreateHandler().Handle(
             new GetStudentsWithPendingSubmissionsQuery("course-1", IncludeAwaitingGrading: true),
             CancellationToken.None);
 
-        Assert.Contains("Não foi possível confirmar todos os feedbacks", result.Warning);
+        Assert.Contains("Atividades sem nota foram omitidas", result.Warning);
         Assert.Empty(result.AwaitingGrading);
-        Assert.False(result.IsComplete);
+        Assert.True(result.IsComplete);
     }
 
     [Fact]
@@ -122,7 +121,6 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         public IReadOnlyDictionary<string, AssignmentSettingsSummary> AssignmentSettings { get; init; } =
             new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
         public bool ThrowOnSubmissionRead { get; init; }
-        public bool ThrowOnFeedbackRead { get; init; }
         public int ParticipantReads { get; set; }
         public int ContentReads { get; set; }
         public int AssignmentSettingsReads { get; set; }
@@ -134,8 +132,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
                 new SubmissionsGateway(this),
                 new ContentsGateway(this),
                 new CurrentUserGateway(),
-                new AssignmentSettingsGateway(this),
-                new SubmissionStatusGateway(this));
+                new AssignmentSettingsGateway(this));
     }
 
     private sealed class ParticipantsGateway(Fixture fixture) : IMoodleParticipantsGateway
@@ -224,16 +221,4 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             CancellationToken cancellationToken) => Task.FromResult<AssignmentSettingsSummary?>(null);
     }
 
-    private sealed class SubmissionStatusGateway(Fixture fixture) : IMoodleAssignmentSubmissionStatusGateway
-    {
-        public Task<AssignmentSubmissionAttemptStatus?> GetSubmissionStatusAsync(
-            string userExternalId,
-            string assignmentId,
-            string studentId,
-            CancellationToken cancellationToken)
-        {
-            if (fixture.ThrowOnFeedbackRead) throw new InvalidOperationException("feedback read failed");
-            return Task.FromResult<AssignmentSubmissionAttemptStatus?>(new(assignmentId, studentId, 1, "submitted", false));
-        }
-    }
 }

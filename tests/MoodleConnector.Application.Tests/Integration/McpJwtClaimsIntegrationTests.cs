@@ -1013,6 +1013,7 @@ public sealed class McpTestWebApplicationFactory : WebApplicationFactory<Program
 {
     protected override void ConfigureWebHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
     {
+        builder.UseContentRoot(ResolvePresentationContentRoot());
         builder.UseEnvironment("Testing");
 
         builder.ConfigureAppConfiguration((_, configurationBuilder) =>
@@ -1080,6 +1081,17 @@ public sealed class McpTestWebApplicationFactory : WebApplicationFactory<Program
                 options.TokenValidationParameters.ValidAudience = McpJwtClaimsIntegrationTests.JwtAudience;
             });
         });
+    }
+
+    private static string ResolvePresentationContentRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            var candidate = Path.Combine(directory.FullName, "src", "MoodleConnector.Presentation");
+            if (Directory.Exists(candidate)) return candidate;
+        }
+
+        throw new DirectoryNotFoundException("Nao foi possivel localizar o projeto MoodleConnector.Presentation para os testes de integracao.");
     }
 }
 

@@ -153,10 +153,10 @@ internal sealed class MoodleSnapshotStore(
     private static TimeSpan GetFreshTtl(string dataset, string tier, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : dataset switch
         {
-            MoodleSnapshotDatasets.Courses => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromMinutes(30) : TimeSpan.FromHours(1),
-            MoodleSnapshotDatasets.Activities => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromMinutes(15) : TimeSpan.FromHours(2),
+            MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(2),
+            MoodleSnapshotDatasets.Activities => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(1) : TimeSpan.FromHours(4),
-            MoodleSnapshotDatasets.DashboardPending => TimeSpan.FromMinutes(5),
+            MoodleSnapshotDatasets.DashboardPending => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.DashboardAccess => TimeSpan.FromMinutes(45),
             _ => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? HotTtl : WarmTtl,
         };
@@ -164,10 +164,10 @@ internal sealed class MoodleSnapshotStore(
     private static TimeSpan GetStaleWindow(string dataset, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : dataset switch
         {
-            MoodleSnapshotDatasets.Courses => TimeSpan.FromHours(24),
-            MoodleSnapshotDatasets.Activities => TimeSpan.FromHours(6),
+            MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(7),
+            MoodleSnapshotDatasets.Activities => TimeSpan.FromDays(3),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => TimeSpan.FromHours(24),
-            MoodleSnapshotDatasets.DashboardPending => TimeSpan.FromMinutes(15),
+            MoodleSnapshotDatasets.DashboardPending => TimeSpan.FromDays(3),
             MoodleSnapshotDatasets.DashboardAccess => TimeSpan.FromHours(6),
             _ => TimeSpan.FromHours(12),
         };

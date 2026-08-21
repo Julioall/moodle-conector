@@ -247,7 +247,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             var now = DateTimeOffset.UtcNow;
             state.Status = "completed";
             state.LastCompletedAt = now;
-            state.NextSyncAt = now.Add(GetInterval(work.Dataset, work.Force));
+            state.NextSyncAt = GetNextAutomaticSyncAt(work.Dataset, now);
             state.LastError = null;
             state.LeaseUntil = null;
             state.RecordsSynced = records;
@@ -439,10 +439,10 @@ internal sealed class MoodleSnapshotSyncQueue(
                 foreach (var course in courses)
                 {
                     var finished = course.EndDate is not null && course.EndDate < now;
-                    var next = finished ? now.AddDays(7) : now;
-                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Activities, course.CourseId, next, 20, cancellationToken);
-                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Students, course.CourseId, next, 30, cancellationToken);
-                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Groups, course.CourseId, next, 60, cancellationToken);
+                    var activityNext = GetNextAutomaticSyncAt(MoodleSnapshotDatasets.Activities, now);
+                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Activities, course.CourseId, activityNext, 20, cancellationToken);
+                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Students, course.CourseId, finished ? now.AddDays(7) : now, 30, cancellationToken);
+                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Groups, course.CourseId, finished ? now.AddDays(7) : now, 60, cancellationToken);
                 }
 
                 var courseIds = courses.Select(course => course.CourseId).ToArray();
@@ -650,18 +650,18 @@ internal sealed class MoodleSnapshotSyncQueue(
     private static TimeSpan GetFreshInterval(string type, string tier, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : type switch
         {
-            MoodleSnapshotDatasets.Courses => TimeSpan.FromHours(1),
-            MoodleSnapshotDatasets.Activities => tier.Equals("cold", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromDays(7) : TimeSpan.FromMinutes(15),
-            MoodleSnapshotDatasets.Students => TimeSpan.FromMinutes(30),
-            MoodleSnapshotDatasets.Groups => TimeSpan.FromHours(2),
+            MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(2),
+            MoodleSnapshotDatasets.Activities => TimeSpan.FromHours(24),
+            MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(1) : TimeSpan.FromHours(4),
             _ => TimeSpan.FromHours(1),
         };
 
     private static TimeSpan GetStaleWindow(string type, string tier, bool frozen) =>
         frozen ? TimeSpan.Zero : type switch
         {
-            MoodleSnapshotDatasets.Activities => tier.Equals("cold", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromDays(30) : TimeSpan.FromHours(6),
-            MoodleSnapshotDatasets.Students => TimeSpan.FromHours(6),
+            MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(7),
+            MoodleSnapshotDatasets.Activities => tier.Equals("cold", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromDays(30) : TimeSpan.FromDays(3),
+            MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => TimeSpan.FromHours(24),
             _ => TimeSpan.FromHours(12),
         };
 
@@ -674,15 +674,28 @@ internal sealed class MoodleSnapshotSyncQueue(
         _ => 0,
     };
 
-    private static TimeSpan GetInterval(string dataset, bool force) => dataset switch
+    private static DateTimeOffset GetNextAutomaticSyncAt(string dataset, DateTimeOffset now) => dataset switch
+        {
+            MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses => GetNextBrazilMidnight(now).AddDays(2),
+            MoodleSnapshotDatasets.Activities => GetNextBrazilMidnight(now).AddDays(1),
+            _ => now.Add(dataset == MoodleSnapshotDatasets.Groups ? TimeSpan.FromHours(2) : TimeSpan.FromHours(1)),
+        };
+
+    private static DateTimeOffset GetNextBrazilMidnight(DateTimeOffset now)
     {
-        MoodleSnapshotDatasets.Activities when force => TimeSpan.FromDays(7),
-        MoodleSnapshotDatasets.Activities => TimeSpan.FromMinutes(15),
-        MoodleSnapshotDatasets.Students => TimeSpan.FromMinutes(30),
-        MoodleSnapshotDatasets.Groups => TimeSpan.FromHours(2),
-        MoodleSnapshotDatasets.Courses => TimeSpan.FromHours(1),
-        _ => TimeSpan.FromHours(6),
-    };
+        var timeZone = ResolveBrazilTimeZone();
+        var localNow = TimeZoneInfo.ConvertTime(now, timeZone);
+        var nextLocalMidnight = localNow.Date.AddDays(1);
+        var offset = timeZone.GetUtcOffset(nextLocalMidnight);
+        return new DateTimeOffset(nextLocalMidnight, offset).ToUniversalTime();
+    }
+
+    private static TimeZoneInfo ResolveBrazilTimeZone()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById("E. South America Standard Time"); }
+        catch (TimeZoneNotFoundException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"); }
+        catch (InvalidTimeZoneException) { return TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo"); }
+    }
 
     private bool TryEnqueueSignal(MoodleSnapshotSyncRequest request)
     {

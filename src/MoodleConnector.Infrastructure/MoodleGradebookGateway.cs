@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
@@ -9,9 +10,11 @@ namespace MoodleConnector.Infrastructure;
 internal sealed class MoodleGradebookGateway(
     IOptions<MoodleApiOptions> options,
     IMoodleConnectorCredentialsProvider credentialsProvider,
-    IMoodleRestClient restClient) : IMoodleGradebookGateway
+    IMoodleRestClient restClient,
+    IMemoryCache? memoryCache = null) : IMoodleGradebookGateway
 {
     private const string MoodleFunction = "gradereport_user_get_grade_items";
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(24);
     private readonly MoodleApiOptions _options = options.Value;
 
     public async Task<CourseGradebook> GetStudentGradebookAsync(
@@ -23,13 +26,21 @@ internal sealed class MoodleGradebookGateway(
         var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
         
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var cacheKey = $"moodle-gradebook:{credentials.Alias}:{courseIdNumber}:{studentIdNumber}";
+        if (memoryCache?.TryGetValue(cacheKey, out CourseGradebook? cached) == true && cached is not null)
+        {
+            return cached;
+        }
+
         var payload = await restClient.CallAsync(credentials, MoodleFunction, new Dictionary<string, object?>
         {
             ["courseid"] = courseIdNumber.ToString(CultureInfo.InvariantCulture),
             ["userid"] = studentIdNumber.ToString(CultureInfo.InvariantCulture)
         }, cancellationToken);
 
-        return ParseGradebook(payload.GetRawText(), courseId, studentId);
+        var gradebook = ParseGradebook(payload.GetRawText(), courseId, studentId);
+        memoryCache?.Set(cacheKey, gradebook, CacheDuration);
+        return gradebook;
     }
 
     private static CourseGradebook ParseGradebook(string payload, string courseId, string studentId)

@@ -84,7 +84,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var tools = await GetToolsListAsync(_factory, "Production");
 
-        Assert.Equal(106, tools.Count);
+        Assert.Equal(108, tools.Count);
         Assert.Contains("moodle_execute_read", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_prepare_write", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_confirm_write", tools, StringComparer.OrdinalIgnoreCase);
