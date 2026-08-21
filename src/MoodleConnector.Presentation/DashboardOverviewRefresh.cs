@@ -25,7 +25,9 @@ internal sealed record DashboardOverviewRefreshRequest(
 internal interface IDashboardOverviewRefreshQueue
 {
     bool Enqueue(DashboardOverviewRefreshRequest request);
+    Task<bool> EnqueueAsync(DashboardOverviewRefreshRequest request, CancellationToken cancellationToken = default);
     bool IsQueued(Guid ownerId, string connectionAlias);
+    Task<bool> IsQueuedAsync(Guid ownerId, string connectionAlias, CancellationToken cancellationToken = default);
 }
 
 internal sealed class DashboardOverviewRefreshQueue(
@@ -33,15 +35,21 @@ internal sealed class DashboardOverviewRefreshQueue(
     ILogger<DashboardOverviewRefreshQueue> logger) : BackgroundService, IDashboardOverviewRefreshQueue
 {
     private readonly Channel<DashboardOverviewRefreshRequest> channel =
-        Channel.CreateUnbounded<DashboardOverviewRefreshRequest>(new UnboundedChannelOptions
+        Channel.CreateBounded<DashboardOverviewRefreshRequest>(new BoundedChannelOptions(256)
         {
+            FullMode = BoundedChannelFullMode.DropWrite,
             SingleReader = true,
             SingleWriter = false,
             AllowSynchronousContinuations = false,
         });
     private readonly ConcurrentDictionary<string, byte> queued = new(StringComparer.Ordinal);
 
-    public bool Enqueue(DashboardOverviewRefreshRequest request)
+    public bool Enqueue(DashboardOverviewRefreshRequest request) =>
+        EnqueueAsync(request).GetAwaiter().GetResult();
+
+    public async Task<bool> EnqueueAsync(
+        DashboardOverviewRefreshRequest request,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(request.ClientId) ||
             string.IsNullOrWhiteSpace(request.ConnectionAlias) ||
@@ -50,17 +58,44 @@ internal sealed class DashboardOverviewRefreshQueue(
             return false;
         }
 
-        var key = GetKey(request.OwnerId, request.ConnectionAlias);
-        if (!queued.TryAdd(key, 0))
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var state = await db.MoodleSyncStates.SingleOrDefaultAsync(item =>
+            item.OwnerId == request.OwnerId &&
+            item.ConnectionAlias == request.ConnectionAlias &&
+            item.Dataset == MoodleSnapshotDatasets.DashboardPending &&
+            item.CourseId == string.Empty, cancellationToken);
+        if (state?.Status == "running")
         {
             return false;
         }
 
-        if (channel.Writer.TryWrite(request))
+        if (state is null)
         {
-            return true;
+            state = new MoodleSyncStateEntity
+            {
+                Id = Guid.NewGuid(),
+                OwnerId = request.OwnerId,
+                ConnectionAlias = request.ConnectionAlias,
+                Dataset = MoodleSnapshotDatasets.DashboardPending,
+                CourseId = string.Empty,
+            };
+            db.MoodleSyncStates.Add(state);
         }
 
+        state.ClientId = request.ClientId;
+        state.UserExternalId = request.OwnerId.ToString();
+        state.Status = "pending";
+        state.NextSyncAt = now;
+        state.Priority = 5;
+        state.LastError = null;
+        state.UpdatedAt = now;
+        await db.SaveChangesAsync(cancellationToken);
+
+        var key = GetKey(request.OwnerId, request.ConnectionAlias);
+        if (!queued.TryAdd(key, 0)) return false;
+        if (channel.Writer.TryWrite(request)) return true;
         queued.TryRemove(key, out _);
         return false;
     }
@@ -68,47 +103,33 @@ internal sealed class DashboardOverviewRefreshQueue(
     public bool IsQueued(Guid ownerId, string connectionAlias) =>
         queued.ContainsKey(GetKey(ownerId, connectionAlias));
 
+    public async Task<bool> IsQueuedAsync(Guid ownerId, string connectionAlias, CancellationToken cancellationToken = default)
+    {
+        if (IsQueued(ownerId, connectionAlias)) return true;
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+        return await db.MoodleSyncStates.AsNoTracking().AnyAsync(item =>
+            item.OwnerId == ownerId && item.ConnectionAlias == connectionAlias &&
+            item.Dataset == MoodleSnapshotDatasets.DashboardPending && item.CourseId == string.Empty &&
+            (item.Status == "pending" || item.Status == "running"), cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("DashboardOverviewRefreshQueue iniciada.");
         try
         {
-            await foreach (var request in channel.Reader.ReadAllAsync(stoppingToken))
+            while (!stoppingToken.IsCancellationRequested)
             {
-                var key = GetKey(request.OwnerId, request.ConnectionAlias);
-                try
+                while (channel.Reader.TryRead(out var request))
                 {
-                    using var scope = scopeFactory.CreateScope();
-                    var executionContext = scope.ServiceProvider.GetRequiredService<IConnectorExecutionContext>();
-                    var connectionSelection = scope.ServiceProvider.GetRequiredService<IMoodleConnectionSelection>();
-                    var builder = scope.ServiceProvider.GetRequiredService<DashboardPendingSnapshotBuilder>();
+                    await ProcessRequestAsync(request, stoppingToken);
+                }
 
-                    executionContext.Enter(request.ClientId, request.OwnerId.ToString(), null);
-                    connectionSelection.Alias = request.ConnectionAlias;
-
-                    var snapshot = await builder.BuildAsync(request.OwnerId, request.Courses, stoppingToken);
-                    var memoryCache = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
-                    memoryCache.Set(
-                        DashboardOverviewCache.Pending(request.OwnerId, request.ConnectionAlias),
-                        snapshot,
-                        AppDashboardBudget.MetricCacheDuration);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception exception)
-                {
-                    logger.LogError(
-                        exception,
-                        "Falha ao atualizar a visão geral do dashboard. OwnerId={OwnerId} Connection={ConnectionAlias}",
-                        request.OwnerId,
-                        request.ConnectionAlias);
-                }
-                finally
-                {
-                    queued.TryRemove(key, out _);
-                }
+                await EnqueueDueStatesAsync(stoppingToken);
+                var signal = channel.Reader.WaitToReadAsync(stoppingToken).AsTask();
+                var tick = Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                await Task.WhenAny(signal, tick);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -118,20 +139,172 @@ internal sealed class DashboardOverviewRefreshQueue(
         logger.LogInformation("DashboardOverviewRefreshQueue encerrada.");
     }
 
+    private async Task EnqueueDueStatesAsync(CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+        var store = scope.ServiceProvider.GetRequiredService<IMoodleSnapshotStore>();
+        var courseScopeResolver = scope.ServiceProvider.GetRequiredService<DashboardCourseScopeResolver>();
+        var now = DateTimeOffset.UtcNow;
+        var states = await db.MoodleSyncStates.AsNoTracking()
+            .Where(item => item.Dataset == MoodleSnapshotDatasets.DashboardPending &&
+                           item.CourseId == string.Empty && item.NextSyncAt <= now && item.Status != "running")
+            .OrderBy(item => item.Priority)
+            .Take(16)
+            .ToArrayAsync(cancellationToken);
+        foreach (var state in states)
+        {
+            var courses = await store.GetCoursesAsync(state.OwnerId, state.ConnectionAlias, cancellationToken);
+            if (courses is null) continue;
+            var scopedCourses = await courseScopeResolver.FilterAsync(
+                state.OwnerId,
+                state.ConnectionAlias,
+                courses.Data,
+                cancellationToken);
+            if (scopedCourses.Count == 0) continue;
+            var request = new DashboardOverviewRefreshRequest(state.OwnerId, state.ClientId, state.ConnectionAlias, scopedCourses);
+            var key = GetKey(request.OwnerId, request.ConnectionAlias);
+            if (queued.TryAdd(key, 0) && !channel.Writer.TryWrite(request)) queued.TryRemove(key, out _);
+        }
+    }
+
+    private async Task ProcessRequestAsync(DashboardOverviewRefreshRequest request, CancellationToken cancellationToken)
+    {
+        var key = GetKey(request.OwnerId, request.ConnectionAlias);
+        try
+        {
+            using var scope = scopeFactory.CreateScope();
+            var state = await TryClaimAsync(scope.ServiceProvider, request, cancellationToken);
+            if (state is null) return;
+
+            var executionContext = scope.ServiceProvider.GetRequiredService<IConnectorExecutionContext>();
+            var connectionSelection = scope.ServiceProvider.GetRequiredService<IMoodleConnectionSelection>();
+            var builder = scope.ServiceProvider.GetRequiredService<DashboardPendingSnapshotBuilder>();
+            executionContext.Enter(request.ClientId, request.OwnerId.ToString(), null);
+            connectionSelection.Alias = request.ConnectionAlias;
+
+            var snapshot = await builder.BuildAsync(request.OwnerId, request.Courses, cancellationToken);
+            var store = scope.ServiceProvider.GetRequiredService<IMoodleSnapshotStore>();
+            var generatedAt = snapshot.SnapshotGeneratedAt ?? DateTimeOffset.UtcNow;
+            var snapshotComplete = snapshot.CoursesAnalyzed >= snapshot.CoursesInScope;
+            var snapshotError = snapshotComplete
+                ? null
+                : $"A leitura de pendências ficou incompleta em {snapshot.CoursesInScope - snapshot.CoursesAnalyzed} curso(s).";
+            await store.SaveAsync(
+                request.OwnerId,
+                request.ConnectionAlias,
+                MoodleSnapshotDatasets.DashboardPending,
+                string.Empty,
+                snapshot,
+                "hot",
+                frozen: false,
+                complete: snapshotComplete,
+                snapshot.CoursesAnalyzed,
+                generatedAt,
+                cancellationToken);
+
+            var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+            var persistedState = await db.MoodleSyncStates.SingleAsync(item => item.Id == state.Id, cancellationToken);
+            persistedState.Status = "completed";
+            persistedState.LastCompletedAt = DateTimeOffset.UtcNow;
+            persistedState.NextSyncAt = DateTimeOffset.UtcNow.Add(AppDashboardBudget.MetricCacheDuration);
+            persistedState.LastError = snapshotError;
+            persistedState.LeaseUntil = null;
+            persistedState.RecordsSynced = snapshot.CoursesAnalyzed;
+            persistedState.AttemptCount = 0;
+            persistedState.UpdatedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await MarkFailedAsync(request, exception, cancellationToken);
+            logger.LogError(
+                exception,
+                "Falha ao atualizar a visão geral do dashboard. OwnerId={OwnerId} Connection={ConnectionAlias}",
+                request.OwnerId,
+                request.ConnectionAlias);
+        }
+        finally
+        {
+            queued.TryRemove(key, out _);
+        }
+    }
+
+    private static async Task<MoodleSyncStateEntity?> TryClaimAsync(
+        IServiceProvider services,
+        DashboardOverviewRefreshRequest request,
+        CancellationToken cancellationToken)
+    {
+        var db = services.GetRequiredService<ConnectorDbContext>();
+        var state = await db.MoodleSyncStates.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.OwnerId == request.OwnerId && item.ConnectionAlias == request.ConnectionAlias &&
+            item.Dataset == MoodleSnapshotDatasets.DashboardPending && item.CourseId == string.Empty,
+            cancellationToken);
+        if (state is null || state.NextSyncAt is not { } next || next > DateTimeOffset.UtcNow) return null;
+        var now = DateTimeOffset.UtcNow;
+        var affected = await db.MoodleSyncStates.Where(item =>
+                item.Id == state.Id && item.Status != "running" &&
+                (item.LeaseUntil == null || item.LeaseUntil <= now) && item.NextSyncAt <= now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, "running")
+                .SetProperty(item => item.LastStartedAt, now)
+                .SetProperty(item => item.LastAttemptAt, now)
+                .SetProperty(item => item.LeaseUntil, now.AddMinutes(30))
+                .SetProperty(item => item.AttemptCount, state.AttemptCount + 1)
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+        return affected == 1 ? state : null;
+    }
+
+    private async Task MarkFailedAsync(DashboardOverviewRefreshRequest request, Exception exception, CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+        var state = await db.MoodleSyncStates.SingleOrDefaultAsync(item =>
+            item.OwnerId == request.OwnerId && item.ConnectionAlias == request.ConnectionAlias &&
+            item.Dataset == MoodleSnapshotDatasets.DashboardPending && item.CourseId == string.Empty,
+            cancellationToken);
+        if (state is null) return;
+        var seconds = Math.Min(3600, 30 * Math.Pow(2, Math.Max(0, state.AttemptCount - 1))) * (0.75 + Random.Shared.NextDouble() * 0.5);
+        state.Status = "failed";
+        state.LastError = exception.Message.Length > 4000 ? exception.Message[..4000] : exception.Message;
+        state.NextSyncAt = DateTimeOffset.UtcNow.AddSeconds(seconds);
+        state.LeaseUntil = null;
+        state.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     private static string GetKey(Guid ownerId, string connectionAlias) =>
         $"{ownerId}:{connectionAlias}";
 }
 
 internal sealed class DashboardPendingSnapshotBuilder(
-    IMediator mediator,
-    ConnectorDbContext dbContext)
+    IServiceScopeFactory scopeFactory,
+    ConnectorDbContext dbContext,
+    IConnectorExecutionContext executionContext,
+    IMoodleConnectionSelection connectionSelection)
 {
     public async Task<AppDashboardPendingMetricDto> BuildAsync(
         Guid ownerId,
         IReadOnlyList<CourseSummary> courses,
         CancellationToken cancellationToken)
     {
-        var pendingResults = await ReadPendingAsync(courses, mediator, ownerId.ToString(), cancellationToken);
+        var clientId = executionContext.ClientId
+            ?? throw new InvalidOperationException("O contexto de execução do dashboard não possui ClientId.");
+        var subject = executionContext.Subject ?? ownerId.ToString();
+        var pendingResults = await ReadPendingAsync(
+            courses,
+            scopeFactory,
+            clientId,
+            subject,
+            executionContext.Email,
+            executionContext.Scopes,
+            connectionSelection.Alias,
+            ownerId.ToString(),
+            cancellationToken);
         var pendingRows = pendingResults.SelectMany(item => item.Rows).ToArray();
         var gradingRows = pendingResults.SelectMany(item => item.GradingRows).ToArray();
         var pendingStudentIds = pendingResults
@@ -144,6 +317,13 @@ internal sealed class DashboardPendingSnapshotBuilder(
             .SelectMany(item => item.Warnings)
             .Distinct(StringComparer.Ordinal)
             .ToList();
+        var coursesAnalyzed = pendingResults.Count(item => item.IsComplete);
+        if (coursesAnalyzed < courses.Count)
+        {
+            warnings.Insert(0,
+                $"A leitura de pendências ficou incompleta em {courses.Count - coursesAnalyzed} de {courses.Count} curso(s). " +
+                "Os dados exibidos não representam todo o escopo.");
+        }
         var courseSummaries = pendingResults
             .Select(item => new AppDashboardCoursePendingSummaryDto(
                 item.CourseId,
@@ -183,7 +363,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
         {
             IsRefreshing = false,
             CoursesInScope = courses.Count,
-            CoursesAnalyzed = courses.Count,
+            CoursesAnalyzed = coursesAnalyzed,
             SnapshotGeneratedAt = DateTimeOffset.UtcNow,
         };
     }
@@ -211,7 +391,12 @@ internal sealed class DashboardPendingSnapshotBuilder(
 
     private static async Task<IReadOnlyList<DashboardPendingRead>> ReadPendingAsync(
         IReadOnlyList<CourseSummary> courses,
-        IMediator mediator,
+        IServiceScopeFactory scopeFactory,
+        string clientId,
+        string subject,
+        string? email,
+        IReadOnlyCollection<string> scopes,
+        string? connectionAlias,
         string userExternalId,
         CancellationToken cancellationToken)
     {
@@ -224,7 +409,13 @@ internal sealed class DashboardPendingSnapshotBuilder(
             await limiter.WaitAsync(cancellationToken);
             try
             {
-                var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+                await using var courseScope = scopeFactory.CreateAsyncScope();
+                var courseExecutionContext = courseScope.ServiceProvider.GetRequiredService<IConnectorExecutionContext>();
+                courseExecutionContext.Enter(clientId, subject, email, scopes);
+                var courseConnectionSelection = courseScope.ServiceProvider.GetRequiredService<IMoodleConnectionSelection>();
+                courseConnectionSelection.Alias = connectionAlias;
+                var courseMediator = courseScope.ServiceProvider.GetRequiredService<IMediator>();
+                var pending = await courseMediator.Send(new GetStudentsWithPendingSubmissionsQuery(
                     course.CourseId,
                     DueDaysAhead: 0,
                     MaxStudentsToAnalyze: AppDashboardBudget.MaxParticipantsRead,
@@ -265,7 +456,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     .Count();
                 var warnings = pending.Warning is null
                     ? Array.Empty<string>()
-                    : [$"{course.FullName}: {pending.Warning}"];
+                    : [$"[{course.CourseId}] {course.FullName}: {pending.Warning}"];
                 return new DashboardPendingRead(
                     course.CourseId,
                     course.FullName,
@@ -274,7 +465,8 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     gradingRows,
                     pendingActivities,
                     correctionActivities,
-                    warnings);
+                    warnings,
+                    pending.IsComplete);
             }
             catch
             {
@@ -286,7 +478,8 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     [],
                     0,
                     0,
-                    [$"Não foi possível carregar as pendências do curso {course.FullName}."]);
+                    [$"Não foi possível carregar as pendências do curso {course.FullName} (courseId={course.CourseId})."],
+                    false);
             }
             finally
             {
@@ -339,7 +532,8 @@ internal sealed class DashboardPendingSnapshotBuilder(
         IReadOnlyList<AppDashboardPriorityDto> GradingRows,
         int PendingActivities,
         int CorrectionActivities,
-        IReadOnlyList<string> Warnings);
+        IReadOnlyList<string> Warnings,
+        bool IsComplete);
 
     private sealed record DashboardPendingRow(string StudentId, string Level);
 }

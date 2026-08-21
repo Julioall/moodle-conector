@@ -267,6 +267,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleSnapshot.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
         moodleSnapshot.Property(x => x.Tier).HasMaxLength(16).IsRequired();
         moodleSnapshot.Property(x => x.UpdatedAt).IsRequired();
+        moodleSnapshot.Property(x => x.LastError).HasMaxLength(4000);
+        moodleSnapshot.Property(x => x.PayloadHash).HasMaxLength(64);
         moodleSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.SnapshotType, x.CourseId }).IsUnique();
         moodleSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.UpdatedAt });
 
@@ -278,7 +280,11 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleSyncState.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
         moodleSyncState.Property(x => x.Status).HasMaxLength(32).IsRequired();
         moodleSyncState.Property(x => x.LastError).HasMaxLength(4000);
+        moodleSyncState.Property(x => x.LastAttemptAt);
+        moodleSyncState.Property(x => x.ClientId).HasMaxLength(64).IsRequired();
+        moodleSyncState.Property(x => x.UserExternalId).HasMaxLength(200).IsRequired();
         moodleSyncState.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.Dataset, x.CourseId }).IsUnique();
+        moodleSyncState.HasIndex(x => new { x.Status, x.NextSyncAt, x.Priority });
 
         var ignoredCourse = modelBuilder.Entity<UserIgnoredCourseEntity>();
         ignoredCourse.ToTable("user_ignored_courses");

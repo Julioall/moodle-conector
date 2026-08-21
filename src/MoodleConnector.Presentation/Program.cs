@@ -315,10 +315,14 @@ var mcpServerBuilder = builder.Services
     .AddApplication()
     .AddInfrastructure(builder.Configuration)
     .AddScoped<DashboardPendingSnapshotBuilder>()
+    .AddScoped<DashboardCourseScopeResolver>()
+    .AddScoped<DashboardAccessSnapshotService>()
     .AddScoped<PortalMcpIdentityResolver>()
+    .AddScoped<MoodleSnapshotToolContext>()
     .AddSingleton<DashboardOverviewRefreshQueue>()
     .AddSingleton<IDashboardOverviewRefreshQueue>(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
     .AddHostedService(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
+    .AddHostedService<DashboardAccessSnapshotWorker>()
     .AddMcpServer(options => options.ServerInstructions = MoodleConnectorInstructions.Text)
     .WithHttpTransport()
     .WithRequestFilters(filters =>
@@ -1735,11 +1739,14 @@ app.MapGet("/api/session", async (
     {
         foreach (var connection in profile.MoodleConnections.Where(item => string.Equals(item.Status, "active", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Status, "unknown", StringComparison.OrdinalIgnoreCase)))
         {
-            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(
+            await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
                 identity.Id,
                 identity.ConnectorClientId,
                 connection.Alias,
-                identity.Id.ToString()));
+                identity.Id.ToString(),
+                Dataset: MoodleSnapshotDatasets.Connection,
+                Priority: 100),
+                cancellationToken);
         }
     }
     context.Response.Headers.CacheControl = "no-store";
@@ -2113,10 +2120,11 @@ app.MapGet("/api/dashboard/{metric}", async (
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
     IMediator mediator,
-    IMoodleParticipantsGateway participantsGateway,
-    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    DashboardAccessSnapshotService dashboardAccessSnapshotService,
     IDashboardOverviewRefreshQueue dashboardRefreshQueue,
     DashboardPendingSnapshotBuilder pendingSnapshotBuilder,
+    [FromServices] DashboardCourseScopeResolver dashboardCourseScopeResolver,
+    IMoodleSnapshotStore snapshotStore,
     IMemoryCache memoryCache,
     CancellationToken cancellationToken) =>
 {
@@ -2167,7 +2175,7 @@ app.MapGet("/api/dashboard/{metric}", async (
     IReadOnlyList<CourseSummary> courses;
     if (refresh == true)
     {
-        courses = await GetDashboardCourseScopeAsync(identity.Id.ToString(), effectiveConnectionRef, dbContext, mediator, cancellationToken);
+        courses = await dashboardCourseScopeResolver.ResolveAsync(identity.Id, effectiveConnectionRef, cancellationToken);
         memoryCache.Set(courseScopeCacheKey, courses, AppDashboardBudget.CourseScopeCacheDuration);
     }
     else
@@ -2175,7 +2183,7 @@ app.MapGet("/api/dashboard/{metric}", async (
         courses = await memoryCache.GetOrCreateAsync<IReadOnlyList<CourseSummary>>(courseScopeCacheKey, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = AppDashboardBudget.CourseScopeCacheDuration;
-            return await GetDashboardCourseScopeAsync(identity.Id.ToString(), effectiveConnectionRef, dbContext, mediator, cancellationToken);
+            return await dashboardCourseScopeResolver.ResolveAsync(identity.Id, effectiveConnectionRef, cancellationToken);
         }) ?? [];
     }
     if (normalizedMetric == "courses")
@@ -2208,26 +2216,38 @@ app.MapGet("/api/dashboard/{metric}", async (
 
     if (normalizedMetric == "pending")
     {
-        var isQueued = dashboardRefreshQueue.IsQueued(identity.Id, effectiveConnectionRef);
-        if (refresh == true || !memoryCache.TryGetValue(cacheKey, out AppDashboardPendingMetricDto? cachedPending) || cachedPending is null)
+        var persistedPending = await snapshotStore.GetAsync<AppDashboardPendingMetricDto>(
+            identity.Id,
+            effectiveConnectionRef,
+            MoodleSnapshotDatasets.DashboardPending,
+            cancellationToken: cancellationToken);
+        var isQueued = await dashboardRefreshQueue.IsQueuedAsync(identity.Id, effectiveConnectionRef, cancellationToken);
+        if (refresh == true || persistedPending is null || persistedPending.IsStale)
         {
-            isQueued = isQueued || dashboardRefreshQueue.Enqueue(new DashboardOverviewRefreshRequest(
+            isQueued = isQueued || await dashboardRefreshQueue.EnqueueAsync(new DashboardOverviewRefreshRequest(
                     identity.Id,
                     identity.ConnectorClientId ?? string.Empty,
                     effectiveConnectionRef,
-                    courses));
+                    courses), cancellationToken);
         }
 
         AppDashboardPendingMetricDto response;
-        if (memoryCache.TryGetValue(cacheKey, out AppDashboardPendingMetricDto? existingPending) && existingPending is not null)
+        if (persistedPending is not null)
+        {
+            response = persistedPending.Data with
+            {
+                IsRefreshing = isQueued || await dashboardRefreshQueue.IsQueuedAsync(identity.Id, effectiveConnectionRef, cancellationToken),
+                CoursesInScope = courses.Count,
+                CoursesAnalyzed = persistedPending.Data.CoursesAnalyzed,
+            };
+        }
+        else if (memoryCache.TryGetValue(cacheKey, out AppDashboardPendingMetricDto? existingPending) && existingPending is not null)
         {
             response = existingPending with
             {
-                IsRefreshing = isQueued || dashboardRefreshQueue.IsQueued(identity.Id, effectiveConnectionRef),
+                IsRefreshing = isQueued,
                 CoursesInScope = courses.Count,
-                CoursesAnalyzed = existingPending.CoursesAnalyzed == 0
-                    ? existingPending.Summary.ActiveCourses
-                    : existingPending.CoursesAnalyzed,
+                CoursesAnalyzed = existingPending.CoursesAnalyzed,
             };
         }
         else
@@ -2242,19 +2262,40 @@ app.MapGet("/api/dashboard/{metric}", async (
             }
         }
 
-        return (IResult)Results.Ok(new AppEnvelope<AppDashboardPendingMetricDto>(response, new(generatedAt, effectiveConnectionRef)));
+        return (IResult)Results.Ok(new AppEnvelope<AppDashboardPendingMetricDto>(
+            response,
+            new(
+                persistedPending?.UpdatedAt ?? generatedAt,
+                effectiveConnectionRef,
+                persistedPending is null ? "refreshing" : "snapshot",
+                persistedPending?.UpdatedAt,
+                persistedPending is null ? null : Math.Max(0, (long)(generatedAt - persistedPending.UpdatedAt).TotalSeconds),
+                persistedPending?.IsStale ?? false,
+                isQueued,
+                persistedPending?.IsComplete ?? false)));
     }
 
     if (normalizedMetric == "access")
     {
-        var access = await ReadDashboardAccessAsync(courses, participantsGateway, currentUserIdGateway, cancellationToken);
-        var snapshots = await SaveDashboardAccessSnapshotAndReadHistoryAsync(
-            dbContext,
+        var persistedAccess = refresh != true
+            ? await snapshotStore.GetAsync<DashboardAccessRead>(
+                identity.Id,
+                effectiveConnectionRef,
+                MoodleSnapshotDatasets.DashboardAccess,
+                cancellationToken: cancellationToken)
+            : null;
+        var usedAccessSnapshot = persistedAccess is not null && !persistedAccess.IsStale;
+        var access = usedAccessSnapshot
+            ? persistedAccess!.Data
+            : await dashboardAccessSnapshotService.ReadAsync(courses, cancellationToken);
+        var accessSnapshotAt = usedAccessSnapshot ? persistedAccess!.UpdatedAt : DateTimeOffset.UtcNow;
+        var snapshots = await dashboardAccessSnapshotService.PersistAsync(
             identity.Id,
             effectiveConnectionRef,
-            courses.Count,
             access,
-            generatedAt,
+            accessSnapshotAt,
+            courses.Count,
+            persistCurrentSnapshot: !usedAccessSnapshot,
             cancellationToken);
         var result = new AppDashboardAccessMetricDto(
             new AppDashboardSummaryDto(courses.Count, 0, 0, access.StudentsWithoutAccess14Days, access.StudentsWithoutAccess14Days)
@@ -2269,7 +2310,15 @@ app.MapGet("/api/dashboard/{metric}", async (
             Snapshots = snapshots,
         };
         memoryCache.Set(cacheKey, result, AppDashboardBudget.MetricCacheDuration);
-        return (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
+        return (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(result, new(
+            generatedAt,
+            effectiveConnectionRef,
+            usedAccessSnapshot ? "snapshot" : "live",
+            usedAccessSnapshot ? persistedAccess!.UpdatedAt : generatedAt,
+            usedAccessSnapshot ? Math.Max(0, (long)(generatedAt - persistedAccess!.UpdatedAt).TotalSeconds) : 0,
+            usedAccessSnapshot && persistedAccess!.IsStale,
+            false,
+            usedAccessSnapshot ? persistedAccess!.IsComplete : true)));
     }
 
     return (IResult)AppErrorResults.NotFound("dashboard_metric_not_found", "Métrica de dashboard não encontrada.");
@@ -2284,6 +2333,8 @@ app.MapGet("/api/dashboard", async (
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
     IMediator mediator,
+    IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
@@ -2312,6 +2363,17 @@ app.MapGet("/api/dashboard", async (
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var userId = identity.Id.ToString();
+    var courseSnapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
+    if ((courseSnapshot is null || courseSnapshot.IsStale) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id,
+            identity.ConnectorClientId!,
+            resolved.Alias,
+            userId,
+            Dataset: MoodleSnapshotDatasets.Courses,
+            Priority: 30), cancellationToken);
+    }
 
     if (activityOnly == true)
     {
@@ -2354,7 +2416,13 @@ app.MapGet("/api/dashboard", async (
     // Pending/risk indicators require a course scope and are intentionally not fanned out.
     if (string.IsNullOrWhiteSpace(courseId))
     {
-        var courses = await mediator.Send(new ListMyCoursesQuery(userId, AppDashboardBudget.MaxCoursesRead, 1), cancellationToken);
+        var courses = courseSnapshot is not null
+            ? new PagedCourses(
+                courseSnapshot.Data.Take(AppDashboardBudget.MaxCoursesRead).ToArray(),
+                courseSnapshot.Data.Count,
+                1,
+                AppDashboardBudget.MaxCoursesRead)
+            : await mediator.Send(new ListMyCoursesQuery(userId, AppDashboardBudget.MaxCoursesRead, 1), cancellationToken);
         var activeCourses = courses.Items.Count(course => course.Visible != false);
         var warnings = new List<string>();
         if (courses.HasNextPage) warnings.Add("O resumo de cursos está limitado a uma página para manter o orçamento de leitura.");
@@ -2377,11 +2445,38 @@ app.MapGet("/api/dashboard", async (
             new(generatedAt, effectiveConnectionRef)));
     }
 
-    var course = await mediator.Send(new GetCourseQuery(userId, courseId), cancellationToken);
+    var course = courseSnapshot?.Data.FirstOrDefault(item =>
+        string.Equals(item.CourseId, courseId, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(item.ShortName, courseId, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(item.IdNumber, courseId, StringComparison.OrdinalIgnoreCase))
+        ?? await mediator.Send(new GetCourseQuery(userId, courseId), cancellationToken);
     if (course is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
 
-    var participants = await mediator.Send(new ListCourseParticipantsQuery(
-        userId, courseId, ParticipantStatusFilter.Active, 1, AppDashboardBudget.MaxParticipantsRead, true, false), cancellationToken);
+    var participantSnapshot = await snapshotStore.GetStudentsAsync(identity.Id, resolved.Alias, course.CourseId, cancellationToken);
+    if ((participantSnapshot is null || participantSnapshot.IsStale) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id,
+            identity.ConnectorClientId!,
+            resolved.Alias,
+            userId,
+            CourseId: course.CourseId,
+            Dataset: MoodleSnapshotDatasets.Students,
+            Priority: 10), cancellationToken);
+    }
+    var participants = participantSnapshot is not null
+        ? new CourseParticipantsPage(
+            course.CourseId,
+            1,
+            AppDashboardBudget.MaxParticipantsRead,
+            ParticipantStatusFilter.Active,
+            true,
+            false,
+            participantSnapshot.Data.HasMore,
+            participantSnapshot.Data.Participants.Take(AppDashboardBudget.MaxParticipantsRead).ToArray(),
+            participantSnapshot.Data.ClassificationDiagnostics)
+        : await mediator.Send(new ListCourseParticipantsQuery(
+            userId, courseId, ParticipantStatusFilter.Active, 1, AppDashboardBudget.MaxParticipantsRead, true, false), cancellationToken);
     if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
 
     var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
@@ -2534,18 +2629,22 @@ app.MapGet("/api/courses", async (
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     var snapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
-    if (snapshot is not null && snapshot.Data.Count > 0)
+    if (snapshot is not null)
     {
+        var refreshQueued = false;
         if (snapshot.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+            refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(), Dataset: MoodleSnapshotDatasets.Courses, Priority: 30), cancellationToken);
         var snapshotItems = snapshot.Data.Skip((currentPage - 1) * size).Take(size).ToArray();
         return Results.Ok(new AppListEnvelope<AppCourseDto>(
             snapshotItems.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray(),
             new(currentPage, size, snapshotItems.Length, currentPage * size < snapshot.Data.Count, snapshot.UpdatedAt, effectiveConnectionRef,
-                snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, snapshot.Data.Count)));
+                snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, snapshot.Data.Count,
+                "snapshot", snapshot.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                snapshot.IsStale, refreshQueued, snapshot.IsComplete)));
     }
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(), Dataset: MoodleSnapshotDatasets.Courses, Priority: 30), cancellationToken);
     var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
     var data = result.Items.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
     return Results.Ok(new AppListEnvelope<AppCourseDto>(data,
@@ -2644,12 +2743,21 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
     var cachedCourse = snapshot?.Data.FirstOrDefault(item => string.Equals(item.CourseId, courseId, StringComparison.OrdinalIgnoreCase) || string.Equals(item.ShortName, courseId, StringComparison.OrdinalIgnoreCase) || string.Equals(item.IdNumber, courseId, StringComparison.OrdinalIgnoreCase));
     if (cachedCourse is not null)
     {
+        var refreshQueued = false;
         if (snapshot!.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
-        return Results.Ok(new AppEnvelope<AppCourseDto>(AppCourseContractMapper.ToDto(cachedCourse, connectionRef), new(snapshot.UpdatedAt, connectionRef)));
+            refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(), Dataset: MoodleSnapshotDatasets.Courses, Priority: 20), cancellationToken);
+        return Results.Ok(new AppEnvelope<AppCourseDto>(AppCourseContractMapper.ToDto(cachedCourse, connectionRef), new(
+            snapshot.UpdatedAt,
+            connectionRef,
+            "snapshot",
+            snapshot.UpdatedAt,
+            Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+            snapshot.IsStale,
+            refreshQueued,
+            snapshot.IsComplete)));
     }
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(), Dataset: MoodleSnapshotDatasets.Courses, Priority: 20), cancellationToken);
     var course = await mediator.Send(new GetCourseQuery(identity.Id.ToString(), courseId), cancellationToken);
     return course is null
         ? AppErrorResults.NotFound("course_not_found", "Curso não encontrado.")
@@ -2670,16 +2778,20 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
     var cachedActivities = snapshot is null ? null : ToCourseActivitiesSummary(snapshot.Data);
     if (cachedActivities is not null && includeActionSummary != true)
     {
+        var refreshQueued = false;
         if (snapshot!.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+            refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(), CourseId: courseId, Dataset: MoodleSnapshotDatasets.Activities, Priority: 10), cancellationToken);
         var cachedPage = cachedActivities.Activities.Skip((Math.Max(page ?? 1, 1) - 1) * Math.Clamp(pageSize ?? 20, 1, 100)).Take(Math.Clamp(pageSize ?? 20, 1, 100)).ToArray();
         var cachedPageNumber = Math.Max(page ?? 1, 1); var cachedPageSize = Math.Clamp(pageSize ?? 20, 1, 100);
         return Results.Ok(new AppListEnvelope<AppActivityDto>(cachedPage.Select(activity => AppCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray(),
             new(cachedPageNumber, cachedPageSize, cachedPage.Length, cachedPageNumber * cachedPageSize < cachedActivities.Total, snapshot.UpdatedAt,
-                connectionRef, snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, cachedActivities.Total)));
+                connectionRef, snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, cachedActivities.Total,
+                "snapshot", snapshot.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                snapshot.IsStale, refreshQueued, snapshot.IsComplete)));
     }
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString()));
+        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(), CourseId: courseId, Dataset: MoodleSnapshotDatasets.Activities, Priority: 10), cancellationToken);
     var result = await mediator.Send(new ListCourseActivitiesQuery(identity.Id.ToString(), courseId, CourseActivityModuleTypes.All, false), cancellationToken);
     if (result is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
     var currentPage = Math.Max(page ?? 1, 1); var size = Math.Clamp(pageSize ?? 20, 1, 100);
@@ -2727,8 +2839,9 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
     var snapshot = includePending == true || resolved is null ? null : await snapshotStore.GetStudentsAsync(identity.Id, resolved.Alias, courseId, cancellationToken);
     if (snapshot is not null)
     {
+        var refreshQueued = false;
         if (snapshot.IsStale && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-            snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved!.Alias, identity.Id.ToString()));
+            refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved!.Alias, identity.Id.ToString(), CourseId: courseId, Dataset: MoodleSnapshotDatasets.Students, Priority: 10), cancellationToken);
         var cached = snapshot.Data;
         var cachedItems = cached.Participants.ToArray();
         var cachedPage = cachedItems.Skip((currentPage - 1) * size).Take(size).ToArray();
@@ -2736,10 +2849,13 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
             new[] { new StudentCourseDto(connectionRef, courseId, courseId, null, participant.Suspended == true ? "suspenso" : "ativo", null, participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) })).ToArray();
         return Results.Ok(new AppListEnvelope<StudentDto>(cachedData,
             new(currentPage, size, cachedData.Length, currentPage * size < cachedItems.Length, snapshot.UpdatedAt,
-                connectionRef, snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, cachedItems.Length)));
+                connectionRef, snapshot.IsStale ? ["Dados locais atualizados em segundo plano."] : null, cachedItems.Length,
+                "snapshot", snapshot.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                snapshot.IsStale, refreshQueued, snapshot.IsComplete)));
     }
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-        snapshotSyncQueue.Enqueue(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved!.Alias, identity.Id.ToString()));
+        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved!.Alias, identity.Id.ToString(), CourseId: courseId, Dataset: MoodleSnapshotDatasets.Students, Priority: 10), cancellationToken);
     var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, currentPage, size, true, true), cancellationToken);
     var pendingByStudent = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     if (includePending == true)
@@ -4639,221 +4755,6 @@ static async Task SignInAppAccountAsync(HttpContext context, ConnectorDbContext 
 
 
 
-static async Task<IReadOnlyList<CourseSummary>> GetDashboardCourseScopeAsync(
-    string userExternalId,
-    string connectionAlias,
-    ConnectorDbContext dbContext,
-    IMediator mediator,
-    CancellationToken cancellationToken)
-{
-    var allCourses = new List<CourseSummary>();
-    var page = 1;
-    PagedCourses current;
-    do
-    {
-        current = await mediator.Send(new ListMyCoursesQuery(userExternalId, 100, page), cancellationToken);
-        allCourses.AddRange(current.Items);
-        page++;
-    }
-    while (current.HasNextPage);
-
-    var ignoredCourseIds = await dbContext.UserIgnoredCourses
-        .AsNoTracking()
-        .Where(item => item.OwnerId == Guid.Parse(userExternalId) && item.ConnectionAlias == connectionAlias)
-        .Select(item => item.CourseId)
-        .ToHashSetAsync(StringComparer.Ordinal, cancellationToken);
-
-    var now = DateTimeOffset.UtcNow;
-    return NormalizeDashboardCourseEndDates(allCourses)
-        .Where(course =>
-            !ignoredCourseIds.Contains(course.CourseId) &&
-            (course.StartDate is null || course.StartDate <= now) &&
-            (course.EndDate is null || course.EndDate >= now))
-        .ToArray();
-}
-
-static IReadOnlyList<CourseSummary> NormalizeDashboardCourseEndDates(IReadOnlyList<CourseSummary> courses)
-{
-    var adjustedEndDates = new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
-    var groups = courses
-        .Where(course => !string.IsNullOrWhiteSpace(course.CategoryName))
-        .GroupBy(course => course.CategoryName!.Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(part => part.ToLowerInvariant())
-            .ToArray() is { Length: > 0 } parts ? string.Join(" > ", parts) : string.Empty)
-        .Where(group => !string.IsNullOrWhiteSpace(group.Key));
-
-    foreach (var group in groups)
-    {
-        if (group.Count() < 2) continue;
-        var endDates = group.Select(course => course.EndDate).Where(date => date.HasValue).Select(date => date!.Value).Distinct().ToArray();
-        if (endDates.Length == 0) continue;
-
-        // Moodle pode devolver mais de uma sequência dentro da mesma turma
-        // (por exemplo, módulos configurados com finais diferentes). Cada
-        // sequência deve ser inferida separadamente.
-        IEnumerable<IEnumerable<CourseSummary>> sequences = endDates.Length == 1
-            ? new[] { group.AsEnumerable() }
-            : endDates.Select(endDate => group.Where(course => course.EndDate == endDate));
-
-        foreach (var sequence in sequences)
-        {
-            var starts = sequence.Select(course => course.StartDate).Where(date => date.HasValue).Select(date => date!.Value).Distinct().OrderBy(date => date).ToArray();
-            if (starts.Length < 2) continue;
-
-            foreach (var course in sequence)
-            {
-                if (course.StartDate is not { } start) continue;
-                var nextStart = starts.FirstOrDefault(candidate => candidate > start);
-                if (nextStart > start) adjustedEndDates[course.CourseId] = nextStart;
-            }
-        }
-    }
-
-    return courses
-        .Select(course => adjustedEndDates.TryGetValue(course.CourseId, out var endDate)
-            ? course with { EndDate = endDate }
-            : course)
-        .ToArray();
-}
-
-static async Task<DashboardAccessRead> ReadDashboardAccessAsync(
-    IReadOnlyList<CourseSummary> courses,
-    IMoodleParticipantsGateway participantsGateway,
-    IMoodleCurrentUserIdGateway currentUserIdGateway,
-    CancellationToken cancellationToken)
-{
-    var userExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
-    using var limiter = new SemaphoreSlim(4, 4);
-    var warnings = new System.Collections.Concurrent.ConcurrentBag<string>();
-    var students = new System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset?>(StringComparer.OrdinalIgnoreCase);
-    var tasks = courses.Select(async course =>
-    {
-        await limiter.WaitAsync(cancellationToken);
-        try
-        {
-            var page = 1;
-            while (page <= 20)
-            {
-                var result = await participantsGateway.GetCourseParticipantsAsync(
-                    userExternalId,
-                    course.CourseId,
-                    ParticipantStatusFilter.Active,
-                    page,
-                    AppDashboardBudget.MaxParticipantsRead,
-                    studentsOnly: true,
-                    includeEmail: false,
-                    groupId: null,
-                    cancellationToken);
-                foreach (var participant in result.Participants)
-                {
-                    students.AddOrUpdate(
-                        participant.UserId,
-                        participant.LastCourseAccessAt,
-                        (_, current) => current is null || participant.LastCourseAccessAt > current ? participant.LastCourseAccessAt : current);
-                }
-
-                if (!result.HasMore) break;
-                page++;
-            }
-
-            if (page > 20)
-            {
-                warnings.Add($"A leitura de alunos do curso {course.FullName} foi limitada para preservar o desempenho.");
-            }
-        }
-        catch
-        {
-            warnings.Add($"Não foi possível carregar os acessos do curso {course.FullName}.");
-        }
-        finally
-        {
-            limiter.Release();
-        }
-    });
-    await Task.WhenAll(tasks);
-
-    var now = DateTimeOffset.UtcNow;
-    var accessedLast7Days = students.Values.Count(access => access is not null && access >= now.AddDays(-7));
-    var lowAccess = students.Values.Count(access => access is not null && access < now.AddDays(-7) && access >= now.AddDays(-14));
-    var withoutAccess14Days = students.Values.Count(access => access is not null && access < now.AddDays(-14));
-    var neverAccessed = students.Values.Count(access => access is null);
-    var segments = new[]
-    {
-        new AppDashboardAccessSegmentDto("recent", "Acesso recente · 0–7 dias", accessedLast7Days, "success"),
-        new AppDashboardAccessSegmentDto("low", "Baixo acesso · 8–14 dias", lowAccess, "warning"),
-        new AppDashboardAccessSegmentDto("stale", "Sem acesso · 14+ dias", withoutAccess14Days, "risk"),
-        new AppDashboardAccessSegmentDto("never", "Nunca acessaram", neverAccessed, "risk"),
-    };
-    return new DashboardAccessRead(students.Count, accessedLast7Days, withoutAccess14Days, neverAccessed, segments, warnings.Distinct(StringComparer.Ordinal).ToArray());
-}
-
-static async Task<IReadOnlyList<AppDashboardAccessSnapshotDto>> SaveDashboardAccessSnapshotAndReadHistoryAsync(
-    ConnectorDbContext dbContext,
-    Guid ownerId,
-    string connectionAlias,
-    int coursesInScope,
-    DashboardAccessRead access,
-    DateTimeOffset generatedAt,
-    CancellationToken cancellationToken)
-{
-    var snapshotDate = GetBrazilDate(generatedAt);
-    var recent = access.Segments.FirstOrDefault(item => item.Key == "recent")?.Students ?? 0;
-    var low = access.Segments.FirstOrDefault(item => item.Key == "low")?.Students ?? 0;
-    var stale = access.Segments.FirstOrDefault(item => item.Key == "stale")?.Students ?? 0;
-
-    var snapshot = await dbContext.DashboardAccessSnapshots
-        .SingleOrDefaultAsync(item => item.OwnerId == ownerId &&
-                                      item.ConnectionAlias == connectionAlias &&
-                                      item.SnapshotDate == snapshotDate,
-            cancellationToken);
-    if (snapshot is null)
-    {
-        snapshot = new DashboardAccessSnapshotEntity
-        {
-            Id = Guid.NewGuid(),
-            OwnerId = ownerId,
-            ConnectionAlias = connectionAlias,
-            SnapshotDate = snapshotDate,
-        };
-        snapshot.CoursesInScope = coursesInScope;
-        snapshot.TotalStudents = access.TotalStudents;
-        snapshot.RecentStudents = recent;
-        snapshot.LowAccessStudents = low;
-        snapshot.StaleStudents = stale;
-        snapshot.NeverAccessedStudents = access.StudentsNeverAccessed;
-        snapshot.StudentsAtRisk = access.StudentsWithoutAccess14Days;
-        snapshot.GeneratedAt = generatedAt;
-        dbContext.DashboardAccessSnapshots.Add(snapshot);
-        await dbContext.SaveChangesAsync(cancellationToken);
-    }
-
-    var cutoff = snapshotDate.AddDays(-14);
-    return await dbContext.DashboardAccessSnapshots
-        .AsNoTracking()
-        .Where(item => item.OwnerId == ownerId &&
-                       item.ConnectionAlias == connectionAlias &&
-                       item.SnapshotDate >= cutoff &&
-                       item.SnapshotDate <= snapshotDate)
-        .OrderBy(item => item.SnapshotDate)
-        .Select(item => new AppDashboardAccessSnapshotDto(
-            item.SnapshotDate,
-            item.TotalStudents,
-            item.RecentStudents,
-            item.LowAccessStudents,
-            item.StaleStudents,
-            item.NeverAccessedStudents,
-            item.StudentsAtRisk))
-        .ToArrayAsync(cancellationToken);
-}
-
-static DateOnly GetBrazilDate(DateTimeOffset value)
-{
-    var brazil = TimeZoneInfo.FindSystemTimeZoneById(
-        OperatingSystem.IsWindows() ? "E. South America Standard Time" : "America/Sao_Paulo");
-    var local = TimeZoneInfo.ConvertTime(value, brazil);
-    return new DateOnly(local.Year, local.Month, local.Day);
-}
-
 static bool IsLocalReturnUrl(string? returnUrl)
 {
     return !string.IsNullOrWhiteSpace(returnUrl) &&
@@ -5037,7 +4938,15 @@ public sealed record DashboardAccessRead(
     IReadOnlyList<string> Warnings);
 public sealed record AppEnvelope<T>(T Data, AppMeta Meta);
 public sealed record AppListEnvelope<T>(IReadOnlyList<T> Data, AppListMeta Meta);
-public sealed record AppMeta(DateTimeOffset GeneratedAt, string? ConnectionRef);
+public sealed record AppMeta(
+    DateTimeOffset GeneratedAt,
+    string? ConnectionRef,
+    string Source = "live",
+    DateTimeOffset? SnapshotAt = null,
+    long? AgeSeconds = null,
+    bool Stale = false,
+    bool RefreshQueued = false,
+    bool Complete = true);
 public sealed record AppListMeta(
     int Page,
     int PageSize,
@@ -5046,7 +4955,13 @@ public sealed record AppListMeta(
     DateTimeOffset GeneratedAt,
     string? ConnectionRef,
     IReadOnlyList<string>? Warnings = null,
-    int? Total = null);
+    int? Total = null,
+    string Source = "live",
+    DateTimeOffset? SnapshotAt = null,
+    long? AgeSeconds = null,
+    bool Stale = false,
+    bool RefreshQueued = false,
+    bool Complete = true);
 public sealed record AppSessionDto(bool Authenticated, AppUserDto? User);
 public sealed record AppUserDto(Guid Id, string Name, IReadOnlyList<string> Roles, IReadOnlyList<string> Permissions);
 

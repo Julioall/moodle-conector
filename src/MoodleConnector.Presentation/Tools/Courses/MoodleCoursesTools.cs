@@ -19,6 +19,7 @@ public sealed class MoodleCoursesTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
     IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null,
     ILogger<MoodleCoursesTools>? logger = null)
 {
     [MoodleToolMetadata(Family = "courses", Classification = "R1", Kind = "wrapper", CanonicalOperation = "core_enrol_get_users_courses", Structural = false)]
@@ -42,6 +43,7 @@ public sealed class MoodleCoursesTools(
         CancellationToken cancellationToken = default)
     {
         PagedCourses paged;
+        ToolFreshness? freshness = null;
         try
         {
             moodleSelection.Alias = moodleAlias;
@@ -53,7 +55,59 @@ public sealed class MoodleCoursesTools(
                     errorCode: MoodleErrorContract.AuthenticationFailed);
             }
 
-            paged = await mediator.Send(new ListMyCoursesQuery(moodleUserId.Value.ToString(), limite, pagina), cancellationToken);
+            var scope = snapshotContext is null ? null : await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+            var snapshot = scope is null
+                ? null
+                : await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
+
+            if (snapshot is not null)
+            {
+                if (limite is < 1 or > 100)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(limite), "O limite deve estar entre 1 e 100.");
+                }
+
+                if (pagina < 1)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(pagina), "A pagina deve ser maior ou igual a 1.");
+                }
+
+                var courses = snapshot.Data ?? [];
+                var totalPages = courses.Count == 0 ? 0 : (courses.Count + limite - 1) / limite;
+                var pageItems = courses.Skip((pagina - 1) * limite).Take(limite).ToArray();
+                var refreshQueued = snapshot.IsStale && scope is not null && snapshotContext is not null &&
+                    await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+
+                paged = new PagedCourses(pageItems, courses.Count, pagina, limite);
+                freshness = new ToolFreshness(
+                    "snapshot",
+                    snapshot.UpdatedAt,
+                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                    snapshot.IsStale,
+                    refreshQueued,
+                    snapshot.IsComplete,
+                    snapshot.RecordCount > 0 ? snapshot.RecordCount : courses.Count);
+            }
+            else
+            {
+                if (scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                }
+                paged = await mediator.Send(new ListMyCoursesQuery(moodleUserId.Value.ToString(), limite, pagina), cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -91,7 +145,8 @@ public sealed class MoodleCoursesTools(
             [],
             AuditId: Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow,
-            Message: BuildNarration(data));
+            Message: BuildNarration(data),
+            Freshness: freshness);
 
         return new CallToolResult
         {

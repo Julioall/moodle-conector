@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
-import { AlertCircle, AlertTriangle, BookOpen, CalendarDays, CheckSquare, ClipboardCheck, RefreshCw, UserCheck, UsersRound } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { AlertCircle, AlertTriangle, AreaChart, BarChart3, BookOpen, CalendarDays, CheckSquare, ChartLine, ClipboardCheck, RefreshCw, UserCheck, UsersRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatCard } from '@/components/ui/StatCard';
 import { useConnectionScope } from '../connections/useConnectionScope';
-import { dashboardGateway, type DashboardAccessMetric, type DashboardPendingMetric, type DashboardPriority, type DashboardSummaryMetric } from './dashboard-gateway';
+import { dashboardGateway, type DashboardAccessMetric, type DashboardAccessSnapshot, type DashboardPendingMetric, type DashboardPriority, type DashboardSummaryMetric } from './dashboard-gateway';
 
 const DASHBOARD_STALE_TIME = 5 * 60_000;
 const DASHBOARD_GC_TIME = 15 * 60_000;
@@ -33,6 +33,93 @@ function formatSnapshotDate(value: string) {
 
 function metricValue(value?: number | null, loading = false, error = false) {
   return loading ? '…' : error ? '—' : value ?? 0;
+}
+
+const DAILY_CHART_OPTIONS = [
+  { key: 'bars', label: 'Barras agrupadas', icon: BarChart3 },
+  { key: 'lines', label: 'Linhas por faixa', icon: ChartLine },
+  { key: 'area', label: 'Área empilhada', icon: AreaChart },
+] as const;
+
+type DailyChartType = (typeof DAILY_CHART_OPTIONS)[number]['key'];
+type SnapshotSeriesKey = 'recent' | 'low' | 'stale' | 'never';
+
+const DAILY_CHART_SERIES: ReadonlyArray<{ key: SnapshotSeriesKey; label: string; color: string; getValue: (snapshot: DashboardAccessSnapshot) => number }> = [
+  { key: 'recent', label: '0–7 dias', color: 'hsl(var(--status-success))', getValue: (snapshot) => snapshot.recentStudents },
+  { key: 'low', label: '8–14 dias', color: 'hsl(var(--status-warning))', getValue: (snapshot) => snapshot.lowAccessStudents },
+  { key: 'stale', label: '14+ dias', color: 'hsl(var(--risk-risco))', getValue: (snapshot) => snapshot.staleStudents },
+  { key: 'never', label: 'Nunca', color: 'hsl(var(--destructive))', getValue: (snapshot) => snapshot.neverAccessedStudents },
+];
+
+function getNiceChartMax(value: number) {
+  if (value <= 1) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  const normalized = value / magnitude;
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return step * magnitude;
+}
+
+function formatAxisValue(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+}
+
+function DailyAccessChart({ snapshots }: { snapshots: DashboardAccessSnapshot[] }) {
+  const [chartType, setChartType] = useState<DailyChartType>('bars');
+  const chartWidth = 760;
+  const chartHeight = 236;
+  const margin = { top: 14, right: 16, bottom: 34, left: 48 };
+  const plotWidth = chartWidth - margin.left - margin.right;
+  const plotHeight = chartHeight - margin.top - margin.bottom;
+  const maxStudents = Math.max(1, ...snapshots.map((snapshot) => Math.max(snapshot.totalStudents, DAILY_CHART_SERIES.reduce((total, series) => total + series.getValue(snapshot), 0))));
+  const scaleMax = getNiceChartMax(maxStudents);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => scaleMax * ratio);
+  const x = (index: number) => snapshots.length <= 1 ? margin.left + plotWidth / 2 : margin.left + (index / (snapshots.length - 1)) * plotWidth;
+  const y = (value: number) => margin.top + plotHeight - (Math.max(0, value) / scaleMax) * plotHeight;
+  const seriesValue = (snapshot: DashboardAccessSnapshot, seriesIndex: number) => DAILY_CHART_SERIES[seriesIndex].getValue(snapshot);
+  const seriesPath = (seriesIndex: number, stacked: boolean) => snapshots.map((snapshot, index) => {
+    const value = stacked
+      ? DAILY_CHART_SERIES.slice(0, seriesIndex + 1).reduce((total, series) => total + series.getValue(snapshot), 0)
+      : seriesValue(snapshot, seriesIndex);
+    return `${x(index)},${y(value)}`;
+  }).join(' ');
+  const stackedAreaPath = (seriesIndex: number) => {
+    const upper = snapshots.map((snapshot, index) => {
+      const value = DAILY_CHART_SERIES.slice(0, seriesIndex + 1).reduce((total, series) => total + series.getValue(snapshot), 0);
+      return `${x(index)},${y(value)}`;
+    });
+    const lower = snapshots.slice().reverse().map((snapshot, reverseIndex) => {
+      const index = snapshots.length - reverseIndex - 1;
+      const value = DAILY_CHART_SERIES.slice(0, seriesIndex).reduce((total, series) => total + series.getValue(snapshot), 0);
+      return `${x(index)},${y(value)}`;
+    });
+    return `M ${upper.join(' L ')} L ${lower.join(' L ')} Z`;
+  };
+
+  return <div className="space-y-3">
+    <div className="flex items-start justify-between gap-3">
+      <div><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Últimos 15 dias</p></div>
+      <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Tipo de gráfico">
+        {DAILY_CHART_OPTIONS.map((option) => { const Icon = option.icon; return <Button key={option.key} type="button" variant={chartType === option.key ? 'secondary' : 'ghost'} size="icon" className="h-7 w-7 rounded-md text-muted-foreground" onClick={() => setChartType(option.key)} title={option.label} aria-label={option.label} aria-pressed={chartType === option.key}><Icon className="h-3.5 w-3.5" /></Button>; })}
+      </div>
+    </div>
+    <div className="overflow-x-auto pb-1">
+      <div className="min-w-[560px]">
+        <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="h-auto w-full" role="img" aria-label={`Evolução diária de acessos, em alunos, no formato ${DAILY_CHART_OPTIONS.find((option) => option.key === chartType)?.label.toLowerCase()}`}>
+          {ticks.map((tick) => <g key={tick}><line x1={margin.left} x2={chartWidth - margin.right} y1={y(tick)} y2={y(tick)} stroke="hsl(var(--border))" strokeDasharray="2 3" /><text x={margin.left - 8} y={y(tick) + 3} textAnchor="end" className="fill-muted-foreground" fontSize="10">{formatAxisValue(tick)}</text></g>)}
+          {chartType === 'bars' && snapshots.map((snapshot, index) => {
+            const barWidth = Math.max(5, Math.min(10, plotWidth / Math.max(snapshots.length * 4, 1)));
+            const barGap = 2;
+            const groupWidth = DAILY_CHART_SERIES.length * barWidth + (DAILY_CHART_SERIES.length - 1) * barGap;
+            return <g key={snapshot.date}>{DAILY_CHART_SERIES.map((series, seriesIndex) => { const value = seriesValue(snapshot, seriesIndex); const barX = x(index) - groupWidth / 2 + seriesIndex * (barWidth + barGap); return value > 0 ? <rect key={series.key} x={barX} y={y(value)} width={barWidth} height={Math.max(1, y(0) - y(value))} rx="2" fill={series.color}><title>{`${formatSnapshotDate(snapshot.date)} · ${series.label} · ${value} alunos`}</title></rect> : null; })}</g>;
+          })}
+          {chartType === 'area' && DAILY_CHART_SERIES.map((series, seriesIndex) => <path key={series.key} d={stackedAreaPath(seriesIndex)} fill={series.color} fillOpacity="0.2" stroke={series.color} strokeWidth="1.5"><title>{series.label}</title></path>)}
+          {chartType === 'lines' && DAILY_CHART_SERIES.map((series, seriesIndex) => <g key={series.key}><polyline fill="none" stroke={series.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" points={seriesPath(seriesIndex, false)} />{snapshots.map((snapshot, index) => <circle key={snapshot.date} cx={x(index)} cy={y(seriesValue(snapshot, seriesIndex))} r="2.5" fill={series.color}><title>{`${formatSnapshotDate(snapshot.date)} · ${series.label} · ${seriesValue(snapshot, seriesIndex)} alunos`}</title></circle>)}</g>)}
+          {snapshots.map((snapshot, index) => <text key={snapshot.date} x={x(index)} y={chartHeight - 10} textAnchor="middle" className="fill-muted-foreground" fontSize="10">{formatSnapshotDate(snapshot.date)}</text>)}
+        </svg>
+      </div>
+    </div>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span className="font-medium">Alunos</span>{DAILY_CHART_SERIES.map((series) => <span key={series.key}><i className="mr-1 inline-block h-2 w-2 rounded-sm" style={{ backgroundColor: series.color }} />{series.label}</span>)}</div>
+  </div>;
 }
 
 export function DashboardPage() {
@@ -97,8 +184,6 @@ export function DashboardPage() {
   const correctionCount = Math.max(analyzedCorrectionDeliveries, summary.pendingCorrectionAssignments ?? 0, pendingQuery.data?.data.activitiesToReview.length ?? 0);
   const accessSegments = accessQuery.data?.data.segments ?? [];
   const accessSnapshots = accessQuery.data?.data.snapshots ?? [];
-  const snapshotMax = Math.max(1, ...accessSnapshots.map((snapshot) => snapshot.totalStudents));
-  const neverAccessedCount = accessSegments.find((segment) => segment.key === 'never')?.students ?? summary.neverAccessedStudents ?? 0;
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="dashboard-title">
@@ -110,7 +195,7 @@ export function DashboardPage() {
       <section className="space-y-4" aria-labelledby="signals-title">
         <div className="flex items-center justify-between"><h2 id="signals-title" className="text-lg font-semibold">Sinais do monitoramento</h2><span className="text-xs text-muted-foreground">Cada métrica possui atualização própria</span></div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-          <StatCard title="Cursos acompanhados" value={metricValue(summary.activeCourses, isSummaryLoading, summaryQuery.isError)} subtitle="escopo de Meus Cursos" icon={BookOpen} variant="pending" onRefresh={() => refresh('summary')} refreshing={summaryQuery.isFetching} />
+          <StatCard title="Meus Cursos" value={metricValue(summary.activeCourses, isSummaryLoading, summaryQuery.isError)} subtitle="cursos acompanhados" icon={BookOpen} variant="pending" onRefresh={() => refresh('summary')} refreshing={summaryQuery.isFetching} />
           <StatCard title="Eventos hoje" value={metricValue(summary.todayEvents, isSummaryLoading, summaryQuery.isError)} subtitle="agenda local" icon={CalendarDays} variant="pending" onRefresh={() => refresh('summary')} refreshing={summaryQuery.isFetching} />
           <StatCard title="Tarefas para hoje" value={metricValue(summary.todayTasks, isSummaryLoading, summaryQuery.isError)} subtitle="com vencimento hoje" icon={CheckSquare} variant="risk" onRefresh={() => refresh('summary')} refreshing={summaryQuery.isFetching} />
           <StatCard title="Entregas para corrigir" value={metricValue(correctionCount, isPendingLoading || isPendingRefreshing, pendingQuery.isError)} subtitle={isPendingLoading || isPendingRefreshing ? 'atualizando todos os cursos' : pendingQuery.isError ? 'não foi possível consultar' : `${correctionCount} aguardando correção`} icon={ClipboardCheck} variant="warning" onRefresh={() => refresh('pending')} refreshing={pendingQuery.isFetching || isPendingRefreshing} />
@@ -133,8 +218,8 @@ export function DashboardPage() {
       </Card>
 
       <Card>
-        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3"><CardTitle className="flex items-center gap-2 text-lg"><UsersRound className="h-5 w-5 text-primary" /> Acesso dos alunos</CardTitle><Button variant="ghost" size="sm" onClick={() => refresh('access')} disabled={accessQuery.isFetching}><RefreshCw className={`mr-1 h-4 w-4 ${accessQuery.isFetching ? 'animate-spin' : ''}`} /> Atualizar</Button></CardHeader>
-        <CardContent className="space-y-5"><div className="grid gap-4 sm:grid-cols-3"><div><p className="text-3xl font-bold">{metricValue(summary.activeStudents, isAccessLoading, accessQuery.isError)}</p><p className="text-sm text-muted-foreground">alunos matriculados únicos</p></div><div><p className="text-2xl font-bold">{metricValue(summary.studentsAtRisk, isAccessLoading, accessQuery.isError)}</p><p className="text-sm text-muted-foreground">sem acesso há 14+ dias</p></div><div><p className="text-2xl font-bold">{metricValue(neverAccessedCount, isAccessLoading, accessQuery.isError)}</p><p className="text-sm text-muted-foreground">nunca acessaram</p></div></div><div className="space-y-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Distribuição por frequência de acesso</p>{accessSegments.length > 0 ? accessSegments.map((segment) => { const total = summary.activeStudents ?? 0; const width = total > 0 ? Math.min(100, (segment.students / total) * 100) : 0; const tone = segment.key === 'never' ? 'bg-destructive' : segment.tone === 'success' ? 'bg-status-success' : segment.tone === 'warning' ? 'bg-status-warning' : 'bg-risk-risco'; return <div key={segment.key} className="space-y-1.5"><div className="flex justify-between gap-3 text-xs"><span>{segment.label}</span><span className="font-medium">{segment.students}</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full ${tone} transition-all`} style={{ width: `${width}%` }} /></div></div>; }) : <div className="h-2 rounded-full bg-muted" />}</div>{accessSnapshots.length > 0 && <div className="space-y-3 border-t pt-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evolução diária · últimos 15 dias</p><p className="mt-1 text-xs text-muted-foreground">Cada ponto é um snapshot agregado do dia; o histórico começa no primeiro carregamento.</p></div><div className="flex items-end gap-1 overflow-x-auto pb-1" aria-label="Evolução diária de acessos e riscos">{accessSnapshots.map((snapshot) => <div key={snapshot.date} className="flex min-w-8 flex-1 flex-col items-center gap-1" title={`${formatSnapshotDate(snapshot.date)} · ${snapshot.totalStudents} alunos · ${snapshot.studentsAtRisk} em risco`}><div className="flex h-20 w-full items-end justify-center gap-0.5 rounded bg-muted/40 px-0.5 pt-1">{[['bg-status-success', snapshot.recentStudents], ['bg-status-warning', snapshot.lowAccessStudents], ['bg-risk-risco', snapshot.staleStudents], ['bg-destructive', snapshot.neverAccessedStudents]].map(([tone, value]) => <div key={tone as string} className={`w-1.5 rounded-t ${tone as string}`} style={{ height: `${Math.max(value as number, value as number > 0 ? 4 : 0) / snapshotMax * 100}%` }} />)}</div><span className="text-[10px] text-muted-foreground">{formatSnapshotDate(snapshot.date)}</span></div>)}</div><div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground"><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-status-success" />0–7 dias</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-status-warning" />8–14 dias</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-risk-risco" />14+ dias</span><span><i className="mr-1 inline-block h-2 w-2 rounded-sm bg-destructive" />nunca</span></div></div>}<p className="text-xs text-muted-foreground">Baixo acesso representa 8–14 dias; sem acesso representa 14+ dias; “nunca acessaram” não possuem registro de acesso.</p></CardContent>
+        <CardHeader className="flex-row items-center justify-between space-y-0 pb-3"><CardTitle className="flex items-center gap-2 text-lg"><UsersRound className="h-5 w-5 text-primary" /> Acessos hoje</CardTitle><Button variant="ghost" size="sm" onClick={() => refresh('access')} disabled={accessQuery.isFetching}><RefreshCw className={`mr-1 h-4 w-4 ${accessQuery.isFetching ? 'animate-spin' : ''}`} /> Atualizar</Button></CardHeader>
+        <CardContent className="space-y-5"><div><p className="text-3xl font-bold">{metricValue(summary.activeStudents, isAccessLoading, accessQuery.isError)}</p><p className="text-sm text-muted-foreground">alunos matriculados únicos</p></div><div className="space-y-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Distribuição por frequência de acesso</p>{accessSegments.length > 0 ? accessSegments.map((segment) => { const total = summary.activeStudents ?? 0; const width = total > 0 ? Math.min(100, (segment.students / total) * 100) : 0; const tone = segment.key === 'never' ? 'bg-destructive' : segment.tone === 'success' ? 'bg-status-success' : segment.tone === 'warning' ? 'bg-status-warning' : 'bg-risk-risco'; return <div key={segment.key} className="space-y-1.5"><div className="flex justify-between gap-3 text-xs"><span>{segment.label}</span><span className="font-medium">{segment.students}</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full ${tone} transition-all`} style={{ width: `${width}%` }} /></div></div>; }) : <div className="h-2 rounded-full bg-muted" />}</div>{accessSnapshots.length > 0 && <DailyAccessChart snapshots={accessSnapshots} />}</CardContent>
       </Card>
 
       {notices.length > 0 && <details className="rounded-md border border-amber-200/70 bg-amber-50/40 text-sm dark:border-amber-900/70 dark:bg-amber-950/10"><summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-amber-900 dark:text-amber-100"><AlertCircle className="h-4 w-4 shrink-0" /><span>{notices.length} aviso{notices.length === 1 ? '' : 's'} de atualização</span><span className="ml-auto text-xs text-muted-foreground">Ver detalhes</span></summary><ul className="space-y-1 border-t border-amber-200/70 px-8 py-3 text-xs text-muted-foreground dark:border-amber-900/70">{notices.map((notice) => <li key={notice}>{notice}</li>)}</ul></details>}

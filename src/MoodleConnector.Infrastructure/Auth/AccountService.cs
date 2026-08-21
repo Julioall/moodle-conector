@@ -372,6 +372,16 @@ internal sealed class AccountService(
             // Audit logs are retained for accountability and are never deleted here.
         }
 
+        // Snapshots and durable refresh states are derived from this Moodle
+        // connection. Keeping them after disconnect would both waste storage
+        // and allow a later reconnect to observe stale data.
+        dbContext.MoodleSnapshots.RemoveRange(await dbContext.MoodleSnapshots
+            .Where(item => item.OwnerId == userId && item.ConnectionAlias == clientEntity.MoodleAlias)
+            .ToListAsync(cancellationToken));
+        dbContext.MoodleSyncStates.RemoveRange(await dbContext.MoodleSyncStates
+            .Where(item => item.OwnerId == userId && item.ConnectionAlias == clientEntity.MoodleAlias)
+            .ToListAsync(cancellationToken));
+
         dbContext.ConnectorClients.Remove(clientEntity);
 
         // Verify if it was the last default, and pick another one to be default if exists
@@ -404,6 +414,12 @@ internal sealed class AccountService(
 
         var clientId = account.ConnectorClientId ?? account.Id.ToString();
         var subjects = new[] { account.Id.ToString(), clientId }.Distinct().ToArray();
+        dbContext.MoodleSnapshots.RemoveRange(await dbContext.MoodleSnapshots
+            .Where(item => item.OwnerId == request.UserId)
+            .ToListAsync(cancellationToken));
+        dbContext.MoodleSyncStates.RemoveRange(await dbContext.MoodleSyncStates
+            .Where(item => item.OwnerId == request.UserId)
+            .ToListAsync(cancellationToken));
         var pendingActions = await dbContext.PendingMoodleActions
             .Where(action => subjects.Contains(action.CreatedBySubject))
             .ToListAsync(cancellationToken);

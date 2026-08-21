@@ -7,14 +7,34 @@ public sealed record MoodleSnapshotSyncRequest(
     string ClientId,
     string ConnectionAlias,
     string UserExternalId,
-    bool Force = false);
+    bool Force = false,
+    string Dataset = MoodleSnapshotDatasets.Connection,
+    string? CourseId = null,
+    int Priority = 50);
+
+public static class MoodleSnapshotDatasets
+{
+    public const string Connection = "connection";
+    public const string Courses = "courses";
+    public const string Activities = "activities";
+    public const string Students = "students";
+    public const string Groups = "groups";
+    public const string DashboardPending = "dashboard_pending";
+    public const string DashboardAccess = "dashboard_access";
+}
 
 public sealed record MoodleSnapshotEnvelope<T>(
     T Data,
     DateTimeOffset UpdatedAt,
     bool IsStale,
     bool IsFrozen,
-    string Tier);
+    string Tier,
+    DateTimeOffset? FreshUntil = null,
+    DateTimeOffset? StaleUntil = null,
+    DateTimeOffset? LastAttemptAt = null,
+    string? LastError = null,
+    bool IsComplete = true,
+    int RecordCount = 0);
 
 public interface IMoodleSnapshotStore
 {
@@ -34,9 +54,41 @@ public interface IMoodleSnapshotStore
         string connectionAlias,
         string courseId,
         CancellationToken cancellationToken = default);
+
+    Task<MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>?> GetGroupsAsync(
+        Guid ownerId,
+        string connectionAlias,
+        string courseId,
+        CancellationToken cancellationToken = default);
+
+    Task<MoodleSnapshotEnvelope<T>?> GetAsync<T>(
+        Guid ownerId,
+        string connectionAlias,
+        string dataset,
+        string courseId = "",
+        CancellationToken cancellationToken = default);
+
+    Task SaveAsync<T>(
+        Guid ownerId,
+        string connectionAlias,
+        string dataset,
+        string courseId,
+        T payload,
+        string tier,
+        bool frozen,
+        bool complete,
+        int recordCount,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default);
+
+    void Invalidate(Guid ownerId, string connectionAlias, string dataset, string courseId = "");
 }
 
 public interface IMoodleSnapshotSyncQueue
 {
     bool Enqueue(MoodleSnapshotSyncRequest request);
+
+    Task<bool> EnqueueAsync(
+        MoodleSnapshotSyncRequest request,
+        CancellationToken cancellationToken = default);
 }

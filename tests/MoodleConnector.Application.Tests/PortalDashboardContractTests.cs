@@ -74,5 +74,35 @@ public sealed class AppDashboardContractTests
         Assert.Equal(10, metric.Snapshots[0].TotalStudents);
         Assert.Equal(2, metric.Snapshots[0].StudentsAtRisk);
     }
+
+    [Fact]
+    public void Daily_access_snapshot_keeps_the_latest_observation_of_the_day()
+    {
+        var first = new DateTimeOffset(2026, 8, 20, 12, 0, 0, TimeSpan.Zero);
+        var second = first.AddHours(4);
+        var entity = new MoodleConnector.Infrastructure.DashboardAccessSnapshotEntity
+        {
+            GeneratedAt = first,
+        };
+
+        Assert.False(DashboardAccessSnapshotHistoryPolicy.ShouldReplace(entity.GeneratedAt, first));
+        Assert.True(DashboardAccessSnapshotHistoryPolicy.ShouldReplace(entity.GeneratedAt, second));
+
+        DashboardAccessSnapshotHistoryPolicy.Apply(
+            entity,
+            coursesInScope: 34,
+            totalStudents: 120,
+            recentStudents: 80,
+            lowAccessStudents: 15,
+            staleStudents: 20,
+            neverAccessedStudents: 5,
+            studentsAtRisk: 25,
+            generatedAt: second);
+
+        Assert.Equal(second, entity.GeneratedAt);
+        Assert.Equal(120, entity.TotalStudents);
+        Assert.Equal(34, entity.CoursesInScope);
+        Assert.Equal(25, entity.StudentsAtRisk);
+    }
 }
 

@@ -45,7 +45,7 @@ export function StatCard({
       className
     )}>
       <div className="flex items-start justify-between gap-2">
-        <div className="space-y-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <p className="text-sm font-medium text-muted-foreground">{title}</p>
           <p className="text-2xl font-bold tracking-tight">{value}</p>
           {subtitle && (
@@ -60,7 +60,7 @@ export function StatCard({
             </p>
           )}
         </div>
-        <div className="flex items-start gap-1">
+        <div className="flex shrink-0 items-start gap-1">
           {onRefresh && <Button type="button" variant="ghost" size="icon" className="h-7 w-7" aria-label={`Atualizar ${title}`} title={`Atualizar ${title}`} onClick={onRefresh} disabled={refreshing}><RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} /></Button>}
           {Icon && <div className={cn('rounded-lg p-2')}>
             <Icon className={cn(

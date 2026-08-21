@@ -56,7 +56,7 @@ public sealed class PortalMcpIdentityResolver(IHttpContextAccessor httpContextAc
     }
 
     private static PortalMcpIdentity ToIdentity(UserAccountEntity account) =>
-        new(account.Id, account.Name, account.Email);
+        new(account.Id, account.Name, account.Email, account.ConnectorClientId);
 }
 
-public sealed record PortalMcpIdentity(Guid Id, string Name, string Email);
+public sealed record PortalMcpIdentity(Guid Id, string Name, string Email, string? ConnectorClientId = null);

@@ -15,7 +15,8 @@ namespace MoodleConnector.Presentation.Tools;
 public sealed class MoodleCourseActivitiesTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     [McpServerTool(
         Name = "list_course_activities",
@@ -210,11 +211,52 @@ public sealed class MoodleCourseActivitiesTools(
         }
 
         CourseActivitiesSummary? activities;
+        ToolFreshness? freshness = null;
         try
         {
-            activities = await mediator.Send(
-                new ListCourseActivitiesQuery(moodleUserId.Value.ToString(), courseId, activityTypes, includeHidden),
-                cancellationToken);
+            var scope = snapshotContext is null ? null : await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+            var snapshotCourseId = snapshotContext is null ? courseId : await ResolveSnapshotCourseIdAsync(scope, courseId, cancellationToken);
+            var snapshot = !includeHidden && scope is not null
+                ? await snapshotContext!.GetActivitiesAsync(scope, snapshotCourseId, cancellationToken)
+                : null;
+
+            if (snapshot?.Data is not null && !snapshot.Data.IncludeHidden)
+            {
+                activities = ToCachedActivities(snapshot.Data, activityTypes, includeHidden);
+                var refreshQueued = snapshot.IsStale && scope is not null && snapshotContext is not null &&
+                    await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Activities,
+                        snapshotCourseId,
+                        priority: 10,
+                        cancellationToken: cancellationToken);
+                freshness = new ToolFreshness(
+                    "snapshot",
+                    snapshot.UpdatedAt,
+                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                    snapshot.IsStale,
+                    refreshQueued,
+                    snapshot.IsComplete,
+                    snapshot.RecordCount > 0 ? snapshot.RecordCount : activities.Total);
+            }
+            else
+            {
+                if (snapshot is null && scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Activities,
+                        snapshotCourseId,
+                        priority: 10,
+                        cancellationToken: cancellationToken);
+                }
+
+                activities = await mediator.Send(
+                    new ListCourseActivitiesQuery(moodleUserId.Value.ToString(), courseId, activityTypes, includeHidden),
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -231,7 +273,8 @@ public sealed class MoodleCourseActivitiesTools(
         }
 
         var data = ToActivitiesResponse(activities);
-        var response = new ToolResponse<ListCourseActivitiesResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<ListCourseActivitiesResponse>(
+            "ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult
         {
@@ -357,6 +400,85 @@ public sealed class MoodleCourseActivitiesTools(
 
         return $"Encontrei {response.Total} atividade(s). {response.WithoutDeadlineCount} sem prazo de fechamento/entrega retornado pelo Moodle.";
     }
+
+    private async Task<string> ResolveSnapshotCourseIdAsync(
+        MoodleSnapshotToolScope? scope,
+        string courseId,
+        CancellationToken cancellationToken)
+    {
+        if (scope is null)
+        {
+            return courseId;
+        }
+
+        var courses = await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
+        var match = courses?.Data.FirstOrDefault(course =>
+            string.Equals(course.CourseId, courseId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(course.ShortName, courseId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(course.IdNumber, courseId, StringComparison.OrdinalIgnoreCase));
+        return match?.CourseId ?? courseId;
+    }
+
+    private static CourseActivitiesSummary ToCachedActivities(
+        CourseContentsSummary contents,
+        IReadOnlyCollection<string> requestedTypes,
+        bool includeHidden)
+    {
+        var types = NormalizeActivityTypes(requestedTypes);
+        var activities = contents.Sections
+            .SelectMany(section => section.Modules)
+            .Where(module => types.Contains(module.ModuleType, StringComparer.OrdinalIgnoreCase))
+            .Where(module => includeHidden || module.UserVisible != false)
+            .Select(ToCachedActivity)
+            .ToArray();
+
+        return new CourseActivitiesSummary(
+            contents.CourseId,
+            types,
+            includeHidden,
+            activities.Length,
+            activities.Count(activity => !activity.HasDates),
+            activities.Count(activity => !activity.HasDeadline),
+            activities);
+    }
+
+    private static IReadOnlyCollection<string> NormalizeActivityTypes(IReadOnlyCollection<string> types)
+    {
+        var normalized = types
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Select(type => type.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return normalized.Length == 0 ? CourseActivityModuleTypes.All : normalized;
+    }
+
+    private static CourseActivitySummary ToCachedActivity(CourseModuleSummary module)
+    {
+        var openAt = FindDate(module.Dates, "open", "abre", "abertura", "disponivel de", "available from");
+        var dueAt = FindDate(module.Dates, "due", "entrega", "prazo", "vencimento", "cut-off", "cutoff");
+        var closeAt = FindDate(module.Dates, "close", "fecha", "fechamento", "available until", "disponivel ate");
+        return new CourseActivitySummary(
+            module.ModuleId,
+            module.InstanceId,
+            module.ModuleType,
+            module.Name,
+            module.Url,
+            module.Visible,
+            module.UserVisible,
+            module.Description,
+            module.AvailabilityInfo,
+            module.Dates.Count > 0,
+            dueAt is not null || closeAt is not null,
+            openAt,
+            dueAt,
+            closeAt,
+            module.Dates,
+            module.Files.Count);
+    }
+
+    private static DateTimeOffset? FindDate(IReadOnlyList<CourseModuleDate> dates, params string[] labels) =>
+        dates.FirstOrDefault(date => labels.Any(label =>
+            date.Label.Contains(label, StringComparison.OrdinalIgnoreCase)))?.Date;
 
     private static string BuildDeadlinesNarration(ListActivityDeadlinesResponse response)
     {

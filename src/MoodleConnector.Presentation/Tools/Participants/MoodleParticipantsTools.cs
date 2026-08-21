@@ -15,7 +15,8 @@ namespace MoodleConnector.Presentation.Tools;
 public sealed class MoodleParticipantsTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     [McpServerTool(
         Name = "list_course_participants",
@@ -175,18 +176,77 @@ public sealed class MoodleParticipantsTools(
         }
 
         CourseParticipantsPage? participantsPage;
+        ToolFreshness? freshness = null;
         try
         {
-            participantsPage = await mediator.Send(
-                new ListCourseParticipantsQuery(
-                    moodleUserId.Value.ToString(),
-                    courseId,
-                    statusFilter,
+            var scope = snapshotContext is null
+                ? null
+                : await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+            var snapshotCourseId = await ResolveSnapshotCourseIdAsync(scope, courseId, cancellationToken);
+            var snapshot = studentsOnly && statusFilter == ParticipantStatusFilter.Active && !includeEmail && scope is not null
+                ? await snapshotContext!.GetStudentsAsync(scope, snapshotCourseId, cancellationToken)
+                : null;
+
+            if (snapshot?.Data is { } cached && cached.StudentsOnly &&
+                cached.StatusFilter == ParticipantStatusFilter.Active && !cached.IncludeEmail)
+            {
+                var allParticipants = cached.Participants;
+                var pagedParticipants = allParticipants
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToArray();
+                participantsPage = new CourseParticipantsPage(
+                    cached.CourseId,
                     page,
                     pageSize,
-                    studentsOnly,
-                    includeEmail),
-                cancellationToken);
+                    ParticipantStatusFilter.Active,
+                    true,
+                    false,
+                    cached.HasMore || page * pageSize < allParticipants.Count,
+                    pagedParticipants,
+                    cached.ClassificationDiagnostics);
+
+                var refreshQueued = snapshot.IsStale && scope is not null &&
+                    await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Students,
+                        snapshotCourseId,
+                        priority: 10,
+                        cancellationToken: cancellationToken);
+                freshness = new ToolFreshness(
+                    "snapshot",
+                    snapshot.UpdatedAt,
+                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                    snapshot.IsStale,
+                    refreshQueued,
+                    snapshot.IsComplete,
+                    snapshot.RecordCount > 0 ? snapshot.RecordCount : allParticipants.Count);
+            }
+            else
+            {
+                if (snapshot is null && scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Students,
+                        snapshotCourseId,
+                        priority: 10,
+                        cancellationToken: cancellationToken);
+                }
+
+                participantsPage = await mediator.Send(
+                    new ListCourseParticipantsQuery(
+                        moodleUserId.Value.ToString(),
+                        courseId,
+                        statusFilter,
+                        page,
+                        pageSize,
+                        studentsOnly,
+                        includeEmail),
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -206,7 +266,7 @@ public sealed class MoodleParticipantsTools(
             return ToolResultHelper.Error<ListCourseParticipantsResponse>("Curso nao encontrado entre os cursos vinculados ao usuario.");
         }
 
-        return ParticipantsSuccess(participantsPage);
+        return ParticipantsSuccess(participantsPage, freshness);
     }
 
     private async Task<CallToolResult> ListGroupMembersCoreAsync(
@@ -294,11 +354,54 @@ public sealed class MoodleParticipantsTools(
         }
 
         IReadOnlyList<CourseGroupSummary>? groups;
+        ToolFreshness? freshness = null;
         try
         {
-            groups = await mediator.Send(
-                new ListCourseGroupsQuery(moodleUserId.Value.ToString(), courseId),
-                cancellationToken);
+            var scope = snapshotContext is null
+                ? null
+                : await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+            var snapshotCourseId = await ResolveSnapshotCourseIdAsync(scope, courseId, cancellationToken);
+            var snapshot = scope is null
+                ? null
+                : await snapshotContext!.GetGroupsAsync(scope, snapshotCourseId, cancellationToken);
+
+            if (snapshot?.Data is not null)
+            {
+                groups = snapshot.Data;
+                var refreshQueued = snapshot.IsStale && scope is not null &&
+                    await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Groups,
+                        snapshotCourseId,
+                        priority: 10,
+                        cancellationToken: cancellationToken);
+                freshness = new ToolFreshness(
+                    "snapshot",
+                    snapshot.UpdatedAt,
+                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                    snapshot.IsStale,
+                    refreshQueued,
+                    snapshot.IsComplete,
+                    snapshot.RecordCount > 0 ? snapshot.RecordCount : groups.Count);
+            }
+            else
+            {
+                if (scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Groups,
+                        snapshotCourseId,
+                        priority: 10,
+                        cancellationToken: cancellationToken);
+                }
+
+                groups = await mediator.Send(
+                    new ListCourseGroupsQuery(moodleUserId.Value.ToString(), courseId),
+                    cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -318,7 +421,8 @@ public sealed class MoodleParticipantsTools(
             courseId,
             groups.Count,
             groups.Select(ToGroupItem).ToArray());
-        var response = new ToolResponse<ListCourseGroupsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<ListCourseGroupsResponse>(
+            "ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult
         {
@@ -328,7 +432,27 @@ public sealed class MoodleParticipantsTools(
         };
     }
 
-    private static CallToolResult ParticipantsSuccess(CourseParticipantsPage participantsPage)
+    private async Task<string> ResolveSnapshotCourseIdAsync(
+        MoodleSnapshotToolScope? scope,
+        string courseId,
+        CancellationToken cancellationToken)
+    {
+        if (scope is null)
+        {
+            return courseId;
+        }
+
+        var courses = await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
+        var match = courses?.Data.FirstOrDefault(course =>
+            string.Equals(course.CourseId, courseId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(course.ShortName, courseId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(course.IdNumber, courseId, StringComparison.OrdinalIgnoreCase));
+        return match?.CourseId ?? courseId;
+    }
+
+    private static CallToolResult ParticipantsSuccess(
+        CourseParticipantsPage participantsPage,
+        ToolFreshness? freshness = null)
     {
         var data = new ListCourseParticipantsResponse(
             participantsPage.CourseId,
@@ -345,7 +469,8 @@ public sealed class MoodleParticipantsTools(
             data,
             BuildParticipantWarnings(participantsPage),
             AuditId: null,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            Freshness: freshness);
 
         return new CallToolResult
         {

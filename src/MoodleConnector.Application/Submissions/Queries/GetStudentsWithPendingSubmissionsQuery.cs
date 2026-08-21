@@ -37,6 +37,7 @@ public sealed record GetStudentsWithPendingSubmissionsResult(
     string? Warning)
 {
     public IReadOnlyList<(string StudentId, string FullName, DateTimeOffset? LastCourseAccessAt, AwaitingGradingItem Item)> AwaitingGrading { get; init; } = [];
+    public bool IsComplete { get; init; } = true;
 }
 
 /// <summary>
@@ -109,7 +110,10 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 DueDaysAhead: request.DueDaysAhead,
                 Students: [],
                 SuggestedRecipientIds: [],
-                Warning: "Não foi possível carregar os conteúdos do curso para identificar atividades.");
+                Warning: "Não foi possível carregar os conteúdos do curso para identificar atividades.")
+            {
+                IsComplete = false,
+            };
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -165,6 +169,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         // cursos cause rajadas de chamadas e respostas incompletas.
         using var feedbackStatusLimiter = new SemaphoreSlim(4);
         var feedbackStatusUnavailable = false;
+        var submissionReadFailed = false;
 
         IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches;
         var submissionFailures = new List<string>();
@@ -181,6 +186,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         catch
         {
             submissionBatches = [];
+            submissionReadFailed = true;
         }
 
         var contextsByAssignmentId = assignmentContexts
@@ -284,10 +290,19 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             .ToList();
 
         string? warning = null;
-        if (assignmentsProcessed == 0)
+        if (assignModules.Count == 0)
         {
-            warning = "Nenhuma atividade do tipo 'assign' foi encontrada ou processada no curso. " +
-                      "Verifique se o curso possui atividades avaliativas configuradas.";
+            warning = "Nenhuma atividade do tipo 'assign' foi encontrada no curso. " +
+                      "Verifique se há atividades avaliativas configuradas.";
+        }
+        else if (assignmentContexts.Length == 0)
+        {
+            warning = "As atividades do tipo 'assign' encontradas ficaram fora do período solicitado para esta consulta.";
+        }
+        else if (assignmentsProcessed == 0)
+        {
+            warning = "Foram encontradas atividades do tipo 'assign', mas nenhuma foi processada. " +
+                      "Verifique os erros de leitura retornados pelo Moodle.";
         }
         else if (request.MaxAssignmentsToAnalyze > 0 && assignModules.Count > request.MaxAssignmentsToAnalyze)
         {
@@ -306,6 +321,14 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             var submissionWarning = "Não foi possível ler as submissões de " +
                 $"{submissionFailures.Count} atividade(s): {string.Join(", ", submissionFailures)}. " +
                 "As demais atividades foram processadas normalmente.";
+            warning = string.IsNullOrWhiteSpace(warning)
+                ? submissionWarning
+                : $"{warning} {submissionWarning}";
+        }
+
+        if (submissionReadFailed)
+        {
+            const string submissionWarning = "Não foi possível ler as submissões das atividades avaliativas; a contagem deste curso está incompleta.";
             warning = string.IsNullOrWhiteSpace(warning)
                 ? submissionWarning
                 : $"{warning} {submissionWarning}";
@@ -330,6 +353,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             Warning: warning)
         {
             AwaitingGrading = awaitingGrading,
+            IsComplete = !feedbackStatusUnavailable && !submissionReadFailed && submissionFailures.Count == 0,
         };
     }
 

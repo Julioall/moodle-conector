@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -36,9 +36,17 @@ describe('DashboardPage', () => {
 
     await waitFor(() => expect(screen.getByText('Eventos hoje')).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText('Pendências por curso')).toBeInTheDocument());
-    expect(screen.getByText('Cursos acompanhados')).toBeInTheDocument();
+    expect(screen.getByText('Meus Cursos', { exact: true })).toBeInTheDocument();
     expect(screen.getByText('Curso de demonstração')).toBeInTheDocument();
-    expect(screen.getByText('Evolução diária · últimos 15 dias')).toBeInTheDocument();
+    expect(screen.getByText('Últimos 15 dias')).toBeInTheDocument();
+    expect(screen.getByText('Alunos', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('14+ dias', { exact: true })).toBeInTheDocument();
+    expect(screen.getByText('Nunca', { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Barras agrupadas' })).toHaveAttribute('aria-pressed', 'true');
+    const lineChartButton = screen.getByRole('button', { name: 'Linhas por faixa' });
+    fireEvent.click(lineChartButton);
+    expect(lineChartButton).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Área empilhada' })).toHaveAttribute('aria-pressed', 'false');
     expect(dashboardGateway.getMetric).toHaveBeenCalledWith('summary', 'demo');
     expect(dashboardGateway.getMetric).toHaveBeenCalledWith('pending', 'demo');
     expect(dashboardGateway.getMetric).toHaveBeenCalledWith('access', 'demo');
