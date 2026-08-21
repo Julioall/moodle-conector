@@ -34,6 +34,7 @@ internal sealed class MoodleSnapshotSyncQueue(
     private readonly HashSet<string> _pending = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> ConnectionLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly DateTimeOffset _applicationStartedAt = DateTimeOffset.UtcNow;
 
     public bool Enqueue(MoodleSnapshotSyncRequest request) =>
         EnqueueAsync(request).GetAwaiter().GetResult();
@@ -54,7 +55,7 @@ internal sealed class MoodleSnapshotSyncQueue(
                     item.CourseId == (request.CourseId ?? string.Empty),
             cancellationToken);
 
-        if (state?.Status == "running")
+        if (state is not null && MoodleSyncLeasePolicy.IsActive(state, now))
         {
             // A running job already owns the key. A subsequent force refresh is
             // represented by the next scheduled attempt instead of duplicating
@@ -106,6 +107,7 @@ internal sealed class MoodleSnapshotSyncQueue(
 
         try
         {
+            await RecoverOrphanedStatesAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
                 while (_queue.Reader.TryRead(out var request))
@@ -137,7 +139,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             .Where(item => item.ClientId != string.Empty &&
                           item.NextSyncAt != null &&
                           item.NextSyncAt <= now &&
-                          item.Status != "running")
+                          (item.Status != "running" || item.LeaseUntil == null || item.LeaseUntil <= now))
             .OrderBy(item => item.Priority)
             .ThenBy(item => item.NextSyncAt)
             .Take(32)
@@ -157,11 +159,47 @@ internal sealed class MoodleSnapshotSyncQueue(
         }
     }
 
+    private async Task RecoverOrphanedStatesAsync(CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var orphanedStates = await db.MoodleSyncStates
+            .Where(item => item.Dataset != MoodleSnapshotDatasets.DashboardPending &&
+                           item.Status == "running" &&
+                           (item.LastStartedAt == null || item.LastStartedAt < _applicationStartedAt))
+            .ToListAsync(cancellationToken);
+
+        foreach (var orphanedState in orphanedStates)
+        {
+            orphanedState.Status = "pending";
+            orphanedState.LeaseUntil = null;
+            orphanedState.NextSyncAt = now;
+            orphanedState.LastError = null;
+            orphanedState.UpdatedAt = now;
+        }
+
+        var recovered = orphanedStates.Count;
+        if (recovered > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        if (recovered > 0)
+        {
+            logger.LogWarning(
+                "Estados de sincronização órfãos recuperados após reinicialização. Count={Count}",
+                recovered);
+        }
+    }
+
     private async Task ProcessRequestAsync(
         MoodleSnapshotSyncRequest request,
         CancellationToken cancellationToken)
     {
         var key = BuildKey(request);
+        CancellationTokenSource? leaseHeartbeatCancellation = null;
+        Task? leaseHeartbeat = null;
         try
         {
             var work = await TryClaimAsync(request, cancellationToken);
@@ -169,6 +207,9 @@ internal sealed class MoodleSnapshotSyncQueue(
             {
                 return;
             }
+
+            leaseHeartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            leaseHeartbeat = RenewLeaseAsync(work.StateId, leaseHeartbeatCancellation.Token);
 
             using var scope = scopeFactory.CreateScope();
             var executionContext = scope.ServiceProvider.GetRequiredService<IConnectorExecutionContext>();
@@ -239,10 +280,52 @@ internal sealed class MoodleSnapshotSyncQueue(
         }
         finally
         {
+            if (leaseHeartbeatCancellation is not null)
+            {
+                leaseHeartbeatCancellation.Cancel();
+                if (leaseHeartbeat is not null)
+                {
+                    try
+                    {
+                        await leaseHeartbeat;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                }
+
+                leaseHeartbeatCancellation.Dispose();
+            }
+
             lock (_gate)
             {
                 _pending.Remove(key);
             }
+        }
+    }
+
+    private async Task RenewLeaseAsync(Guid stateId, CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(5));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                using var scope = scopeFactory.CreateScope();
+                var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+                await db.MoodleSyncStates
+                    .Where(item => item.Id == stateId && item.Status == "running")
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(item => item.LeaseUntil, DateTimeOffset.UtcNow.AddMinutes(30))
+                        .SetProperty(item => item.UpdatedAt, DateTimeOffset.UtcNow), cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Não foi possível renovar o lease da sincronização Moodle. StateId={StateId}", stateId);
         }
     }
 
@@ -264,7 +347,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         }
 
         var now = DateTimeOffset.UtcNow;
-        if (state.Status == "running" && state.LeaseUntil is { } lease && lease > now)
+        if (MoodleSyncLeasePolicy.IsActive(state, now))
         {
             return null;
         }
@@ -273,7 +356,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         var force = request.Force || state.ForceRequested;
         var updated = await db.MoodleSyncStates
             .Where(item => item.Id == state.Id &&
-                           item.Status != "running" &&
+                           (item.Status != "running" || item.LeaseUntil == null || item.LeaseUntil <= now) &&
                            (item.LeaseUntil == null || item.LeaseUntil <= now) &&
                            item.NextSyncAt <= now)
             .ExecuteUpdateAsync(setters => setters

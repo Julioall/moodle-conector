@@ -57,7 +57,9 @@ public sealed record GetStudentsWithPendingSubmissionsQuery(
     int DueDaysAhead = 0,
     int MaxStudentsToAnalyze = 100,
     bool IncludeAwaitingGrading = false,
-    int MaxAssignmentsToAnalyze = 0) : IRequest<GetStudentsWithPendingSubmissionsResult>;
+    int MaxAssignmentsToAnalyze = 0,
+    CourseContentsSummary? PrefetchedContents = null,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<GetStudentsWithPendingSubmissionsResult>;
 
 public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -75,16 +77,23 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
 
         // 1. Fetch active students
-        var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-            userExternalId: currentUserExternalId,
-            courseId: request.CourseId,
-            statusFilter: ParticipantStatusFilter.Active,
-            page: 1,
-            pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
-            studentsOnly: true,
-            includeEmail: false,
-            groupId: null,
-            cancellationToken: cancellationToken);
+        var participantsPage = IsForCourse(request.PrefetchedParticipants, request.CourseId)
+            ? request.PrefetchedParticipants! with
+            {
+                Participants = request.PrefetchedParticipants!.Participants
+                    .Take(request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100)
+                    .ToArray()
+            }
+            : await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId: currentUserExternalId,
+                courseId: request.CourseId,
+                statusFilter: ParticipantStatusFilter.Active,
+                page: 1,
+                pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken);
 
         var studentMap = participantsPage.Participants.ToDictionary(p => p.UserId, p => p);
         var pendingByStudent = studentMap.Keys.ToDictionary(id => id, _ => new List<PendingSubmissionItem>());
@@ -94,13 +103,15 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         CourseContentsSummary contents;
         try
         {
-            contents = await contentsGateway.GetCourseContentsAsync(
-                userExternalId: currentUserExternalId,
-                courseId: request.CourseId,
-                moduleTypes: ["assign"],
-                includeHidden: false,
-                onlyWithFiles: false,
-                cancellationToken: cancellationToken);
+            contents = IsForCourse(request.PrefetchedContents, request.CourseId)
+                ? request.PrefetchedContents!
+                : await contentsGateway.GetCourseContentsAsync(
+                    userExternalId: currentUserExternalId,
+                    courseId: request.CourseId,
+                    moduleTypes: ["assign"],
+                    includeHidden: false,
+                    onlyWithFiles: false,
+                    cancellationToken: cancellationToken);
         }
         catch
         {
@@ -150,17 +161,20 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         // tratada; não é motivo para removê-la da fila do tutor.
         IReadOnlyDictionary<string, AssignmentSettingsSummary> assignmentSettings =
             new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
-        try
+        if (assignmentContexts.Length > 0)
         {
-            assignmentSettings = await assignmentSettingsGateway.GetCourseAssignmentSettingsAsync(
-                currentUserExternalId,
-                request.CourseId,
-                cancellationToken);
-        }
-        catch
-        {
-            // Mantém o comportamento baseado em gradingstatus se a leitura
-            // das configurações não estiver disponível.
+            try
+            {
+                assignmentSettings = await assignmentSettingsGateway.GetCourseAssignmentSettingsAsync(
+                    currentUserExternalId,
+                    request.CourseId,
+                    cancellationToken);
+            }
+            catch
+            {
+                // Mantém o comportamento baseado em gradingstatus se a leitura
+                // das configurações não estiver disponível.
+            }
         }
 
         var canClassifyNoGradeActivities = assignmentSettings.Count > 0;
@@ -171,22 +185,25 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         var feedbackStatusUnavailable = false;
         var submissionReadFailed = false;
 
-        IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches;
+        IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches = [];
         var submissionFailures = new List<string>();
-        try
+        if (assignmentContexts.Length > 0)
         {
-            submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
-                currentUserExternalId,
-                assignmentContexts.Select(context => context.Module.InstanceId!).ToArray(),
-                request.IncludeAwaitingGrading ? null : "notsubmitted",
-                since: null,
-                before: null,
-                cancellationToken);
-        }
-        catch
-        {
-            submissionBatches = [];
-            submissionReadFailed = true;
+            try
+            {
+                submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+                    currentUserExternalId,
+                    assignmentContexts.Select(context => context.Module.InstanceId!).ToArray(),
+                    request.IncludeAwaitingGrading ? null : "notsubmitted",
+                    since: null,
+                    before: null,
+                    cancellationToken);
+            }
+            catch
+            {
+                submissionBatches = [];
+                submissionReadFailed = true;
+            }
         }
 
         var contextsByAssignmentId = assignmentContexts
@@ -360,7 +377,15 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     private static bool IsAwaitingGrading(string? gradingStatus) =>
         string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(gradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
+            string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsForCourse(CourseContentsSummary? contents, string courseId) =>
+        contents is not null &&
+        string.Equals(contents.CourseId, courseId, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsForCourse(CourseParticipantsPage? participants, string courseId) =>
+        participants is not null &&
+        string.Equals(participants.CourseId, courseId, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsNoGradeActivity(
         CourseModuleSummary module,

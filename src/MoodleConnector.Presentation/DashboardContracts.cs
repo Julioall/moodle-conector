@@ -132,6 +132,7 @@ public static class AppDashboardBudget
     // read budget than the synchronous course screens.
     public const int MaxParticipantsRead = 500;
     public const int MaxAssignmentsRead = 100;
+    public const int PendingCourseConcurrency = 4;
     public const int MaxPriorities = 50;
     public const int MaxCorrectionItems = 500;
     public const int MaxActivities = 50;

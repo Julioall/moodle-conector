@@ -76,6 +76,38 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         Assert.False(result.IsComplete);
     }
 
+    [Fact]
+    public async Task Reuses_prefetched_course_data_and_skips_moodle_reads_for_empty_assign_scope()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(),
+        };
+        var participants = new CourseParticipantsPage(
+            "course-1",
+            1,
+            100,
+            ParticipantStatusFilter.Active,
+            StudentsOnly: true,
+            IncludeEmail: false,
+            HasMore: false,
+            Participants: [new CourseParticipantSummary("student-1", "Aluno 1", null, false, null, null, null, [], [])]);
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery(
+                "course-1",
+                IncludeAwaitingGrading: true,
+                PrefetchedContents: fixture.Contents,
+                PrefetchedParticipants: participants),
+            CancellationToken.None);
+
+        Assert.Contains("Nenhuma atividade do tipo 'assign'", result.Warning);
+        Assert.Equal(0, fixture.ParticipantReads);
+        Assert.Equal(0, fixture.ContentReads);
+        Assert.Equal(0, fixture.AssignmentSettingsReads);
+        Assert.Equal(0, fixture.SubmissionReads);
+    }
+
     private static CourseContentsSummary Contents(params CourseModuleSummary[] modules) =>
         new("course-1", ["assign"], false, false,
         [new CourseSectionSummary("section-1", 1, "Seção 1", null, true, modules.Length, modules.Length == 0, modules)]);
@@ -91,10 +123,14 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
         public bool ThrowOnSubmissionRead { get; init; }
         public bool ThrowOnFeedbackRead { get; init; }
+        public int ParticipantReads { get; set; }
+        public int ContentReads { get; set; }
+        public int AssignmentSettingsReads { get; set; }
+        public int SubmissionReads { get; set; }
 
         public GetStudentsWithPendingSubmissionsQueryHandler CreateHandler() =>
             new(
-                new ParticipantsGateway(),
+                new ParticipantsGateway(this),
                 new SubmissionsGateway(this),
                 new ContentsGateway(this),
                 new CurrentUserGateway(),
@@ -102,7 +138,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
                 new SubmissionStatusGateway(this));
     }
 
-    private sealed class ParticipantsGateway : IMoodleParticipantsGateway
+    private sealed class ParticipantsGateway(Fixture fixture) : IMoodleParticipantsGateway
     {
         public Task<CourseParticipantsPage> GetCourseParticipantsAsync(
             string userExternalId,
@@ -113,10 +149,13 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             bool studentsOnly,
             bool includeEmail,
             string? groupId,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new CourseParticipantsPage(courseId, page, pageSize, statusFilter, studentsOnly, includeEmail, false, [
+            CancellationToken cancellationToken)
+        {
+            fixture.ParticipantReads++;
+            return Task.FromResult(new CourseParticipantsPage(courseId, page, pageSize, statusFilter, studentsOnly, includeEmail, false, [
                 new CourseParticipantSummary("student-1", "Aluno 1", null, false, null, null, null, [], [])
             ]));
+        }
 
         public Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(string userExternalId, string courseId, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<CourseGroupSummary>>([]);
@@ -130,7 +169,11 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             IReadOnlyCollection<string> moduleTypes,
             bool includeHidden,
             bool onlyWithFiles,
-            CancellationToken cancellationToken) => Task.FromResult(fixture.Contents);
+            CancellationToken cancellationToken)
+        {
+            fixture.ContentReads++;
+            return Task.FromResult(fixture.Contents);
+        }
     }
 
     private sealed class SubmissionsGateway(Fixture fixture) : IMoodleAssignmentSubmissionsGateway
@@ -143,6 +186,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             DateTimeOffset? before,
             CancellationToken cancellationToken)
         {
+            fixture.SubmissionReads++;
             if (fixture.ThrowOnSubmissionRead) throw new InvalidOperationException("submission read failed");
             return Task.FromResult(fixture.Submissions);
         }
@@ -167,7 +211,11 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         public Task<IReadOnlyDictionary<string, AssignmentSettingsSummary>> GetCourseAssignmentSettingsAsync(
             string userExternalId,
             string courseId,
-            CancellationToken cancellationToken) => Task.FromResult(fixture.AssignmentSettings);
+            CancellationToken cancellationToken)
+        {
+            fixture.AssignmentSettingsReads++;
+            return Task.FromResult(fixture.AssignmentSettings);
+        }
 
         public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
             string userExternalId,

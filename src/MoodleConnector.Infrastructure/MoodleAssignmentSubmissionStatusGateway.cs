@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
@@ -11,7 +12,8 @@ namespace MoodleConnector.Infrastructure;
 internal sealed class MoodleAssignmentSubmissionStatusGateway(
     IOptions<MoodleApiOptions> options,
     IMoodleConnectorCredentialsProvider credentialsProvider,
-    IMoodleRestClient restClient) : IMoodleAssignmentSubmissionStatusGateway
+    IMoodleRestClient restClient,
+    IMemoryCache memoryCache) : IMoodleAssignmentSubmissionStatusGateway
 {
     private const string MoodleFunction = "mod_assign_get_submission_status";
     private static readonly Regex HtmlTagRegex = new("<[^>]*>", RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -36,13 +38,21 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
         var assignmentIdNumber = ParseMoodleId(assignmentId, nameof(assignmentId));
         var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var cacheKey = $"moodle_assign_submission_status:{credentials.ConnectionId}:{assignmentIdNumber}:{studentIdNumber}";
+        if (memoryCache.TryGetValue(cacheKey, out SubmissionStatusCacheEntry? cached) && cached is not null)
+        {
+            return cached.Status;
+        }
+
         var payload = await restClient.CallAsync(credentials, MoodleFunction, new Dictionary<string, object?>
         {
             ["assignid"] = assignmentIdNumber.ToString(CultureInfo.InvariantCulture),
             ["userid"] = studentIdNumber.ToString(CultureInfo.InvariantCulture)
         }, cancellationToken);
 
-        return ParseStatus(payload.GetRawText(), assignmentIdNumber, studentIdNumber);
+        var status = ParseStatus(payload.GetRawText(), assignmentIdNumber, studentIdNumber);
+        memoryCache.Set(cacheKey, new SubmissionStatusCacheEntry(status), TimeSpan.FromMinutes(5));
+        return status;
     }
 
     internal static AssignmentSubmissionAttemptStatus? ParseStatus(
@@ -209,5 +219,7 @@ internal sealed class MoodleAssignmentSubmissionStatusGateway(
 
         throw new ArgumentException($"O parametro {parameterName} deve ser um identificador numerico do Moodle.", parameterName);
     }
+
+    private sealed record SubmissionStatusCacheEntry(AssignmentSubmissionAttemptStatus? Status);
 
 }

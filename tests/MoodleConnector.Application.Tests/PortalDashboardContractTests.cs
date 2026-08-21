@@ -40,7 +40,30 @@ public sealed class AppDashboardContractTests
         Assert.InRange(AppDashboardBudget.MaxCoursesRead, 1, 50);
         Assert.InRange(AppDashboardBudget.MaxParticipantsRead, 1, 500);
         Assert.InRange(AppDashboardBudget.MaxAssignmentsRead, 1, 100);
+        Assert.InRange(AppDashboardBudget.PendingCourseConcurrency, 1, 8);
         Assert.InRange(AppDashboardBudget.MaxPriorities, 1, 50);
+    }
+
+    [Fact]
+    public void Dashboard_lease_started_before_application_restart_is_recoverable()
+    {
+        var applicationStartedAt = new DateTimeOffset(2026, 8, 21, 12, 0, 0, TimeSpan.Zero);
+        var orphaned = new MoodleConnector.Infrastructure.MoodleSyncStateEntity
+        {
+            Status = "running",
+            LastStartedAt = applicationStartedAt.AddMinutes(-10),
+            LeaseUntil = applicationStartedAt.AddMinutes(20),
+        };
+        var current = new MoodleConnector.Infrastructure.MoodleSyncStateEntity
+        {
+            Status = "running",
+            LastStartedAt = applicationStartedAt,
+            LeaseUntil = applicationStartedAt.AddMinutes(20),
+        };
+
+        Assert.True(MoodleConnector.Infrastructure.MoodleSyncLeasePolicy.WasStartedBefore(orphaned, applicationStartedAt));
+        Assert.False(MoodleConnector.Infrastructure.MoodleSyncLeasePolicy.WasStartedBefore(current, applicationStartedAt));
+        Assert.True(MoodleConnector.Infrastructure.MoodleSyncLeasePolicy.IsActive(orphaned, applicationStartedAt));
     }
 
     [Fact]
