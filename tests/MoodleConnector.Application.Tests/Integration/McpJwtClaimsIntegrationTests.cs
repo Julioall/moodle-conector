@@ -423,7 +423,8 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
                     ["McpServerSecurity:RequireJwt"] = "true",
                     ["McpServerSecurity:RequireApiKey"] = "false",
                     ["OAuth:Issuer"] = JwtIssuer,
-                    ["OAuth:Audience"] = JwtAudience
+                    ["OAuth:Audience"] = JwtAudience,
+                    ["OAuth:ScopeName"] = "moodle-tests-audience"
                 });
             });
         });
@@ -461,7 +462,123 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.Contains("list_my_courses", body, StringComparison.Ordinal);
         Assert.Contains("securitySchemes", body, StringComparison.Ordinal);
         Assert.Contains("oauth2", body, StringComparison.Ordinal);
-        Assert.Contains("moodle-mcp-audience", body, StringComparison.Ordinal);
+        Assert.Contains("moodle-tests-audience", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("moodle-mcp-audience", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Deve_permitir_descoberta_quando_cliente_envia_bearer_vazio()
+    {
+        var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+            {
+                configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["McpServerSecurity:RequireJwt"] = "true",
+                    ["McpServerSecurity:RequireApiKey"] = "false",
+                    ["OAuth:Issuer"] = JwtIssuer,
+                    ["OAuth:Audience"] = JwtAudience
+                });
+            });
+        });
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", "Bearer ");
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+
+        var response = await client.PostAsync(
+            "/mcp",
+            new StringContent(BuildInitializePayload("empty-bearer-init"), Encoding.UTF8, "application/json"));
+
+        response.EnsureSuccessStatusCode();
+        Assert.True(response.Headers.Contains("Mcp-Session-Id"));
+    }
+
+    [Fact]
+    public async Task Deve_ocultar_tools_cujos_scopes_nao_foram_concedidos_ao_token()
+    {
+        var factory = BuildJwtFactory(requireApiKey: false);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new(
+            "Bearer",
+            CreateJwt(
+                connectorClientId: "jwt-client",
+                scopes: "openid profile email offline_access moodle-mcp-audience moodle.read moodle.read.courses moodle.read.students moodle.read.groups moodle.read.access moodle.read.contents moodle.read.resources moodle.read.activities moodle.read.assignments moodle.read.submissions moodle.read.quizzes moodle.read.scorms moodle.read.forums"));
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+
+        var sessionId = await InitializeMcpSessionAsync(client);
+        await NotifyInitializedAsync(client, sessionId);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent("""
+            {
+              "jsonrpc": "2.0",
+              "id": "tools-read-only-token",
+              "method": "tools/list",
+              "params": {}
+            }
+            """, Encoding.UTF8, "application/json")
+        };
+        if (!string.IsNullOrWhiteSpace(sessionId)) request.Headers.Add("Mcp-Session-Id", sessionId);
+
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var tools = ParseMcpResponseBody(await response.Content.ReadAsStringAsync())?["result"]?["tools"]?.AsArray()
+            ?.Select(tool => tool?["name"]?.GetValue<string>())
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToArray() ?? [];
+
+        Assert.Contains("list_course_activities", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("moodle_prepare_write", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("start_pending_grading_run", tools, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Deve_retornar_desafio_de_reautorizacao_quando_tool_exigir_scope_ausente()
+    {
+        var factory = BuildJwtFactory(requireApiKey: false);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new(
+            "Bearer",
+            CreateJwt(
+                connectorClientId: "jwt-client",
+                scopes: "openid profile email offline_access moodle-mcp-audience moodle.read moodle.read.assignments moodle.read.submissions"));
+        client.DefaultRequestHeaders.Accept.Clear();
+        client.DefaultRequestHeaders.Accept.ParseAdd("application/json");
+        client.DefaultRequestHeaders.Accept.ParseAdd("text/event-stream");
+
+        var sessionId = await InitializeMcpSessionAsync(client);
+        await NotifyInitializedAsync(client, sessionId);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent("""
+            {
+              "jsonrpc": "2.0",
+              "id": "scope-challenge",
+              "method": "tools/call",
+              "params": {
+                "name": "start_pending_grading_run",
+                "arguments": {}
+              }
+            }
+            """, Encoding.UTF8, "application/json")
+        };
+        if (!string.IsNullOrWhiteSpace(sessionId)) request.Headers.Add("Mcp-Session-Id", sessionId);
+
+        var response = await client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Contains(MoodleErrorContract.PermissionDenied, body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("mcp/www_authenticate", body, StringComparison.Ordinal);
+        Assert.Contains("insufficient_scope", body, StringComparison.Ordinal);
+        Assert.Contains("moodle.write.assignments.grade", body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -897,12 +1014,13 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
     private static string CreateJwt(
         string? connectorClientId,
         bool includeEmail = true,
-        string? deniedPlatformPermission = null)
+        string? deniedPlatformPermission = null,
+        string? scopes = null)
     {
         var claims = new List<Claim>
         {
             new("sub", "jwt-user-1"),
-            new("scope", "openid profile email offline_access moodle-mcp-audience " +
+            new("scope", scopes ?? "openid profile email offline_access moodle-mcp-audience " +
                 "moodle.read moodle.write moodle.read.courses moodle.read.students moodle.read.groups " +
                 "moodle.read.access moodle.read.contents moodle.read.resources moodle.read.activities " +
                 "moodle.read.assignments moodle.read.submissions moodle.read.quizzes moodle.read.scorms " +

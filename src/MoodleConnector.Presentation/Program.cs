@@ -21,6 +21,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using ModelContextProtocol.Protocol;
 using MoodleConnector.Application;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
@@ -350,12 +351,10 @@ var mcpServerBuilder = builder.Services
                 }
 
                 if (httpContext is not null &&
-                    httpContext.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) &&
+                    HasBearerToken(httpContext) &&
                     !HasRequiredOAuthScopes(httpContext.User, toolName, metadata))
                 {
-                    return ToolResultHelper.Error<object>(
-                        $"O token não possui os scopes OAuth necessários para a tool '{toolName}'.",
-                        errorCode: "oauth_scope_denied");
+                    return CreateMcpOAuthScopeDeniedToolResult(httpContext, toolName, metadata);
                 }
 
                 return await next(request, cancellationToken);
@@ -389,6 +388,8 @@ var mcpServerBuilder = builder.Services
 
             var security = request.Services.GetRequiredService<IOptions<McpServerSecurityOptions>>().Value;
             var registry = request.Services.GetService<ToolMetadataRegistry>();
+            var httpContext = request.Services.GetService<IHttpContextAccessor>()?.HttpContext;
+            var oauth = request.Services.GetRequiredService<IOptions<OAuthBrokerOptions>>().Value;
 
             // Apply exposure policy BEFORE serialization/transport so JSON vs SSE is irrelevant.
             var policy = request.Services.GetService<IMcpToolExposurePolicy>();
@@ -416,6 +417,26 @@ var mcpServerBuilder = builder.Services
                 }
             }
 
+            // A linked read-only connection cannot receive write scopes. Avoid
+            // returning tools that would otherwise be unusable after OAuth.
+            if (httpContext?.User.Identity?.IsAuthenticated == true &&
+                HasBearerToken(httpContext))
+            {
+                for (var i = result.Tools.Count - 1; i >= 0; i--)
+                {
+                    var tool = result.Tools[i];
+                    if (tool is null || registry is null || !registry.TryGet(tool.Name ?? string.Empty, out var metadata) || metadata is null)
+                    {
+                        continue;
+                    }
+
+                    if (!HasRequiredOAuthScopes(httpContext.User, tool.Name ?? string.Empty, metadata))
+                    {
+                        result.Tools.RemoveAt(i);
+                    }
+                }
+            }
+
             // Post-process remaining tools for metadata and security schemes
             foreach (var tool in result.Tools)
             {
@@ -425,7 +446,7 @@ var mcpServerBuilder = builder.Services
                 {
                     MoodleToolMetadataAttribute? toolMetadata = null;
                     registry?.TryGet(tool.Name ?? string.Empty, out toolMetadata);
-                    AddOAuthSecuritySchemes(tool, toolMetadata);
+                    AddOAuthSecuritySchemes(tool, toolMetadata, oauth);
                 }
             }
 
@@ -557,8 +578,7 @@ app.Use(async (context, next) =>
     }
 
     var hasApiKey = !string.IsNullOrWhiteSpace(context.Request.Headers[securityOptions.ApiKeyHeader].ToString());
-    var hasBearerToken = context.Request.Headers.Authorization.ToString()
-        .StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+    var hasBearerToken = HasBearerToken(context);
     var isAuthenticated = false;
 
     if (securityOptions.RequireApiKey && hasApiKey)
@@ -4122,13 +4142,15 @@ static async Task<bool> IsMcpDiscoveryRequestAsync(HttpContext context)
 
 static bool HasMcpCredentials(HttpContext context, McpServerSecurityOptions securityOptions)
 {
-    var authHeader = context.Request.Headers.Authorization.ToString();
-    if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-    {
-        return true;
-    }
+    return HasBearerToken(context) ||
+           !string.IsNullOrWhiteSpace(context.Request.Headers[securityOptions.ApiKeyHeader].ToString());
+}
 
-    return !string.IsNullOrWhiteSpace(context.Request.Headers[securityOptions.ApiKeyHeader].ToString());
+static bool HasBearerToken(HttpContext context)
+{
+    var authorization = context.Request.Headers.Authorization.ToString();
+    return authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) &&
+           !string.IsNullOrWhiteSpace(authorization["Bearer ".Length..]);
 }
 
 static async Task<bool> TryWriteMcpOauthToolChallengeAsync(
@@ -4336,15 +4358,14 @@ static string[] GetProtocolOAuthScopes(OAuthBrokerOptions? options = null)
     return ["openid", "profile", "email", "offline_access", audienceScope];
 }
 
-static void AddOAuthSecuritySchemes(ModelContextProtocol.Protocol.Tool tool, MoodleToolMetadataAttribute? metadata)
+static void AddOAuthSecuritySchemes(
+    ModelContextProtocol.Protocol.Tool tool,
+    MoodleToolMetadataAttribute? metadata,
+    OAuthBrokerOptions oauth)
 {
     tool.Meta ??= new JsonObject();
-    if (tool.Meta.ContainsKey("securitySchemes"))
-    {
-        return;
-    }
-
-    var requiredScopes = GetProtocolOAuthScopes()
+    // MCP descriptors may be cached between requests; always reflect the active OAuth configuration.
+    var requiredScopes = GetProtocolOAuthScopes(oauth)
         .Concat(metadata is null ? [] : ToolAuthorizationMapping.OAuthScopesFor(tool.Name ?? string.Empty, metadata));
     tool.Meta["securitySchemes"] = CreateOAuthSecuritySchemesNode(requiredScopes);
 }
@@ -4405,12 +4426,15 @@ static void SetMcpOauthAuthenticateHeader(HttpContext context)
 static string BuildMcpOauthAuthenticateChallenge(
     HttpContext context,
     string error,
-    string errorDescription)
+    string errorDescription,
+    IEnumerable<string>? requiredScopes = null)
 {
+    var oauth = context.RequestServices.GetRequiredService<IOptions<OAuthBrokerOptions>>().Value;
+    var scopes = requiredScopes ?? GetProtocolOAuthScopes(oauth);
     return string.Join(", ", new[]
     {
         $"Bearer resource_metadata=\"{GetPublicBaseUrl(context)}/.well-known/oauth-protected-resource/mcp\"",
-        $"scope=\"{EscapeWwwAuthenticateValue(string.Join(' ', GetProtocolOAuthScopes()))}\"",
+        $"scope=\"{EscapeWwwAuthenticateValue(string.Join(' ', scopes.Distinct(StringComparer.OrdinalIgnoreCase)))}\"",
         $"error=\"{EscapeWwwAuthenticateValue(error)}\"",
         $"error_description=\"{EscapeWwwAuthenticateValue(errorDescription)}\""
     });
@@ -5064,12 +5088,43 @@ static bool HasLinkedMoodleConnection(ClaimsPrincipal? principal)
 
 static bool HasRequiredOAuthScopes(ClaimsPrincipal principal, string toolName, MoodleToolMetadataAttribute metadata)
 {
-    var required = ToolAuthorizationMapping.OAuthScopesFor(toolName, metadata);
+    var required = GetRequiredOAuthScopes(toolName, metadata);
     if (required.Length == 0) return true;
     var granted = principal.FindAll("scope")
         .SelectMany(claim => claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
     return required.All(scope => granted.Contains(scope));
+}
+
+static string[] GetRequiredOAuthScopes(string toolName, MoodleToolMetadataAttribute metadata) =>
+    ToolAuthorizationMapping.OAuthScopesFor(toolName, metadata);
+
+static CallToolResult CreateMcpOAuthScopeDeniedToolResult(
+    HttpContext context,
+    string toolName,
+    MoodleToolMetadataAttribute metadata)
+{
+    var requiredScopes = GetProtocolOAuthScopes(
+            context.RequestServices.GetRequiredService<IOptions<OAuthBrokerOptions>>().Value)
+        .Concat(GetRequiredOAuthScopes(toolName, metadata))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+    var message = $"O token não possui os scopes OAuth necessários para a tool '{toolName}'. Reconecte o Moodle Connector para autorizar este acesso.";
+    var result = ToolResultHelper.Error<object>(
+        message,
+        errorCode: MoodleErrorContract.PermissionDenied);
+    result.Meta = new JsonObject
+    {
+        ["mcp/www_authenticate"] = new JsonArray
+        {
+            BuildMcpOauthAuthenticateChallenge(
+                context,
+                "insufficient_scope",
+                message,
+                requiredScopes)
+        }
+    };
+    return result;
 }
 
 public sealed record AppIdentity(Guid Id, string Name, string Email, string? ConnectorClientId);

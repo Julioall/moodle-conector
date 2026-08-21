@@ -117,6 +117,7 @@ internal static class ToolAuthorizationMapping
     public static string[] ScopesForPermissions(IEnumerable<string> permissions)
     {
         var scopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var canDelegateMoodleWrite = false;
         foreach (var permission in permissions)
         {
             switch (permission.ToLowerInvariant())
@@ -125,15 +126,30 @@ internal static class ToolAuthorizationMapping
                 case "tool.students.view": scopes.UnionWith([MoodleScopePolicies.ReadStudents, MoodleScopePolicies.ReadGroups]); break;
                 case "tool.classroom.view": scopes.UnionWith([MoodleScopePolicies.ReadContents, MoodleScopePolicies.ReadResources, MoodleScopePolicies.ReadActivities, MoodleScopePolicies.ReadQuizzes, MoodleScopePolicies.ReadScorms, MoodleScopePolicies.ReadForums]); break;
                 case "tool.assignments.view": scopes.UnionWith([MoodleScopePolicies.ReadAssignments, MoodleScopePolicies.ReadSubmissions]); break;
-                case "tool.assignments.grade": scopes.UnionWith([MoodleScopePolicies.ReadAssignments, MoodleScopePolicies.ReadSubmissions, MoodleScopePolicies.WriteAssignmentsGrade]); break;
-                case "tool.messages.send": scopes.Add(MoodleScopePolicies.WriteMessages); break;
+                case "tool.assignments.grade":
+                    scopes.UnionWith([MoodleScopePolicies.ReadAssignments, MoodleScopePolicies.ReadSubmissions, MoodleScopePolicies.WriteAssignmentsGrade]);
+                    canDelegateMoodleWrite = true;
+                    break;
+                case "tool.messages.send":
+                    scopes.Add(MoodleScopePolicies.WriteMessages);
+                    canDelegateMoodleWrite = true;
+                    break;
                 case "tool.forums.view": scopes.Add(MoodleScopePolicies.ReadForums); break;
-                case "tool.forums.write": scopes.UnionWith([MoodleScopePolicies.ReadForums, MoodleScopePolicies.WriteForums]); break;
+                case "tool.forums.write":
+                    scopes.UnionWith([MoodleScopePolicies.ReadForums, MoodleScopePolicies.WriteForums]);
+                    canDelegateMoodleWrite = true;
+                    break;
                 case "tool.followup.view": scopes.UnionWith([MoodleScopePolicies.ReadAccess, MoodleScopePolicies.ReadStudents, MoodleScopePolicies.ReadForums]); break;
                 case "tool.reports.view": scopes.UnionWith([MoodleScopePolicies.ReadAccess, MoodleScopePolicies.ReadStudents, MoodleScopePolicies.ReadAssignments, MoodleScopePolicies.ReadSubmissions]); break;
                 case "tool.connections.manage": scopes.Add(MoodleScopePolicies.ReadAny); break;
             }
         }
+
+        // The controlled universal write flow validates the same connection and
+        // capability gates as specialized write tools, but uses the coarse scope.
+        if (canDelegateMoodleWrite)
+            scopes.Add(MoodleScopePolicies.WriteAny);
+
         return scopes.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 

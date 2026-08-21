@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MoodleConnector.Presentation.Configuration;
+using MoodleConnector.Presentation.Security;
 using Xunit;
 
 namespace MoodleConnector.Application.Tests.Integration;
@@ -97,6 +98,19 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.DoesNotContain("prepare_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirm_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("future_unregistered_tool", tools, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Write_permissions_delegate_the_coarse_scope_required_by_the_controlled_write_flow()
+    {
+        var scopes = ToolAuthorizationMapping.ScopesForPermissions([
+            "tool.assignments.grade",
+            "tool.messages.send"
+        ]);
+
+        Assert.Contains(MoodleScopePolicies.WriteAny, scopes);
+        Assert.Contains(MoodleScopePolicies.WriteAssignmentsGrade, scopes);
+        Assert.Contains(MoodleScopePolicies.WriteMessages, scopes);
     }
 
     [Theory]
