@@ -28,6 +28,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<MoodleSyncStateEntity> MoodleSyncStates => Set<MoodleSyncStateEntity>();
     public DbSet<PlannerLinkEntity> PlannerLinks => Set<PlannerLinkEntity>();
     public DbSet<UserIgnoredCourseEntity> UserIgnoredCourses => Set<UserIgnoredCourseEntity>();
+    public DbSet<UserTrackedCourseEntity> UserTrackedCourses => Set<UserTrackedCourseEntity>();
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
@@ -295,6 +296,16 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         ignoredCourse.Property(x => x.UpdatedAt).IsRequired();
         ignoredCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.CourseId }).IsUnique();
         ignoredCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias });
+
+        var trackedCourse = modelBuilder.Entity<UserTrackedCourseEntity>();
+        trackedCourse.ToTable("user_tracked_courses");
+        trackedCourse.HasKey(x => x.Id);
+        trackedCourse.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        trackedCourse.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
+        trackedCourse.Property(x => x.CreatedAt).IsRequired();
+        trackedCourse.Property(x => x.UpdatedAt).IsRequired();
+        trackedCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.CourseId }).IsUnique();
+        trackedCourse.HasIndex(x => new { x.OwnerId, x.ConnectionAlias });
 
         var pendingAction = modelBuilder.Entity<PendingMoodleAction>();
         pendingAction.ToTable("moodle_pending_actions");

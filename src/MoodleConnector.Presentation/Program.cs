@@ -2221,8 +2221,31 @@ app.MapGet("/api/dashboard/{metric}", async (
             effectiveConnectionRef,
             MoodleSnapshotDatasets.DashboardPending,
             cancellationToken: cancellationToken);
+
+        // An empty My Courses scope is a valid, stable dashboard state. Do not
+        // enqueue a Moodle refresh (or expose a permanent refreshing state)
+        // when there is nothing to analyze.
+        if (courses.Count == 0)
+        {
+            var emptyResponse = await pendingSnapshotBuilder.CreateEmptyAsync(identity.Id, cancellationToken);
+            return (IResult)Results.Ok(new AppEnvelope<AppDashboardPendingMetricDto>(
+                emptyResponse,
+                new(
+                    generatedAt,
+                    effectiveConnectionRef,
+                    "empty",
+                    null,
+                    null,
+                    false,
+                    false,
+                    true)));
+        }
+
+        var pendingSnapshotMatchesScope = persistedPending is not null &&
+            persistedPending.IsComplete &&
+            persistedPending.Data.CoursesInScope == courses.Count;
         var isQueued = await dashboardRefreshQueue.IsQueuedAsync(identity.Id, effectiveConnectionRef, cancellationToken);
-        if (refresh == true || persistedPending is null || persistedPending.IsStale)
+        if (refresh == true || persistedPending is null || persistedPending.IsStale || !pendingSnapshotMatchesScope)
         {
             isQueued = isQueued || await dashboardRefreshQueue.EnqueueAsync(new DashboardOverviewRefreshRequest(
                     identity.Id,
@@ -2232,7 +2255,7 @@ app.MapGet("/api/dashboard/{metric}", async (
         }
 
         AppDashboardPendingMetricDto response;
-        if (persistedPending is not null)
+        if (persistedPending is not null && pendingSnapshotMatchesScope)
         {
             response = persistedPending.Data with
             {
@@ -2241,7 +2264,9 @@ app.MapGet("/api/dashboard/{metric}", async (
                 CoursesAnalyzed = persistedPending.Data.CoursesAnalyzed,
             };
         }
-        else if (memoryCache.TryGetValue(cacheKey, out AppDashboardPendingMetricDto? existingPending) && existingPending is not null)
+        else if (memoryCache.TryGetValue(cacheKey, out AppDashboardPendingMetricDto? existingPending) &&
+                 existingPending is not null &&
+                 existingPending.CoursesInScope == courses.Count)
         {
             response = existingPending with
             {
@@ -2277,6 +2302,30 @@ app.MapGet("/api/dashboard/{metric}", async (
 
     if (normalizedMetric == "access")
     {
+        // There is no student access metric to calculate without courses in
+        // Meus Cursos. Returning a stable empty result also prevents the
+        // current-user Moodle lookup from running for an empty scope.
+        if (courses.Count == 0)
+        {
+            var emptyAccess = new AppDashboardAccessMetricDto(
+                new AppDashboardSummaryDto(0, 0, 0, 0, 0)
+                {
+                    ActiveStudents = 0,
+                    ActiveNormalStudents = 0,
+                    NeverAccessedStudents = 0,
+                },
+                [
+                    new AppDashboardAccessSegmentDto("recent", "Acesso recente · 0–7 dias", 0, "success"),
+                    new AppDashboardAccessSegmentDto("low", "Baixo acesso · 8–14 dias", 0, "warning"),
+                    new AppDashboardAccessSegmentDto("stale", "Sem acesso · 14+ dias", 0, "risk"),
+                    new AppDashboardAccessSegmentDto("never", "Nunca acessaram", 0, "risk"),
+                ],
+                []);
+            return (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(
+                emptyAccess,
+                new(generatedAt, effectiveConnectionRef, "empty", null, null, false, false, true)));
+        }
+
         var persistedAccess = refresh != true
             ? await snapshotStore.GetAsync<DashboardAccessRead>(
                 identity.Id,
@@ -2675,6 +2724,30 @@ app.MapGet("/api/course-preferences/ignored", async (
         new(DateTimeOffset.UtcNow, resolved.Alias)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
+app.MapGet("/api/course-preferences/tracked", async (
+    string? connectionRef,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var trackedCourseIds = await dbContext.UserTrackedCourses
+        .AsNoTracking()
+        .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias)
+        .OrderBy(item => item.CourseId)
+        .Select(item => item.CourseId)
+        .ToArrayAsync(cancellationToken);
+
+    return Results.Ok(new AppEnvelope<IReadOnlyList<string>>(
+        trackedCourseIds,
+        new(DateTimeOffset.UtcNow, resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
 app.MapPut("/api/course-preferences/ignored", async (
     UpdateIgnoredCoursesInput? input,
     HttpContext context,
@@ -2706,6 +2779,11 @@ app.MapPut("/api/course-preferences/ignored", async (
 
     if (input.Ignored)
     {
+        var tracked = await dbContext.UserTrackedCourses
+            .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias && courseIds.Contains(item.CourseId))
+            .ToListAsync(cancellationToken);
+        dbContext.UserTrackedCourses.RemoveRange(tracked);
+
         foreach (var courseId in courseIds)
         {
             if (existing.ContainsKey(courseId)) continue;
@@ -2724,6 +2802,66 @@ app.MapPut("/api/course-preferences/ignored", async (
     {
         foreach (var preference in existing.Values)
             dbContext.UserIgnoredCourses.Remove(preference);
+    }
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new AppEnvelope<bool>(true, new(now, resolved.Alias)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapPut("/api/course-preferences/tracked", async (
+    UpdateTrackedCoursesInput? input,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IConnectionRegistry connectionRegistry,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    if (input is null || input.CourseIds is null)
+        return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe os cursos que devem ser atualizados." } });
+
+    const int maxCourseIdsPerRequest = 1000;
+    var courseIds = input.CourseIds
+        .Where(courseId => !string.IsNullOrWhiteSpace(courseId))
+        .Select(courseId => courseId.Trim())
+        .Distinct(StringComparer.Ordinal)
+        .ToArray();
+    if (courseIds.Length == 0 || courseIds.Length > maxCourseIdsPerRequest || courseIds.Any(courseId => courseId.Length > 64))
+        return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe entre 1 e 1000 IDs de cursos válidos." } });
+
+    var resolved = await connectionRegistry.ResolveConnectionAsync(input.ConnectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+
+    var existing = await dbContext.UserTrackedCourses
+        .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias && courseIds.Contains(item.CourseId))
+        .ToDictionaryAsync(item => item.CourseId, StringComparer.Ordinal, cancellationToken);
+    var now = DateTimeOffset.UtcNow;
+
+    if (input.Tracked)
+    {
+        var ignored = await dbContext.UserIgnoredCourses
+            .Where(item => item.OwnerId == identity.Id && item.ConnectionAlias == resolved.Alias && courseIds.Contains(item.CourseId))
+            .ToListAsync(cancellationToken);
+        dbContext.UserIgnoredCourses.RemoveRange(ignored);
+
+        foreach (var courseId in courseIds)
+        {
+            if (existing.ContainsKey(courseId)) continue;
+            dbContext.UserTrackedCourses.Add(new UserTrackedCourseEntity
+            {
+                Id = Guid.NewGuid(),
+                OwnerId = identity.Id,
+                ConnectionAlias = resolved.Alias,
+                CourseId = courseId,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+    }
+    else
+    {
+        foreach (var preference in existing.Values)
+            dbContext.UserTrackedCourses.Remove(preference);
     }
 
     await dbContext.SaveChangesAsync(cancellationToken);
@@ -5011,6 +5149,7 @@ public sealed record CreatePermissionGroupInput(string Name, string? Description
 public sealed record UpdatePermissionGroupInput(string Name, string? Description, string[]? Permissions = null);
 public sealed record PermissionGroupMemberInput(Guid UserId);
 public sealed record UpdateIgnoredCoursesInput(string? ConnectionRef, IReadOnlyList<string>? CourseIds, bool Ignored);
+public sealed record UpdateTrackedCoursesInput(string? ConnectionRef, IReadOnlyList<string>? CourseIds, bool Tracked);
 public sealed record SetUserPermissionInput(string Permission, bool IsAllowed);
 
 public sealed record ReviewGradingItemInput(decimal? FinalGrade, string? FinalFeedback, string? TeacherDecision, string? ReviewNotes, string? ExpectedReviewStatus);

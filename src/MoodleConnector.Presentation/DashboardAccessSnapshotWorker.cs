@@ -64,6 +64,14 @@ internal sealed class DashboardAccessSnapshotWorker(
 
                 var resolver = targetScope.ServiceProvider.GetRequiredService<DashboardCourseScopeResolver>();
                 var courses = await resolver.ResolveAsync(target.OwnerId, target.ConnectionAlias, cancellationToken);
+                if (courses.Count == 0)
+                {
+                    logger.LogInformation(
+                        "Daily dashboard access snapshot skipped because My Courses is empty. OwnerId={OwnerId} Connection={ConnectionAlias}",
+                        target.OwnerId,
+                        target.ConnectionAlias);
+                    continue;
+                }
                 var accessService = targetScope.ServiceProvider.GetRequiredService<DashboardAccessSnapshotService>();
                 var access = await accessService.ReadAsync(courses, cancellationToken);
                 var generatedAt = DateTimeOffset.UtcNow;

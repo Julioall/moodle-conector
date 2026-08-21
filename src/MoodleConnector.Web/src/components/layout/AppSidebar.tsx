@@ -57,6 +57,10 @@ export function AppSidebar() {
   const { connectionRef } = useConnectionScope();
   const { state } = useSidebar();
   const isCollapsed = state === 'collapsed';
+  const scopedUrl = (url: string) => {
+    if (!connectionRef || url === '/configuracoes') return url;
+    return `${url}${url.includes('?') ? '&' : '?'}connectionRef=${encodeURIComponent(connectionRef)}`;
+  };
 
   const renderGroup = (label: string | undefined, items: SidebarNavItem[]) => {
     const visibleItems = user ? items.filter((item) => can(item.permission)) : items;
@@ -73,7 +77,7 @@ export function AppSidebar() {
               <SidebarMenuItem key={item.title}>
                 <SidebarMenuButton asChild tooltip={item.title}>
                   <NavLink
-                    to={item.url === '/' && connectionRef ? `/?connectionRef=${encodeURIComponent(connectionRef)}` : item.url}
+                    to={scopedUrl(item.url)}
                     end={item.url === '/'}
                     className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
                     activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"

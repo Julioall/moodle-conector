@@ -64,6 +64,37 @@ public sealed class DashboardCourseScopeResolverTests
         Assert.Equal(["first", "second"], result.Select(course => course.CourseId));
     }
 
+    [Fact]
+    public async Task Includes_an_explicitly_tracked_course_even_when_it_is_outside_the_current_cycle()
+    {
+        var ownerId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using var db = new ConnectorDbContext(options);
+        db.UserTrackedCourses.Add(new UserTrackedCourseEntity
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = ownerId,
+            ConnectionAlias = "goias",
+            CourseId = "tracked-finished",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var courses = new[]
+        {
+            Course("tracked-finished", DateTimeOffset.UtcNow.AddMonths(-6), DateTimeOffset.UtcNow.AddMonths(-1)),
+            Course("not-tracked-finished", DateTimeOffset.UtcNow.AddMonths(-6), DateTimeOffset.UtcNow.AddMonths(-1)),
+        };
+
+        var resolver = new DashboardCourseScopeResolver(null!, db, null!);
+        var result = await resolver.FilterAsync(ownerId, "goias", courses, CancellationToken.None);
+
+        Assert.Equal(["tracked-finished"], result.Select(course => course.CourseId));
+    }
+
     private static CourseSummary Course(string id, DateTimeOffset start, DateTimeOffset? end) =>
         new(id, null, null, id, id, null, "Senai > Turma", start, end, true, null, null, null, null, null, null);
 }

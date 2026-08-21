@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { connectionsGateway, type MoodleConnection } from './connections-gateway';
 
@@ -8,6 +8,27 @@ const SELECTED_CONNECTION_KEY = 'app:selected-connection';
 function readStoredConnection(): string | undefined {
   if (typeof window === 'undefined') return undefined;
   return window.localStorage.getItem(SELECTED_CONNECTION_KEY) || undefined;
+}
+
+let globalConnection = readStoredConnection();
+const globalConnectionListeners = new Set<() => void>();
+
+function subscribeToGlobalConnection(listener: () => void) {
+  globalConnectionListeners.add(listener);
+  return () => globalConnectionListeners.delete(listener);
+}
+
+function getGlobalConnection() {
+  return globalConnection;
+}
+
+function setGlobalConnection(next?: string) {
+  globalConnection = next;
+  if (typeof window !== 'undefined') {
+    if (next) window.localStorage.setItem(SELECTED_CONNECTION_KEY, next);
+    else window.localStorage.removeItem(SELECTED_CONNECTION_KEY);
+  }
+  globalConnectionListeners.forEach((listener) => listener());
 }
 
 export function useMoodleConnections() {
@@ -25,9 +46,13 @@ export function useMoodleConnections() {
  */
 export function useConnectionScope() {
   const [params, setParams] = useSearchParams();
-  const [storedConnection, setStoredConnection] = useState(readStoredConnection);
   const connections = useMoodleConnections();
   const urlConnection = params.get('connectionRef') || undefined;
+  const storedConnection = useSyncExternalStore(
+    subscribeToGlobalConnection,
+    getGlobalConnection,
+    () => undefined,
+  );
   const defaultConnection = connections.data?.data.find((connection) => connection.isDefault)
     ?? connections.data?.data[0];
   const connectionRef = urlConnection ?? storedConnection;
@@ -36,13 +61,19 @@ export function useConnectionScope() {
   const effectiveConnectionRef = selectedConnection?.connectionRef
     ?? (connections.isSuccess ? defaultConnection?.connectionRef : connectionRef);
 
+  // A URL parameter is accepted for deep links, but the selected Moodle is
+  // application state. Once the connection list confirms the parameter,
+  // promote it to the global selection so the next screen keeps the same
+  // Moodle even when its route has no query string.
+  useEffect(() => {
+    if (urlConnection && selectedConnection?.connectionRef === urlConnection && storedConnection !== urlConnection) {
+      setGlobalConnection(urlConnection);
+    }
+  }, [selectedConnection?.connectionRef, storedConnection, urlConnection]);
+
   const selectConnection = useCallback((nextConnectionRef: string) => {
     const next = nextConnectionRef || undefined;
-    setStoredConnection(next);
-    if (typeof window !== 'undefined') {
-      if (next) window.localStorage.setItem(SELECTED_CONNECTION_KEY, next);
-      else window.localStorage.removeItem(SELECTED_CONNECTION_KEY);
-    }
+    setGlobalConnection(next);
     setParams((current) => {
       const nextParams = new URLSearchParams(current);
       if (next) nextParams.set('connectionRef', next);

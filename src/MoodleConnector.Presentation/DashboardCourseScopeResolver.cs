@@ -10,7 +10,7 @@ namespace MoodleConnector.Presentation;
 /// <summary>
 /// Centraliza a definição de cursos do dashboard e de “Meus Cursos”.
 /// O snapshot de cursos é deliberadamente bruto; os filtros de ciclo,
-/// sequência e cursos ignorados precisam ser aplicados antes do refresh.
+/// sequência e preferências de acompanhamento precisam ser aplicados antes do refresh.
 /// </summary>
 internal sealed class DashboardCourseScopeResolver(
     IMediator mediator,
@@ -57,13 +57,19 @@ internal sealed class DashboardCourseScopeResolver(
             .Where(item => item.OwnerId == ownerId && item.ConnectionAlias == connectionAlias)
             .Select(item => item.CourseId)
             .ToHashSetAsync(StringComparer.Ordinal, cancellationToken);
+        var trackedCourseIds = await dbContext.UserTrackedCourses
+            .AsNoTracking()
+            .Where(item => item.OwnerId == ownerId && item.ConnectionAlias == connectionAlias)
+            .Select(item => item.CourseId)
+            .ToHashSetAsync(StringComparer.Ordinal, cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         return NormalizeEndDates(courses)
             .Where(course =>
                 !ignoredCourseIds.Contains(course.CourseId) &&
-                (course.StartDate is null || course.StartDate <= now) &&
-                (course.EndDate is null || course.EndDate >= now))
+                (trackedCourseIds.Contains(course.CourseId) ||
+                 ((course.StartDate is null || course.StartDate <= now) &&
+                  (course.EndDate is null || course.EndDate >= now))))
             .ToArray();
     }
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { BookOpen, Building2, ChevronDown, FileSpreadsheet, Plus, Search } from 'lucide-react';
+import { BookOpen, Building2, ChevronDown, EyeOff, FileSpreadsheet, Plus, Search } from 'lucide-react';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -10,8 +10,9 @@ import { useEditMode } from '@/components/layout/edit-mode-context';
 import { useConnectionScope } from '../connections/useConnectionScope';
 import { coursesGateway, type Course } from '../courses/courses-gateway';
 import { CourseCard } from '../courses/components/CourseCard';
-import { filterCoursesByLifecycle, matchesCourseSearch, normalizeCourseEndDatesBySequence, type CourseLifecycle, type CourseLifecycleFilter } from '../courses/course-status';
+import { filterCoursesByLifecycle, getCourseLifecycle, matchesCourseSearch, normalizeCourseEndDatesBySequence, type CourseLifecycle, type CourseLifecycleFilter } from '../courses/course-status';
 import { useIgnoredCourses } from '../courses/course-visibility';
+import { useTrackedCourses } from '../courses/course-tracking';
 import { buildSchoolsTree, countCoursesByCategory, courseCategoryPath, groupCoursesByCategory, normalizeCategoryPath, type TreeNode } from './schools-tree';
 import { ReportGenerationPanel } from '../reports/ReportGenerationPanel';
 
@@ -22,7 +23,7 @@ const statusFilters: { value: CourseLifecycleFilter; label: string }[] = [
   { value: 'finished', label: 'Finalizados' },
 ];
 
-function TreeBranch({ node, courseGroups, courseCounts, coursesPending, coursesError, editMode, ignoredCourseIds, onRestore, selectionMode, selectedCourseIds, onToggleCourse, onToggleCategory, level = 0 }: { node: TreeNode; courseGroups: Map<string, Course[]>; courseCounts: Map<string, number>; coursesPending: boolean; coursesError: boolean; editMode: boolean; ignoredCourseIds: Set<string>; onRestore: (courseId: string) => void; selectionMode: boolean; selectedCourseIds: Set<string>; onToggleCourse: (courseId: string) => void; onToggleCategory: (courseIds: string[]) => void; level?: number }) {
+function TreeBranch({ node, courseGroups, courseCounts, coursesPending, coursesError, editMode, ignoredCourseIds, trackedCourseIds, onRestore, onTrack, onUntrack, selectionMode, selectedCourseIds, onToggleCourse, onToggleCategory, level = 0 }: { node: TreeNode; courseGroups: Map<string, Course[]>; courseCounts: Map<string, number>; coursesPending: boolean; coursesError: boolean; editMode: boolean; ignoredCourseIds: Set<string>; trackedCourseIds: Set<string>; onRestore: (courseId: string) => void; onTrack: (courseId: string) => void; onUntrack: (courseId: string) => void; selectionMode: boolean; selectedCourseIds: Set<string>; onToggleCourse: (courseId: string) => void; onToggleCategory: (courseIds: string[]) => void; level?: number }) {
   const [open, setOpen] = useState(false);
   const categoryKey = normalizeCategoryPath(node.path);
   const categoryCourses = courseGroups.get(categoryKey) ?? [];
@@ -39,11 +40,22 @@ function TreeBranch({ node, courseGroups, courseCounts, coursesPending, coursesE
     <details className={`${level === 0 ? 'rounded-lg border bg-card' : 'border-l pl-4'} group`} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 font-medium marker:hidden hover:bg-muted/50">{selectionMode && nodeCourseIds.length > 0 && <input type="checkbox" checked={allSelected} aria-label={`Selecionar todos os cursos de ${node.name}`} className="h-4 w-4 shrink-0 accent-primary" onChange={() => onToggleCategory(nodeCourseIds)} onClick={(event) => event.stopPropagation()} />}<span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">{level === 0 ? <Building2 className="h-4 w-4" /> : <BookOpen className="h-4 w-4" />}</span><span className="min-w-0 flex-1"><span className="block truncate">{node.name}</span><span className="mt-0.5 block text-xs font-normal text-muted-foreground">{courseCount} {unitLabel}{courseCount === 1 ? '' : 's'}</span></span><ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" /></summary>
       <div className="space-y-3 px-4 pb-4">
-        {[...node.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((child) => <TreeBranch key={child.path} node={child} courseGroups={courseGroups} courseCounts={courseCounts} coursesPending={coursesPending} coursesError={coursesError} editMode={editMode} ignoredCourseIds={ignoredCourseIds} onRestore={onRestore} selectionMode={selectionMode} selectedCourseIds={selectedCourseIds} onToggleCourse={onToggleCourse} onToggleCategory={onToggleCategory} level={level + 1} />)}
+        {[...node.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((child) => <TreeBranch key={child.path} node={child} courseGroups={courseGroups} courseCounts={courseCounts} coursesPending={coursesPending} coursesError={coursesError} editMode={editMode} ignoredCourseIds={ignoredCourseIds} trackedCourseIds={trackedCourseIds} onRestore={onRestore} onTrack={onTrack} onUntrack={onUntrack} selectionMode={selectionMode} selectedCourseIds={selectedCourseIds} onToggleCourse={onToggleCourse} onToggleCategory={onToggleCategory} level={level + 1} />)}
         {!hasChildren && coursesPending && <Skeleton className="h-40 rounded-lg" />}
         {!hasChildren && coursesError && <p className="p-3 text-sm text-destructive">Não foi possível carregar as unidades curriculares.</p>}
         {!hasChildren && !coursesPending && !coursesError && categoryCourses.length === 0 && <p className="p-3 text-sm text-muted-foreground">Nenhum curso corresponde ao filtro selecionado.</p>}
-        {!hasChildren && categoryCourses.length > 0 && <div className="grid gap-4 pt-1 md:grid-cols-2 xl:grid-cols-3">{categoryCourses.map((course) => <CourseCard key={`${course.connectionRef}:${course.courseId}`} course={course} selection={selectionMode ? { checked: selectedCourseIds.has(course.courseId), ariaLabel: `Selecionar ${course.displayName ?? course.fullName} para o relatório`, onChange: () => onToggleCourse(course.courseId) } : undefined} action={editMode && ignoredCourseIds.has(course.courseId) ? { label: 'Adicionar aos Meus Cursos', ariaLabel: `Adicionar ${course.displayName ?? course.fullName} aos Meus Cursos`, icon: <Plus className="h-4 w-4" />, onClick: () => onRestore(course.courseId) } : undefined} />)}</div>}
+        {!hasChildren && categoryCourses.length > 0 && <div className="grid gap-4 pt-1 md:grid-cols-2 xl:grid-cols-3">{categoryCourses.map((course) => {
+          const ignored = ignoredCourseIds.has(course.courseId);
+          const tracked = trackedCourseIds.has(course.courseId);
+          const active = getCourseLifecycle(course) === 'in_progress';
+          const canAdd = ignored || (!active && !tracked);
+          const action = editMode && canAdd
+            ? { label: 'Adicionar aos Meus Cursos', ariaLabel: `Adicionar ${course.displayName ?? course.fullName} aos Meus Cursos`, icon: <Plus className="h-4 w-4" />, onClick: () => { if (ignored) onRestore(course.courseId); if (!active) onTrack(course.courseId); } }
+            : editMode && tracked && !active
+              ? { label: 'Remover dos Meus Cursos', ariaLabel: `Remover ${course.displayName ?? course.fullName} dos Meus Cursos`, icon: <EyeOff className="h-4 w-4" />, onClick: () => onUntrack(course.courseId) }
+              : undefined;
+          return <CourseCard key={`${course.connectionRef}:${course.courseId}`} course={course} selection={selectionMode ? { checked: selectedCourseIds.has(course.courseId), ariaLabel: `Selecionar ${course.displayName ?? course.fullName} para o relatório`, onChange: () => onToggleCourse(course.courseId) } : undefined} action={action} />;
+        })}</div>}
       </div>
     </details>
   );
@@ -53,6 +65,7 @@ export function SchoolsPage() {
   const { connectionRef } = useConnectionScope();
   const { editMode } = useEditMode();
   const { ignoredCourseIds, restoreCourse } = useIgnoredCourses(connectionRef);
+  const { trackedCourseIds, trackCourse, untrackCourse } = useTrackedCourses(connectionRef);
   const [search, setSearch] = useState('');
   const [selectedStatuses, setSelectedStatuses] = useState<CourseLifecycle[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -116,7 +129,7 @@ export function SchoolsPage() {
       {query.isError && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar as categorias.</p></CardContent></Card>}
       {coursesQuery.isError && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar os cursos para aplicar o filtro.</p></CardContent></Card>}
       {query.isSuccess && tree.children.size === 0 && <Card><CardContent className="flex flex-col items-center gap-2 p-12 text-center"><Building2 className="h-10 w-10 text-muted-foreground/50" /><h2 className="font-medium">Nenhuma categoria encontrada</h2></CardContent></Card>}
-      {query.isSuccess && tree.children.size > 0 && <div className="space-y-3">{[...tree.children.values()].map((node) => <TreeBranch key={node.path} node={node} courseGroups={courseGroups} courseCounts={courseCounts} coursesPending={coursesQuery.isPending} coursesError={coursesQuery.isError} editMode={editMode} ignoredCourseIds={ignoredCourseIds} onRestore={restoreCourse} selectionMode={selectionMode} selectedCourseIds={selectedCourseIds} onToggleCourse={toggleCourse} onToggleCategory={toggleCategory} />)}</div>}
+      {query.isSuccess && tree.children.size > 0 && <div className="space-y-3">{[...tree.children.values()].map((node) => <TreeBranch key={node.path} node={node} courseGroups={courseGroups} courseCounts={courseCounts} coursesPending={coursesQuery.isPending} coursesError={coursesQuery.isError} editMode={editMode} ignoredCourseIds={ignoredCourseIds} trackedCourseIds={trackedCourseIds} onRestore={restoreCourse} onTrack={trackCourse} onUntrack={untrackCourse} selectionMode={selectionMode} selectedCourseIds={selectedCourseIds} onToggleCourse={toggleCourse} onToggleCategory={toggleCategory} />)}</div>}
     </main>
   );
 }

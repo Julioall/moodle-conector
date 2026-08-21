@@ -161,12 +161,33 @@ internal sealed class DashboardOverviewRefreshQueue(
                 state.ConnectionAlias,
                 courses.Data,
                 cancellationToken);
-            if (scopedCourses.Count == 0) continue;
+            if (scopedCourses.Count == 0)
+            {
+                await CompleteEmptyStateAsync(db, state.Id, now, cancellationToken);
+                continue;
+            }
             var request = new DashboardOverviewRefreshRequest(state.OwnerId, state.ClientId, state.ConnectionAlias, scopedCourses);
             var key = GetKey(request.OwnerId, request.ConnectionAlias);
             if (queued.TryAdd(key, 0) && !channel.Writer.TryWrite(request)) queued.TryRemove(key, out _);
         }
     }
+
+    private static Task<int> CompleteEmptyStateAsync(
+        ConnectorDbContext db,
+        Guid stateId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken) =>
+        db.MoodleSyncStates
+            .Where(item => item.Id == stateId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.Status, "completed")
+                .SetProperty(item => item.LastCompletedAt, now)
+                .SetProperty(item => item.NextSyncAt, now.Add(AppDashboardBudget.MetricCacheDuration))
+                .SetProperty(item => item.LastError, (string?)null)
+                .SetProperty(item => item.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(item => item.RecordsSynced, 0)
+                .SetProperty(item => item.AttemptCount, 0)
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
 
     private async Task ProcessRequestAsync(DashboardOverviewRefreshRequest request, CancellationToken cancellationToken)
     {
@@ -384,6 +405,25 @@ internal sealed class DashboardPendingSnapshotBuilder(
         {
             IsRefreshing = true,
             CoursesInScope = coursesInScope,
+            CoursesAnalyzed = 0,
+            SnapshotGeneratedAt = null,
+        };
+    }
+
+    public async Task<AppDashboardPendingMetricDto> CreateEmptyAsync(
+        Guid ownerId,
+        CancellationToken cancellationToken)
+    {
+        return new AppDashboardPendingMetricDto(
+            new AppDashboardSummaryDto(0, 0, 0, 0, 0),
+            [],
+            [],
+            [],
+            await ReadTodayItemsAsync(ownerId, cancellationToken),
+            [])
+        {
+            IsRefreshing = false,
+            CoursesInScope = 0,
             CoursesAnalyzed = 0,
             SnapshotGeneratedAt = null,
         };

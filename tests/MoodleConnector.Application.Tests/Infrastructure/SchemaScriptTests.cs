@@ -183,4 +183,21 @@ public sealed class SchemaScriptTests
         Assert.Contains("IX_moodle_sync_states_due", sql, StringComparison.Ordinal);
         Assert.Contains("VALUES (35, 'snapshot freshness metadata and durable sync leases'", sql, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task TrackedCoursesSchemaScript_DeveConterPreferenciasDeCursosAcompanhados()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "036_user_tracked_courses.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de cursos acompanhados nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("user_tracked_courses", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_user_tracked_courses_OwnerId_ConnectionAlias_CourseId", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (36, 'explicitly tracked course preferences'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

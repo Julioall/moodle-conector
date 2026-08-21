@@ -1,5 +1,7 @@
 ﻿using MoodleConnector.Presentation;
 
+using Microsoft.EntityFrameworkCore;
+
 public sealed class AppDashboardContractTests
 {
     [Fact]
@@ -11,6 +13,25 @@ public sealed class AppDashboardContractTests
         Assert.Empty(result.Priorities);
         Assert.Contains("Selecione um curso", result.Warnings.Single());
         Assert.Equal(AppDashboardBudget.MaxParticipantsRead, 500);
+    }
+
+    [Fact]
+    public async Task Empty_pending_scope_does_not_enter_refreshing_state()
+    {
+        var options = new DbContextOptionsBuilder<MoodleConnector.Infrastructure.ConnectorDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .Options;
+        await using var db = new MoodleConnector.Infrastructure.ConnectorDbContext(options);
+        var builder = new DashboardPendingSnapshotBuilder(null!, db, null!, null!);
+
+        var result = await builder.CreateEmptyAsync(Guid.NewGuid(), CancellationToken.None);
+
+        Assert.False(result.IsRefreshing);
+        Assert.Equal(0, result.CoursesInScope);
+        Assert.Equal(0, result.CoursesAnalyzed);
+        Assert.Empty(result.Priorities);
+        Assert.Empty(result.CourseSummaries);
+        Assert.Empty(result.Warnings);
     }
 
     [Fact]

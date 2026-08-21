@@ -40,6 +40,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "033_planner_links_and_external_ids.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "034_moodle_persistent_snapshots.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "035_moodle_snapshot_freshness_and_leases.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "036_user_tracked_courses.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

@@ -10,8 +10,9 @@ import { useEditMode } from '@/components/layout/edit-mode-context';
 import { useConnectionScope } from '../connections/useConnectionScope';
 import { CourseCard } from './components/CourseCard';
 import { coursesGateway, type Course } from './courses-gateway';
-import { filterCoursesByLifecycle, matchesCourseSearch, normalizeCourseEndDatesBySequence } from './course-status';
+import { getCourseLifecycle, matchesCourseSearch, normalizeCourseEndDatesBySequence } from './course-status';
 import { useIgnoredCourses } from './course-visibility';
+import { useTrackedCourses } from './course-tracking';
 import { categoryPartsWithoutRedundantRoot, redundantCategoryRoots } from '../schools/schools-tree';
 
 type CategoryNode = { name: string; path: string; children: Map<string, CategoryNode>; courses: Course[] };
@@ -68,21 +69,26 @@ export function MyCoursesPage() {
   const { connectionRef } = useConnectionScope();
   const { editMode } = useEditMode();
   const { ignoredCourseIds, ignoreCourse, ignoreCourses } = useIgnoredCourses(connectionRef);
+  const { trackedCourseIds, isLoading: trackedCoursesLoading } = useTrackedCourses(connectionRef);
   const [search, setSearch] = useState('');
   const query = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
   const visibleCourses = useMemo(() => {
     const allCourses = normalizeCourseEndDatesBySequence(query.data?.data ?? []);
-    return filterCoursesByLifecycle(allCourses, 'in_progress').filter((course) => !ignoredCourseIds.has(course.courseId)).filter((course) => matchesCourseSearch(course, search));
-  }, [ignoredCourseIds, query.data?.data, search]);
+    return allCourses
+      .filter((course) => !ignoredCourseIds.has(course.courseId))
+      .filter((course) => getCourseLifecycle(course) === 'in_progress' || trackedCourseIds.has(course.courseId))
+      .filter((course) => matchesCourseSearch(course, search));
+  }, [ignoredCourseIds, query.data?.data, search, trackedCourseIds]);
   const tree = useMemo(() => buildCategoryTree(visibleCourses), [visibleCourses]);
+  const scopeLoading = query.isPending || trackedCoursesLoading;
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="courses-title">
-      <header className="page-heading"><div><p className="eyebrow">OPERACIONAL</p><h1 id="courses-title">Meus Cursos</h1><p>{query.isPending ? 'Carregando cursos…' : `${visibleCourses.length} ${visibleCourses.length === 1 ? 'curso' : 'cursos'} em acompanhamento`}</p></div><div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" placeholder="Buscar curso..." value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" /></div></header>
-      {query.isPending && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
+      <header className="page-heading"><div><p className="eyebrow">OPERACIONAL</p><h1 id="courses-title">Meus Cursos</h1><p>{scopeLoading ? 'Carregando cursos…' : `${visibleCourses.length} ${visibleCourses.length === 1 ? 'curso' : 'cursos'} em acompanhamento`}</p></div><div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" placeholder="Buscar curso..." value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" /></div></header>
+      {scopeLoading && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
       {query.isError && <Card><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar os cursos.</CardContent></Card>}
-      {query.isSuccess && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">Não há cursos em acompanhamento no momento.</p></CardContent></Card>}
-      {query.isSuccess && tree.children.size > 0 && <section className="space-y-4" aria-label="Cursos agrupados por categoria">{[...tree.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((node) => <CategoryBranch key={node.path} node={node} editMode={editMode} onIgnore={ignoreCourse} onIgnoreCategory={ignoreCourses} />)}</section>}
+      {!scopeLoading && query.isSuccess && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">Não há cursos em acompanhamento no momento.</p></CardContent></Card>}
+      {!scopeLoading && query.isSuccess && tree.children.size > 0 && <section className="space-y-4" aria-label="Cursos agrupados por categoria">{[...tree.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((node) => <CategoryBranch key={node.path} node={node} editMode={editMode} onIgnore={ignoreCourse} onIgnoreCategory={ignoreCourses} />)}</section>}
     </main>
   );
 }
