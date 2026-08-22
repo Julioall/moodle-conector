@@ -166,7 +166,7 @@ humana e minimização de dados.
 | `discover_grading_functions` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Implementada |
 | `execute_grading_discovery` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `list_gradable_submissions` | Listar Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
+| `list_all_gradable_submissions` | Listar Todas as Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
 | `create_assisted_grading_batch` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
 | `get_grading_batch_status` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
 | `export_grading_coordination_report` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Implementada |
@@ -1177,11 +1177,12 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `list_gradable_submissions`
+## `list_all_gradable_submissions`
 
 Descricao:
 
-- Lista entregas corrigiveis de uma ou mais tarefas com contadores e paginacao agregada.
+- Lista entregas corrigiveis diretamente do snapshot persistente, sem consultar o Moodle nesta chamada.
+- Quando `assignmentIds` fica vazio, lista todas as tarefas disponíveis no snapshot.
 - Usada como passo de preparo antes de `create_assisted_grading_batch`.
 - Aceita filtro por status e flag `onlyAwaitingGrading`.
 - Nao baixa anexos nem retorna conteudo integral de submissoes.
@@ -1191,7 +1192,7 @@ Parametros:
 | Nome | Tipo | Descricao |
 | --- | --- | --- |
 | `courseId` | `string` | Identificador do curso Moodle. |
-| `assignmentIds` | `string[]` | Identificadores das tarefas Moodle. |
+| `assignmentIds` | `string[]?` | Identificadores opcionais das tarefas; vazio significa todas as tarefas do snapshot. |
 | `status` | `string` | Filtro: `all`, `submitted`, `pending`, `late`, `awaiting_grading`. Padrao: `awaiting_grading`. |
 | `onlyAwaitingGrading` | `bool` | Quando true, forca filtro apenas para aguardando correcao. |
 | `includeLate` | `bool` | Quando false, remove entregas atrasadas da lista. |

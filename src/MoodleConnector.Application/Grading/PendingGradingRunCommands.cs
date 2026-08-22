@@ -23,7 +23,11 @@ public sealed record StartPendingGradingRunCommand(
     bool IncludeSubmissionFiles = true,
     bool IncludeCourseMaterials = false,
     string? TeacherInstructions = null,
-    string Priority = "normal") : IRequest<StartPendingGradingRunResult>;
+    string Priority = "normal",
+    bool UseSubmissionSnapshots = false,
+    Guid? SnapshotOwnerId = null,
+    string? SnapshotClientId = null,
+    string? SnapshotConnectionAlias = null) : IRequest<StartPendingGradingRunResult>;
 
 public sealed record StartPendingGradingRunResult(
     [property: JsonPropertyName("coursesDiscovered")] int CoursesDiscovered,
@@ -52,7 +56,9 @@ public sealed record PendingGradingRunCourse(
 
 public sealed class StartPendingGradingRunCommandHandler(
     IMediator mediator,
-    IMoodleCourseContentsGateway contentsGateway)
+    IMoodleCourseContentsGateway contentsGateway,
+    IMoodleSnapshotStore? snapshotStore = null,
+    IMoodleSnapshotSyncQueue? snapshotSyncQueue = null)
     : IRequestHandler<StartPendingGradingRunCommand, StartPendingGradingRunResult>
 {
     private const int CoursePageSize = 100;
@@ -73,14 +79,39 @@ public sealed class StartPendingGradingRunCommandHandler(
 
         var maxCourses = request.MaxCourses == 0 ? int.MaxValue : Math.Clamp(request.MaxCourses, 1, 1000);
         var maxItemsPerBatch = Math.Clamp(request.MaxItemsPerBatch, 1, 400);
-        var courses = await LoadCoursesAsync(request.UserExternalId, maxCourses, cancellationToken);
+        var useSnapshots = request.UseSubmissionSnapshots &&
+            request.SnapshotOwnerId is not null &&
+            !string.IsNullOrWhiteSpace(request.SnapshotClientId) &&
+            !string.IsNullOrWhiteSpace(request.SnapshotConnectionAlias) &&
+            snapshotStore is not null;
+        IReadOnlyList<CourseSummary> courses = useSnapshots
+            ? []
+            : await LoadCoursesAsync(request.UserExternalId, maxCourses, cancellationToken);
         var batches = new List<PendingGradingRunBatch>();
         var courseResults = new List<PendingGradingRunCourse>();
         var warnings = new List<string>();
 
+        if (useSnapshots)
+        {
+            courses = await LoadCoursesFromSnapshotAsync(request, maxCourses, warnings, cancellationToken);
+        }
+
         foreach (var course in courses)
         {
             var courseName = ResolveCourseName(course);
+            if (useSnapshots)
+            {
+                courseResults.Add(await ProcessSnapshotCourseAsync(
+                    request,
+                    course,
+                    courseName,
+                    maxItemsPerBatch,
+                    batches,
+                    warnings,
+                    cancellationToken));
+                continue;
+            }
+
             CourseContentsSummary contents;
             try
             {
@@ -226,6 +257,185 @@ public sealed class StartPendingGradingRunCommandHandler(
             NextStep: batches.Count == 0
                 ? "Nao ha entregas pendentes elegiveis para iniciar a correcao. Consulte os cursos com falha para ajuste manual."
                 : "Para cada batchJobId, prepare o pacote de IA, gere os rascunhos, revise-os com o professor e confirme o lancamento no Moodle. Ao final, use export_pending_grading_run_report com todos os batchJobIds para obter a lista consolidada de corrigidos e nao corrigidos.");
+    }
+
+    private async Task<IReadOnlyList<CourseSummary>> LoadCoursesFromSnapshotAsync(
+        StartPendingGradingRunCommand request,
+        int maxCourses,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await snapshotStore!.GetCoursesAsync(
+            request.SnapshotOwnerId!.Value,
+            request.SnapshotConnectionAlias!,
+            cancellationToken);
+        if (snapshot is null)
+        {
+            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Courses, null, force: false, cancellationToken);
+            warnings.Add(
+                queued
+                    ? "O snapshot de cursos ainda não está disponível; a atualização foi agendada e nenhuma consulta live foi feita."
+                    : "O snapshot de cursos ainda não está disponível e não foi possível agendar a atualização.");
+            return [];
+        }
+
+        if (snapshot.IsStale || !snapshot.IsComplete)
+        {
+            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Courses, null, force: true, cancellationToken);
+            warnings.Add(
+                queued
+                    ? "O snapshot de cursos está desatualizado ou incompleto; a atualização foi agendada."
+                    : "O snapshot de cursos está desatualizado ou incompleto e não foi possível agendar a atualização.");
+        }
+
+        return snapshot.Data
+            .Take(maxCourses)
+            .ToArray();
+    }
+
+    private async Task<PendingGradingRunCourse> ProcessSnapshotCourseAsync(
+        StartPendingGradingRunCommand request,
+        CourseSummary course,
+        string courseName,
+        int maxItemsPerBatch,
+        List<PendingGradingRunBatch> batches,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await snapshotStore!.GetAsync<CourseAssignmentSubmissionsSnapshot>(
+            request.SnapshotOwnerId!.Value,
+            request.SnapshotConnectionAlias!,
+            MoodleSnapshotDatasets.Submissions,
+            course.CourseId,
+            cancellationToken);
+        if (snapshot is null)
+        {
+            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Submissions, course.CourseId, force: false, cancellationToken);
+            var message = queued
+                ? "O snapshot de entregas ainda não está disponível; a atualização foi agendada."
+                : "O snapshot de entregas ainda não está disponível e não foi possível agendar a atualização.";
+            warnings.Add($"Curso {course.CourseId}: {message}");
+            return new PendingGradingRunCourse(course.CourseId, courseName, "snapshot_unavailable", null, message);
+        }
+
+        if (snapshot.IsStale || !snapshot.IsComplete)
+        {
+            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Submissions, course.CourseId, force: true, cancellationToken);
+            warnings.Add($"Curso {course.CourseId}: o snapshot de entregas está desatualizado ou incompleto; a leitura usou apenas os dados disponíveis e agendou atualização={queued}.");
+        }
+
+        if (snapshot.Data.Assignments.Count == 0)
+        {
+            return new PendingGradingRunCourse(
+                course.CourseId,
+                courseName,
+                "no_assignments",
+                null,
+                "Nenhuma atividade avaliativa do tipo assign está disponível no snapshot.");
+        }
+
+        var batchesBeforeCourse = batches.Count;
+        var courseMessages = new List<string>();
+        foreach (var assignment in snapshot.Data.Assignments)
+        {
+            if (!assignment.IsComplete)
+            {
+                var message = assignment.ErrorMessage ?? "Os dados da tarefa estão incompletos no snapshot.";
+                courseMessages.Add($"Tarefa {assignment.AssignmentId}: {message}");
+                warnings.Add($"Curso {course.CourseId}: tarefa {assignment.AssignmentId}: {message}");
+                continue;
+            }
+
+            var submissions = assignment.Submissions
+                .Where(submission => submission.NeedsGrading)
+                .ToArray();
+            foreach (var submissionChunk in submissions.Chunk(maxItemsPerBatch))
+            {
+                try
+                {
+                    var batch = await mediator.Send(
+                        new CreateAssistedGradingBatchCommand(
+                            request.UserExternalId,
+                            course.CourseId,
+                            AssignmentIds: [assignment.AssignmentId],
+                            SubmissionIds: [],
+                            MaxItems: maxItemsPerBatch,
+                            OnlyAwaitingGrading: true,
+                            IncludeRubric: request.IncludeRubric,
+                            IncludeSubmissionFiles: request.IncludeSubmissionFiles,
+                            IncludeCourseMaterials: request.IncludeCourseMaterials,
+                            TeacherInstructions: request.TeacherInstructions,
+                            Priority: request.Priority,
+                            PrefetchedSubmissions: submissionChunk),
+                        cancellationToken);
+
+                    if (batch.BatchJobId == Guid.Empty || batch.AcceptedItems == 0)
+                    {
+                        continue;
+                    }
+
+                    batches.Add(new PendingGradingRunBatch(
+                        batch.BatchJobId,
+                        batch.CourseId,
+                        courseName,
+                        batch.AssignmentIds,
+                        batch.AcceptedItems,
+                        batch.BlockedItems));
+                    warnings.AddRange(batch.Warnings.Select(warning => $"Curso {course.CourseId}: {warning}"));
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    var message = $"Nao foi possivel preparar o sublote da tarefa {assignment.AssignmentId}: {ex.Message}";
+                    courseMessages.Add(message);
+                    warnings.Add($"Curso {course.CourseId}: {message}");
+                }
+            }
+        }
+
+        var courseBatchCount = batches.Count - batchesBeforeCourse;
+        return new PendingGradingRunCourse(
+            course.CourseId,
+            courseName,
+            courseBatchCount > 0
+                ? "batch_created"
+                : courseMessages.Count > 0
+                    ? "partial_failure"
+                    : "no_pending_submissions",
+            courseBatchCount == 1 ? batches[^1].BatchJobId : null,
+            courseBatchCount > 0
+                ? $"{courseBatchCount} sublote(s) criado(s). {string.Join(" ", courseMessages)}".Trim()
+                : courseMessages.Count > 0
+                    ? string.Join(" ", courseMessages)
+                    : "Nenhuma entrega aguardando correcao foi encontrada.");
+    }
+
+    private async Task<bool> QueueSnapshotAsync(
+        StartPendingGradingRunCommand request,
+        string dataset,
+        string? courseId,
+        bool force,
+        CancellationToken cancellationToken)
+    {
+        if (snapshotSyncQueue is null)
+        {
+            return false;
+        }
+
+        return await snapshotSyncQueue.EnqueueAsync(
+            new MoodleSnapshotSyncRequest(
+                request.SnapshotOwnerId!.Value,
+                request.SnapshotClientId!,
+                request.SnapshotConnectionAlias!,
+                request.UserExternalId,
+                force,
+                dataset,
+                courseId,
+                Priority: 5),
+            cancellationToken);
     }
 
     private async Task<IReadOnlyList<AssignmentSubmissionSummary>> LoadPendingSubmissionsAsync(

@@ -6,6 +6,8 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Completion.Queries;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
+using MoodleConnector.Presentation.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Completion;
 
@@ -13,7 +15,8 @@ namespace MoodleConnector.Presentation.Tools.Completion;
 public sealed class MoodleAccessMonitoringTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     [McpServerTool(
         Name = "list_students_without_recent_access",
@@ -55,11 +58,65 @@ public sealed class MoodleAccessMonitoringTools(
             return ToolResultHelper.Error<GetStudentsWithoutRecentAccessResult>("Usuário não autenticado.");
 
         GetStudentsWithoutRecentAccessResult data;
+        ToolFreshness? freshness = null;
         try
         {
+            MoodleSnapshotToolScope? scope = null;
+            MoodleSnapshotEnvelope<CourseParticipantsPage>? snapshot = null;
+            var resolvedCourseId = courseId;
+            var refreshQueued = false;
+            if (snapshotContext is not null)
+            {
+                try
+                {
+                    scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        snapshot = await snapshotContext.GetStudentsAsync(scope, resolvedCourseId, cancellationToken);
+                        if (snapshot is null || snapshot.Data is null || snapshot.IsStale)
+                        {
+                            refreshQueued = await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Students,
+                                resolvedCourseId,
+                                priority: 20,
+                                force: snapshot is not null,
+                                cancellationToken);
+                        }
+                    }
+                }
+                catch
+                {
+                    scope = null;
+                    snapshot = null;
+                }
+            }
+
             data = await mediator.Send(
-                new GetStudentsWithoutRecentAccessQuery(courseId, daysWithoutAccess, maxStudentsToAnalyze),
+                new GetStudentsWithoutRecentAccessQuery(
+                    resolvedCourseId,
+                    daysWithoutAccess,
+                    maxStudentsToAnalyze,
+                    snapshot?.Data),
                 cancellationToken);
+
+            if (snapshot is not null && snapshot.Data is not null)
+            {
+                freshness = new ToolFreshness(
+                    "snapshot",
+                    snapshot.UpdatedAt,
+                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                    snapshot.IsStale,
+                    refreshQueued,
+                    snapshot.IsComplete,
+                    snapshot.RecordCount);
+            }
+            else if (scope is not null)
+            {
+                freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+            }
         }
         catch (OperationCanceledException) { throw; }
         catch
@@ -67,7 +124,13 @@ public sealed class MoodleAccessMonitoringTools(
             return ToolResultHelper.Error<GetStudentsWithoutRecentAccessResult>("Não foi possível listar os alunos sem acesso recente.");
         }
 
-        var response = new ToolResponse<GetStudentsWithoutRecentAccessResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<GetStudentsWithoutRecentAccessResult>(
+            "ok",
+            data,
+            [],
+            AuditId: null,
+            DateTimeOffset.UtcNow,
+            Freshness: freshness);
         var narration = $"Monitoramento de acesso — curso {courseId}: {data.TotalStudentsAnalyzed} estudante(s) analisado(s). " +
                         $"{data.Students.Count} sem acesso há mais de {data.DaysThreshold} dia(s).";
 

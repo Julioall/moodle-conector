@@ -59,7 +59,8 @@ public sealed record GetStudentsWithPendingSubmissionsQuery(
     bool IncludeAwaitingGrading = false,
     int MaxAssignmentsToAnalyze = 0,
     CourseContentsSummary? PrefetchedContents = null,
-    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<GetStudentsWithPendingSubmissionsResult>;
+    CourseParticipantsPage? PrefetchedParticipants = null,
+    CourseAssignmentSubmissionsSnapshot? PrefetchedSubmissions = null) : IRequest<GetStudentsWithPendingSubmissionsResult>;
 
 public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -187,20 +188,41 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         var submissionFailures = new List<string>();
         if (assignmentContexts.Length > 0)
         {
-            try
+            if (IsForCourse(request.PrefetchedSubmissions, request.CourseId))
             {
-                submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
-                    currentUserExternalId,
-                    assignmentContexts.Select(context => context.Module.InstanceId!).ToArray(),
-                    request.IncludeAwaitingGrading ? null : "notsubmitted",
-                    since: null,
-                    before: null,
-                    cancellationToken);
+                submissionBatches = request.PrefetchedSubmissions!.Assignments
+                    .Where(item => assignmentContexts.Any(context =>
+                        string.Equals(context.Module.InstanceId, item.AssignmentId, StringComparison.OrdinalIgnoreCase)))
+                    .Select(item => new AssignmentSubmissionsBatch(
+                        item.AssignmentId,
+                        item.Submissions.Select(AssignmentSubmissionSnapshotProjector.ToRecord).ToArray(),
+                        item.ErrorCode,
+                        item.ErrorMessage))
+                    .ToArray();
+                foreach (var item in request.PrefetchedSubmissions.Assignments.Where(item => !item.IsComplete))
+                {
+                    submissionFailures.Add($"{item.AssignmentId} ({item.ErrorCode ?? "snapshot_incomplete"})");
+                }
+
+                submissionReadFailed = request.PrefetchedSubmissions.Assignments.Any(item => !item.IsComplete);
             }
-            catch
+            else
             {
-                submissionBatches = [];
-                submissionReadFailed = true;
+                try
+                {
+                    submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+                        currentUserExternalId,
+                        assignmentContexts.Select(context => context.Module.InstanceId!).ToArray(),
+                        request.IncludeAwaitingGrading ? null : "notsubmitted",
+                        since: null,
+                        before: null,
+                        cancellationToken);
+                }
+                catch
+                {
+                    submissionBatches = [];
+                    submissionReadFailed = true;
+                }
             }
         }
 
@@ -359,6 +381,10 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     private static bool IsForCourse(CourseParticipantsPage? participants, string courseId) =>
         participants is not null &&
         string.Equals(participants.CourseId, courseId, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsForCourse(CourseAssignmentSubmissionsSnapshot? submissions, string courseId) =>
+        submissions is not null &&
+        string.Equals(submissions.CourseId, courseId, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsNoGradeActivity(
         CourseModuleSummary module,

@@ -15,7 +15,8 @@ namespace MoodleConnector.Presentation.Tools;
 public sealed class MoodleAssignmentSubmissionsTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     [McpServerTool(
         Name = "list_assignment_submissions",
@@ -241,13 +242,80 @@ public sealed class MoodleAssignmentSubmissionsTools(
             return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Usuario nao autenticado para consultar entregas.");
         }
 
-        AssignmentSubmissionsPage? submissionsPage;
+        AssignmentSubmissionsPage? submissionsPage = null;
+        ToolFreshness? freshness = null;
+        var resolvedCourseId = courseId;
         try
         {
-            submissionsPage = await mediator.Send(
+            MoodleSnapshotToolScope? scope = null;
+            MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>? snapshot = null;
+            var refreshQueued = false;
+            if (snapshotContext is not null)
+            {
+                try
+                {
+                    scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        snapshot = await snapshotContext.GetSubmissionsAsync(scope, resolvedCourseId, cancellationToken);
+                        var item = snapshot?.Data is null
+                            ? null
+                            : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, assignmentId);
+                        if (item is not null && item.IsComplete)
+                        {
+                            submissionsPage = AssignmentSubmissionSnapshotProjector.ToPage(
+                                item,
+                                resolvedCourseId,
+                                filter,
+                                page,
+                                pageSize,
+                                since,
+                                before,
+                                includeLate,
+                                includeUngraded);
+                            refreshQueued = snapshot!.IsStale && await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Submissions,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: true,
+                                cancellationToken);
+                            freshness = new ToolFreshness(
+                                "snapshot",
+                                snapshot.UpdatedAt,
+                                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                                snapshot.IsStale,
+                                refreshQueued,
+                                snapshot.IsComplete,
+                                snapshot.RecordCount);
+                        }
+                        else
+                        {
+                            refreshQueued = await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Submissions,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: snapshot is not null,
+                                cancellationToken);
+                            freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Local snapshot resolution is optional for legacy MCP
+                    // clients. The authoritative live query remains available.
+                }
+            }
+
+            submissionsPage ??= await mediator.Send(
                 new ListAssignmentSubmissionsQuery(
                     moodleUserId.Value.ToString(),
-                    courseId,
+                    resolvedCourseId,
                     assignmentId,
                     filter,
                     page,
@@ -277,7 +345,7 @@ public sealed class MoodleAssignmentSubmissionsTools(
         }
 
         var data = ToListResponse(submissionsPage);
-        var response = new ToolResponse<ListAssignmentSubmissionsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<ListAssignmentSubmissionsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult
         {
@@ -316,13 +384,60 @@ public sealed class MoodleAssignmentSubmissionsTools(
             return ToolResultHelper.Error<StudentSubmissionResponse>("Usuario nao autenticado para consultar entrega.");
         }
 
-        AssignmentSubmissionSummary? submission;
+        AssignmentSubmissionSummary? submission = null;
+        ToolFreshness? freshness = null;
+        var resolvedCourseId = courseId;
         try
         {
-            submission = await mediator.Send(
+            if (snapshotContext is not null)
+            {
+                try
+                {
+                    var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        var snapshot = await snapshotContext.GetSubmissionsAsync(scope, resolvedCourseId, cancellationToken);
+                        var item = snapshot?.Data is null
+                            ? null
+                            : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, assignmentId);
+                        if (item is not null && item.IsComplete)
+                        {
+                            submission = AssignmentSubmissionSnapshotProjector.FindStudent(item, studentId);
+                            var refreshQueued = snapshot!.IsStale && await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Submissions,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: true,
+                                cancellationToken);
+                            freshness = new ToolFreshness("snapshot", snapshot.UpdatedAt, Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds), snapshot.IsStale, refreshQueued, snapshot.IsComplete, snapshot.RecordCount);
+                        }
+                        else
+                        {
+                            var refreshQueued = await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Submissions,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: snapshot is not null,
+                                cancellationToken);
+                            freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Continue through the existing live path.
+                }
+            }
+
+            submission ??= await mediator.Send(
                 new GetStudentSubmissionQuery(
                     moodleUserId.Value.ToString(),
-                    courseId,
+                    resolvedCourseId,
                     assignmentId,
                     studentId),
                 cancellationToken);
@@ -341,8 +456,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
             return ToolResultHelper.Error<StudentSubmissionResponse>("Estudante, curso ou tarefa nao encontrados entre os dados autorizados do usuario.");
         }
 
-        var data = new StudentSubmissionResponse(courseId, assignmentId, ToSubmissionItem(submission));
-        var response = new ToolResponse<StudentSubmissionResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var data = new StudentSubmissionResponse(resolvedCourseId, assignmentId, ToSubmissionItem(submission));
+        var response = new ToolResponse<StudentSubmissionResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult
         {

@@ -71,6 +71,31 @@ public sealed class MoodleSnapshotToolContext(
         CancellationToken cancellationToken = default) =>
         snapshotStore.GetGroupsAsync(scope.Identity.Id, scope.ConnectionAlias, courseId, cancellationToken);
 
+    public Task<MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>?> GetSubmissionsAsync(
+        MoodleSnapshotToolScope scope,
+        string courseId,
+        CancellationToken cancellationToken = default) =>
+        snapshotStore.GetAsync<CourseAssignmentSubmissionsSnapshot>(
+            scope.Identity.Id,
+            scope.ConnectionAlias,
+            MoodleSnapshotDatasets.Submissions,
+            courseId,
+            cancellationToken);
+
+    public async Task<string> ResolveCourseIdAsync(
+        MoodleSnapshotToolScope? scope,
+        string courseId,
+        CancellationToken cancellationToken = default)
+    {
+        if (scope is null) return courseId;
+        var courses = await GetCoursesAsync(scope, cancellationToken);
+        var match = courses?.Data.FirstOrDefault(course =>
+            string.Equals(course.CourseId, courseId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(course.ShortName, courseId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(course.IdNumber, courseId, StringComparison.OrdinalIgnoreCase));
+        return match?.CourseId ?? courseId;
+    }
+
     public Task<bool> QueueAsync(
         MoodleSnapshotToolScope scope,
         string userExternalId,

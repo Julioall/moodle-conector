@@ -10,6 +10,7 @@ using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
+using MoodleConnector.Presentation.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
@@ -17,7 +18,8 @@ namespace MoodleConnector.Presentation.Tools.Grading;
 public sealed class MoodleGradingTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     [McpServerTool(
         Name = "discover_grading_functions",
@@ -55,16 +57,6 @@ public sealed class MoodleGradingTools(
         return TechnicalDiscoveryCoreAsync(moodleAlias, cancellationToken);
     }
 
-    [McpServerTool(
-        Name = "list_gradable_submissions",
-        Title = "List Gradable Submissions",
-        ReadOnly = true,
-        Destructive = false,
-        Idempotent = true,
-        OpenWorld = false,
-        UseStructuredContent = true,
-        OutputSchemaType = typeof(ToolResponse<ListarEntregasCorrigiveisResponse>))]
-    [Description("Lista entregas corrigiveis de uma ou mais tarefas, com contadores e paginação agregada para preparo de lote.")]
     public Task<CallToolResult> ListarEntregasCorrigiveisAsync(
         [Description("Identificador do curso Moodle.")]
         string courseId,
@@ -87,6 +79,47 @@ public sealed class MoodleGradingTools(
         return ListarEntregasCorrigiveisCoreAsync(
             courseId,
             assignmentIds,
+            status,
+            onlyAwaitingGrading,
+            includeLate,
+            page,
+            perPage,
+            moodleAlias,
+            cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "list_all_gradable_submissions",
+        Title = "List All Gradable Submissions",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<ListarEntregasCorrigiveisResponse>))]
+    [Description("Lê as entregas aguardando correção diretamente do snapshot persistente do curso. Não consulta o Moodle nesta chamada; se o snapshot estiver ausente, incompleto ou desatualizado, agenda uma atualização assíncrona e informa a cobertura disponível." )]
+    public Task<CallToolResult> ListarEntregasCorrigiveisDoSnapshotAsync(
+        [Description("Identificador do curso Moodle. Pode ser courseId, shortName ou idnumber.")]
+        string courseId,
+        [Description("Identificadores opcionais das tarefas. Quando vazio, lê todas as tarefas disponíveis no snapshot.")]
+        string[]? assignmentIds = null,
+        [Description("Filtro de status: all, submitted, pending, late ou awaiting_grading.")]
+        string status = "awaiting_grading",
+        [Description("Quando true, considera somente entregas aguardando correção.")]
+        bool onlyAwaitingGrading = true,
+        [Description("Quando false, remove entregas atrasadas da leitura.")]
+        bool includeLate = true,
+        [Description("Página de resultados, iniciando em 1.")]
+        int page = 1,
+        [Description("Tamanho da página, de 1 a 100.")]
+        int perPage = 25,
+        [Description("Alias do Moodle usado para localizar o snapshot. A chamada não consulta o Moodle.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ListarEntregasCorrigiveisDoSnapshotCoreAsync(
+            courseId,
+            assignmentIds ?? [],
             status,
             onlyAwaitingGrading,
             includeLate,
@@ -824,6 +857,28 @@ public sealed class MoodleGradingTools(
             return ToolResultHelper.Error<StartPendingGradingRunResult>("Usuario nao autenticado para iniciar a correcao de pendencias.");
         }
 
+        Guid? snapshotOwnerId = null;
+        string? snapshotClientId = null;
+        string? snapshotConnectionAlias = null;
+        if (snapshotContext is not null)
+        {
+            try
+            {
+                var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                if (scope is not null)
+                {
+                    snapshotOwnerId = scope.Identity.Id;
+                    snapshotClientId = scope.ClientId;
+                    snapshotConnectionAlias = scope.ConnectionAlias;
+                }
+            }
+            catch
+            {
+                // Legacy callers without a local portal identity retain the
+                // existing live command path.
+            }
+        }
+
         StartPendingGradingRunResult data;
         try
         {
@@ -836,7 +891,11 @@ public sealed class MoodleGradingTools(
                     includeSubmissionFiles,
                     includeCourseMaterials,
                     teacherInstructions,
-                    priority),
+                    priority,
+                    UseSubmissionSnapshots: snapshotOwnerId is not null,
+                    SnapshotOwnerId: snapshotOwnerId,
+                    SnapshotClientId: snapshotClientId,
+                    SnapshotConnectionAlias: snapshotConnectionAlias),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -913,6 +972,44 @@ public sealed class MoodleGradingTools(
         var failedAssignments = new List<EntregaCorrigivelFalha>();
         var failedAssignmentCount = 0;
         Exception? firstFailure = null;
+        var resolvedCourseId = courseId;
+        MoodleSnapshotToolScope? snapshotScope = null;
+        MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>? submissionsSnapshot = null;
+        var refreshQueued = false;
+        var usedSnapshot = false;
+        var usedLive = false;
+
+        if (snapshotContext is not null)
+        {
+            try
+            {
+                snapshotScope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                if (snapshotScope is not null)
+                {
+                    resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(snapshotScope, courseId, cancellationToken);
+                    submissionsSnapshot = await snapshotContext.GetSubmissionsAsync(snapshotScope, resolvedCourseId, cancellationToken);
+                    if (submissionsSnapshot is null || submissionsSnapshot.Data is null || submissionsSnapshot.IsStale)
+                    {
+                        refreshQueued = await snapshotContext.QueueAsync(
+                            snapshotScope,
+                            moodleUserId.Value.ToString(),
+                            MoodleSnapshotDatasets.Submissions,
+                            resolvedCourseId,
+                            priority: 10,
+                            force: submissionsSnapshot is not null,
+                            cancellationToken);
+                    }
+                }
+            }
+            catch
+            {
+                // Snapshot access is an optimization. The live query below
+                // remains authoritative when the local portal context is not
+                // available or cannot be read.
+                snapshotScope = null;
+                submissionsSnapshot = null;
+            }
+        }
 
         foreach (var assignmentId in normalizedAssignmentIds)
         {
@@ -922,19 +1019,50 @@ public sealed class MoodleGradingTools(
                 AssignmentSubmissionsPage? submissions;
                 try
                 {
-                    submissions = await mediator.Send(
-                        new ListAssignmentSubmissionsQuery(
-                            moodleUserId.Value.ToString(),
-                            courseId,
-                            assignmentId,
+                    var snapshotItem = submissionsSnapshot?.Data is null
+                        ? null
+                        : AssignmentSubmissionSnapshotProjector.FindAssignment(submissionsSnapshot.Data, assignmentId);
+                    if (snapshotItem is not null && snapshotItem.IsComplete)
+                    {
+                        submissions = AssignmentSubmissionSnapshotProjector.ToPage(
+                            snapshotItem,
+                            resolvedCourseId,
                             filter,
                             requestPage,
                             100,
-                            Since: null,
-                            Before: null,
-                            IncludeLate: includeLate,
-                            IncludeUngraded: true),
-                        cancellationToken);
+                            since: null,
+                            before: null,
+                            includeLate,
+                            includeUngraded: true);
+                        usedSnapshot = true;
+                    }
+                    else
+                    {
+                        submissions = await mediator.Send(
+                            new ListAssignmentSubmissionsQuery(
+                                moodleUserId.Value.ToString(),
+                                resolvedCourseId,
+                                assignmentId,
+                                filter,
+                                requestPage,
+                                100,
+                                Since: null,
+                                Before: null,
+                                IncludeLate: includeLate,
+                                IncludeUngraded: true),
+                            cancellationToken);
+                        usedLive = true;
+                        if (snapshotScope is not null && (snapshotItem is null || !snapshotItem.IsComplete))
+                        {
+                            refreshQueued |= await snapshotContext!.QueueAsync(
+                                snapshotScope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Submissions,
+                                resolvedCourseId,
+                                priority: 10,
+                                cancellationToken: cancellationToken);
+                        }
+                    }
                 }
                 catch (OperationCanceledException)
                 {
@@ -1036,12 +1164,262 @@ public sealed class MoodleGradingTools(
 
         var responseStatus = failedAssignmentCount > 0 ? "partial_failure" : "ok";
 
+        var freshness = submissionsSnapshot is not null && usedSnapshot && !usedLive
+            ? new ToolFreshness(
+                "snapshot",
+                submissionsSnapshot.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - submissionsSnapshot.UpdatedAt).TotalSeconds),
+                submissionsSnapshot.IsStale,
+                refreshQueued,
+                submissionsSnapshot.IsComplete,
+                submissionsSnapshot.RecordCount)
+            : snapshotScope is not null
+                ? new ToolFreshness("live", null, null, false, refreshQueued, false, 0)
+                : null;
+
         var response = new ToolResponse<ListarEntregasCorrigiveisResponse>(
             responseStatus,
             data,
             warnings,
             AuditId: null,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            Freshness: freshness);
+
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = BuildListarEntregasCorrigiveisNarration(data) }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    private async Task<CallToolResult> ListarEntregasCorrigiveisDoSnapshotCoreAsync(
+        string courseId,
+        IReadOnlyList<string> assignmentIds,
+        string status,
+        bool onlyAwaitingGrading,
+        bool includeLate,
+        int page,
+        int perPage,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(courseId))
+        {
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
+                "Informe um identificador de curso.",
+                errorCode: "invalid_course_id");
+        }
+
+        if (!TryParseSubmissionFilter(status, out var parsedFilter))
+        {
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
+                "Filtro de status invalido. Use all, submitted, pending, late ou awaiting_grading.",
+                errorCode: "invalid_submission_filter");
+        }
+
+        var safePage = Math.Max(1, page);
+        var safePageSize = Math.Clamp(perPage, 1, 100);
+        var filter = onlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : parsedFilter;
+
+        moodleSelection.Alias = moodleAlias;
+        var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+        if (moodleUserId is null)
+        {
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
+                "Usuario nao autenticado para ler o snapshot de entregas.",
+                errorCode: MoodleErrorContract.AuthenticationFailed);
+        }
+
+        if (snapshotContext is null)
+        {
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
+                "A leitura snapshot-only nao esta disponivel neste cliente.",
+                errorCode: MoodleErrorContract.SnapshotUnavailable);
+        }
+
+        MoodleSnapshotToolScope? scope;
+        try
+        {
+            scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+        }
+        catch
+        {
+            scope = null;
+        }
+
+        if (scope is null)
+        {
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
+                "Nao foi possivel resolver a identidade local para ler o snapshot de entregas.",
+                errorCode: MoodleErrorContract.SnapshotUnavailable);
+        }
+
+        var resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+        MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>? snapshot;
+        try
+        {
+            snapshot = await snapshotContext.GetSubmissionsAsync(scope, resolvedCourseId, cancellationToken);
+        }
+        catch
+        {
+            snapshot = null;
+        }
+
+        if (snapshot is null)
+        {
+            var queued = await snapshotContext.QueueAsync(
+                scope,
+                moodleUserId.Value.ToString(),
+                MoodleSnapshotDatasets.Submissions,
+                resolvedCourseId,
+                priority: 5,
+                cancellationToken: cancellationToken);
+            var queueMessage = queued
+                ? " Uma atualização assíncrona foi agendada."
+                : string.Empty;
+            return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
+                $"Ainda não existe snapshot de entregas para o curso {resolvedCourseId}. A leitura não consultou o Moodle.{queueMessage}",
+                errorCode: MoodleErrorContract.SnapshotUnavailable);
+        }
+
+        var refreshQueued = snapshot.IsStale || !snapshot.IsComplete
+            ? await snapshotContext.QueueAsync(
+                scope,
+                moodleUserId.Value.ToString(),
+                MoodleSnapshotDatasets.Submissions,
+                resolvedCourseId,
+                priority: 5,
+                force: true,
+                cancellationToken: cancellationToken)
+            : false;
+
+        var normalizedAssignmentIds = assignmentIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var selectedAssignments = normalizedAssignmentIds.Length == 0
+            ? snapshot.Data.Assignments
+            : normalizedAssignmentIds
+                .Select(id => AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, id))
+                .Where(item => item is not null)
+                .Cast<AssignmentSubmissionsSnapshotItem>()
+                .ToArray();
+
+        var failedAssignments = new List<EntregaCorrigivelFalha>();
+        if (normalizedAssignmentIds.Length > 0)
+        {
+            foreach (var id in normalizedAssignmentIds)
+            {
+                if (AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, id) is null)
+                {
+                    failedAssignments.Add(new EntregaCorrigivelFalha(
+                        id,
+                        "assignment_not_in_snapshot",
+                        "A tarefa solicitada ainda não está disponível no snapshot persistente."));
+                }
+            }
+        }
+
+        var allItems = new List<EntregaCorrigivelItem>();
+        foreach (var assignment in selectedAssignments)
+        {
+            if (!assignment.IsComplete)
+            {
+                failedAssignments.Add(new EntregaCorrigivelFalha(
+                    assignment.AssignmentId,
+                    assignment.ErrorCode ?? "snapshot_incomplete",
+                    assignment.ErrorMessage ?? "Os dados desta tarefa estão incompletos no snapshot."));
+                continue;
+            }
+
+            for (var assignmentPage = 1; ; assignmentPage++)
+            {
+                var pageData = AssignmentSubmissionSnapshotProjector.ToPage(
+                    assignment,
+                    resolvedCourseId,
+                    filter,
+                    assignmentPage,
+                    100,
+                    since: null,
+                    before: null,
+                    includeLate,
+                    includeUngraded: true);
+                allItems.AddRange(pageData.Submissions.Select(submission => new EntregaCorrigivelItem(
+                    resolvedCourseId,
+                    assignment.AssignmentId,
+                    submission.SubmissionId,
+                    submission.UserId,
+                    submission.FullName,
+                    submission.Status,
+                    submission.GradingStatus,
+                    submission.Submitted,
+                    submission.NeedsGrading,
+                    submission.Late,
+                    submission.AttemptNumber,
+                    submission.SubmittedAt,
+                    submission.ModifiedAt,
+                    submission.FileCount,
+                    submission.HasOnlineText)));
+
+                if (!pageData.HasMore)
+                {
+                    break;
+                }
+            }
+        }
+
+        var orderedItems = allItems
+            .OrderBy(item => item.StudentName ?? item.StudentId, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(item => item.AssignmentId, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var pagedItems = orderedItems
+            .Skip((safePage - 1) * safePageSize)
+            .Take(safePageSize)
+            .ToArray();
+        var data = new ListarEntregasCorrigiveisResponse(
+            safePage,
+            safePageSize,
+            orderedItems.Length,
+            safePage * safePageSize < orderedItems.Length,
+            new EntregaCorrigivelContadores(
+                orderedItems.Length,
+                orderedItems.Count(item => item.NeedsGrading),
+                orderedItems.Count(item => item.Submitted),
+                orderedItems.Count(item => !item.Submitted),
+                orderedItems.Count(item => item.Late)),
+            new EntregaCorrigivelPermissoes(
+                CanCreateBatch: true,
+                CanCommitToMoodle: false,
+                CommitStatus: "requires_sandbox_validation",
+                CommitReason: "A leitura snapshot-only nao executa escrita no Moodle."),
+            failedAssignments,
+            pagedItems);
+
+        var warnings = failedAssignments
+            .Select(failure => $"{failure.AssignmentId}: {failure.Message}")
+            .ToList();
+        if (snapshot.IsStale)
+        {
+            warnings.Add("O snapshot está desatualizado; a atualização foi apenas agendada e nenhum dado live foi buscado nesta chamada.");
+        }
+
+        var freshness = new ToolFreshness(
+            "snapshot",
+            snapshot.UpdatedAt,
+            Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+            snapshot.IsStale,
+            refreshQueued,
+            snapshot.IsComplete && failedAssignments.Count == 0,
+            snapshot.RecordCount);
+        var response = new ToolResponse<ListarEntregasCorrigiveisResponse>(
+            failedAssignments.Count == 0 ? "ok" : "partial_failure",
+            data,
+            warnings,
+            AuditId: null,
+            DateTimeOffset.UtcNow,
+            Freshness: freshness);
 
         return new CallToolResult
         {

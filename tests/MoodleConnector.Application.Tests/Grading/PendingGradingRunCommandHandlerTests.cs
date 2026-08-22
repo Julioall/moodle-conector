@@ -56,6 +56,87 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task StartRun_UsaSnapshotsSemLerCursosOuEntregasNoMoodle()
+    {
+        var mediator = new RunMediator(pendingSubmissionCount: 99);
+        var ownerId = Guid.NewGuid();
+        var course = new CourseSummary(
+            "10",
+            IdNumber: null,
+            ShortName: "Curso snapshot",
+            FullName: "Curso snapshot",
+            DisplayName: "Curso snapshot",
+            CategoryId: null,
+            CategoryName: null,
+            StartDate: null,
+            EndDate: null,
+            Visible: true,
+            ViewUrl: null,
+            CourseImage: null,
+            Progress: null,
+            HasProgress: null,
+            IsFavourite: null,
+            LastAccessAt: null);
+        var submission = new AssignmentSubmissionSummary(
+            "student-1",
+            "Aluno Snapshot",
+            "submission-1",
+            "submitted",
+            "notgraded",
+            Submitted: true,
+            Late: false,
+            NeedsGrading: true,
+            SubmittedAt: DateTimeOffset.UtcNow,
+            ModifiedAt: DateTimeOffset.UtcNow,
+            AttemptNumber: 1,
+            FileCount: 1,
+            HasOnlineText: false,
+            Files: []);
+        var snapshot = new CourseAssignmentSubmissionsSnapshot(
+            "10",
+            [new AssignmentSubmissionsSnapshotItem(
+                "501",
+                "1001",
+                "Atividade snapshot",
+                null,
+                [submission])]);
+        var store = new RunSnapshotStore(
+            [course],
+            new MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>(
+                snapshot,
+                DateTimeOffset.UtcNow,
+                IsStale: false,
+                IsFrozen: false,
+                Tier: "hot",
+                IsComplete: true,
+                RecordCount: 1));
+        var queue = new RunSnapshotQueue();
+        var sut = new StartPendingGradingRunCommandHandler(
+            mediator,
+            new ThrowingCourseContentsGateway(),
+            store,
+            queue);
+
+        var result = await sut.Handle(
+            new StartPendingGradingRunCommand(
+                "321",
+                MaxCourses: 10,
+                MaxItemsPerBatch: 100,
+                UseSubmissionSnapshots: true,
+                SnapshotOwnerId: ownerId,
+                SnapshotClientId: "client-1",
+                SnapshotConnectionAlias: "goias"),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.TotalItems);
+        Assert.Single(result.Batches);
+        Assert.Single(mediator.CreateBatchRequests);
+        Assert.Equal("501", Assert.Single(mediator.CreateBatchRequests[0].AssignmentIds));
+        Assert.Equal("submission-1", Assert.Single(mediator.CreateBatchRequests[0].PrefetchedSubmissions!).SubmissionId);
+        Assert.Empty(queue.Requests);
+    }
+
+    [Fact]
     public async Task GetRunReport_ListaCorrigidosENaoCorrigidosComMotivo()
     {
         var repository = new RunRepository();
@@ -216,6 +297,85 @@ public sealed class PendingGradingRunCommandHandlerTests
                 onlyWithFiles,
                 [new CourseSectionSummary("1", 1, "Topico", null, true, 1, false, [assignment])]));
         }
+    }
+
+    private sealed class ThrowingCourseContentsGateway : IMoodleCourseContentsGateway
+    {
+        public Task<CourseContentsSummary> GetCourseContentsAsync(
+            string userExternalId,
+            string courseId,
+            IReadOnlyCollection<string> moduleTypes,
+            bool includeHidden,
+            bool onlyWithFiles,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("O fluxo snapshot-only não deveria ler conteúdos no Moodle.");
+    }
+
+    private sealed class RunSnapshotQueue : IMoodleSnapshotSyncQueue
+    {
+        public List<MoodleSnapshotSyncRequest> Requests { get; } = [];
+
+        public bool Enqueue(MoodleSnapshotSyncRequest request)
+        {
+            Requests.Add(request);
+            return true;
+        }
+
+        public Task<bool> EnqueueAsync(MoodleSnapshotSyncRequest request, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            return Task.FromResult(true);
+        }
+    }
+
+    private sealed class RunSnapshotStore(
+        IReadOnlyList<CourseSummary> courses,
+        MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot> submissions)
+        : IMoodleSnapshotStore
+    {
+        public Task<MoodleSnapshotEnvelope<IReadOnlyList<CourseSummary>>?> GetCoursesAsync(
+            Guid ownerId,
+            string connectionAlias,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<MoodleSnapshotEnvelope<IReadOnlyList<CourseSummary>>?>(
+                new MoodleSnapshotEnvelope<IReadOnlyList<CourseSummary>>(
+                    courses,
+                    DateTimeOffset.UtcNow,
+                    IsStale: false,
+                    IsFrozen: false,
+                    Tier: "hot",
+                    IsComplete: true,
+                    RecordCount: courses.Count));
+
+        public Task<MoodleSnapshotEnvelope<T>?> GetAsync<T>(
+            Guid ownerId,
+            string connectionAlias,
+            string dataset,
+            string courseId = "",
+            CancellationToken cancellationToken = default)
+        {
+            if (dataset == MoodleSnapshotDatasets.Submissions && typeof(T) == typeof(CourseAssignmentSubmissionsSnapshot))
+            {
+                return Task.FromResult<MoodleSnapshotEnvelope<T>?>(
+                    (MoodleSnapshotEnvelope<T>)(object)submissions);
+            }
+
+            return Task.FromResult<MoodleSnapshotEnvelope<T>?>(null);
+        }
+
+        public Task<MoodleSnapshotEnvelope<CourseContentsSummary>?> GetActivitiesAsync(Guid ownerId, string connectionAlias, string courseId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<MoodleSnapshotEnvelope<CourseContentsSummary>?>(null);
+
+        public Task<MoodleSnapshotEnvelope<CourseParticipantsPage>?> GetStudentsAsync(Guid ownerId, string connectionAlias, string courseId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<MoodleSnapshotEnvelope<CourseParticipantsPage>?>(null);
+
+        public Task<MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>?> GetGroupsAsync(Guid ownerId, string connectionAlias, string courseId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>?>(null);
+
+        public Task SaveAsync<T>(Guid ownerId, string connectionAlias, string dataset, string courseId, T payload, string tier, bool frozen, bool complete, int recordCount, DateTimeOffset now, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public void Invalidate(Guid ownerId, string connectionAlias, string dataset, string courseId = "") { }
     }
 
     private sealed class RunMediator(int pendingSubmissionCount = 2) : IMediator

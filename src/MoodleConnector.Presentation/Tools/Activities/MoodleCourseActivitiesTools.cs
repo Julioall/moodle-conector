@@ -308,11 +308,49 @@ public sealed class MoodleCourseActivitiesTools(
             return ToolResultHelper.Error<CourseActivityDetailsResponse>("Usuario nao autenticado para consultar atividade.");
         }
 
-        CourseActivitySummary? activity;
+        CourseActivitySummary? activity = null;
+        ToolFreshness? freshness = null;
+        var resolvedCourseId = courseId;
         try
         {
-            activity = await mediator.Send(
-                new GetCourseActivityQuery(moodleUserId.Value.ToString(), courseId, activityId, allowedActivityTypes),
+            if (snapshotContext is not null)
+            {
+                try
+                {
+                    var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        var snapshot = await snapshotContext.GetActivitiesAsync(scope, resolvedCourseId, cancellationToken);
+                        var cached = snapshot?.Data is null
+                            ? null
+                            : ToCachedActivities(snapshot.Data, allowedActivityTypes, includeHidden: false)
+                                .Activities.FirstOrDefault(item =>
+                                    string.Equals(item.ActivityId, activityId.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(item.InstanceId, activityId.Trim(), StringComparison.OrdinalIgnoreCase));
+                        if (cached is not null)
+                        {
+                            activity = cached;
+                            var refreshQueued = snapshot!.IsStale && await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Activities,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: true,
+                                cancellationToken);
+                            freshness = new ToolFreshness("snapshot", snapshot.UpdatedAt, Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds), snapshot.IsStale, refreshQueued, snapshot.IsComplete, snapshot.RecordCount);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fall back to the authoritative live activity query.
+                }
+            }
+
+            activity ??= await mediator.Send(
+                new GetCourseActivityQuery(moodleUserId.Value.ToString(), resolvedCourseId, activityId, allowedActivityTypes),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -330,7 +368,7 @@ public sealed class MoodleCourseActivitiesTools(
         }
 
         var data = new CourseActivityDetailsResponse(ToActivityItem(activity));
-        var response = new ToolResponse<CourseActivityDetailsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<CourseActivityDetailsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult
         {
@@ -359,11 +397,44 @@ public sealed class MoodleCourseActivitiesTools(
             return ToolResultHelper.Error<ListActivityDeadlinesResponse>("Usuario nao autenticado para consultar prazos de atividades.");
         }
 
-        CourseActivityDeadlinesSummary? deadlines;
+        CourseActivityDeadlinesSummary? deadlines = null;
+        ToolFreshness? freshness = null;
+        var resolvedCourseId = courseId;
         try
         {
-            deadlines = await mediator.Send(
-                new ListActivityDeadlinesQuery(moodleUserId.Value.ToString(), courseId, activityTypes, includeHidden),
+            if (!includeHidden && snapshotContext is not null)
+            {
+                try
+                {
+                    var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        var snapshot = await snapshotContext.GetActivitiesAsync(scope, resolvedCourseId, cancellationToken);
+                        if (snapshot?.Data is not null)
+                        {
+                            var activities = ToCachedActivities(snapshot.Data, activityTypes, includeHidden: false);
+                            deadlines = ToCachedDeadlines(activities);
+                            var refreshQueued = snapshot.IsStale && await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Activities,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: true,
+                                cancellationToken);
+                            freshness = new ToolFreshness("snapshot", snapshot.UpdatedAt, Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds), snapshot.IsStale, refreshQueued, snapshot.IsComplete, snapshot.RecordCount);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Fall back to the live deadline query.
+                }
+            }
+
+            deadlines ??= await mediator.Send(
+                new ListActivityDeadlinesQuery(moodleUserId.Value.ToString(), resolvedCourseId, activityTypes, includeHidden),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -381,7 +452,7 @@ public sealed class MoodleCourseActivitiesTools(
         }
 
         var data = ToDeadlinesResponse(deadlines);
-        var response = new ToolResponse<ListActivityDeadlinesResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<ListActivityDeadlinesResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult
         {
@@ -451,6 +522,28 @@ public sealed class MoodleCourseActivitiesTools(
             .ToArray();
         return normalized.Length == 0 ? CourseActivityModuleTypes.All : normalized;
     }
+
+    private static CourseActivityDeadlinesSummary ToCachedDeadlines(CourseActivitiesSummary activities) =>
+        new(
+            activities.CourseId,
+            activities.ActivityTypeFilters,
+            activities.IncludeHidden,
+            activities.Total,
+            activities.WithoutDatesCount,
+            activities.WithoutDeadlineCount,
+            activities.Activities.Select(activity => new CourseActivityDeadlineSummary(
+                activity.ActivityId,
+                activity.InstanceId,
+                activity.ActivityType,
+                activity.Name,
+                activity.Visible,
+                activity.UserVisible,
+                activity.HasDates,
+                activity.HasDeadline,
+                activity.OpenAt,
+                activity.DueAt,
+                activity.CloseAt,
+                activity.Dates)).ToArray());
 
     private static CourseActivitySummary ToCachedActivity(CourseModuleSummary module)
     {

@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Infrastructure;
@@ -427,6 +428,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         var coursesGateway = services.GetRequiredService<IMoodleCoursesGateway>();
         var contentsGateway = services.GetRequiredService<IMoodleCourseContentsGateway>();
         var participantsGateway = services.GetRequiredService<IMoodleParticipantsGateway>();
+        var submissionsGateway = services.GetRequiredService<IMoodleAssignmentSubmissionsGateway>();
 
         if (work.Dataset is MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses)
         {
@@ -443,6 +445,7 @@ internal sealed class MoodleSnapshotSyncQueue(
                     await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Activities, course.CourseId, activityNext, 20, cancellationToken);
                     await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Students, course.CourseId, finished ? now.AddDays(7) : now, 30, cancellationToken);
                     await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Groups, course.CourseId, finished ? now.AddDays(7) : now, 60, cancellationToken);
+                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Submissions, course.CourseId, finished ? now.AddDays(7) : now, 15, cancellationToken);
                 }
 
                 var courseIds = courses.Select(course => course.CourseId).ToArray();
@@ -498,7 +501,7 @@ internal sealed class MoodleSnapshotSyncQueue(
                 var contents = await contentsGateway.GetCourseContentsAsync(
                     work.UserExternalId,
                     courseSummary.CourseId,
-                    CourseActivityModuleTypes.All,
+                    moduleTypes: [],
                     includeHidden: false,
                     onlyWithFiles: false,
                     cancellationToken);
@@ -524,6 +527,46 @@ internal sealed class MoodleSnapshotSyncQueue(
             {
                 var groups = await participantsGateway.GetCourseGroupsAsync(work.UserExternalId, courseSummary.CourseId, cancellationToken);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Groups, courseSummary.CourseId, groups, "warm", false, cancellationToken);
+                break;
+            }
+            case MoodleSnapshotDatasets.Submissions:
+            {
+                var contents = await contentsGateway.GetCourseContentsAsync(
+                    work.UserExternalId,
+                    courseSummary.CourseId,
+                    moduleTypes: [],
+                    includeHidden: false,
+                    onlyWithFiles: false,
+                    cancellationToken);
+                var participants = await participantsGateway.GetCourseParticipantsAsync(
+                    work.UserExternalId,
+                    courseSummary.CourseId,
+                    ParticipantStatusFilter.Active,
+                    page: 1,
+                    pageSize: 1000,
+                    studentsOnly: true,
+                    includeEmail: false,
+                    groupId: null,
+                    cancellationToken);
+                var assignmentIds = contents.Sections
+                    .SelectMany(section => section.Modules)
+                    .Where(module =>
+                        string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(module.InstanceId))
+                    .Select(module => module.InstanceId!)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var batches = assignmentIds.Length == 0
+                    ? []
+                    : await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+                        work.UserExternalId,
+                        assignmentIds,
+                        status: null,
+                        since: null,
+                        before: null,
+                        cancellationToken);
+                var snapshot = AssignmentSubmissionSnapshotProjector.Build(contents, participants, batches);
+                await SaveAsync(db, work, MoodleSnapshotDatasets.Submissions, courseSummary.CourseId, snapshot, finishedCourse ? "cold" : "hot", finishedCourse, cancellationToken);
                 break;
             }
             default:
@@ -642,6 +685,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         entity.IsComplete = payload switch
         {
             CourseParticipantsPage participants => !participants.HasMore,
+            CourseAssignmentSubmissionsSnapshot submissions => submissions.Assignments.All(item => item.IsComplete),
             _ => true,
         };
         entity.RecordCount = CountRecords(payload);
@@ -653,6 +697,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(2),
             MoodleSnapshotDatasets.Activities => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(1) : TimeSpan.FromHours(4),
+            MoodleSnapshotDatasets.Submissions => TimeSpan.FromMinutes(15),
             _ => TimeSpan.FromHours(1),
         };
 
@@ -662,6 +707,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(7),
             MoodleSnapshotDatasets.Activities => tier.Equals("cold", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromDays(30) : TimeSpan.FromDays(3),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => TimeSpan.FromHours(24),
+            MoodleSnapshotDatasets.Submissions => TimeSpan.FromHours(6),
             _ => TimeSpan.FromHours(12),
         };
 
@@ -671,6 +717,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         CourseContentsSummary contents => contents.Sections.Sum(section => section.Modules.Count),
         CourseParticipantsPage participants => participants.Participants.Count,
         IReadOnlyCollection<CourseGroupSummary> groups => groups.Count,
+        CourseAssignmentSubmissionsSnapshot submissions => submissions.Assignments.Sum(item => item.Submissions.Count),
         _ => 0,
     };
 
@@ -678,6 +725,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         {
             MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses => GetNextBrazilMidnight(now).AddDays(2),
             MoodleSnapshotDatasets.Activities => GetNextBrazilMidnight(now).AddDays(1),
+            MoodleSnapshotDatasets.Submissions => now.AddMinutes(30),
             _ => now.Add(dataset == MoodleSnapshotDatasets.Groups ? TimeSpan.FromHours(2) : TimeSpan.FromHours(1)),
         };
 
@@ -725,7 +773,7 @@ internal sealed class MoodleSnapshotSyncQueue(
     private static MoodleSnapshotSyncRequest Normalize(MoodleSnapshotSyncRequest request)
     {
         var dataset = request.Dataset.Trim().ToLowerInvariant();
-        if (dataset is not (MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses or MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups))
+        if (dataset is not (MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses or MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups or MoodleSnapshotDatasets.Submissions))
         {
             dataset = MoodleSnapshotDatasets.Connection;
         }
@@ -733,7 +781,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         return request with
         {
             Dataset = dataset,
-            CourseId = dataset is MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups
+            CourseId = dataset is MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups or MoodleSnapshotDatasets.Submissions
                 ? request.CourseId?.Trim()
                 : null,
             Priority = Math.Clamp(request.Priority, 0, 1000),

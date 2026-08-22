@@ -140,6 +140,25 @@ public sealed class MoodleGradingToolsTests
     }
 
     [Fact]
+    public async Task Leitura_snapshot_only_nao_faz_fallback_para_moodle_live()
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321));
+
+        var result = await sut.ListarEntregasCorrigiveisDoSnapshotAsync(
+            "10",
+            status: "awaiting_grading");
+
+        Assert.True(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("snapshot_unavailable", structured.GetProperty("errorCode").GetString());
+        Assert.Null(mediator.LastQuery);
+    }
+
+    [Fact]
     public async Task Deve_preservar_entregas_validas_e_expor_falha_por_tarefa()
     {
         var mediator = new FakeMediator

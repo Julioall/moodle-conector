@@ -24,6 +24,7 @@ public static class MoodleErrorContract
     public const string InvalidResponse = "moodle_invalid_response";
     public const string ApiError = "moodle_api_error";
     public const string CourseNotFound = "moodle_course_not_found";
+    public const string SnapshotUnavailable = "snapshot_unavailable";
     public const string Unexpected = "unexpected_connector_error";
 
     public static MoodleErrorDescriptor Describe(Exception exception)
@@ -66,6 +67,7 @@ public static class MoodleErrorContract
             NetworkError or "moodle_unavailable" => NetworkError,
             InvalidResponse or "moodle_empty_response" => InvalidResponse,
             CourseNotFound or "invalidcourseid" or "course_not_found" => CourseNotFound,
+            SnapshotUnavailable => SnapshotUnavailable,
             ApiError or "moodle_error" or "invalidparameter" or "invalid_parameter" => ApiError,
             Unexpected => Unexpected,
             _ => ApiError
@@ -86,6 +88,7 @@ public static class MoodleErrorContract
         NetworkError => "Nao foi possivel estabelecer comunicacao com o Moodle.",
         InvalidResponse => "O Moodle retornou uma resposta invalida.",
         CourseNotFound => "O curso nao foi encontrado ou nao esta acessivel para o usuario autenticado.",
+        SnapshotUnavailable => "O snapshot solicitado ainda nao esta disponivel ou esta incompleto.",
         ApiError => "O Moodle recusou ou nao conseguiu concluir a chamada solicitada.",
         _ => "O conector encontrou um erro inesperado ao consultar o Moodle."
     };

@@ -217,7 +217,42 @@ public sealed class MoodleCoursesTools(
         IReadOnlyList<CourseSummary> courses;
         try
         {
-            courses = await mediator.Send(new SearchCoursesQuery(moodleUserId.Value.ToString(), query, 10), cancellationToken);
+            var scope = snapshotContext is null ? null : await snapshotContext.TryResolveAsync(null, cancellationToken);
+            var snapshot = scope is null
+                ? null
+                : await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
+            if (snapshot is not null)
+            {
+                courses = snapshot.Data
+                    .Where(course => MatchesCourse(course, query))
+                    .Take(10)
+                    .ToArray();
+                if (snapshot.IsStale && scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                }
+            }
+            else
+            {
+                if (scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                }
+
+                courses = await mediator.Send(new SearchCoursesQuery(moodleUserId.Value.ToString(), query, 10), cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -289,7 +324,42 @@ public sealed class MoodleCoursesTools(
         CourseSummary? course;
         try
         {
-            course = await mediator.Send(new GetCourseQuery(moodleUserId.Value.ToString(), id), cancellationToken);
+            var scope = snapshotContext is null ? null : await snapshotContext.TryResolveAsync(null, cancellationToken);
+            var snapshot = scope is null
+                ? null
+                : await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
+            if (snapshot is not null)
+            {
+                course = snapshot.Data.FirstOrDefault(item =>
+                    string.Equals(item.CourseId, id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.ShortName, id, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.IdNumber, id, StringComparison.OrdinalIgnoreCase));
+                if (snapshot.IsStale && scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                }
+            }
+            else
+            {
+                if (scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                }
+
+                course = await mediator.Send(new GetCourseQuery(moodleUserId.Value.ToString(), id), cancellationToken);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -334,6 +404,7 @@ public sealed class MoodleCoursesTools(
         }
 
         IReadOnlyList<CourseSummary> courses;
+        ToolFreshness? freshness = null;
         try
         {
             moodleSelection.Alias = moodleAlias;
@@ -345,7 +416,48 @@ public sealed class MoodleCoursesTools(
                     errorCode: MoodleErrorContract.AuthenticationFailed);
             }
 
-            courses = await mediator.Send(new SearchCoursesQuery(moodleUserId.Value.ToString(), query, limit), cancellationToken);
+            var scope = snapshotContext is null ? null : await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+            var snapshot = scope is null
+                ? null
+                : await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
+            if (snapshot is not null)
+            {
+                courses = snapshot.Data
+                    .Where(course => MatchesCourse(course, query))
+                    .Take(Math.Max(1, limit))
+                    .ToArray();
+                var refreshQueued = snapshot.IsStale && scope is not null &&
+                    await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                freshness = new ToolFreshness(
+                    "snapshot",
+                    snapshot.UpdatedAt,
+                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                    snapshot.IsStale,
+                    refreshQueued,
+                    snapshot.IsComplete,
+                    snapshot.RecordCount > 0 ? snapshot.RecordCount : snapshot.Data.Count);
+            }
+            else
+            {
+                if (scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                }
+
+                courses = await mediator.Send(new SearchCoursesQuery(moodleUserId.Value.ToString(), query, limit), cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -372,7 +484,8 @@ public sealed class MoodleCoursesTools(
             [],
             AuditId: Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow,
-            Message: BuildNarration(data));
+            Message: BuildNarration(data),
+            Freshness: freshness);
 
         return new CallToolResult
         {
@@ -393,6 +506,7 @@ public sealed class MoodleCoursesTools(
         }
 
         CourseSummary? course;
+        ToolFreshness? freshness = null;
         try
         {
             moodleSelection.Alias = moodleAlias;
@@ -404,7 +518,48 @@ public sealed class MoodleCoursesTools(
                     errorCode: MoodleErrorContract.AuthenticationFailed);
             }
 
-            course = await mediator.Send(new GetCourseQuery(moodleUserId.Value.ToString(), courseId), cancellationToken);
+            var scope = snapshotContext is null ? null : await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+            var snapshot = scope is null
+                ? null
+                : await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
+            if (snapshot is not null)
+            {
+                course = snapshot.Data.FirstOrDefault(item =>
+                    string.Equals(item.CourseId, courseId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.ShortName, courseId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.IdNumber, courseId, StringComparison.OrdinalIgnoreCase));
+                var refreshQueued = snapshot.IsStale && scope is not null &&
+                    await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                freshness = new ToolFreshness(
+                    "snapshot",
+                    snapshot.UpdatedAt,
+                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                    snapshot.IsStale,
+                    refreshQueued,
+                    snapshot.IsComplete,
+                    snapshot.RecordCount > 0 ? snapshot.RecordCount : snapshot.Data.Count);
+            }
+            else
+            {
+                if (scope is not null)
+                {
+                    _ = await snapshotContext!.QueueAsync(
+                        scope,
+                        moodleUserId.Value.ToString(),
+                        MoodleSnapshotDatasets.Courses,
+                        courseId: null,
+                        priority: 20,
+                        cancellationToken: cancellationToken);
+                }
+
+                course = await mediator.Send(new GetCourseQuery(moodleUserId.Value.ToString(), courseId), cancellationToken);
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -439,7 +594,8 @@ public sealed class MoodleCoursesTools(
             [],
             AuditId: Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow,
-            Message: narration);
+            Message: narration,
+            Freshness: freshness);
 
         return new CallToolResult
         {
@@ -513,6 +669,17 @@ public sealed class MoodleCoursesTools(
             course.HasProgress,
             course.IsFavourite,
             course.LastAccessAt);
+    }
+
+    private static bool MatchesCourse(CourseSummary course, string query)
+    {
+        var term = query.Trim();
+        return course.CourseId.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+               course.ShortName?.Contains(term, StringComparison.OrdinalIgnoreCase) == true ||
+               course.IdNumber?.Contains(term, StringComparison.OrdinalIgnoreCase) == true ||
+               course.FullName.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+               course.DisplayName?.Contains(term, StringComparison.OrdinalIgnoreCase) == true ||
+               course.CategoryName?.Contains(term, StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static string BuildCourseUrl(CourseSummary course)

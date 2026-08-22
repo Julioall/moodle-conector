@@ -6,6 +6,8 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Submissions.Queries;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
+using MoodleConnector.Presentation.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Submissions;
 
@@ -13,7 +15,8 @@ namespace MoodleConnector.Presentation.Tools.Submissions;
 public sealed class MoodlePendingSubmissionsTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     [McpServerTool(
         Name = "list_students_with_pending_submissions",
@@ -55,10 +58,77 @@ public sealed class MoodlePendingSubmissionsTools(
             return ToolResultHelper.Error<GetStudentsWithPendingSubmissionsResult>("Usuário não autenticado.");
 
         GetStudentsWithPendingSubmissionsResult data;
+        ToolFreshness? freshness = null;
         try
         {
+            var resolvedCourseId = courseId;
+            CourseContentsSummary? prefetchedContents = null;
+            CourseParticipantsPage? prefetchedParticipants = null;
+            CourseAssignmentSubmissionsSnapshot? prefetchedSubmissions = null;
+            if (snapshotContext is not null)
+            {
+                try
+                {
+                    var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        var activities = await snapshotContext.GetActivitiesAsync(scope, resolvedCourseId, cancellationToken);
+                        var students = await snapshotContext.GetStudentsAsync(scope, resolvedCourseId, cancellationToken);
+                        var submissions = await snapshotContext.GetSubmissionsAsync(scope, resolvedCourseId, cancellationToken);
+                        if (activities?.IsComplete == true) prefetchedContents = activities.Data;
+                        if (students?.IsComplete == true) prefetchedParticipants = students.Data;
+                        if (submissions?.Data is not null) prefetchedSubmissions = submissions.Data;
+
+                        if (submissions is not null)
+                        {
+                            var refreshQueued = submissions.IsStale && await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Submissions,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: submissions.IsStale,
+                                cancellationToken);
+                            freshness = new ToolFreshness(
+                                "snapshot",
+                                submissions.UpdatedAt,
+                                Math.Max(0, (long)(DateTimeOffset.UtcNow - submissions.UpdatedAt).TotalSeconds),
+                                submissions.IsStale,
+                                refreshQueued,
+                                submissions.IsComplete,
+                                submissions.RecordCount);
+                        }
+                        else
+                        {
+                            var refreshQueued = await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Submissions,
+                                resolvedCourseId,
+                                priority: 10,
+                                cancellationToken: cancellationToken);
+                            freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Snapshot lookup is an optimization. Preserve the live
+                    // query path when the local account or snapshot store is
+                    // unavailable.
+                }
+            }
+
             data = await mediator.Send(
-                new GetStudentsWithPendingSubmissionsQuery(courseId, dueDaysAhead, maxStudentsToAnalyze),
+                new GetStudentsWithPendingSubmissionsQuery(
+                    resolvedCourseId,
+                    dueDaysAhead,
+                    maxStudentsToAnalyze,
+                    IncludeAwaitingGrading: true,
+                    PrefetchedContents: prefetchedContents,
+                    PrefetchedParticipants: prefetchedParticipants,
+                    PrefetchedSubmissions: prefetchedSubmissions),
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
@@ -67,7 +137,7 @@ public sealed class MoodlePendingSubmissionsTools(
             return ToolResultHelper.Error<GetStudentsWithPendingSubmissionsResult>("Não foi possível listar os alunos com atividades pendentes neste momento.");
         }
 
-        var response = new ToolResponse<GetStudentsWithPendingSubmissionsResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<GetStudentsWithPendingSubmissionsResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         var filter = dueDaysAhead > 0 ? $"nos próximos {dueDaysAhead} dias ou vencidas" : "sem filtro de prazo";
         var narration = $"Pendências de atividade — curso {courseId} ({filter}): {data.TotalStudentsAnalyzed} estudante(s) analisado(s). " +
                         $"{data.Students.Count} com pelo menos uma SA pendente.";

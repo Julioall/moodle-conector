@@ -26,7 +26,8 @@ public sealed record GetStudentsWithoutRecentAccessResult(
 public sealed record GetStudentsWithoutRecentAccessQuery(
     string CourseId,
     int DaysWithoutAccess = 7,
-    int MaxStudentsToAnalyze = 100) : IRequest<GetStudentsWithoutRecentAccessResult>;
+    int MaxStudentsToAnalyze = 100,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<GetStudentsWithoutRecentAccessResult>;
 
 public sealed class GetStudentsWithoutRecentAccessQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -39,16 +40,28 @@ public sealed class GetStudentsWithoutRecentAccessQueryHandler(
     {
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
 
-        var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-            userExternalId: currentUserExternalId,
-            courseId: request.CourseId,
-            statusFilter: ParticipantStatusFilter.Active,
-            page: 1,
-            pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
-            studentsOnly: true,
-            includeEmail: false,
-            groupId: null,
-            cancellationToken: cancellationToken);
+        var maximum = request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100;
+        var prefetched = request.PrefetchedParticipants;
+        var participantsPage = prefetched is not null &&
+                               string.Equals(prefetched.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase) &&
+                               prefetched.StudentsOnly &&
+                               prefetched.StatusFilter == ParticipantStatusFilter.Active
+            ? prefetched with
+            {
+                PageSize = maximum,
+                HasMore = prefetched.HasMore || prefetched.Participants.Count > maximum,
+                Participants = prefetched.Participants.Take(maximum).ToArray()
+            }
+            : await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId: currentUserExternalId,
+                courseId: request.CourseId,
+                statusFilter: ParticipantStatusFilter.Active,
+                page: 1,
+                pageSize: maximum,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken);
 
         var threshold = request.DaysWithoutAccess > 0 ? request.DaysWithoutAccess : 7;
         var now = DateTimeOffset.UtcNow;

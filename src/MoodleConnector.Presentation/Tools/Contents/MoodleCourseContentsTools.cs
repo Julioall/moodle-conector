@@ -18,7 +18,8 @@ public sealed class MoodleCourseContentsTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
     IMoodleUserResolver moodleUserResolver,
-    ILogger<MoodleCourseContentsTools>? logger = null)
+    ILogger<MoodleCourseContentsTools>? logger = null,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     private static readonly string[] ResourceModuleTypes = ["resource", "page", "url", "book", "folder", "label"];
     private static readonly string[] AllowedModuleTypes =
@@ -226,7 +227,9 @@ public sealed class MoodleCourseContentsTools(
             return ToolResultHelper.Error<ListCourseContentsResponse>("Informe um identificador de curso.");
         }
 
-        CourseContentsSummary? contents;
+        CourseContentsSummary? contents = null;
+        ToolFreshness? freshness = null;
+        var resolvedCourseId = courseId;
         try
         {
             moodleSelection.Alias = moodleAlias;
@@ -238,10 +241,41 @@ public sealed class MoodleCourseContentsTools(
                     errorCode: MoodleErrorContract.AuthenticationFailed);
             }
 
-            contents = await mediator.Send(
+            if (!includeHidden && snapshotContext is not null)
+            {
+                try
+                {
+                    var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        var snapshot = await snapshotContext.GetActivitiesAsync(scope, resolvedCourseId, cancellationToken);
+                        if (snapshot?.Data is { ModuleTypeFilters.Count: 0 } cached)
+                        {
+                            contents = FilterCachedContents(cached, moduleTypes, onlyWithFiles);
+                            var refreshQueued = snapshot.IsStale && await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Activities,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: true,
+                                cancellationToken);
+                            freshness = new ToolFreshness("snapshot", snapshot.UpdatedAt, Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds), snapshot.IsStale, refreshQueued, snapshot.IsComplete, snapshot.RecordCount);
+                        }
+                    }
+                }
+                catch
+                {
+                    // The live content query remains the fallback for legacy
+                    // accounts and snapshots created before full-content sync.
+                }
+            }
+
+            contents ??= await mediator.Send(
                 new ListCourseContentsQuery(
                     moodleUserId.Value.ToString(),
-                    courseId,
+                    resolvedCourseId,
                     moduleTypes,
                     includeHidden,
                     onlyWithFiles),
@@ -279,7 +313,7 @@ public sealed class MoodleCourseContentsTools(
                 errorCode: MoodleErrorContract.CourseNotFound);
         }
 
-        return ContentsSuccess(contents);
+        return ContentsSuccess(contents, freshness);
     }
 
     private async Task<CallToolResult> GetModuleCoreAsync(
@@ -305,11 +339,57 @@ public sealed class MoodleCourseContentsTools(
             return ToolResultHelper.Error<CourseModuleDetailsResponse>("Usuario nao autenticado para consultar modulo.");
         }
 
-        CourseModuleSummary? module;
+        CourseModuleSummary? module = null;
+        ToolFreshness? freshness = null;
+        var resolvedCourseId = courseId;
         try
         {
-            module = await mediator.Send(
-                new GetCourseModuleQuery(moodleUserId.Value.ToString(), courseId, moduleId),
+            if (snapshotContext is not null)
+            {
+                try
+                {
+                    var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                    if (scope is not null)
+                    {
+                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                        var snapshot = await snapshotContext.GetActivitiesAsync(scope, resolvedCourseId, cancellationToken);
+                        module = snapshot?.Data is null
+                            ? null
+                            : snapshot.Data.Sections
+                                .SelectMany(section => section.Modules)
+                                .FirstOrDefault(item =>
+                                    string.Equals(item.ModuleId, moduleId.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(item.InstanceId, moduleId.Trim(), StringComparison.OrdinalIgnoreCase));
+                        if (module is not null)
+                        {
+                            var refreshQueued = snapshot!.IsStale && await snapshotContext.QueueAsync(
+                                scope,
+                                moodleUserId.Value.ToString(),
+                                MoodleSnapshotDatasets.Activities,
+                                resolvedCourseId,
+                                priority: 10,
+                                force: true,
+                                cancellationToken);
+                            freshness = new ToolFreshness(
+                                "snapshot",
+                                snapshot.UpdatedAt,
+                                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                                snapshot.IsStale,
+                                refreshQueued,
+                                snapshot.IsComplete,
+                                snapshot.RecordCount);
+                        }
+                    }
+                }
+                catch
+                {
+                    // The live module query remains the fallback for older or
+                    // unavailable snapshots.
+                }
+            }
+
+            module ??= await mediator.Send(
+                new GetCourseModuleQuery(moodleUserId.Value.ToString(), resolvedCourseId, moduleId),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -327,7 +407,13 @@ public sealed class MoodleCourseContentsTools(
         }
 
         var data = new CourseModuleDetailsResponse(ToModuleItem(module));
-        var response = new ToolResponse<CourseModuleDetailsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<CourseModuleDetailsResponse>(
+            "ok",
+            data,
+            [],
+            AuditId: null,
+            DateTimeOffset.UtcNow,
+            Freshness: freshness);
 
         return new CallToolResult
         {
@@ -387,7 +473,40 @@ public sealed class MoodleCourseContentsTools(
         };
     }
 
-    private static CallToolResult ContentsSuccess(CourseContentsSummary contents)
+    private static CourseContentsSummary FilterCachedContents(
+        CourseContentsSummary cached,
+        IReadOnlyCollection<string> moduleTypes,
+        bool onlyWithFiles)
+    {
+        var normalizedTypes = moduleTypes
+            .Where(type => !string.IsNullOrWhiteSpace(type))
+            .Select(type => type.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var sections = cached.Sections
+            .Select(section =>
+            {
+                var modules = section.Modules
+                    .Where(module => normalizedTypes.Length == 0 || normalizedTypes.Contains(module.ModuleType, StringComparer.OrdinalIgnoreCase))
+                    .Where(module => onlyWithFiles ? module.Files.Count > 0 : true)
+                    .ToArray();
+                return section with
+                {
+                    ModuleCount = modules.Length,
+                    IsEmpty = modules.Length == 0,
+                    Modules = modules,
+                };
+            })
+            .ToArray();
+        return new CourseContentsSummary(
+            cached.CourseId,
+            normalizedTypes,
+            IncludeHidden: false,
+            onlyWithFiles,
+            sections);
+    }
+
+    private static CallToolResult ContentsSuccess(CourseContentsSummary contents, ToolFreshness? freshness = null)
     {
         var data = ToContentsResponse(contents);
         var narration = BuildContentsNarration(data);
@@ -397,7 +516,8 @@ public sealed class MoodleCourseContentsTools(
             [],
             AuditId: Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow,
-            Message: narration);
+            Message: narration,
+            Freshness: freshness);
 
         return new CallToolResult
         {

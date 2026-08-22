@@ -154,6 +154,10 @@ public class ToolMetadataRegistryTests
         Assert.Equal(MoodleScopePolicies.ReadAny, universalRead!.RequiredOAuthScopes);
         Assert.DoesNotContain(MoodleScopePolicies.WriteAny, universalRead.RequiredOAuthScopes, StringComparison.OrdinalIgnoreCase);
 
+        Assert.True(reg.TryGet("list_all_gradable_submissions", out var allGradable));
+        Assert.Equal("assignments", allGradable!.Family);
+        Assert.True(allGradable.Structural == false);
+
         var inventory = new ToolSurfaceInventory(reg);
         Assert.Equal(110, inventory.Total);
         Assert.Equal(11, inventory.StructuralCount);
