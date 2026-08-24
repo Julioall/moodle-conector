@@ -21,7 +21,7 @@ public sealed class ChatGptOAuthClientSeedTests
         services.AddSingleton<IOptions<OAuthBrokerOptions>>(Options.Create(new OAuthBrokerOptions
         {
             Audience = "https://novascript.com.br/mcp",
-            ChatGptClientId = "chatgpt-mcp",
+            ChatGptClientId = "moodle",
             ChatGptRedirectUri = "https://chatgpt.com/connector/oauth/4_E5iaAhGUvs",
             ScopeName = "moodle-mcp-audience"
         }));
@@ -43,7 +43,7 @@ public sealed class ChatGptOAuthClientSeedTests
         await InvokeSeedChatGptOAuthClientAsync(provider);
 
         var manager = provider.GetRequiredService<IOpenIddictApplicationManager>();
-        var application = await manager.FindByClientIdAsync("chatgpt-mcp");
+        var application = await manager.FindByClientIdAsync("moodle");
 
         Assert.NotNull(application);
 

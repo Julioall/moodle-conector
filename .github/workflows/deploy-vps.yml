@@ -35,7 +35,7 @@ env:
   CADDYFILE: ${{ vars.CADDYFILE || './Caddyfile' }}
   MCP_REQUIRE_JWT: ${{ vars.MCP_REQUIRE_JWT || 'true' }}
   MCP_REQUIRE_API_KEY: ${{ vars.MCP_REQUIRE_API_KEY || 'false' }}
-  OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || 'chatgpt-mcp' }}
+  OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || 'moodle' }}
   OAUTH_SCOPE_NAME: ${{ vars.OAUTH_SCOPE_NAME || 'moodle-mcp-audience' }}
   OAUTH_REQUIRE_HTTPS_METADATA: ${{ vars.OAUTH_REQUIRE_HTTPS_METADATA || 'true' }}
   OAUTH_ACCESS_TOKEN_MINUTES: ${{ vars.OAUTH_ACCESS_TOKEN_MINUTES || '60' }}

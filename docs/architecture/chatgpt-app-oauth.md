@@ -41,7 +41,7 @@ McpServerSecurity__RequireApiKey=false
 
 OAuth__Issuer=https://moodle-conector.<dominio>
 OAuth__Audience=https://moodle-conector.<dominio>/mcp
-OAuth__ChatGptClientId=chatgpt-mcp
+OAuth__ChatGptClientId=moodle
 OAuth__ChatGptRedirectUri=https://chatgpt.com/connector/oauth/<callback_id>
 OAuth__ScopeName=moodle-mcp-audience
 OAuth__RequireHttpsMetadata=true

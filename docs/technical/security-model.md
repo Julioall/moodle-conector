@@ -29,7 +29,7 @@ Configurações:
 ```env
 OAuth__Issuer=https://<APP_DOMAIN>
 OAuth__Audience=https://<APP_DOMAIN>/mcp
-OAuth__ChatGptClientId=chatgpt-mcp
+OAuth__ChatGptClientId=moodle
 OAuth__ChatGptRedirectUri=https://chatgpt.com/connector/oauth/<callback_id>
 OAuth__ScopeName=moodle-mcp-audience
 OAuth__RequireHttpsMetadata=true

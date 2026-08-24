@@ -4997,7 +4997,7 @@ static async Task SeedChatGptOAuthClientAsync(
     var manager = services.GetRequiredService<IOpenIddictApplicationManager>();
     var descriptor = new OpenIddictApplicationDescriptor
     {
-        ClientId = string.IsNullOrWhiteSpace(oauth.ChatGptClientId) ? "chatgpt-mcp" : oauth.ChatGptClientId,
+        ClientId = string.IsNullOrWhiteSpace(oauth.ChatGptClientId) ? "moodle" : oauth.ChatGptClientId,
         DisplayName = "ChatGPT Moodle Connector",
         ClientType = OpenIddictConstants.ClientTypes.Public,
         ConsentType = OpenIddictConstants.ConsentTypes.Implicit

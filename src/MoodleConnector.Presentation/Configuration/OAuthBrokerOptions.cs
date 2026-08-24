@@ -8,7 +8,7 @@ public sealed class OAuthBrokerOptions
 
     public string Audience { get; init; } = string.Empty;
 
-    public string ChatGptClientId { get; init; } = "chatgpt-mcp";
+    public string ChatGptClientId { get; init; } = "moodle";
 
     public string ChatGptRedirectUri { get; init; } = string.Empty;
 

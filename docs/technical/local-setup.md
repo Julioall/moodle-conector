@@ -82,7 +82,7 @@ APP_DOMAIN=
 OAuth__Issuer=http://localhost:8787
 OAuth__Audience=http://localhost:8787/mcp
 OAuth__RequireHttpsMetadata=false
-OAuth__ChatGptClientId=chatgpt-mcp
+OAuth__ChatGptClientId=moodle
 OAuth__ScopeName=moodle-mcp-audience
 OAuth__KeyStoragePath=App_Data/oauth
 ```

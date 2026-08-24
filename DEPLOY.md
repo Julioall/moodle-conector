@@ -58,7 +58,7 @@ McpServerSecurity__RequireApiKey=false
 
 OAuth__Issuer=https://moodle-conector.seu-dominio.com
 OAuth__Audience=https://moodle-conector.seu-dominio.com/mcp
-OAuth__ChatGptClientId=chatgpt-mcp
+OAuth__ChatGptClientId=moodle
 OAuth__ChatGptRedirectUri=https://chatgpt.com/connector/oauth/<callback_id>
 OAuth__ScopeName=moodle-mcp-audience
 OAuth__RequireHttpsMetadata=true
@@ -112,7 +112,7 @@ Variables opcionais:
 - `CADDYFILE` - padrão `./Caddyfile`
 - `MCP_REQUIRE_JWT` - padrão `true`
 - `MCP_REQUIRE_API_KEY` - padrão `false`
-- `OAUTH_CLIENT_ID` - padrão `chatgpt-mcp`
+- `OAUTH_CLIENT_ID` - padrão `moodle`
 - `OAUTH_SCOPE_NAME` - padrão `moodle-mcp-audience`
 - `OAUTH_REQUIRE_HTTPS_METADATA` - padrão `true`
 - `OAUTH_ACCESS_TOKEN_MINUTES` - padrão `60`

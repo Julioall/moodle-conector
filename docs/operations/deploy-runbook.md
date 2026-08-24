@@ -33,7 +33,7 @@ O alvo é uma VPS com Docker Compose, PostgreSQL, aplicação e Caddy opcional p
 | `CADDYFILE` | `./Caddyfile` |
 | `MCP_REQUIRE_JWT` | `true` |
 | `MCP_REQUIRE_API_KEY` | `false` |
-| `OAUTH_CLIENT_ID` | `chatgpt-mcp` |
+| `OAUTH_CLIENT_ID` | `moodle` |
 | `OAUTH_SCOPE_NAME` | `moodle-mcp-audience` |
 | `OAUTH_REQUIRE_HTTPS_METADATA` | `true` |
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` |
