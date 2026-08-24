@@ -127,7 +127,7 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
         Name = "update_agenda_event",
         Title = "Editar evento da agenda",
         ReadOnly = false,
-        Destructive = false,
+        Destructive = true,
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true,

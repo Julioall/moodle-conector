@@ -80,7 +80,7 @@ public sealed class MoodleMemoryDocumentToolsTests
 
         Assert.Equal("save_user_memory_document", salvar.Name);
         Assert.False(salvar.ReadOnly);
-        Assert.False(salvar.Destructive);
+        Assert.True(salvar.Destructive);
         Assert.True(salvar.Idempotent);
 
         Assert.Equal("list_user_memory_documents", listar.Name);

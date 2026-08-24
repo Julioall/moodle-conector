@@ -47,10 +47,9 @@ export function AuthPage() {
           isDefault: true,
           canWrite: false,
         });
-        // The first Moodle connection completes onboarding. Start at the
-        // operational dashboard; the legacy access/groups URL is no longer
-        // part of the user-facing flow.
-        window.location.assign('/selecionar-cursos');
+        // Courses in progress are included automatically; additional courses
+        // can be followed later from Schools.
+        window.location.assign('/');
         return;
       }
 

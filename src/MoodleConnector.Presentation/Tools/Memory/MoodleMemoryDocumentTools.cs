@@ -17,7 +17,7 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
         Name = "save_user_memory_document",
         Title = "Save User Memory Document",
         ReadOnly = false,
-        Destructive = false,
+        Destructive = true,
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true,

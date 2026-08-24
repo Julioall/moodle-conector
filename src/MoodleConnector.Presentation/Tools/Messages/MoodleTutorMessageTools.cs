@@ -21,7 +21,7 @@ public sealed class MoodleTutorMessageTools(
 {
 
     [McpServerTool(Name = "prepare_welcome_message", Title = "Prepare Welcome Message",
-        ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessagePreview>))]
     [Description("Prepara uma mensagem de boas-vindas para os destinatários informados. Retorna prévia e pendingActionId para confirmação. Use ao iniciar um novo curso.")]
     public Task<CallToolResult> PrepararMensagemBoasVindasAsync(
@@ -33,7 +33,7 @@ public sealed class MoodleTutorMessageTools(
         => PrepareMsgCoreAsync(courseId, TutorMessageType.BoasVindas, recipientIds, customText, moodleAlias, cancellationToken);
 
     [McpServerTool(Name = "confirm_welcome_message", Title = "Confirm Welcome Message",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessageSendResult>))]
     [Description("Confirma e envia a mensagem de boas-vindas previamente preparada.")]
     public Task<CallToolResult> ConfirmarMensagemBoasVindasAsync(
@@ -46,7 +46,7 @@ public sealed class MoodleTutorMessageTools(
     // â”€â”€ Cobrança de acesso â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [McpServerTool(Name = "prepare_access_reminder", Title = "Prepare Access Reminder",
-        ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessagePreview>))]
     [Description("Prepara mensagem de cobrança para estudantes que não acessaram o AVA. Use após listar_alunos_sem_acesso para direcionar os destinatários.")]
     public Task<CallToolResult> PrepararMensagemCobrancaAcessoAsync(
@@ -58,7 +58,7 @@ public sealed class MoodleTutorMessageTools(
         => PrepareMsgCoreAsync(courseId, TutorMessageType.CobrancaAcesso, recipientIds, customText, moodleAlias, cancellationToken);
 
     [McpServerTool(Name = "confirm_access_reminder", Title = "Confirm Access Reminder",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessageSendResult>))]
     [Description("Confirma e envia a mensagem de cobrança de acesso.")]
     public Task<CallToolResult> ConfirmarMensagemCobrancaAcessoAsync(
@@ -71,7 +71,7 @@ public sealed class MoodleTutorMessageTools(
     // â”€â”€ Cobrança de SA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [McpServerTool(Name = "prepare_activity_reminder", Title = "Prepare Activity Reminder",
-        ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessagePreview>))]
     [Description("Prepara mensagem de cobrança para estudantes com SA pendente de entrega. Use após listar_alunos_pendentes_atividade para direcionar os destinatários.")]
     public Task<CallToolResult> PrepararMensagemCobrancaSaAsync(
@@ -83,7 +83,7 @@ public sealed class MoodleTutorMessageTools(
         => PrepareMsgCoreAsync(courseId, TutorMessageType.CobrancaSa, recipientIds, customText, moodleAlias, cancellationToken);
 
     [McpServerTool(Name = "confirm_activity_reminder", Title = "Confirm Activity Reminder",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessageSendResult>))]
     [Description("Confirma e envia a mensagem de cobrança de SA.")]
     public Task<CallToolResult> ConfirmarMensagemCobrancaSaAsync(
@@ -96,7 +96,7 @@ public sealed class MoodleTutorMessageTools(
     // â”€â”€ Recuperação â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     [McpServerTool(Name = "prepare_recovery_message", Title = "Prepare Recovery Message",
-        ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessagePreview>))]
     [Description("Prepara mensagem de recuperação paralela para estudantes com conceito abaixo do mínimo. Use após listar_alunos_abaixo_minimo. ATENÇÃO: garanta que a atividade de recuperação esteja publicada antes de confirmar o envio.")]
     public Task<CallToolResult> PrepararMensagemRecuperacaoAsync(
@@ -108,7 +108,7 @@ public sealed class MoodleTutorMessageTools(
         => PrepareMsgCoreAsync(courseId, TutorMessageType.Recuperacao, recipientIds, customText, moodleAlias, cancellationToken);
 
     [McpServerTool(Name = "confirm_recovery_message", Title = "Confirm Recovery Message",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessageSendResult>))]
     [Description("Confirma e envia a mensagem de recuperação paralela.")]
     public Task<CallToolResult> ConfirmarMensagemRecuperacaoAsync(
@@ -120,7 +120,7 @@ public sealed class MoodleTutorMessageTools(
 
 
     [McpServerTool(Name = "prepare_closing_message", Title = "Prepare Closing Message",
-        ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessagePreview>))]
     [Description("Prepara aviso de encerramento de prazo de fórum ou SA.")]
     public Task<CallToolResult> PrepararMensagemEncerramentoAsync(
@@ -132,7 +132,7 @@ public sealed class MoodleTutorMessageTools(
         => PrepareMsgCoreAsync(courseId, TutorMessageType.Encerramento, recipientIds, customText, moodleAlias, cancellationToken);
 
     [McpServerTool(Name = "confirm_closing_message", Title = "Confirm Closing Message",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessageSendResult>))]
     [Description("Confirma e envia a mensagem de encerramento de prazo.")]
     public Task<CallToolResult> ConfirmarMensagemEncerramentoAsync(
@@ -144,7 +144,7 @@ public sealed class MoodleTutorMessageTools(
 
 
     [McpServerTool(Name = "prepare_followup_message", Title = "Prepare Followup Message",
-        ReadOnly = true, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessagePreview>))]
     [Description("Prepara mensagem de incentivo/acompanhamento geral para estudantes selecionados.")]
     public Task<CallToolResult> PrepararMensagemAcompanhamentoAsync(
@@ -156,7 +156,7 @@ public sealed class MoodleTutorMessageTools(
         => PrepareMsgCoreAsync(courseId, TutorMessageType.Acompanhamento, recipientIds, customText, moodleAlias, cancellationToken);
 
     [McpServerTool(Name = "confirm_followup_message", Title = "Confirm Followup Message",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<TutorMessageSendResult>))]
     [Description("Confirma e envia a mensagem de acompanhamento.")]
     public Task<CallToolResult> ConfirmarMensagemAcompanhamentoAsync(

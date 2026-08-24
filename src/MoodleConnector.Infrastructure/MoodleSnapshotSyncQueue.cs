@@ -27,7 +27,9 @@ internal sealed class MoodleSnapshotSyncQueue(
     private readonly Channel<MoodleSnapshotSyncRequest> _queue =
         Channel.CreateBounded<MoodleSnapshotSyncRequest>(new BoundedChannelOptions(256)
         {
-            FullMode = BoundedChannelFullMode.DropWrite,
+            // Reject a full write so TryEnqueueSignal can remove the in-memory
+            // marker and let the durable polling loop schedule it again.
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false,
             AllowSynchronousContinuations = false,

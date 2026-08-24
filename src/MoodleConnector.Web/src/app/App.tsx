@@ -7,7 +7,6 @@ import { Spinner } from '../components/ui/spinner';
 import { AuthGate } from '../features/auth/AuthGate';
 
 const MyCoursesPage = lazy(() => import('../features/courses/MyCoursesPage').then(({ MyCoursesPage }) => ({ default: MyCoursesPage })));
-const CourseSelectionPage = lazy(() => import('../features/courses/CourseSelectionPage').then(({ CourseSelectionPage }) => ({ default: CourseSelectionPage })));
 const CoursePanelPage = lazy(() => import('../features/courses/CoursePanelPage').then(({ CoursePanelPage }) => ({ default: CoursePanelPage })));
 const StudentProfilePage = lazy(() => import('../features/students/StudentProfilePage').then(({ StudentProfilePage }) => ({ default: StudentProfilePage })));
 const DashboardPage = lazy(() => import('../features/dashboard/DashboardPage').then(({ DashboardPage }) => ({ default: DashboardPage })));
@@ -29,7 +28,8 @@ export function App() {
               {/* Keep the former standalone URL readable after connections moved into Settings. */}
               <Route path="/conexoes" element={<Navigate to="/configuracoes?tab=conexoes" replace />} />
               <Route path="/meus-cursos" element={<MyCoursesPage />} />
-              <Route path="/selecionar-cursos" element={<CourseSelectionPage />} />
+              {/* Preserve previously shared onboarding links after automatic course selection. */}
+              <Route path="/selecionar-cursos" element={<Navigate to="/meus-cursos" replace />} />
               <Route path="/escolas" element={<SchoolsPage />} />
               <Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} />
               <Route path="/cursos/:connectionRef/:courseId/alunos/:studentId" element={<StudentProfilePage />} />

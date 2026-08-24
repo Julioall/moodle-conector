@@ -108,7 +108,7 @@ export function SchoolsPage() {
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="schools-title">
-      <header className="page-heading"><div><p className="eyebrow">CATÁLOGO</p><h1 id="schools-title">Escolas</h1><p>Navegue pelas categorias e carregue as unidades curriculares sob demanda.</p></div><Button type="button" variant={selectionMode ? 'secondary' : 'outline'} size="sm" onClick={toggleSelectionMode}><FileSpreadsheet className="mr-1.5 h-4 w-4" />{selectionMode ? 'Cancelar seleção' : 'Gerar relatório'}</Button></header>
+      <header className="page-heading"><div><p className="eyebrow">CATÁLOGO</p><h1 id="schools-title">Escolas</h1><p>Cursos em andamento já aparecem em Meus Cursos. Use o modo de edição para adicionar outras turmas ao acompanhamento.</p></div><Button type="button" variant={selectionMode ? 'secondary' : 'outline'} size="sm" onClick={toggleSelectionMode}><FileSpreadsheet className="mr-1.5 h-4 w-4" />{selectionMode ? 'Cancelar seleção' : 'Gerar relatório'}</Button></header>
       <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-wrap gap-2" role="group" aria-label="Filtros de status dos cursos nas escolas">
           <button type="button" aria-pressed={selectedStatuses.length === 0} onClick={() => setSelectedStatuses([])} className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${selectedStatuses.length === 0 ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'}`}>Todos</button>

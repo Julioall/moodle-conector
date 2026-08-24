@@ -197,7 +197,7 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
         Name = "update_task",
         Title = "Editar tarefa do portal",
         ReadOnly = false,
-        Destructive = false,
+        Destructive = true,
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true,

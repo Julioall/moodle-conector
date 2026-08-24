@@ -45,7 +45,7 @@ public sealed class MoodleUniversalWriteTools(
     }
 
     [McpServerTool(Name = "moodle_confirm_write", Title = "Confirmar Escrita Moodle",
-        ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
+        ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleWriteResult>))]
     [Description("Confirma e executa uma única vez uma escrita Moodle previamente preparada. Exige o mesmo usuário, conexão, escopo moodle.write e texto literal de confirmação.")]
     public async Task<CallToolResult> ConfirmWriteAsync(

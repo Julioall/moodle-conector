@@ -161,8 +161,8 @@ public class ToolMetadataRegistryTests
         var inventory = new ToolSurfaceInventory(reg);
         Assert.Equal(110, inventory.Total);
         Assert.Equal(11, inventory.StructuralCount);
-        Assert.Equal(60, inventory.SpecializedCount);
-        Assert.Equal(22, inventory.ControlledWriteCount);
+        Assert.Equal(54, inventory.SpecializedCount);
+        Assert.Equal(28, inventory.ControlledWriteCount);
         Assert.Equal(0, inventory.DeprecatedCount);
     }
 

@@ -62,7 +62,13 @@ const moodleBaseUrl = process.env.APP_E2E_MOODLE_URL ?? 'https://moodle.local';
 const moodleUsername = process.env.APP_E2E_MOODLE_USERNAME ?? 'demo';
 const moodlePassword = process.env.APP_E2E_MOODLE_PASSWORD ?? 'demo-password';
 
-expectJson(await call('POST', '/api/account/register', { name: 'App E2E Smoke', email, password }), 200, 'register');
+const registrationCsrf = expectJson(await call('GET', '/api/csrf'), 200, 'registration CSRF');
+if (!registrationCsrf.token) throw new Error('registration CSRF token was not issued.');
+expectJson(
+  await call('POST', '/api/account/register', { name: 'App E2E Smoke', email, password }, { 'x-csrf-token': registrationCsrf.token }),
+  200,
+  'register',
+);
 const session = expectJson(await call('GET', '/api/session'), 200, 'session');
 if (session.data?.authenticated !== true) throw new Error('session is not authenticated.');
 

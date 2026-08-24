@@ -95,6 +95,28 @@ public sealed class DashboardCourseScopeResolverTests
         Assert.Equal(["tracked-finished"], result.Select(course => course.CourseId));
     }
 
+    [Fact]
+    public async Task Includes_current_courses_by_default_and_excludes_courses_outside_the_current_cycle()
+    {
+        var ownerId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using var db = new ConnectorDbContext(options);
+        var now = DateTimeOffset.UtcNow;
+        var courses = new[]
+        {
+            Course("current", now.AddDays(-1), now.AddDays(1)),
+            Course("future", now.AddDays(1), now.AddDays(30)),
+            Course("finished", now.AddDays(-30), now.AddDays(-1)),
+        };
+
+        var resolver = new DashboardCourseScopeResolver(null!, db, null!);
+        var result = await resolver.FilterAsync(ownerId, "goias", courses, CancellationToken.None);
+
+        Assert.Equal(["current"], result.Select(course => course.CourseId));
+    }
+
     private static CourseSummary Course(string id, DateTimeOffset start, DateTimeOffset? end) =>
         new(id, null, null, id, id, null, "Senai > Turma", start, end, true, null, null, null, null, null, null);
 }

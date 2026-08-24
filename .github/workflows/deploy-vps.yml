@@ -408,6 +408,7 @@ jobs:
             printf 'Postgres__ConnectionString=%s\n' "$CONNECTION_STRING"
             printf 'ConnectorSecrets__EncryptionKeyBase64=%s\n' "$CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64"
             printf 'AdminApi__ApiKey=%s\n' "$ADMIN_API_KEY"
+            printf 'Features__AppV2Enabled=true\n'
             printf 'McpServerSecurity__RequireJwt=%s\n' "$MCP_REQUIRE_JWT"
             printf 'McpServerSecurity__RequireApiKey=%s\n' "$MCP_REQUIRE_API_KEY"
             printf 'OAuth__Issuer=%s\n' "$OAUTH_ISSUER_EFFECTIVE"

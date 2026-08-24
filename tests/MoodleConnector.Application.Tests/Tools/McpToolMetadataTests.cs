@@ -7,7 +7,9 @@ using MoodleConnector.Presentation.Tools.Completion;
 using MoodleConnector.Presentation.Tools.Grading;
 using MoodleConnector.Presentation.Tools.Gradebook;
 using MoodleConnector.Presentation.Tools.Memory;
+using MoodleConnector.Presentation.Tools.Messages;
 using MoodleConnector.Presentation.Tools.Pedagogy;
+using MoodleConnector.Presentation.Tools.Portal;
 using MoodleConnector.Presentation.Tools.Risk;
 using MoodleConnector.Presentation.Tools.Reports;
 
@@ -23,7 +25,12 @@ public sealed class McpToolMetadataTests
             var toolName = attribute.Name ?? method.Name;
 
             Assert.False(attribute.OpenWorld, $"{toolName} deve declarar OpenWorld=false.");
-            if (toolName is "confirm_batch_grade_launch" or "confirm_forum_post" or "manage_user_memory" or "remove_user_memory_document")
+            if (toolName is "confirm_batch_grade_launch" or "confirm_forum_post" or "confirm_individual_grade_launch" or
+                "confirm_welcome_message" or "confirm_access_reminder" or "confirm_activity_reminder" or
+                "confirm_recovery_message" or "confirm_closing_message" or "confirm_followup_message" or
+                "manage_user_memory" or "save_user_memory_document" or "remove_user_memory_document" or
+                "cancel_assisted_grading_batch" or "update_grading_draft" or "update_grading_drafts_batch" or
+                "save_ai_grading_batch" or "moodle_confirm_write")
             {
                 Assert.True(attribute.Destructive, $"{toolName} deve declarar Destructive=true.");
             }
@@ -66,6 +73,19 @@ public sealed class McpToolMetadataTests
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} cancela job interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe por batchJobId.");
+            }
+            else if (toolName is "prepare_welcome_message" or "prepare_access_reminder" or "prepare_activity_reminder" or
+                     "prepare_recovery_message" or "prepare_closing_message" or "prepare_followup_message")
+            {
+                Assert.False(attribute.ReadOnly, $"{toolName} cria uma acao pendente e deve declarar ReadOnly=false.");
+                Assert.False(attribute.Idempotent, $"{toolName} cria uma nova acao pendente a cada chamada.");
+            }
+            else if (toolName is "confirm_welcome_message" or "confirm_access_reminder" or "confirm_activity_reminder" or
+                     "confirm_recovery_message" or "confirm_closing_message" or "confirm_followup_message" or
+                     "moodle_prepare_write" or "moodle_confirm_write")
+            {
+                Assert.False(attribute.ReadOnly, $"{toolName} altera estado e deve declarar ReadOnly=false.");
+                Assert.False(attribute.Idempotent, $"{toolName} nao declara semantica retry-safe.");
             }
             else
             {
@@ -178,6 +198,13 @@ public sealed class McpToolMetadataTests
         Assert.False(attribute.OpenWorld);
     }
 
+    [Fact]
+    public void AtualizacoesQuePodemSobrescreverEstadoDevemSerMarcadasComoDestrutivas()
+    {
+        Assert.True(GetToolAttribute(typeof(PortalTaskTools), "update_task").Destructive);
+        Assert.True(GetToolAttribute(typeof(PortalAgendaTools), "update_agenda_event").Destructive);
+    }
+
     private static IEnumerable<(Type ToolType, MethodInfo Method, McpServerToolAttribute Attribute)> EnumerateToolAttributes()
     {
         var toolTypes = new[]
@@ -198,6 +225,8 @@ public sealed class McpToolMetadataTests
             typeof(MoodleMemoryTools),
             typeof(MoodleMemoryDocumentTools),
             typeof(MoodlePedagogyTools),
+            typeof(MoodleTutorMessageTools),
+            typeof(MoodleUniversalWriteTools),
             typeof(DemoPendingActionTools)
         };
 
@@ -213,4 +242,9 @@ public sealed class McpToolMetadataTests
             }
         }
     }
+
+    private static McpServerToolAttribute GetToolAttribute(Type toolType, string toolName) =>
+        toolType.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .Select(method => method.GetCustomAttribute<McpServerToolAttribute>())
+            .Single(attribute => attribute?.Name == toolName)!;
 }
