@@ -12,7 +12,8 @@ public static class AssignmentSubmissionSnapshotProjector
     public static CourseAssignmentSubmissionsSnapshot Build(
         CourseContentsSummary contents,
         CourseParticipantsPage participants,
-        IReadOnlyList<AssignmentSubmissionsBatch> batches)
+        IReadOnlyList<AssignmentSubmissionsBatch> batches,
+        IReadOnlyDictionary<string, AssignmentSettingsSummary>? assignmentSettings = null)
     {
         var batchesByAssignment = batches
             .GroupBy(batch => batch.AssignmentId, StringComparer.OrdinalIgnoreCase)
@@ -38,7 +39,8 @@ public static class AssignmentSubmissionSnapshotProjector
                         [],
                         IsComplete: false,
                         ErrorCode: "assignment_snapshot_missing",
-                        ErrorMessage: "O Moodle não retornou dados desta tarefa durante a sincronização.");
+                        ErrorMessage: "O Moodle não retornou dados desta tarefa durante a sincronização.",
+                        MaxGrade: FindMaxGrade(assignmentSettings, module));
                 }
 
                 return new AssignmentSubmissionsSnapshotItem(
@@ -49,7 +51,8 @@ public static class AssignmentSubmissionSnapshotProjector
                     BuildRows(participants.Participants, batch.Submissions, dueAt),
                     IsComplete: string.IsNullOrWhiteSpace(batch.ErrorCode),
                     ErrorCode: batch.ErrorCode,
-                    ErrorMessage: batch.ErrorMessage);
+                    ErrorMessage: batch.ErrorMessage,
+                    MaxGrade: FindMaxGrade(assignmentSettings, module));
             })
             .ToArray();
 
@@ -235,4 +238,23 @@ public static class AssignmentSubmissionSnapshotProjector
             date.Label.Contains("due", StringComparison.OrdinalIgnoreCase) ||
             date.Label.Contains("prazo", StringComparison.OrdinalIgnoreCase) ||
             date.Label.Contains("entrega", StringComparison.OrdinalIgnoreCase))?.Date;
+
+    private static decimal? FindMaxGrade(
+        IReadOnlyDictionary<string, AssignmentSettingsSummary>? settings,
+        CourseModuleSummary module)
+    {
+        if (settings is null)
+        {
+            return null;
+        }
+
+        if (settings.TryGetValue(module.InstanceId ?? string.Empty, out var byInstance))
+        {
+            return byInstance.MaxGrade;
+        }
+
+        return settings.TryGetValue(module.ModuleId ?? string.Empty, out var byModule)
+            ? byModule.MaxGrade
+            : null;
+    }
 }

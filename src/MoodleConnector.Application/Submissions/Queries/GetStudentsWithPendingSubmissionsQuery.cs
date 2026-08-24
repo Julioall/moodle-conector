@@ -159,9 +159,11 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         // Uma atividade sem nota ainda pode exigir feedback. O grau da
         // atividade só define qual sinal devemos usar para saber se ela foi
         // tratada; não é motivo para removê-la da fila do tutor.
-        IReadOnlyDictionary<string, AssignmentSettingsSummary> assignmentSettings =
-            new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
-        if (assignmentContexts.Length > 0)
+        var assignmentSettings = GetSettingsFromSnapshot(
+            request.PrefetchedSubmissions,
+            request.CourseId,
+            assignmentContexts);
+        if (assignmentContexts.Length > 0 && assignmentSettings is null)
         {
             try
             {
@@ -176,6 +178,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 // das configurações não estiver disponível.
             }
         }
+
+        assignmentSettings ??= new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
 
         var canClassifyNoGradeActivities = assignmentSettings.Count > 0;
         // Atividades sem nota exigiriam uma leitura Moodle por envio para
@@ -397,6 +401,40 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
 
         return settings.TryGetValue(module.ModuleId ?? string.Empty, out var byModule) &&
             byModule.MaxGrade <= 0;
+    }
+
+    private static IReadOnlyDictionary<string, AssignmentSettingsSummary>? GetSettingsFromSnapshot(
+        CourseAssignmentSubmissionsSnapshot? snapshot,
+        string courseId,
+        IReadOnlyList<AssignmentContext> contexts)
+    {
+        if (!IsForCourse(snapshot, courseId))
+        {
+            return contexts.Count == 0
+                ? new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
+                : null;
+        }
+
+        var settings = new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
+        foreach (var context in contexts)
+        {
+            var item = snapshot!.Assignments.FirstOrDefault(assignment =>
+                string.Equals(assignment.AssignmentId, context.Module.InstanceId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(assignment.AssignmentModuleId, context.Module.ModuleId, StringComparison.OrdinalIgnoreCase));
+            if (item?.MaxGrade is not { } maxGrade)
+            {
+                return null;
+            }
+
+            var summary = new AssignmentSettingsSummary(item.AssignmentId, maxGrade, item.AssignmentName);
+            settings[item.AssignmentId] = summary;
+            if (!string.IsNullOrWhiteSpace(item.AssignmentModuleId))
+            {
+                settings[item.AssignmentModuleId] = summary;
+            }
+        }
+
+        return settings;
     }
 
     private sealed record AssignmentContext(CourseModuleSummary Module, DateTimeOffset? DueDate);

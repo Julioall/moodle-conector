@@ -101,6 +101,21 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
         Assert.All(assignment.Submissions, row => Assert.False(row.Submitted));
     }
 
+    [Fact]
+    public void Build_persists_assignment_grade_settings_for_offline_pending_reads()
+    {
+        var snapshot = AssignmentSubmissionSnapshotProjector.Build(
+            Contents(DateTimeOffset.UtcNow.AddDays(1)),
+            Participants(),
+            [new AssignmentSubmissionsBatch("assignment-1", [])],
+            new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
+            {
+                ["assignment-1"] = new("assignment-1", 100m, "Assignment 1"),
+            });
+
+        Assert.Equal(100m, Assert.Single(snapshot.Assignments).MaxGrade);
+    }
+
     private static CourseContentsSummary Contents(DateTimeOffset dueAt) =>
         new(
             "course-1",

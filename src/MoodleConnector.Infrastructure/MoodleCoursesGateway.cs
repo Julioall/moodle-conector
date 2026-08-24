@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -26,6 +27,7 @@ internal sealed class MoodleCoursesGateway(
     private readonly ILogger<MoodleCoursesGateway> _logger = logger ?? NullLogger<MoodleCoursesGateway>.Instance;
     private static readonly TimeSpan CourseListCacheDuration = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan CategoryCacheDuration = TimeSpan.FromMinutes(30);
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> CourseCacheLocks = new(StringComparer.Ordinal);
 
     public async Task<IReadOnlyList<CourseHierarchyNode>> GetMyCourseHierarchyAsync(string userExternalId, CancellationToken cancellationToken)
     {
@@ -153,47 +155,66 @@ internal sealed class MoodleCoursesGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var moodleUserId = await ResolveMoodleUserIdAsync(credentials, userExternalId, cancellationToken);
         var cacheKey = $"moodle:courses:{credentials.ConnectionId}:{moodleUserId}";
-        return await cache.GetOrCreateAsync(
-            cacheKey,
-            async entry =>
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<CourseSummary>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        // Dashboard metrics arrive together. Collapse their cold-cache reads
+        // so a large Moodle catalogue is fetched only once per connection.
+        var gate = CourseCacheLocks.GetOrAdd(cacheKey, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (cache.TryGetValue(cacheKey, out cached) && cached is not null)
             {
-                entry.AbsoluteExpirationRelativeToNow = CourseListCacheDuration;
-                entry.SlidingExpiration = TimeSpan.FromMinutes(3);
+                return cached;
+            }
 
-                var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
-                var moodleCourses = await GetCoursesAsync(credentials, moodleUserId, profile, cancellationToken);
-                var categories = await GetCategoryPathsAsync(credentials, profile, cancellationToken);
-                _logger.LogInformation("Moodle courses loaded: {CourseCount}, categories: {CategoryCount}", moodleCourses.Count, categories.Count);
-                return moodleCourses
-                    .Select(course =>
-                    {
-                        var categoryId = course.CategoryId ?? course.Category;
-                        var categoryName = categoryId is long resolvedCategoryId &&
-                                            categories.TryGetValue(resolvedCategoryId, out var resolvedCategoryPath) &&
-                                            !string.IsNullOrWhiteSpace(resolvedCategoryPath)
-                            ? resolvedCategoryPath
-                            : course.CategoryName;
+            var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+            var moodleCourses = await GetCoursesAsync(credentials, moodleUserId, profile, cancellationToken);
+            var categories = await GetCategoryPathsAsync(credentials, profile, cancellationToken);
+            _logger.LogInformation("Moodle courses loaded: {CourseCount}, categories: {CategoryCount}", moodleCourses.Count, categories.Count);
+            var courses = moodleCourses
+                .Select(course =>
+                {
+                    var categoryId = course.CategoryId ?? course.Category;
+                    var categoryName = categoryId is long resolvedCategoryId &&
+                                        categories.TryGetValue(resolvedCategoryId, out var resolvedCategoryPath) &&
+                                        !string.IsNullOrWhiteSpace(resolvedCategoryPath)
+                        ? resolvedCategoryPath
+                        : course.CategoryName;
 
-                        return new CourseSummary(
-                            course.Id.ToString(CultureInfo.InvariantCulture),
-                            course.IdNumber,
-                            course.ShortName,
-                            course.FullName,
-                            course.DisplayName,
-                            categoryId,
-                            categoryName,
-                            ToDateTimeOffset(course.StartDate),
-                            ToDateTimeOffset(course.EndDate),
-                            ToBool(course.Visible),
-                            course.ViewUrl,
-                            course.CourseImage,
-                            ToDecimal(course.Progress),
-                            ToBool(course.HasProgress),
-                            ToBool(course.IsFavourite),
-                            ToDateTimeOffset(course.TimeAccess));
-                    })
-                    .ToArray();
-            }) ?? [];
+                    return new CourseSummary(
+                        course.Id.ToString(CultureInfo.InvariantCulture),
+                        course.IdNumber,
+                        course.ShortName,
+                        course.FullName,
+                        course.DisplayName,
+                        categoryId,
+                        categoryName,
+                        ToDateTimeOffset(course.StartDate),
+                        ToDateTimeOffset(course.EndDate),
+                        ToBool(course.Visible),
+                        course.ViewUrl,
+                        course.CourseImage,
+                        ToDecimal(course.Progress),
+                        ToBool(course.HasProgress),
+                        ToBool(course.IsFavourite),
+                        ToDateTimeOffset(course.TimeAccess));
+                })
+                .ToArray();
+            cache.Set(cacheKey, courses, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = CourseListCacheDuration,
+                SlidingExpiration = TimeSpan.FromMinutes(3),
+            });
+            return courses;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private async Task<IReadOnlyDictionary<long, string>> GetCategoryPathsAsync(

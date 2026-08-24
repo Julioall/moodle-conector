@@ -107,6 +107,62 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         Assert.Equal(0, fixture.SubmissionReads);
     }
 
+    [Fact]
+    public async Task Reuses_complete_submission_snapshot_without_moodle_reads()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(Module("assign-1", "assign")),
+        };
+        var participants = new CourseParticipantsPage(
+            "course-1",
+            1,
+            100,
+            ParticipantStatusFilter.Active,
+            StudentsOnly: true,
+            IncludeEmail: false,
+            HasMore: false,
+            Participants: [new CourseParticipantSummary("student-1", "Aluno 1", null, false, null, null, null, [], [])]);
+        var submissions = new CourseAssignmentSubmissionsSnapshot(
+            "course-1",
+            [new AssignmentSubmissionsSnapshotItem(
+                "assign-1",
+                "module-assign-1",
+                "Atividade",
+                null,
+                [new AssignmentSubmissionSummary(
+                    "student-1",
+                    "Aluno 1",
+                    null,
+                    "not_submitted",
+                    null,
+                    false,
+                    false,
+                    false,
+                    null,
+                    null,
+                    null,
+                    0,
+                    false,
+                    [])],
+                MaxGrade: 100m)]);
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery(
+                "course-1",
+                IncludeAwaitingGrading: true,
+                PrefetchedContents: fixture.Contents,
+                PrefetchedParticipants: participants,
+                PrefetchedSubmissions: submissions),
+            CancellationToken.None);
+
+        Assert.Single(result.Students);
+        Assert.Equal(0, fixture.ParticipantReads);
+        Assert.Equal(0, fixture.ContentReads);
+        Assert.Equal(0, fixture.AssignmentSettingsReads);
+        Assert.Equal(0, fixture.SubmissionReads);
+    }
+
     private static CourseContentsSummary Contents(params CourseModuleSummary[] modules) =>
         new("course-1", ["assign"], false, false,
         [new CourseSectionSummary("section-1", 1, "Seção 1", null, true, modules.Length, modules.Length == 0, modules)]);

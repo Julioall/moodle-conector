@@ -130,6 +130,30 @@ public sealed class MoodleCoursesCapabilityGatewayTests
     }
 
     [Fact]
+    public async Task GetMyCoursesAsync_Coalesces_concurrent_cold_cache_reads()
+    {
+        var restClient = new FakeRestClient { ResponseDelay = TimeSpan.FromMilliseconds(25) };
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var gateway = new MoodleCoursesGateway(
+            Options.Create(new MoodleApiOptions()),
+            cache,
+            new FakeCredentialsProvider(),
+            restClient,
+            new FakeCatalog(Profile("core_enrol_get_users_courses", "core_course_get_categories")),
+            new FakeCurrentUserIdGateway(),
+            new MoodleBusinessFlowRegistry(),
+            new MoodleResourceResolver());
+
+        var pages = await Task.WhenAll(
+            Enumerable.Range(0, 3)
+                .Select(_ => gateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None)));
+
+        Assert.All(pages, page => Assert.Single(page.Items));
+        Assert.Equal(1, restClient.CountCalls("core_enrol_get_users_courses"));
+        Assert.Equal(1, restClient.CountCalls("core_course_get_categories"));
+    }
+
+    [Fact]
     public async Task GetMyCourseAsync_ConsultaCursoExatoEValidaMatriculaSemListarTodosOsCursos()
     {
         var restClient = new FakeRestClient();
@@ -198,13 +222,30 @@ public sealed class MoodleCoursesCapabilityGatewayTests
         public int EnrolledUserId { get; init; } = 7;
         public bool UseNestedCategory { get; init; }
         public bool EnrolledMissingCategoryId { get; init; }
+        public TimeSpan ResponseDelay { get; init; }
+
+        public int CountCalls(string functionName)
+        {
+            lock (Calls)
+            {
+                return Calls.Count(call => call == functionName);
+            }
+        }
 
         public Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName, IReadOnlyDictionary<string, object?> parameters, CancellationToken cancellationToken) =>
             CallAsync(connection, functionName, parameters, true, cancellationToken);
 
-        public Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName, IReadOnlyDictionary<string, object?> parameters, bool allowServiceToken, CancellationToken cancellationToken)
+        public async Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName, IReadOnlyDictionary<string, object?> parameters, bool allowServiceToken, CancellationToken cancellationToken)
         {
-            Calls.Add(functionName);
+            if (ResponseDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(ResponseDelay, cancellationToken);
+            }
+
+            lock (Calls)
+            {
+                Calls.Add(functionName);
+            }
             var payload = functionName switch
             {
                 "core_course_get_enrolled_courses_by_timeline_classification" => UseNestedCategory
@@ -223,7 +264,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
                 _ => "[{\"id\":42,\"fullname\":\"Curso ativo\"}]"
             };
             using var document = JsonDocument.Parse(payload);
-            return Task.FromResult(document.RootElement.Clone());
+            return document.RootElement.Clone();
         }
     }
 }

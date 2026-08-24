@@ -37,7 +37,7 @@ internal sealed class DashboardOverviewRefreshQueue(
     private readonly Channel<DashboardOverviewRefreshRequest> channel =
         Channel.CreateBounded<DashboardOverviewRefreshRequest>(new BoundedChannelOptions(256)
         {
-            FullMode = BoundedChannelFullMode.DropWrite,
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false,
             AllowSynchronousContinuations = false,
@@ -69,6 +69,22 @@ internal sealed class DashboardOverviewRefreshQueue(
             item.CourseId == string.Empty, cancellationToken);
         if (state is not null && MoodleSyncLeasePolicy.IsActive(state, now))
         {
+            return false;
+        }
+
+        if (state is not null &&
+            state.Status == "pending" &&
+            state.NextSyncAt is { } nextSyncAt)
+        {
+            if (nextSyncAt > now)
+            {
+                return false;
+            }
+
+            var dueKey = GetKey(request.OwnerId, request.ConnectionAlias);
+            if (!queued.TryAdd(dueKey, 0)) return false;
+            if (channel.Writer.TryWrite(request)) return true;
+            queued.TryRemove(dueKey, out _);
             return false;
         }
 
@@ -269,10 +285,15 @@ internal sealed class DashboardOverviewRefreshQueue(
 
             var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
             var persistedState = await db.MoodleSyncStates.SingleAsync(item => item.Id == state.Id, cancellationToken);
-            persistedState.Status = "completed";
             var completedAt = DateTimeOffset.UtcNow;
-            persistedState.LastCompletedAt = completedAt;
-            persistedState.NextSyncAt = GetNextBrazilMidnight(completedAt);
+            persistedState.Status = snapshotComplete ? "completed" : "pending";
+            if (snapshotComplete)
+            {
+                persistedState.LastCompletedAt = completedAt;
+            }
+            persistedState.NextSyncAt = snapshotComplete
+                ? GetNextBrazilMidnight(completedAt)
+                : completedAt.AddSeconds(30);
             persistedState.LastError = snapshotError;
             persistedState.LeaseUntil = null;
             persistedState.RecordsSynced = snapshot.CoursesAnalyzed;
@@ -546,9 +567,9 @@ internal sealed class DashboardPendingSnapshotBuilder(
         string userExternalId,
         CancellationToken cancellationToken)
     {
-        // Cada curso consulta lotes de submissões em background. Quatro cursos
-        // simultâneos reduzem o tempo total sem liberar uma rajada ilimitada
-        // contra o Moodle; conteúdos e alunos vêm dos snapshots quando existem.
+        // This step only reads local snapshots. Missing data is queued for the
+        // per-course worker so opening the dashboard never fans out live Moodle
+        // calls for every tracked course.
         using var limiter = new SemaphoreSlim(AppDashboardBudget.PendingCourseConcurrency);
         var tasks = courses.Select(async course =>
         {
@@ -563,6 +584,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
                 var courseMediator = courseScope.ServiceProvider.GetRequiredService<IMediator>();
                 CourseContentsSummary? prefetchedContents = null;
                 CourseParticipantsPage? prefetchedParticipants = null;
+                CourseAssignmentSubmissionsSnapshot? prefetchedSubmissions = null;
                 if (!string.IsNullOrWhiteSpace(connectionAlias))
                 {
                     var snapshotStore = courseScope.ServiceProvider.GetRequiredService<IMoodleSnapshotStore>();
@@ -585,6 +607,77 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     {
                         prefetchedParticipants = participantSnapshot.Data;
                     }
+
+                    var submissionsSnapshot = await snapshotStore.GetAsync<CourseAssignmentSubmissionsSnapshot>(
+                        ownerId,
+                        connectionAlias!,
+                        MoodleSnapshotDatasets.Submissions,
+                        course.CourseId,
+                        cancellationToken);
+                    if (submissionsSnapshot?.IsComplete == true)
+                    {
+                        prefetchedSubmissions = submissionsSnapshot.Data;
+                    }
+
+                    var snapshotsReady = prefetchedContents is not null &&
+                                         prefetchedParticipants is not null &&
+                                         prefetchedSubmissions is not null;
+                    if (!snapshotsReady)
+                    {
+                        var snapshotQueue = courseScope.ServiceProvider.GetRequiredService<IMoodleSnapshotSyncQueue>();
+                        await snapshotQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                            ownerId,
+                            clientId,
+                            connectionAlias!,
+                            userExternalId,
+                            Dataset: MoodleSnapshotDatasets.Submissions,
+                            CourseId: course.CourseId,
+                            Priority: 10,
+                            // An incomplete submission snapshot already has a
+                            // scheduled retry. Force only the legacy case in
+                            // which a complete submission snapshot lacks its
+                            // companion activities or students snapshot.
+                            Force: submissionsSnapshot?.IsComplete == true), cancellationToken);
+                        return new DashboardPendingRead(
+                            course.CourseId,
+                            course.FullName,
+                            [],
+                            [],
+                            [],
+                            [],
+                            0,
+                            0,
+                            [$"[{course.CourseId}] {course.FullName}: os dados locais deste curso estão sendo preparados."],
+                            false);
+                    }
+
+                    if (activitySnapshot!.IsStale || participantSnapshot!.IsStale || submissionsSnapshot!.IsStale)
+                    {
+                        var snapshotQueue = courseScope.ServiceProvider.GetRequiredService<IMoodleSnapshotSyncQueue>();
+                        await snapshotQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                            ownerId,
+                            clientId,
+                            connectionAlias!,
+                            userExternalId,
+                            Dataset: MoodleSnapshotDatasets.Submissions,
+                            CourseId: course.CourseId,
+                            Priority: 10,
+                            Force: true), cancellationToken);
+                    }
+                }
+                else
+                {
+                    return new DashboardPendingRead(
+                        course.CourseId,
+                        course.FullName,
+                        [],
+                        [],
+                        [],
+                        [],
+                        0,
+                        0,
+                        [$"[{course.CourseId}] {course.FullName}: a conexão Moodle não está disponível para preparar o snapshot."],
+                        false);
                 }
                 var pending = await courseMediator.Send(new GetStudentsWithPendingSubmissionsQuery(
                     course.CourseId,
@@ -593,7 +686,8 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     IncludeAwaitingGrading: true,
                     MaxAssignmentsToAnalyze: AppDashboardBudget.MaxAssignmentsRead,
                     PrefetchedContents: prefetchedContents,
-                    PrefetchedParticipants: prefetchedParticipants), cancellationToken);
+                    PrefetchedParticipants: prefetchedParticipants,
+                    PrefetchedSubmissions: prefetchedSubmissions), cancellationToken);
 
                 var rows = pending.Students
                     .SelectMany(student => student.PendingAssignments.Select(activity => new DashboardPendingRow(

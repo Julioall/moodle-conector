@@ -62,6 +62,17 @@ internal sealed class DashboardAccessSnapshotWorker(
                 var connectionSelection = targetScope.ServiceProvider.GetRequiredService<IMoodleConnectionSelection>();
                 connectionSelection.Alias = target.ConnectionAlias;
 
+                var snapshotStore = targetScope.ServiceProvider.GetRequiredService<IMoodleSnapshotStore>();
+                var existingSnapshot = await snapshotStore.GetAsync<DashboardAccessRead>(
+                    target.OwnerId,
+                    target.ConnectionAlias,
+                    MoodleSnapshotDatasets.DashboardAccess,
+                    cancellationToken: cancellationToken);
+                if (existingSnapshot is not null && !existingSnapshot.IsStale)
+                {
+                    continue;
+                }
+
                 var resolver = targetScope.ServiceProvider.GetRequiredService<DashboardCourseScopeResolver>();
                 var courses = await resolver.ResolveAsync(target.OwnerId, target.ConnectionAlias, cancellationToken);
                 if (courses.Count == 0)

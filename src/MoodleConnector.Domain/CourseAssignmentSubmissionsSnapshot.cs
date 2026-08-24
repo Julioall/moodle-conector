@@ -17,4 +17,5 @@ public sealed record AssignmentSubmissionsSnapshotItem(
     IReadOnlyList<AssignmentSubmissionSummary> Submissions,
     bool IsComplete = true,
     string? ErrorCode = null,
-    string? ErrorMessage = null);
+    string? ErrorMessage = null,
+    decimal? MaxGrade = null);

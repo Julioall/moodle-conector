@@ -63,7 +63,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             // A running job already owns the key. A subsequent force refresh is
             // represented by the next scheduled attempt instead of duplicating
             // the expensive Moodle fan-out.
-            if (request.Force)
+            if (request.Force && !state.ForceRequested)
             {
                 state.ForceRequested = true;
                 state.NextSyncAt = now;
@@ -85,6 +85,15 @@ internal sealed class MoodleSnapshotSyncQueue(
                 CourseId = request.CourseId ?? string.Empty,
             };
             db.MoodleSyncStates.Add(state);
+        }
+        else if (!request.Force &&
+                 string.Equals(state.Status, "pending", StringComparison.OrdinalIgnoreCase) &&
+                 state.NextSyncAt is { } scheduled &&
+                 scheduled <= now)
+        {
+            // The durable work is already due. Avoid rewriting the same row on
+            // every dashboard poll; the in-memory signal remains enough.
+            return TryEnqueueSignal(request);
         }
         else if (!request.Force && state.NextSyncAt is { } next && next > now)
         {
@@ -110,6 +119,7 @@ internal sealed class MoodleSnapshotSyncQueue(
 
         try
         {
+            await RemoveLegacyEagerPrefetchStatesAsync(stoppingToken);
             await RecoverOrphanedStatesAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -130,6 +140,32 @@ internal sealed class MoodleSnapshotSyncQueue(
         }
 
         logger.LogInformation("MoodleSnapshotSyncQueue encerrada.");
+    }
+
+    private async Task RemoveLegacyEagerPrefetchStatesAsync(CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+
+        // Before lazy snapshots, a connection refresh scheduled four jobs for
+        // every course. Clear only those precise legacy signatures, leaving
+        // user-triggered jobs (which use priority 5, 10, or 20) untouched.
+        var removed = await db.MoodleSyncStates
+            .Where(item =>
+                item.CourseId != string.Empty &&
+                (item.Status == "pending" || item.Status == "failed") &&
+                ((item.Dataset == MoodleSnapshotDatasets.Activities && item.Priority == 20) ||
+                 (item.Dataset == MoodleSnapshotDatasets.Students && item.Priority == 30) ||
+                 (item.Dataset == MoodleSnapshotDatasets.Groups && item.Priority == 60) ||
+                 (item.Dataset == MoodleSnapshotDatasets.Submissions && item.Priority == 15)))
+            .ExecuteDeleteAsync(cancellationToken);
+
+        if (removed > 0)
+        {
+            logger.LogInformation(
+                "Removed {Count} legacy eager Moodle snapshot jobs.",
+                removed);
+        }
     }
 
     private async Task EnqueueDueStatesAsync(CancellationToken cancellationToken)
@@ -231,15 +267,26 @@ internal sealed class MoodleSnapshotSyncQueue(
             {
                 records = await SyncAsync(scope.ServiceProvider, work, cancellationToken);
                 var snapshotStore = scope.ServiceProvider.GetRequiredService<IMoodleSnapshotStore>();
-                var invalidatedDataset = work.Dataset == MoodleSnapshotDatasets.Connection
-                    ? MoodleSnapshotDatasets.Courses
-                    : work.Dataset;
-                snapshotStore.Invalidate(
-                    work.OwnerId,
-                    work.ConnectionAlias,
-                    invalidatedDataset,
-                    work.CourseId ?? string.Empty);
-                metrics.RecordRefresh(invalidatedDataset);
+                string[] invalidatedDatasets = work.Dataset switch
+                {
+                    MoodleSnapshotDatasets.Connection => [MoodleSnapshotDatasets.Courses],
+                    // A submissions read already retrieves the same activities
+                    // and participants, so all three snapshots are refreshed.
+                    MoodleSnapshotDatasets.Submissions => [
+                        MoodleSnapshotDatasets.Submissions,
+                        MoodleSnapshotDatasets.Activities,
+                        MoodleSnapshotDatasets.Students],
+                    _ => [work.Dataset],
+                };
+                foreach (var dataset in invalidatedDatasets)
+                {
+                    snapshotStore.Invalidate(
+                        work.OwnerId,
+                        work.ConnectionAlias,
+                        dataset,
+                        work.CourseId ?? string.Empty);
+                    metrics.RecordRefresh(dataset);
+                }
             }
             finally
             {
@@ -431,6 +478,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         var contentsGateway = services.GetRequiredService<IMoodleCourseContentsGateway>();
         var participantsGateway = services.GetRequiredService<IMoodleParticipantsGateway>();
         var submissionsGateway = services.GetRequiredService<IMoodleAssignmentSubmissionsGateway>();
+        var assignmentSettingsGateway = services.GetRequiredService<IMoodleAssignmentSettingsGateway>();
 
         if (work.Dataset is MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses)
         {
@@ -440,16 +488,6 @@ internal sealed class MoodleSnapshotSyncQueue(
             if (work.Dataset == MoodleSnapshotDatasets.Connection)
             {
                 var now = DateTimeOffset.UtcNow;
-                foreach (var course in courses)
-                {
-                    var finished = course.EndDate is not null && course.EndDate < now;
-                    var activityNext = GetNextAutomaticSyncAt(MoodleSnapshotDatasets.Activities, now);
-                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Activities, course.CourseId, activityNext, 20, cancellationToken);
-                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Students, course.CourseId, finished ? now.AddDays(7) : now, 30, cancellationToken);
-                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Groups, course.CourseId, finished ? now.AddDays(7) : now, 60, cancellationToken);
-                    await EnsureStateAsync(db, work, MoodleSnapshotDatasets.Submissions, course.CourseId, finished ? now.AddDays(7) : now, 15, cancellationToken);
-                }
-
                 var courseIds = courses.Select(course => course.CourseId).ToArray();
                 var cutoff = now.AddDays(-7);
                 await db.MoodleSnapshots
@@ -477,7 +515,8 @@ internal sealed class MoodleSnapshotSyncQueue(
             return 0;
         }
 
-        var courseSummary = await coursesGateway.GetMyCourseAsync(work.UserExternalId, work.CourseId, cancellationToken);
+        var courseSummary = await ReadCourseFromSnapshotAsync(db, work, cancellationToken)
+            ?? await coursesGateway.GetMyCourseAsync(work.UserExternalId, work.CourseId, cancellationToken);
         if (courseSummary is null)
         {
             return 0;
@@ -567,7 +606,31 @@ internal sealed class MoodleSnapshotSyncQueue(
                         since: null,
                         before: null,
                         cancellationToken);
-                var snapshot = AssignmentSubmissionSnapshotProjector.Build(contents, participants, batches);
+                IReadOnlyDictionary<string, AssignmentSettingsSummary> assignmentSettings =
+                    new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
+                if (assignmentIds.Length > 0)
+                {
+                    try
+                    {
+                        assignmentSettings = await assignmentSettingsGateway.GetCourseAssignmentSettingsAsync(
+                            work.UserExternalId,
+                            courseSummary.CourseId,
+                            cancellationToken);
+                    }
+                    catch
+                    {
+                        // The submissions payload remains useful when Moodle
+                        // does not expose the optional grade configuration.
+                    }
+                }
+
+                var snapshot = AssignmentSubmissionSnapshotProjector.Build(
+                    contents,
+                    participants,
+                    batches,
+                    assignmentSettings);
+                await SaveAsync(db, work, MoodleSnapshotDatasets.Activities, courseSummary.CourseId, contents, finishedCourse ? "cold" : "hot", finishedCourse, cancellationToken);
+                await SaveAsync(db, work, MoodleSnapshotDatasets.Students, courseSummary.CourseId, participants, "hot", false, cancellationToken);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Submissions, courseSummary.CourseId, snapshot, finishedCourse ? "cold" : "hot", finishedCourse, cancellationToken);
                 break;
             }
@@ -598,49 +661,37 @@ internal sealed class MoodleSnapshotSyncQueue(
         return courses;
     }
 
-    private static async Task EnsureStateAsync(
+    private static async Task<CourseSummary?> ReadCourseFromSnapshotAsync(
         ConnectorDbContext db,
         SyncWork work,
-        string dataset,
-        string courseId,
-        DateTimeOffset nextSyncAt,
-        int priority,
         CancellationToken cancellationToken)
     {
-        var state = await db.MoodleSyncStates.SingleOrDefaultAsync(
-            item => item.OwnerId == work.OwnerId &&
-                    item.ConnectionAlias == work.ConnectionAlias &&
-                    item.Dataset == dataset &&
-                    item.CourseId == courseId,
-            cancellationToken);
-        if (state is null)
+        var payload = await db.MoodleSnapshots
+            .AsNoTracking()
+            .Where(item => item.OwnerId == work.OwnerId &&
+                           item.ConnectionAlias == work.ConnectionAlias &&
+                           item.SnapshotType == MoodleSnapshotDatasets.Courses &&
+                           item.CourseId == string.Empty)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Select(item => item.PayloadJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(payload))
         {
-            db.MoodleSyncStates.Add(new MoodleSyncStateEntity
-            {
-                Id = Guid.NewGuid(),
-                OwnerId = work.OwnerId,
-                ConnectionAlias = work.ConnectionAlias,
-                Dataset = dataset,
-                CourseId = courseId,
-                ClientId = work.ClientId,
-                UserExternalId = work.UserExternalId,
-                Priority = priority,
-                Status = "pending",
-                NextSyncAt = nextSyncAt,
-                UpdatedAt = DateTimeOffset.UtcNow,
-            });
-            return;
+            return null;
         }
 
-        state.ClientId = work.ClientId;
-        state.UserExternalId = work.UserExternalId;
-        state.Priority = Math.Min(state.Priority == 0 ? priority : state.Priority, priority);
-        if (state.Status != "running" && (state.NextSyncAt is null || nextSyncAt < state.NextSyncAt))
+        try
         {
-            state.Status = "pending";
-            state.NextSyncAt = nextSyncAt;
+            var courses = JsonSerializer.Deserialize<IReadOnlyList<CourseSummary>>(payload, JsonOptions);
+            return courses?.FirstOrDefault(course =>
+                string.Equals(course.CourseId, work.CourseId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(course.ShortName, work.CourseId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(course.IdNumber, work.CourseId, StringComparison.OrdinalIgnoreCase));
         }
-        state.UpdatedAt = DateTimeOffset.UtcNow;
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static async Task SaveAsync<T>(
