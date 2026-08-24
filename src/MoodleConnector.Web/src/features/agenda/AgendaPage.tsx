@@ -1,6 +1,7 @@
 import { type FormEvent, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CalendarDays, CalendarRange, CheckSquare, ChevronLeft, ChevronRight, Clock3, Download, List, Pencil, Plus, Trash2, Upload } from 'lucide-react';
+import { toast } from 'sonner';
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
@@ -158,7 +159,20 @@ export function AgendaPage() {
   const create = useMutation({ mutationFn: (input: AgendaInput) => agendaGateway.create(input), onSuccess: handleSaved });
   const update = useMutation({ mutationFn: ({ id, input }: { id: string; input: AgendaInput }) => agendaGateway.update(id, input), onSuccess: handleSaved });
   const remove = useMutation({ mutationFn: agendaGateway.remove, onSuccess: () => { setDeleteId(null); void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); } });
-  const importIcs = useMutation({ mutationFn: agendaGateway.importIcs, onSuccess: () => { void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); } });
+  const importIcs = useMutation({
+    mutationFn: agendaGateway.importIcs,
+    onSuccess: ({ data }) => {
+      const summaries = [
+        data.imported > 0 ? `${data.imported} ${data.imported === 1 ? 'novo item' : 'novos itens'}` : null,
+        data.updated > 0 ? `${data.updated} ${data.updated === 1 ? 'item atualizado' : 'itens atualizados'}` : null,
+        data.skipped > 0 ? `${data.skipped} ${data.skipped === 1 ? 'item ignorado' : 'itens ignorados'}` : null,
+      ].filter(Boolean).join(', ');
+      toast.success('Importação concluída', { description: summaries || 'Nenhum item foi encontrado no arquivo.' });
+      void client.invalidateQueries({ queryKey: ['app', 'agenda'] });
+      void client.invalidateQueries({ queryKey: ['app', 'tasks'] });
+    },
+    onError: (error) => toast.error('Não foi possível importar a agenda', { description: error instanceof Error ? error.message : undefined }),
+  });
   const updateTask = useMutation({ mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => tasksGateway.update(id, { status }), onSuccess: (response) => { setDetailTask(response.data); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); } });
   const openCreate = (date?: Date) => { resetForm(); if (date) { const next = new Date(date); next.setHours(9, 0, 0, 0); setStartAt(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}T09:00`); } setFormOpen(true); };
   const openEdit = (event: AgendaEvent) => { setEditingEvent(event); setTitle(event.title); setDescription(event.description ?? ''); setStartAt(toDateTimeLocal(event.startAt)); setEndAt(event.endAt ? toDateTimeLocal(event.endAt) : ''); setType(event.type); setFormOpen(true); };

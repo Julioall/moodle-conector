@@ -26,12 +26,10 @@ internal static class CourseDashboardSnapshotMapper
             .Where(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < generatedAt.AddDays(-14))
             .Select(student => student.UserId)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var pendingRows = pendingSnapshot?.Priorities
-            .Where(item => IsForCourse(item, course.CourseId) &&
-                           string.Equals(item.Title, "Entrega pendente", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(item => string.Equals(item.Level, "risk", StringComparison.OrdinalIgnoreCase))
-            .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
-            .ToArray() ?? [];
+        var pendingCoverage = pendingSnapshot is null
+            ? null
+            : DashboardPendingCoveragePolicy.Evaluate(pendingSnapshot, course.CourseId);
+        var pendingRows = BuildPendingRows(pendingSnapshot, course.CourseId);
         var gradingRows = pendingSnapshot?.ActivitiesToReview
             .Where(item => IsForCourse(item, course.CourseId))
             .OrderBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
@@ -71,6 +69,11 @@ internal static class CourseDashboardSnapshotMapper
         }
         else
         {
+            if (pendingCoverage?.HasMissingCoverage == true)
+            {
+                warnings.Add("As prioridades do curso estão sendo preparadas em segundo plano.");
+            }
+
             if (!pendingSnapshot.IsRefreshing && pendingSnapshot.CoursesAnalyzed < pendingSnapshot.CoursesInScope)
             {
                 warnings.Add("As pendências deste curso podem estar incompletas.");
@@ -99,8 +102,16 @@ internal static class CourseDashboardSnapshotMapper
             TodayTasks = todayTasks,
             ActivitiesToReview = gradingRows.Length,
             ActiveNormalStudents = participants is null ? null : Math.Max(0, activeParticipants.Count - studentsNeedingAttention),
-            PendingSubmissionAssignments = pendingSnapshot is null ? null : pendingRows.Length,
-            PendingCorrectionAssignments = pendingSnapshot is null ? null : gradingRows.Length,
+            PendingSubmissionAssignments = pendingSnapshot is null
+                ? null
+                : pendingCoverage?.SubmissionItemsMissing == true
+                    ? pendingCoverage.Summary?.PendingSubmissionActivities ?? pendingRows.Length
+                    : pendingRows.Length,
+            PendingCorrectionAssignments = pendingSnapshot is null
+                ? null
+                : pendingCoverage?.CorrectionItemsMissing == true
+                    ? pendingCoverage.Summary?.PendingCorrectionActivities ?? gradingRows.Length
+                    : gradingRows.Length,
             ActiveStudents = participants?.Participants.Count,
         };
         var priorities = accessRows
@@ -128,4 +139,33 @@ internal static class CourseDashboardSnapshotMapper
 
     private static bool IsCourseWarning(string warning, string courseId) =>
         warning.StartsWith($"[{courseId}]", StringComparison.OrdinalIgnoreCase);
+
+    private static AppDashboardPriorityDto[] BuildPendingRows(
+        AppDashboardPendingMetricDto? pendingSnapshot,
+        string courseId)
+    {
+        var priorityRows = pendingSnapshot?.Priorities
+            .Where(item => IsForCourse(item, courseId) &&
+                           string.Equals(item.Title, "Entrega pendente", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(item => string.Equals(item.Level, "risk", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+        if (priorityRows.Length > 0)
+        {
+            return priorityRows;
+        }
+
+        return pendingSnapshot?.PendingItems
+            .Where(item => string.Equals(item.CourseId, courseId, StringComparison.OrdinalIgnoreCase))
+            .Select(item => new AppDashboardPriorityDto(
+                $"{item.CourseId}:{item.StudentId}:{item.AssignmentId}",
+                "Entrega pendente",
+                $"{item.StudentName} · {item.AssignmentName}",
+                item.IsOverdue ? "risk" : "attention",
+                item.CourseId,
+                item.StudentId))
+            .OrderByDescending(item => string.Equals(item.Level, "risk", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(item => item.Detail, StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+    }
 }

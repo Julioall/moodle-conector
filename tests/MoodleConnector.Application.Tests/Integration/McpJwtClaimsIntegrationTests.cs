@@ -799,6 +799,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         });
         var email = $"professor-{Guid.NewGuid():N}@example.com";
         var password = "senha-local-12345";
+        await RefreshCsrfTokenAsync(client);
 
         var weakPasswordResponse = await client.PostAsJsonAsync("/api/account/register", new
         {
@@ -817,13 +818,15 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         });
 
         registerResponse.EnsureSuccessStatusCode();
+        await RefreshCsrfTokenAsync(client);
 
         var firstProfile = await client.GetFromJsonAsync<JsonElement>("/api/account/me");
         Assert.Equal(email, firstProfile.GetProperty("email").GetString());
         Assert.False(firstProfile.GetProperty("hasMoodleConnected").GetBoolean());
 
-        var logoutResponse = await client.GetAsync("/auth/logout");
+        var logoutResponse = await client.PostAsync("/auth/logout", null);
         logoutResponse.EnsureSuccessStatusCode();
+        await RefreshCsrfTokenAsync(client);
 
         var loginResponse = await client.PostAsJsonAsync("/api/account/login", new
         {
@@ -832,6 +835,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         });
 
         loginResponse.EnsureSuccessStatusCode();
+        await RefreshCsrfTokenAsync(client);
 
         var connectResponse = await client.PostAsJsonAsync("/api/account/connect-moodle", new
         {
@@ -854,6 +858,100 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.Equal("goias", connection.GetProperty("alias").GetString());
         Assert.Equal("https://moodle.tests/ead", connection.GetProperty("baseUrl").GetString());
         Assert.True(connection.GetProperty("canWrite").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Deve_exigir_csrf_para_mutacoes_autenticadas_da_conta()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            HandleCookies = true
+        });
+        await RefreshCsrfTokenAsync(client);
+
+        var registerResponse = await client.PostAsJsonAsync("/api/account/register", new
+        {
+            name = "Professor CSRF",
+            email = $"csrf-{Guid.NewGuid():N}@example.com",
+            password = "senha-local-12345"
+        });
+        registerResponse.EnsureSuccessStatusCode();
+        await RefreshCsrfTokenAsync(client);
+
+        var connectResponse = await client.PostAsJsonAsync("/api/account/connect-moodle", new
+        {
+            moodleAlias = "CSRF",
+            moodleBaseUrl = "https://moodle.tests",
+            moodleUsername = "professor.csrf",
+            moodlePassword = "senha-moodle",
+            isDefault = true,
+            canWrite = false
+        });
+        connectResponse.EnsureSuccessStatusCode();
+
+        client.DefaultRequestHeaders.Remove("X-CSRF-TOKEN");
+        var missingTokenResponse = await client.PostAsync("/api/account/api-key/rotate", null);
+        Assert.Equal(HttpStatusCode.BadRequest, missingTokenResponse.StatusCode);
+        var missingToken = await missingTokenResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("csrf_invalid", missingToken.GetProperty("error").GetProperty("code").GetString());
+
+        await RefreshCsrfTokenAsync(client);
+        var rotateResponse = await client.PostAsync("/api/account/api-key/rotate", null);
+        rotateResponse.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task Deve_reportar_apenas_itens_criados_na_importacao_da_agenda()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            HandleCookies = true
+        });
+        await RefreshCsrfTokenAsync(client);
+
+        var registerResponse = await client.PostAsJsonAsync("/api/account/register", new
+        {
+            name = "Professor Agenda",
+            email = $"agenda-{Guid.NewGuid():N}@example.com",
+            password = "senha-local-12345"
+        });
+        registerResponse.EnsureSuccessStatusCode();
+        await RefreshCsrfTokenAsync(client);
+
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent("""
+            BEGIN:VCALENDAR
+            VERSION:2.0
+            BEGIN:VEVENT
+            UID:agenda-criada
+            DTSTART:20260824T120000Z
+            SUMMARY:Reunião de planejamento
+            END:VEVENT
+            BEGIN:VEVENT
+            UID:agenda-sem-inicio
+            SUMMARY:Evento sem início
+            END:VEVENT
+            END:VCALENDAR
+            """), "file", "agenda.ics");
+
+        var response = await client.PostAsync("/api/agenda/import", form);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var data = body.GetProperty("data");
+        Assert.Equal(1, data.GetProperty("imported").GetInt32());
+        Assert.Equal(0, data.GetProperty("updated").GetInt32());
+        Assert.Equal(1, data.GetProperty("skipped").GetInt32());
+    }
+
+    private static async Task RefreshCsrfTokenAsync(HttpClient client)
+    {
+        var response = await client.GetAsync("/api/csrf");
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var token = body.GetProperty("token").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(token));
+        client.DefaultRequestHeaders.Remove("X-CSRF-TOKEN");
+        client.DefaultRequestHeaders.Add("X-CSRF-TOKEN", token);
     }
 
     private async Task<IReadOnlyList<string>> GetToolsListAsync(WebApplicationFactory<Program> factory, string exposureProfile)

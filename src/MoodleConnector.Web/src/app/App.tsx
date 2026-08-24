@@ -20,7 +20,7 @@ const ReportHistoryPage = lazy(() => import('../features/reports/ReportHistoryPa
 
 export function App() {
   return (
-    <BrowserRouter basename="" future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <BrowserRouter basename="">
       <AuthGate>
         <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Spinner className="h-8 w-8" /></div>}>
           <Routes>

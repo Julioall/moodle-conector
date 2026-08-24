@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { accessGateway } from '../features/settings/access-gateway';
 
 describe('access gateway', () => {
-  it('updates an existing permission group with CSRF protection', async () => {
+  it('delegates CSRF protection to the shared app client when updating a permission group', async () => {
     const client = {
       get: vi.fn().mockResolvedValue({ token: 'fresh-token' }),
       request: vi.fn().mockResolvedValue({ group: { id: 'group-1' } }),
@@ -14,7 +14,7 @@ describe('access gateway', () => {
       permissions: ['courses.view'],
     });
 
-    expect(client.get).toHaveBeenCalledWith('/api/csrf');
+    expect(client.get).not.toHaveBeenCalled();
     expect(client.request).toHaveBeenCalledWith('/api/permission-groups/group%2F1', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

@@ -1,5 +1,6 @@
 ﻿import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { sessionGateway } from '../../integrations/auth/session-gateway';
+import { createAppClient } from '../../integrations/http/api-client';
 
 export function useSession() {
   const queryClient = useQueryClient();
@@ -12,10 +13,9 @@ export function useSession() {
 
   const logout = async () => {
     // The app and the account/OAuth broker share the same account cookie.
-    // Use the existing sign-out endpoint so the shell never invents a second auth flow.
     queryClient.clear();
     try {
-      await fetch('/auth/logout', { credentials: 'same-origin' });
+      await createAppClient().request('/auth/logout', { method: 'POST' });
     } finally {
       window.location.assign('/');
     }

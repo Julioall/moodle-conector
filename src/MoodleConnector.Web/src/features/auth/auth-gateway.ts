@@ -16,10 +16,10 @@ export type MoodleBootstrapInput = {
   canWrite: boolean;
 };
 
-const client = createAppClient();
-
 async function accountRequest(path: string, body: Record<string, unknown>): Promise<AccountResponse> {
-  return client.request<AccountResponse>(path, {
+  // Authentication can change the cookie identity. A new client requests a
+  // token bound to that identity instead of reusing an anonymous one.
+  return createAppClient().request<AccountResponse>(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

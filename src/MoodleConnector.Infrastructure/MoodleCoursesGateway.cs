@@ -275,17 +275,32 @@ internal sealed class MoodleCoursesGateway(
             {
                 try
                 {
-                    var enrolledPayload = await restClient.CallAsync(
-                        credentials,
-                        "core_enrol_get_users_courses",
-                        new Dictionary<string, object?>
-                        {
-                            ["userid"] = moodleUserId.ToString(CultureInfo.InvariantCulture)
-                        },
-                        cancellationToken);
-                    var enrolledCourses = JsonSerializer.Deserialize<IReadOnlyList<CourseDto>>(enrolledPayload.GetRawText()) ?? [];
+                    var enrolledCourses = await GetEnrolledCoursesAsync(credentials, moodleUserId, cancellationToken);
                     if (enrolledCourses.Count > 0)
                     {
+                        if (RequiresTimelineCategoryEnrichment(enrolledCourses) &&
+                            IsFunctionAvailable(profile, "core_course_get_enrolled_courses_by_timeline_classification"))
+                        {
+                            try
+                            {
+                                var timelineCourses = await GetTimelineCoursesAsync(credentials, cancellationToken);
+                                var enrichedCourses = MergeCourseCategoryData(enrolledCourses, timelineCourses);
+                                if (!ReferenceEquals(enrichedCourses, enrolledCourses))
+                                {
+                                    _logger.LogInformation(
+                                        "Moodle enrolled courses were enriched with timeline category data. ConnectionId={ConnectionId} Alias={Alias}",
+                                        credentials.ConnectionId,
+                                        credentials.Alias);
+                                }
+
+                                return enrichedCourses;
+                            }
+                            catch (MoodleApiException exception)
+                            {
+                                _logger.LogWarning(exception, "Moodle timeline category enrichment failed; using enrolled courses payload as-is.");
+                            }
+                        }
+
                         return enrolledCourses;
                     }
                 }
@@ -302,7 +317,41 @@ internal sealed class MoodleCoursesGateway(
                     "A conexão Moodle não possui uma função compatível para listar os cursos matriculados.");
             }
 
-            var timelinePayload = await restClient.CallAsync(
+            return await GetTimelineCoursesAsync(credentials, cancellationToken);
+        }
+
+        if (strategy?.StrategyName != "enrolled_courses_fallback")
+        {
+            throw new MoodleApiException(
+                "flow_unavailable",
+                "O fluxo listar_cursos_ativos nao possui uma estrategia compativel com as funcoes habilitadas nesta conexao Moodle.");
+        }
+
+        return await GetEnrolledCoursesAsync(credentials, moodleUserId, cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<CourseDto>> GetEnrolledCoursesAsync(
+        MoodleConnectorCredentials credentials,
+        long moodleUserId,
+        CancellationToken cancellationToken)
+    {
+        var payload = await restClient.CallAsync(
+            credentials,
+            "core_enrol_get_users_courses",
+            new Dictionary<string, string>
+            {
+                ["userid"] = moodleUserId.ToString(CultureInfo.InvariantCulture)
+            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+            cancellationToken);
+
+        return JsonSerializer.Deserialize<List<CourseDto>>(payload.GetRawText()) ?? [];
+    }
+
+    private async Task<IReadOnlyList<CourseDto>> GetTimelineCoursesAsync(
+        MoodleConnectorCredentials credentials,
+        CancellationToken cancellationToken)
+    {
+        var timelinePayload = await restClient.CallAsync(
                 credentials,
                 "core_course_get_enrolled_courses_by_timeline_classification",
                 new Dictionary<string, object?>
@@ -317,33 +366,8 @@ internal sealed class MoodleCoursesGateway(
                     ["sort"] = "fullname"
                 },
                 cancellationToken);
-            var timeline = JsonSerializer.Deserialize<TimelineCoursesResponseDto>(timelinePayload.GetRawText());
-            var timelineCourses = timeline?.Courses ?? [];
-            if (timelineCourses.Count > 0 && timelineCourses.All(course => course.CategoryId is not null))
-            {
-                return timelineCourses;
-            }
-
-            return timelineCourses;
-        }
-
-        if (strategy?.StrategyName != "enrolled_courses_fallback")
-        {
-            throw new MoodleApiException(
-                "flow_unavailable",
-                "O fluxo listar_cursos_ativos nao possui uma estrategia compativel com as funcoes habilitadas nesta conexao Moodle.");
-        }
-
-        var payload = await restClient.CallAsync(
-            credentials,
-            "core_enrol_get_users_courses",
-            new Dictionary<string, string>
-            {
-                ["userid"] = moodleUserId.ToString(CultureInfo.InvariantCulture)
-            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
-            cancellationToken);
-
-        return JsonSerializer.Deserialize<List<CourseDto>>(payload.GetRawText()) ?? [];
+        var timeline = JsonSerializer.Deserialize<TimelineCoursesResponseDto>(timelinePayload.GetRawText());
+        return timeline?.Courses ?? [];
     }
 
     private static bool IsFunctionAvailable(MoodleFunctionProfile profile, string functionName) =>
@@ -477,6 +501,78 @@ internal sealed class MoodleCoursesGateway(
         MoodleResourceType.CategoryId or MoodleResourceType.CategoryUrl => "category",
         _ => "id"
     };
+
+    private static bool RequiresTimelineCategoryEnrichment(IReadOnlyList<CourseDto> courses) =>
+        courses.Any(course => (course.CategoryId ?? course.Category) is null);
+
+    private static IReadOnlyList<CourseDto> MergeCourseCategoryData(
+        IReadOnlyList<CourseDto> primaryCourses,
+        IReadOnlyList<CourseDto> fallbackCourses)
+    {
+        if (primaryCourses.Count == 0 || fallbackCourses.Count == 0)
+        {
+            return primaryCourses;
+        }
+
+        var fallbackById = fallbackCourses
+            .GroupBy(course => course.Id)
+            .ToDictionary(group => group.Key, group => group.First());
+        var changed = false;
+        var merged = new CourseDto[primaryCourses.Count];
+
+        for (var index = 0; index < primaryCourses.Count; index++)
+        {
+            var course = primaryCourses[index];
+            if (!fallbackById.TryGetValue(course.Id, out var fallback))
+            {
+                merged[index] = course;
+                continue;
+            }
+
+            var enriched = MergeCourseCategoryData(course, fallback);
+            changed |= !ReferenceEquals(enriched, course);
+            merged[index] = enriched;
+        }
+
+        return changed ? merged : primaryCourses;
+    }
+
+    private static CourseDto MergeCourseCategoryData(CourseDto course, CourseDto fallback)
+    {
+        var categoryId = course.CategoryId ?? fallback.CategoryId;
+        var category = course.Category ?? fallback.Category;
+        var categoryName = !string.IsNullOrWhiteSpace(course.CategoryName)
+            ? course.CategoryName
+            : fallback.CategoryName;
+
+        if (categoryId == course.CategoryId &&
+            category == course.Category &&
+            string.Equals(categoryName, course.CategoryName, StringComparison.Ordinal))
+        {
+            return course;
+        }
+
+        return new CourseDto
+        {
+            Id = course.Id,
+            ShortName = course.ShortName,
+            IdNumber = course.IdNumber,
+            FullName = course.FullName,
+            DisplayName = course.DisplayName,
+            CategoryId = categoryId,
+            Category = category,
+            CategoryName = categoryName,
+            StartDate = course.StartDate,
+            EndDate = course.EndDate,
+            Visible = course.Visible,
+            ViewUrl = course.ViewUrl,
+            CourseImage = course.CourseImage,
+            Progress = course.Progress,
+            HasProgress = course.HasProgress,
+            IsFavourite = course.IsFavourite,
+            TimeAccess = course.TimeAccess
+        };
+    }
 
     private static CourseSummary ToCourseSummary(CourseDto course) => new(
         course.Id.ToString(CultureInfo.InvariantCulture),

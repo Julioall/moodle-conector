@@ -511,7 +511,9 @@ app.Use(async (context, next) =>
     {
         await next();
     }
-    catch (AntiforgeryValidationException) when (context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase))
+    catch (AntiforgeryValidationException) when (
+        context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase) ||
+        context.Request.Path.StartsWithSegments("/auth/logout", StringComparison.OrdinalIgnoreCase))
     {
         if (context.Response.HasStarted) throw;
         context.Response.Clear();
@@ -544,6 +546,7 @@ const string mcpPath = "/mcp";
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseAntiforgery();
 
 // Rehydrate local account metadata at the request boundary. Portal endpoints
 // still use the account model for their own authorization, while MCP tool
@@ -1100,7 +1103,7 @@ app.MapPost("/api/agenda/import", async (HttpContext context, ConnectorDbContext
             }
         }
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Results.Ok(new AppEnvelope<PlannerImportResultDto>(new(imported.Count, updated, skipped, warnings), new(DateTimeOffset.UtcNow, null)));
+        return Results.Ok(new AppEnvelope<PlannerImportResultDto>(new(created, updated, skipped, warnings), new(DateTimeOffset.UtcNow, null)));
     }
     catch (ArgumentException exception)
     {
@@ -1335,11 +1338,13 @@ app.MapPost("/api/reports/jobs", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
     if (input is null) return Results.BadRequest(new { error = new { code = "invalid_report_job", message = "Informe os parâmetros do relatório." } });
 
     var reportType = input.ReportType.Trim().ToLowerInvariant();
@@ -1432,11 +1437,13 @@ app.MapDelete("/api/reports/jobs/{id:guid}", async (
     Guid id,
     HttpContext context,
     ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
 
     var job = await dbContext.ReportJobs.SingleOrDefaultAsync(item => item.Id == id && item.OwnerId == identity.Id, cancellationToken);
     if (job is null) return Results.NotFound();
@@ -1450,11 +1457,12 @@ app.MapDelete("/api/reports/jobs/{id:guid}", async (
     return Results.NoContent();
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapPost("/api/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IMediator mediator, AppMessagePrepareInput input, CancellationToken cancellationToken) =>
+app.MapPost("/api/messages/prepare", async (HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, IMediator mediator, AppMessagePrepareInput input, CancellationToken cancellationToken) =>
 {
     if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
     if (!Enum.TryParse<TutorMessageType>(input.MessageType, true, out var messageType)) return Results.BadRequest(new { error = new { code = "invalid_message_type", message = "Tipo de mensagem inválido." } });
     if (input.RecipientIds is null || input.RecipientIds.Count == 0 || input.RecipientIds.Count > 100) return Results.BadRequest(new { error = new { code = "invalid_recipients", message = "Informe de 1 a 100 destinatários explícitos." } });
     try
@@ -2622,8 +2630,11 @@ app.MapGet("/api/dashboard", async (
     var dashboardCourses = courseSnapshot is null
         ? []
         : await dashboardCourseScopeResolver.FilterAsync(identity.Id, resolved.Alias, courseSnapshot.Data, cancellationToken);
+    var pendingCoverageMissing = pendingSnapshot is not null &&
+        DashboardPendingCoveragePolicy.Evaluate(pendingSnapshot.Data, course.CourseId).HasMissingCoverage;
     var pendingScopeMatches = pendingSnapshot is not null &&
-        pendingSnapshot.Data.CoursesInScope == dashboardCourses.Count;
+        pendingSnapshot.Data.CoursesInScope == dashboardCourses.Count &&
+        !pendingCoverageMissing;
     var pendingRefreshQueued = false;
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
         dashboardCourses.Count > 0 &&
@@ -2794,10 +2805,12 @@ app.MapPut("/api/course-preferences/ignored", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
     if (input is null || input.CourseIds is null)
         return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe os cursos que devem ser atualizados." } });
 
@@ -2854,10 +2867,12 @@ app.MapPut("/api/course-preferences/tracked", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
     if (input is null || input.CourseIds is null)
         return Results.BadRequest(new { error = new { code = "invalid_course_preferences", message = "Informe os cursos que devem ser atualizados." } });
 
@@ -3141,8 +3156,10 @@ app.MapPost("/api/account/register", async (
     ConnectorDbContext dbContext,
     IAccountService accountService,
     IPlatformPermissionService platformPermissionService,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
+    await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.Name) ||
         string.IsNullOrWhiteSpace(input.Email) ||
         string.IsNullOrWhiteSpace(input.Password))
@@ -3180,8 +3197,10 @@ app.MapPost("/api/account/login", async (
     ConnectorDbContext dbContext,
     IAccountService accountService,
     IPlatformPermissionService platformPermissionService,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
+    await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.Email) ||
         string.IsNullOrWhiteSpace(input.Password))
     {
@@ -3294,10 +3313,12 @@ app.MapPost("/api/team-invitations/accept", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     ITeamAccessService teamAccessService,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
     if (string.IsNullOrWhiteSpace(input.Token))
         return Results.BadRequest(new { ok = false, error = "Informe o token do convite." });
 
@@ -3425,10 +3446,12 @@ app.MapPost("/api/account/api-key/rotate", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
 
     context.Response.Headers.CacheControl = "no-store";
     try
@@ -3452,10 +3475,12 @@ app.MapPost("/api/account/connect-moodle", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
 
     if (string.IsNullOrWhiteSpace(input.MoodleAlias) ||
         string.IsNullOrWhiteSpace(input.MoodleBaseUrl) ||
@@ -3490,10 +3515,12 @@ app.MapPut("/api/account/moodle/{id}", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
 
     if (string.IsNullOrWhiteSpace(input.MoodleAlias) || string.IsNullOrWhiteSpace(input.MoodleBaseUrl))
         return Results.BadRequest(new { ok = false, error = "Preencha alias e URL do Moodle." });
@@ -3525,10 +3552,12 @@ app.MapDelete("/api/account/moodle/{id}", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
 
     try
     {
@@ -3546,10 +3575,12 @@ app.MapDelete("/api/account", async (
     HttpContext context,
     IAccountService accountService,
     ConnectorDbContext dbContext,
+    IAntiforgery antiforgery,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    await antiforgery.ValidateRequestAsync(context);
 
     try
     {
@@ -3599,8 +3630,9 @@ app.MapPost("/auth/login", async (
     return Results.Redirect(IsLocalReturnUrl(returnUrl) ? returnUrl : "/");
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
-app.MapGet("/auth/logout", () =>
+app.MapPost("/auth/logout", async (HttpContext context, IAntiforgery antiforgery) =>
 {
+    await antiforgery.ValidateRequestAsync(context);
     return Results.SignOut(authenticationSchemes: new[] { CookieAuthenticationDefaults.AuthenticationScheme });
 });
 

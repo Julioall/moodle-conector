@@ -35,7 +35,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
     }
 
     [Fact]
-    public async Task GetMyCoursesAsync_PrefereCursosMatriculadosQuandoAConexaoOfereceAsDuasFuncoes()
+    public async Task GetMyCoursesAsync_PrefereCursosMatriculadosEComplementaCategoriasQuandoNecessario()
     {
         var restClient = new FakeRestClient();
         using var cache = new MemoryCache(new MemoryCacheOptions());
@@ -55,7 +55,9 @@ public sealed class MoodleCoursesCapabilityGatewayTests
         var page = await gateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None);
 
         Assert.Single(page.Items);
-        Assert.Equal(["core_enrol_get_users_courses", "core_course_get_categories"], restClient.Calls);
+        Assert.Equal(
+            ["core_enrol_get_users_courses", "core_course_get_enrolled_courses_by_timeline_classification", "core_course_get_categories"],
+            restClient.Calls);
     }
 
     [Fact]
@@ -99,6 +101,32 @@ public sealed class MoodleCoursesCapabilityGatewayTests
         var page = await gateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None);
 
         Assert.Equal("CTM/ DR-GO > DR-MT", Assert.Single(page.Items).CategoryName);
+    }
+
+    [Fact]
+    public async Task GetMyCoursesAsync_EnriqueceCategoriasPelaTimelineQuandoCursosMatriculadosNaoTrazemCategoryId()
+    {
+        var restClient = new FakeRestClient { UseNestedCategory = true, EnrolledMissingCategoryId = true };
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var gateway = new MoodleCoursesGateway(
+            Options.Create(new MoodleApiOptions()),
+            cache,
+            new FakeCredentialsProvider(),
+            restClient,
+            new FakeCatalog(Profile(
+                "core_course_get_enrolled_courses_by_timeline_classification",
+                "core_enrol_get_users_courses",
+                "core_course_get_categories")),
+            new FakeCurrentUserIdGateway(),
+            new MoodleBusinessFlowRegistry(),
+            new MoodleResourceResolver());
+
+        var page = await gateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None);
+
+        Assert.Equal("CTM/ DR-GO > DR-MT", Assert.Single(page.Items).CategoryName);
+        Assert.Equal(
+            ["core_enrol_get_users_courses", "core_course_get_enrolled_courses_by_timeline_classification", "core_course_get_categories"],
+            restClient.Calls);
     }
 
     [Fact]
@@ -169,6 +197,7 @@ public sealed class MoodleCoursesCapabilityGatewayTests
         public List<string> Calls { get; } = [];
         public int EnrolledUserId { get; init; } = 7;
         public bool UseNestedCategory { get; init; }
+        public bool EnrolledMissingCategoryId { get; init; }
 
         public Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName, IReadOnlyDictionary<string, object?> parameters, CancellationToken cancellationToken) =>
             CallAsync(connection, functionName, parameters, true, cancellationToken);
@@ -182,7 +211,9 @@ public sealed class MoodleCoursesCapabilityGatewayTests
                     ? "{\"courses\":[{\"id\":42,\"fullname\":\"Curso ativo\",\"categoryid\":2,\"categoryname\":\"CTM/ DR-GO\"}]}"
                     : "{\"courses\":[{\"id\":42,\"fullname\":\"Curso ativo\"}]}",
                 "core_enrol_get_users_courses" => UseNestedCategory
-                    ? "[{\"id\":42,\"fullname\":\"Curso ativo\",\"categoryid\":2,\"categoryname\":\"CTM/ DR-GO\"}]"
+                    ? EnrolledMissingCategoryId
+                        ? "[{\"id\":42,\"fullname\":\"Curso ativo\",\"categoryname\":\"CTM/ DR-GO\"}]"
+                        : "[{\"id\":42,\"fullname\":\"Curso ativo\",\"categoryid\":2,\"categoryname\":\"CTM/ DR-GO\"}]"
                     : "[{\"id\":42,\"fullname\":\"Curso ativo\"}]",
                 "core_course_get_courses_by_field" => "{\"courses\":[{\"id\":42,\"fullname\":\"Curso ativo\"}]}",
                 "core_enrol_get_enrolled_users" => $"[{{\"id\":{EnrolledUserId}}}]",

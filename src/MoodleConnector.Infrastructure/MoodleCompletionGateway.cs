@@ -27,8 +27,8 @@ internal sealed class MoodleCompletionGateway(
 
         await Task.WhenAll(activitiesCompletionTask, courseCompletionTask);
 
-        var activities = activitiesCompletionTask.Result;
-        var courseCompletion = courseCompletionTask.Result;
+        var activities = await activitiesCompletionTask;
+        var courseCompletion = await courseCompletionTask;
 
         return new CourseCompletionStatus(
             Completed: courseCompletion.Completed,

@@ -109,6 +109,41 @@ describe('CoursePanelPage', () => {
     expect(dashboardGateway.get).toHaveBeenCalledWith('demo', '42');
   });
 
+  it('counts pending submission priorities in the overview badge', async () => {
+    vi.mocked(dashboardGateway.get).mockResolvedValue({
+      data: {
+        summary: {
+          activeCourses: 1,
+          pendingDeliveries: 1,
+          awaitingGrading: 0,
+          studentsAtRisk: 0,
+          studentsNeedingAttention: 1,
+          pendingSubmissionAssignments: 1,
+          pendingCorrectionAssignments: 0,
+        },
+        priorities: [
+          {
+            key: 'demo:42:student-1:assign-1',
+            title: 'Entrega pendente',
+            detail: 'Aluno teste · Atividade 1',
+            level: 'attention',
+            courseId: '42',
+            studentId: 'student-1',
+          },
+        ],
+        activitiesToReview: [],
+        recentActivity: [],
+        warnings: [],
+      },
+      meta: { generatedAt: '2026-08-14T00:00:00Z' },
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('1 ação sugerida')).toBeInTheDocument());
+    expect(screen.queryByText('0 ações sugeridas')).not.toBeInTheDocument();
+  });
+
   it('refreshes the course data manually', async () => {
     renderPage('/cursos/demo/42?tab=activities');
 
@@ -135,6 +170,32 @@ describe('CoursePanelPage', () => {
 
     await waitFor(() => expect(screen.getByText('A lista será exibida assim que a atualização terminar.')).toBeInTheDocument());
     expect(screen.queryByText('Nenhuma atividade encontrada nesta página.')).not.toBeInTheDocument();
+  });
+
+  it('explains when course priorities are still being prepared', async () => {
+    vi.mocked(dashboardGateway.get).mockResolvedValue({
+      data: {
+        summary: {
+          activeCourses: 1,
+          pendingDeliveries: 2,
+          awaitingGrading: 0,
+          studentsAtRisk: 0,
+          studentsNeedingAttention: 1,
+          pendingSubmissionAssignments: 2,
+          pendingCorrectionAssignments: 0,
+        },
+        priorities: [],
+        activitiesToReview: [],
+        recentActivity: [],
+        warnings: ['As prioridades do curso estão sendo preparadas em segundo plano.'],
+      },
+      meta: { generatedAt: '2026-08-14T00:00:00Z' },
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText('As prioridades serão exibidas assim que a atualização terminar.')).toBeInTheDocument());
+    expect(screen.queryByText('Nenhuma prioridade operacional identificada.')).not.toBeInTheDocument();
   });
 
   it('keeps the course workspace focused and opens contextual follow-up', async () => {
