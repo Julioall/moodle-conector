@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using System.ComponentModel;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -102,6 +104,33 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.DoesNotContain("prepare_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirm_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("future_unregistered_tool", tools, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Published_tool_metadata_does_not_suggest_unregistered_connection_aliases()
+    {
+        var productionContainers = RegisteredMcpToolContainers.AlwaysOn
+            .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
+                new FeatureOptions { DemoToolsEnabled = false },
+                new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
+
+        var publishedMetadata = productionContainers
+            .SelectMany(container => container.GetMethods())
+            .SelectMany(method => method
+                .GetCustomAttributes<DescriptionAttribute>(inherit: true)
+                .Select(attribute => attribute.Description)
+                .Concat(method.GetParameters()
+                    .SelectMany(parameter => parameter
+                        .GetCustomAttributes<DescriptionAttribute>(inherit: true)
+                        .Select(attribute => attribute.Description))))
+            .ToArray();
+
+        foreach (var forbiddenAlias in new[] { "goias", "nacional", "ctm" })
+        {
+            Assert.DoesNotContain(
+                publishedMetadata,
+                description => description.Contains(forbiddenAlias, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     [Fact]

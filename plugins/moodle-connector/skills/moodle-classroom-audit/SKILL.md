@@ -11,7 +11,7 @@ Use para auditoria analitica da sala virtual e para preparar insumos de monitori
 
 1. Resolva conexao, curso e janela.
 2. Leia estrutura com `list_course_contents`/`audit_course_structure` e classifique modulos.
-3. Para o checklist do CTM, use `audit_virtual_classroom_checklist`; ele pode retornar `ok`, `ausente`, `incompleto` ou `nao_verificavel`.
+3. Para o checklist institucional, use `audit_virtual_classroom_checklist`; ele pode retornar `ok`, `ausente`, `incompleto` ou `nao_verificavel`.
 4. Recolha apenas prazos, atividades, participantes, acesso, forum e conclusao necessarios.
 5. Reconcile `courseId`, `cmid`, `instanceId` e `userid` antes de calcular cobertura.
 6. Se o resultado for um relatorio composto, encaminhe a `moodle-reports`.

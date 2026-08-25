@@ -23,7 +23,7 @@ public sealed record CourseGradesExcelExportResult(
     string? Warning);
 
 /// <summary>
-/// Tools de relatórios pedagógicos para tutores SENAI CTM.
+/// Tools de relatórios pedagógicos para tutores.
 /// Fase 10 — Domínio Relatórios.
 /// </summary>
 [McpServerToolType]

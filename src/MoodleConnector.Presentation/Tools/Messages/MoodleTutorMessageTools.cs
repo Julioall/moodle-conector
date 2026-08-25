@@ -10,7 +10,7 @@ using MoodleConnector.Application.Tools;
 namespace MoodleConnector.Presentation.Tools.Messages;
 
 /// <summary>
-/// Tools para o ciclo de mensagens tipificadas do tutor SENAI CTM.
+/// Tools para o ciclo de mensagens tipificadas do tutor.
 /// Cada tipo de mensagem tem um par preparar/confirmar, seguindo o padrão PendingAction.
 /// </summary>
 [McpServerToolType]

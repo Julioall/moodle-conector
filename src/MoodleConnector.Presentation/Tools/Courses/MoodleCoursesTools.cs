@@ -38,7 +38,7 @@ public sealed class MoodleCoursesTools(
         int limite = 20,
         [Description("Numero da pagina a retornar (base 1). Use para paginar e listar todos os cursos. Padrao: 1.")]
         int pagina = 1,
-        [Description("Alias do Moodle a consultar. Use quando o usuario mencionar um ambiente especifico, como goias, nacional ou ctm. Quando omitido, usa o Moodle padrao do usuario.")]
+        [Description("Alias exato da conexao Moodle a consultar. Omita para usar a conexao padrao. So informe um alias quando ele tiver sido fornecido explicitamente pelo usuario ou retornado pelo proprio portal; nao deduza nem invente aliases.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {

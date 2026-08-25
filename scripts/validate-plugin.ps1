@@ -154,6 +154,18 @@ foreach ($skillDirectory in Get-ChildItem -LiteralPath $skillsRoot -Directory) {
     }
 }
 
+$forbiddenConnectionAliases = @("goias", "nacional", "ctm")
+$publishedPluginFiles = Get-ChildItem -LiteralPath $pluginRoot -Recurse -File |
+    Where-Object { $_.Extension -in @(".json", ".md") }
+foreach ($publishedPluginFile in $publishedPluginFiles) {
+    $publishedContents = Get-Content -LiteralPath $publishedPluginFile.FullName -Raw -Encoding utf8
+    foreach ($forbiddenConnectionAlias in $forbiddenConnectionAliases) {
+        if ($publishedContents -match "(?i)\b$([regex]::Escape($forbiddenConnectionAlias))\b") {
+            Fail "published plugin file '$($publishedPluginFile.FullName)' suggests the unregistered connection alias '$forbiddenConnectionAlias'."
+        }
+    }
+}
+
 $manifestText = Get-Content -LiteralPath $manifestPath -Raw -Encoding utf8
 if ($manifestText -match '\[TODO:') {
     Fail "plugin.json contains a TODO placeholder."

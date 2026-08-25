@@ -10,7 +10,7 @@ using MoodleConnector.Application.Tools;
 namespace MoodleConnector.Presentation.Tools.Monitor;
 
 /// <summary>
-/// Tools de suporte administrativo para o monitor SENAI CTM.
+/// Tools de suporte administrativo para o monitor.
 /// Fase 20 — Domínio Monitor.
 /// </summary>
 [McpServerToolType]
@@ -26,7 +26,7 @@ public sealed class MoodleMonitorTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AuditVirtualClassroomChecklistResult>))]
-    [Description("Audita a sala virtual do AVA contra o checklist padrão do Guia do Tutor SENAI CTM. Verifica presença de: Guia do Estudante, Critérios de Certificação, Plano de Estudo/Cronograma, Fórum de Apresentação, Fórum de Dúvidas, conteúdo interativo (SCORM), Situação de Aprendizagem (SA), datas configuradas e visibilidade da sala. Retorna status por item: ok, ausente, incompleto ou nao_verificavel.")]
+    [Description("Audita a sala virtual do AVA contra o checklist institucional do Guia do Tutor. Verifica presença de: Guia do Estudante, Critérios de Certificação, Plano de Estudo/Cronograma, Fórum de Apresentação, Fórum de Dúvidas, conteúdo interativo (SCORM), Situação de Aprendizagem (SA), datas configuradas e visibilidade da sala. Retorna status por item: ok, ausente, incompleto ou nao_verificavel.")]
     public Task<CallToolResult> AuditarChecklistSalaVirtualAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
         [Description("Alias do Moodle a usar.")] string? moodleAlias = null,

@@ -73,7 +73,7 @@ Depois do cadastro, adicione um ou mais ambientes Moodle.
 
 Para cada Moodle, informe:
 
-- um alias fácil de lembrar, como `goias`, `nacional`, `ctm` ou `faculdade`;
+- um alias fácil de lembrar, como `meu-moodle`, `escola-abc` ou `faculdade`;
 - a URL base do Moodle;
 - o usuário do Moodle;
 - a senha do Moodle;
@@ -83,11 +83,11 @@ Para cada Moodle, informe:
 O alias ajuda o ChatGPT a escolher o Moodle correto durante a conversa. Por exemplo:
 
 ```text
-Liste meus cursos no Moodle goias.
+Liste meus cursos no Moodle meu-moodle.
 ```
 
 ```text
-Gere um relatório de notas no Moodle nacional.
+Gere um relatório de notas no Moodle escola-abc.
 ```
 
 Você pode cadastrar vários Moodles e alternar entre eles pelo prompt.
@@ -157,7 +157,7 @@ Liste todos os meus cursos em andamento.
 ```
 
 ```text
-Consulte o curso 29972 no Moodle goias.
+Consulte o curso 29972 no Moodle meu-moodle.
 ```
 
 ```text
@@ -169,7 +169,7 @@ Gere um relatório de notas para este curso.
 ```
 
 ```text
-Busque os cursos do Moodle nacional com o termo desenvolvimento de sistemas.
+Busque os cursos do Moodle escola-abc com o termo desenvolvimento de sistemas.
 ```
 
 Quando houver mais de um Moodle cadastrado, informe o alias no pedido para evitar ambiguidade.

@@ -9,7 +9,7 @@ Use esta matriz para evitar que um endpoint vazio seja interpretado como ausenci
 | Participacao | `list_course_participants`, `list_course_students`, `list_students_without_recent_access` | Denominador e janela explicitos | A lista de participantes esta parcial ou o acesso nao tem timestamp confiavel. |
 | Conclusao | `get_student_completion`, `core_completion_get_course_completion_status` | Estado de conclusao por estudante/modulo | Completion nao esta habilitado ou o status e desconhecido. |
 | Forum | `read_forum`, `list_students_without_forum_participation` | Participacao observada dentro da janela | Forum nao foi localizado, a janela nao foi informada ou nao ha cobertura suficiente. |
-| Checklist CTM | `audit_virtual_classroom_checklist` | `ok`, `ausente`, `incompleto` ou `nao_verificavel` | O retorno nao informa regra, cobertura ou timestamp. |
+| Checklist institucional | `audit_virtual_classroom_checklist` | `ok`, `ausente`, `incompleto` ou `nao_verificavel` | O retorno nao informa regra, cobertura ou timestamp. |
 
 ## Regras de cobertura
 
