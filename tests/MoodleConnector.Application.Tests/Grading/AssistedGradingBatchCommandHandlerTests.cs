@@ -24,7 +24,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             orchestrator,
             new FakeCourseContentsGateway(),
             new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService());
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway());
 
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -66,7 +67,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             orchestrator,
             new FakeCourseContentsGateway(),
             fileGateway,
-            extraction);
+            extraction,
+            new FakeAssignmentSubmissionsGateway());
 
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -106,7 +108,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             orchestrator,
             new FakeCourseContentsGateway(),
             fileGateway,
-            new FakeDocumentExtractionService());
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway());
 
         await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -151,7 +154,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             orchestrator,
             contentsGateway,
             fileGateway,
-            extraction);
+            extraction,
+            new FakeAssignmentSubmissionsGateway());
 
         await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -201,7 +205,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             orchestrator,
             new FakeCourseContentsGateway(),
             new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService());
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway());
 
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
@@ -1081,6 +1086,20 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 CharCount: 31,
                 Truncated: false,
                 ErrorMessage: null));
+        }
+    }
+
+    private sealed class FakeAssignmentSubmissionsGateway : IMoodleAssignmentSubmissionsGateway
+    {
+        public Task<IReadOnlyList<AssignmentSubmissionRecord>> GetAssignmentSubmissionsAsync(
+            string userExternalId,
+            string assignmentId,
+            string? status,
+            DateTimeOffset? since,
+            DateTimeOffset? before,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<AssignmentSubmissionRecord>>([]);
         }
     }
 }

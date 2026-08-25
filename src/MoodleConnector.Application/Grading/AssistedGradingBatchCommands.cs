@@ -187,6 +187,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleSubmissionFileGateway fileGateway,
     IDocumentExtractionService extractionService,
+    IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IOptions<GradingLimitsOptions>? limits = null)
     : IRequestHandler<CreateAssistedGradingBatchCommand, CreateAssistedGradingBatchResult>
 {
@@ -355,6 +356,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
+        var submissionFilesCache = new Dictionary<string, IReadOnlyList<AssignmentSubmissionRecord>>(StringComparer.OrdinalIgnoreCase);
         foreach (var seed in selectedItems)
         {
             var item = AssistedGradingItem.Create(
@@ -371,7 +373,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 await AddSubmissionFileArtifactsAsync(
                     request.UserExternalId,
                     item.Id,
+                    seed.AssignmentId,
+                    seed.SubmissionId,
+                    seed.StudentId,
                     seed.Files,
+                    submissionFilesCache,
                     warnings,
                     cancellationToken);
             }
@@ -451,14 +457,59 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     private async Task AddSubmissionFileArtifactsAsync(
         string userExternalId,
         Guid gradingItemId,
+        string assignmentId,
+        string? submissionId,
+        string studentId,
         IReadOnlyList<AssignmentSubmissionFile> files,
+        Dictionary<string, IReadOnlyList<AssignmentSubmissionRecord>> submissionFilesCache,
         List<string> warnings,
         CancellationToken cancellationToken)
     {
         var maxFiles = Math.Clamp(_limits.MaxFilesPerSubmission, 0, 100);
         var maxBytes = Math.Max(1, _limits.MaxFileSizeMb) * 1024L * 1024L;
 
-        foreach (var file in files.Take(maxFiles))
+        var effectiveFiles = files;
+
+        // Re-fetch from Moodle API when Files came empty from snapshot/prefetch
+        // but we know the submission exists. Uses per-assignment cache to avoid
+        // redundant API calls for multiple students in the same assignment.
+        if (effectiveFiles.Count == 0 && !string.IsNullOrWhiteSpace(assignmentId))
+        {
+            try
+            {
+                if (!submissionFilesCache.TryGetValue(assignmentId, out var cachedSubmissions))
+                {
+                    cachedSubmissions = await submissionsGateway.GetAssignmentSubmissionsAsync(
+                        userExternalId,
+                        assignmentId,
+                        "submitted",
+                        null,
+                        null,
+                        cancellationToken);
+                    submissionFilesCache[assignmentId] = cachedSubmissions;
+                }
+
+                var match = cachedSubmissions.FirstOrDefault(s =>
+                    (!string.IsNullOrWhiteSpace(submissionId) &&
+                     string.Equals(s.SubmissionId, submissionId, StringComparison.OrdinalIgnoreCase)) ||
+                    string.Equals(s.UserId, studentId, StringComparison.OrdinalIgnoreCase));
+
+                if (match?.Files is { Count: > 0 })
+                {
+                    effectiveFiles = match.Files;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Nao foi possivel re-obter anexos da entrega (assignment {assignmentId}, student {studentId}): {ex.Message}");
+            }
+        }
+
+        foreach (var file in effectiveFiles.Take(maxFiles))
         {
             try
             {

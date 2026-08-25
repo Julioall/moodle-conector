@@ -119,7 +119,7 @@ public static class AssignmentSubmissionSnapshotProjector
             summary.AttemptNumber,
             summary.FileCount,
             summary.HasOnlineText,
-            Files: []);
+            Files: summary.Files ?? []);
 
     private static IReadOnlyList<AssignmentSubmissionSummary> BuildRows(
         IReadOnlyList<CourseParticipantSummary> participants,
