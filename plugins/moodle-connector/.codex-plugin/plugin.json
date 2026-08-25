@@ -1,6 +1,6 @@
 {
   "name": "moodle-connector",
-  "version": "0.1.0",
+  "version": "0.1.0+codex.20260825165916",
   "description": "Fluxos seguros para cursos, atividades e acompanhamento no Moodle.",
   "author": {
     "name": "Moodle Connector contributors",
@@ -18,13 +18,18 @@
   "interface": {
     "displayName": "Moodle Connector",
     "shortDescription": "Fluxos seguros para cursos e atividades Moodle.",
-    "longDescription": "Orienta fluxos pedagógicos e conecta um servidor MCP remoto para consultar ambientes Moodle com autorização, prévias e confirmação humana em escritas.",
+    "longDescription": "Orienta fluxos pedag\u00f3gicos e conecta um servidor MCP remoto para consultar ambientes Moodle com autoriza\u00e7\u00e3o, pr\u00e9vias e confirma\u00e7\u00e3o humana em escritas.",
     "developerName": "Moodle Connector contributors",
     "category": "Productivity",
     "capabilities": [
       "Skills",
       "MCP"
     ],
-    "defaultPrompt": "Ajude-me a acompanhar uma turma Moodle com segurança."
-  }
+    "defaultPrompt": [
+      "Ajude-me a acompanhar uma turma Moodle com seguran\u00e7a.",
+      "Liste minhas atividades Moodle pendentes e priorize o que exige aten\u00e7\u00e3o.",
+      "Prepare uma revis\u00e3o de entregas Moodle sem publicar altera\u00e7\u00f5es sem confirma\u00e7\u00e3o."
+    ]
+  },
+  "apps": "./.app.json"
 }

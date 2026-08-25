@@ -55,6 +55,20 @@ const expectJson = (response, expected, label) => {
   return response.json;
 };
 
+const waitFor = async (label, path, predicate, timeoutMs = 15_000) => {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await call('GET', path);
+    if (last.status === 200 && last.json && predicate(last.json)) {
+      console.log(`PASS ${label} 200`);
+      return last.json;
+    }
+    await new Promise(resolve => globalThis.setTimeout(resolve, 250));
+  }
+  throw new Error(`${label} did not become ready: ${last?.status} ${last?.text}`);
+};
+
 const email = `app-e2e-${randomUUID()}@example.test`;
 const password = 'AppE2EFlow!2026';
 const moodleAlias = process.env.APP_E2E_MOODLE_ALIAS ?? 'local-e2e';
@@ -79,7 +93,7 @@ const account = expectJson(await call('GET', '/api/account/me'), 200, 'account')
 const permissionPayload = {
   name: `E2E ${randomUUID()}`,
   description: 'Permissões temporárias para o smoke test ponta a ponta.',
-  permissions: ['connections.manage', 'courses.view', 'students.view', 'dashboard.view'],
+  permissions: ['connections.manage', 'courses.view', 'students.view', 'dashboard.view', 'grading.view', 'grading.manage'],
 };
 const missingCsrf = await call('POST', '/api/permission-groups', permissionPayload);
 expectStatus(missingCsrf, 400, 'reject missing CSRF');
@@ -91,7 +105,9 @@ const permissionGroup = expectJson(await call('POST', '/api/permission-groups', 
 const groupId = permissionGroup.group?.id;
 if (!groupId || !account.id) throw new Error('E2E permission group was not created.');
 expectJson(await call('POST', `/api/permission-groups/${encodeURIComponent(groupId)}/members`, { userId: account.id }, { 'x-csrf-token': csrf.token }), 200, 'assign E2E permissions');
-expectJson(await call('POST', '/api/account/login', { email, password }), 200, 'refresh session permissions');
+const loginCsrf = expectJson(await call('GET', '/api/csrf'), 200, 'login CSRF');
+expectJson(await call('POST', '/api/account/login', { email, password }, { 'x-csrf-token': loginCsrf.token }), 200, 'refresh session permissions');
+const connectionCsrf = expectJson(await call('GET', '/api/csrf'), 200, 'connection CSRF');
 
 const connectionPayload = {
   moodleAlias,
@@ -101,7 +117,7 @@ const connectionPayload = {
   isDefault: true,
   canWrite: false,
 };
-const connection = expectJson(await call('POST', '/api/connections', connectionPayload, { 'x-csrf-token': csrf.token }), 200, 'connect Moodle');
+const connection = expectJson(await call('POST', '/api/connections', connectionPayload, { 'x-csrf-token': connectionCsrf.token }), 200, 'connect Moodle');
 if (!connection.connectionRef || !connection.alias || connection.status !== 'active' || connection.apiKey || connection.password || connection.token) {
   throw new Error(`connection contract is invalid or contains a secret: ${JSON.stringify(connection)}`);
 }
@@ -116,19 +132,29 @@ if (!course?.courseId) throw new Error('stub course was not returned.');
 
 const coursePath = `/api/courses/${encodeURIComponent(connectionRef)}/${encodeURIComponent(course.courseId)}`;
 expectJson(await call('GET', coursePath), 200, 'course detail');
-const activities = expectJson(await call('GET', `${coursePath}/activities`), 200, 'activities');
+const submissionsPath = `/api/submissions?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}&assignmentId=5001&status=awaiting_grading&page=1&pageSize=25`;
+const preparingSubmissions = expectJson(await call('GET', submissionsPath), 200, 'queue submissions snapshot');
+if (preparingSubmissions.meta?.source !== 'background' && preparingSubmissions.meta?.source !== 'snapshot') throw new Error('submission preparation metadata is invalid.');
+const submissions = await waitFor('submissions snapshot', submissionsPath, payload => payload.meta?.source === 'snapshot' && payload.meta?.complete === true);
+if (submissions.data?.total !== 1 || submissions.data?.submissions?.[0]?.needsGrading !== true || submissions.data.submissions[0]?.fileCount !== 1) throw new Error('submission snapshot contract is invalid.');
+const submission = submissions.data.submissions[0];
+const detail = expectJson(await call('GET', `/api/submissions/${encodeURIComponent(course.courseId)}/5001/${encodeURIComponent(submission.userId)}?connectionRef=${encodeURIComponent(connectionRef)}`), 200, 'submission detail');
+if (detail.meta?.source !== 'snapshot' || detail.data?.files?.length !== 1) throw new Error('submission detail must use the local snapshot and preserve files.');
+
+const activities = await waitFor('activities snapshot', `${coursePath}/activities`, payload => payload.meta?.source === 'snapshot' && payload.data?.length === 3);
 if (activities.data?.length !== 3 || activities.meta?.total !== 3) throw new Error('activity pagination contract is invalid.');
 
-const students = expectJson(await call('GET', `${coursePath}/students`), 200, 'students');
+const students = await waitFor('students snapshot', `${coursePath}/students`, payload => payload.meta?.source === 'snapshot' && payload.data?.length === 3);
 const student = students.data?.[0];
 if (!student?.studentId || students.data.length !== 3) throw new Error('stub students were not returned.');
 expectJson(await call('GET', `${coursePath}/students/${encodeURIComponent(student.studentId)}`), 200, 'student profile');
 
-const pending = expectJson(await call('GET', `/api/pending?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}&periodDays=30`), 200, 'pending');
-if (pending.meta?.total !== 3 || pending.data?.some(item => item.type !== 'pending_submission')) throw new Error('pending contract is invalid.');
+const pendingPath = `/api/pending?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}&periodDays=30`;
+const pending = await waitFor('pending snapshot', pendingPath, payload => payload.meta?.source === 'snapshot' && payload.meta?.complete === true);
+if (pending.meta?.total !== 2 || pending.data?.some(item => item.type !== 'pending_submission')) throw new Error('pending contract is invalid.');
 
-const dashboard = expectJson(await call('GET', `/api/dashboard?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}`), 200, 'dashboard');
-if (dashboard.data?.summary?.activeCourses !== 1 || dashboard.data?.summary?.pendingDeliveries !== 3) throw new Error('dashboard stub indicators are invalid.');
+const dashboard = await waitFor('dashboard', `/api/dashboard?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${encodeURIComponent(course.courseId)}`, payload => payload.data?.summary?.activeCourses === 1 && payload.data?.summary?.pendingDeliveries === 2);
+if (dashboard.data?.summary?.activeCourses !== 1 || dashboard.data?.summary?.pendingDeliveries !== 2) throw new Error('dashboard stub indicators are invalid.');
 
-console.log('App E2E smoke passed (login â†’ Moodle â†’ courses â†’ course â†’ students â†’ profile â†’ pending â†’ dashboard)');
+console.log('App E2E smoke passed (login → Moodle → snapshots → activities → submissions → correction detail → pending → dashboard)');
 

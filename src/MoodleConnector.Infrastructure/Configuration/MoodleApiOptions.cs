@@ -13,6 +13,11 @@ public sealed class MoodleApiOptions
 
     public bool AllowServiceTokenForReadOnlyQueries { get; init; } = false;
 
+    // Hosts corporativos explicitamente aprovados que podem resolver para IPs
+    // privados. A exceção é aplicada somente ao nome exato do host; HTTPS e
+    // todas as demais validações de URL continuam obrigatórios.
+    public string[] TrustedPrivateEndpointHosts { get; init; } = [];
+
     public bool UseStubData { get; init; } = false;
 
     public int HttpTimeoutSeconds { get; init; } = 30;

@@ -31,9 +31,12 @@ internal sealed class MoodleCredentialValidator(
         {
             validatedEndpoint = await endpointValidator.ValidateAsync(moodleBaseUrl, cancellationToken);
         }
-        catch (MoodleApiException)
+        catch (MoodleApiException exception) when (exception.Stage == MoodleIntegrationStage.UrlValidation)
         {
-            return false;
+            throw new InvalidOperationException(
+                "A URL do Moodle foi bloqueada pela política de rede antes da autenticação. " +
+                "Confira o endereço ou solicite a inclusão do domínio corporativo na lista de destinos confiáveis.",
+                exception);
         }
 
         var baseUrl = validatedEndpoint.AbsoluteUri.TrimEnd('/');

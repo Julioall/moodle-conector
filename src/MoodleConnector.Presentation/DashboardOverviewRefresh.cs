@@ -20,7 +20,8 @@ internal sealed record DashboardOverviewRefreshRequest(
     Guid OwnerId,
     string ClientId,
     string ConnectionAlias,
-    IReadOnlyList<CourseSummary> Courses);
+    IReadOnlyList<CourseSummary> Courses,
+    bool Force = false);
 
 internal interface IDashboardOverviewRefreshQueue
 {
@@ -78,7 +79,18 @@ internal sealed class DashboardOverviewRefreshQueue(
         {
             if (nextSyncAt > now)
             {
-                return false;
+                if (!request.Force)
+                {
+                    return false;
+                }
+
+                // A per-course snapshot can become ready after a dashboard
+                // attempt has scheduled its retry. Let an explicit force from
+                // the screen retry now instead of leaving the user in a
+                // preparatory state for the full backoff window.
+                state.NextSyncAt = now;
+                state.UpdatedAt = now;
+                await db.SaveChangesAsync(cancellationToken);
             }
 
             var dueKey = GetKey(request.OwnerId, request.ConnectionAlias);

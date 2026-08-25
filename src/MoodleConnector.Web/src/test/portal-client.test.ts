@@ -24,4 +24,14 @@ describe('app Wave B contracts', () => {
   });
 });
 
+describe('app client error body contracts', () => {
+  it('shows the safe string error returned by portal endpoints', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response('{"ok":false,"error":"Credenciais do Moodle inválidas."}', { status: 400 }));
+    await expect(createAppClient(fetcher).get('/api/connections')).rejects.toMatchObject({
+      status: 400,
+      message: 'Credenciais do Moodle inválidas.',
+    } satisfies Partial<AppHttpError>);
+  });
+});
+
 

@@ -15,8 +15,19 @@ describe('Moodle-first academic surfaces', () => {
     await gateway.confirmGrade({ connectionRef: 'campus-a', pendingActionId: 'pending-1', confirmationText: 'CONFIRMAR NOTA 8.50' });
 
     expect(get).toHaveBeenCalledWith(expect.stringContaining('/api/submissions?'));
+    expect(get.mock.calls[0][0]).toContain('page=1&pageSize=25');
     expect(request).toHaveBeenNthCalledWith(1, '/api/grading/individual/prepare', expect.objectContaining({ method: 'POST' }));
     expect(request).toHaveBeenNthCalledWith(2, '/api/grading/individual/confirm', expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('requests a bounded correction page and can explicitly refresh its snapshot', async () => {
+    const get = vi.fn().mockResolvedValue({ data: { submissions: [] } });
+    const gateway = createSubmissionsGateway({ get, request: vi.fn() });
+
+    await gateway.list('campus-a', '42', 'assignment-7', 'awaiting_grading', 3, 25, true);
+
+    expect(get).toHaveBeenCalledWith(expect.stringContaining('page=3&pageSize=25'));
+    expect(get).toHaveBeenCalledWith(expect.stringContaining('refresh=true'));
   });
 
   it('keeps forum reads and evidence history scoped to the selected Moodle', async () => {

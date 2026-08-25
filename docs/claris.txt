@@ -210812,7 +210812,7 @@ AS $$
     FROM public.users u
     WHERE u.id = auth.uid()
       AND (
-        u.moodle_username = '04112637225'
+        u.moodle_username = '[REDACTED_MOODLE_USERNAME]'
         OR lower(COALESCE(u.email, '')) = 'julioalves@fieg.com.br'
       )
   );
@@ -210859,7 +210859,7 @@ SELECT
       SELECT usp.risk_threshold_days
       FROM public.user_sync_preferences usp
       JOIN public.users u ON u.id::text = usp.user_id
-      WHERE u.moodle_username = '04112637225'
+      WHERE u.moodle_username = '[REDACTED_MOODLE_USERNAME]'
          OR lower(COALESCE(u.email, '')) = 'julioalves@fieg.com.br'
       ORDER BY usp.updated_at DESC
       LIMIT 1
@@ -210871,7 +210871,7 @@ SELECT
       SELECT usp.claris_llm_settings
       FROM public.user_sync_preferences usp
       JOIN public.users u ON u.id::text = usp.user_id
-      WHERE u.moodle_username = '04112637225'
+      WHERE u.moodle_username = '[REDACTED_MOODLE_USERNAME]'
          OR lower(COALESCE(u.email, '')) = 'julioalves@fieg.com.br'
       ORDER BY usp.updated_at DESC
       LIMIT 1
@@ -211103,7 +211103,7 @@ AS $$
     FROM public.users u
     WHERE u.id = auth.uid()
       AND (
-        u.moodle_username = '04112637225'
+        u.moodle_username = '[REDACTED_MOODLE_USERNAME]'
         OR lower(COALESCE(u.email, '')) = 'julioalves@fieg.com.br'
       )
   );
@@ -211116,7 +211116,7 @@ DECLARE
 BEGIN
   SELECT u.id INTO v_admin_user_id
   FROM public.users u
-  WHERE u.moodle_username = '04112637225'
+  WHERE u.moodle_username = '[REDACTED_MOODLE_USERNAME]'
      OR lower(COALESCE(u.email, '')) = 'julioalves@fieg.com.br'
   LIMIT 1;
 
@@ -214029,7 +214029,7 @@ AS $$
     FROM public.users u
     WHERE u.id = p_user_id
       AND (
-        u.moodle_username = '04112637225'
+        u.moodle_username = '[REDACTED_MOODLE_USERNAME]'
         OR lower(COALESCE(u.email, '')) = 'julioalves@fieg.com.br'
       )
   );

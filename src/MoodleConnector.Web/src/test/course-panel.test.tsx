@@ -102,6 +102,7 @@ describe('CoursePanelPage', () => {
     renderPage('/cursos/demo/42?tab=activities');
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Atividades' })).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Pendências e correções do curso' })).toBeInTheDocument();
 
     expect(screen.queryByText('2 para corrigir')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Com pendência' })).not.toBeInTheDocument();

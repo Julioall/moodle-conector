@@ -11,9 +11,9 @@ ao servidor MCP remoto já operado pelo projeto.
 
 ## Contexto e evidência atual
 
-O pacote base existe em `plugins/moodle-connector/` e contém apenas o manifesto e a pasta de
-skills. O repositório não contém o identificador `plugin_asdk_app...` necessário para criar uma
-referência válida em `.app.json`.
+O pacote existe em `plugins/moodle-connector/`, contém o manifesto, onze skills e `.app.json`.
+O identificador persistente da conexão foi recuperado do registro local criado pelo ChatGPT e
+validado contra o prefixo técnico `plugin_asdk_app_` antes de ser vinculado ao pacote.
 
 ## Escopo
 
@@ -30,13 +30,15 @@ referência válida em `.app.json`.
 
 ## Dependências e decisões em aberto
 
-- Identificador técnico da conexão MCP criada em ChatGPT Developer mode.
 - Decisão de proprietário e metadados públicos antes da publicação.
+- Validação autenticada em uma conversa nova no ChatGPT web; a sessão de navegador disponível para
+  automação não está autenticada.
 
 ## Plano de execução
 
 1. Registrar `https://<dominio>/mcp` e copiar o ID `plugin_asdk_app...`.
-2. Criar `.app.json` com a referência e adicionar `apps: "./.app.json"` ao manifesto.
+2. Executar `./scripts/link-chatgpt-app.ps1 -AppId "plugin_asdk_app_..."` para criar `.app.json`
+   e adicionar `apps: "./.app.json"` ao manifesto.
 3. Atualizar o marketplace pessoal com fonte `./plugins/moodle-connector` sem versionar arquivos
    do perfil do desenvolvedor.
 4. Instalar em ambiente limpo e executar fluxos de leitura, escrita preparada e UI MCP.
@@ -44,14 +46,15 @@ referência válida em `.app.json`.
 ## Critérios de aceite
 
 - [x] O manifesto e o pacote não contêm segredos, URL local ou cópia do servidor remoto.
-- [ ] `.app.json` possui somente o ID de conexão registrado e revisado.
-- [ ] O pacote instala pelo marketplace do repositório.
+- [x] `.app.json` possui somente o ID de conexão registrado e revisado.
+- [x] O pacote instala e fica habilitado pelo marketplace do repositório.
 - [ ] Skills, tools MCP e UI MCP ficam disponíveis em uma nova conversa.
 - [ ] O pacote não contém segredos, URL local ou cópia do servidor remoto.
 
 ## Validação e evidências
 
 ```powershell
+./scripts/link-chatgpt-app.ps1 -AppId "plugin_asdk_app_..."
 ./scripts/validate-plugin.ps1
 ```
 

@@ -220,7 +220,7 @@ public static class AssignmentSubmissionSnapshotProjector
             submission.AttemptNumber,
             submission.FileCount,
             submission.HasOnlineText,
-            Files: []);
+            Files: submission.Files ?? []);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter) =>

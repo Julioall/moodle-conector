@@ -54,12 +54,13 @@ export type IndividualGradePreview = {
 
 export type GradePrepareResult = { pendingActionId: string; status: string; preview: IndividualGradePreview };
 export type GradeSendResult = { status: string; pendingActionId: string; assignmentId: string; studentId: string; launchedGrade: number; auditId?: string; warnings: string[] };
-type Envelope<T> = { data: T; meta: { generatedAt: string; connectionRef?: string } };
-type ListEnvelope<T> = { data: T[]; meta: { page: number; pageSize: number; returned: number; hasMore: boolean; generatedAt: string; connectionRef?: string; total?: number } };
+type SnapshotMeta = { generatedAt: string; connectionRef?: string; source?: string; snapshotAt?: string; ageSeconds?: number; stale?: boolean; refreshQueued?: boolean; complete?: boolean };
+type Envelope<T> = { data: T; meta: SnapshotMeta };
+type ListEnvelope<T> = { data: T[]; meta: SnapshotMeta & { page: number; pageSize: number; returned: number; hasMore: boolean; warnings?: string[]; total?: number } };
 
 export const createSubmissionsGateway = (client = createAppClient()) => ({
-  list: (connectionRef: string, courseId: string, assignmentId: string, status = 'awaiting_grading') => {
-    const query = new URLSearchParams({ connectionRef, courseId, assignmentId, status, page: '1', pageSize: '100', includeLate: 'true', includeUngraded: 'true' });
+  list: (connectionRef: string, courseId: string, assignmentId: string, status = 'awaiting_grading', page = 1, pageSize = 25, refresh = false) => {
+    const query = new URLSearchParams({ connectionRef, courseId, assignmentId, status, page: String(page), pageSize: String(pageSize), includeLate: 'true', includeUngraded: 'true', ...(refresh ? { refresh: 'true' } : {}) });
     return client.get<Envelope<SubmissionPage>>(`/api/submissions?${query}`);
   },
   detail: (connectionRef: string, courseId: string, assignmentId: string, studentId: string) =>
@@ -91,7 +92,7 @@ export type PendingItem = {
 };
 
 export const createPendingGateway = (client = createAppClient()) => ({
-  list: (connectionRef: string, courseId: string) => client.get<ListEnvelope<PendingItem>>(`/api/pending?${new URLSearchParams({ connectionRef, courseId, page: '1', pageSize: '100' })}`),
+  list: (connectionRef: string, courseId: string, refresh = false) => client.get<ListEnvelope<PendingItem>>(`/api/pending?${new URLSearchParams({ connectionRef, courseId, page: '1', pageSize: '100', ...(refresh ? { refresh: 'true' } : {}) })}`),
 });
 
 export const pendingGateway = createPendingGateway();

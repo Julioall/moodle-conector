@@ -10,8 +10,13 @@
       ASPNETCORE_URLS: http://+:8080
       Features__AppV2Enabled: "true"
       DataProtection__KeyStoragePath: /app/data/keys
-      MoodleApi__UseStubData: "false"
-      MoodleProxy__UseStubData: "false"
+      # O perfil local continua previsível para testes. Defina ambas como false
+      # apenas para validar uma conexão Moodle real no mesmo portal local.
+      MoodleApi__UseStubData: "${MOODLE_API_USE_STUB_DATA:-true}"
+      MoodleProxy__UseStubData: "${MOODLE_PROXY_USE_STUB_DATA:-true}"
+      # A FIEG usa DNS corporativo com IP privado. A exceção é limitada ao
+      # hostname exato e não libera outros destinos privados.
+      MoodleApi__TrustedPrivateEndpointHosts__0: "${MOODLE_API_TRUSTED_PRIVATE_ENDPOINT_HOST_0:-ead.fieg.com.br}"
       RateLimiting__AppAuthPermitLimit: "120"
       Postgres__ConnectionString: Host=postgres;Database=moodle_connector;Username=moodle_connector;Password=app-local-only
       ConnectorSecrets__EncryptionKeyBase64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=

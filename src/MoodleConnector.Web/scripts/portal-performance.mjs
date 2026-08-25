@@ -45,23 +45,34 @@ const call = async (method, path, body, csrf = false) => {
   return { status: response.status, elapsedMs, json, text };
 };
 
+const waitFor = async (label, path, predicate, timeoutMs = 15_000) => {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await call('GET', path);
+    if (last.status === 200 && last.json && predicate(last.json)) return last;
+    await new Promise(resolve => globalThis.setTimeout(resolve, 250));
+  }
+  throw new Error(`${label} did not become ready: ${last?.status} ${last?.text}`);
+};
+
 const email = `portal-perf-${randomUUID()}@example.test`;
 const password = 'PortalPerfLocal!2026';
-const registered = await call('POST', '/api/account/register', { name: 'Portal performance', email, password });
+const registered = await call('POST', '/api/account/register', { name: 'Portal performance', email, password }, true);
 if (registered.status !== 200) throw new Error(`register failed: ${registered.status} ${registered.text}`);
 
 const account = await call('GET', '/api/account/me');
 const permissionGroup = await call('POST', '/api/permission-groups', {
   name: `Portal perf ${randomUUID()}`,
   description: 'Permissões temporárias de medição local.',
-  permissions: ['connections.manage', 'courses.view', 'students.view', 'dashboard.view'],
+  permissions: ['connections.manage', 'courses.view', 'students.view', 'dashboard.view', 'grading.view'],
 }, true);
 if (permissionGroup.status !== 200 || !permissionGroup.json?.group?.id) {
   throw new Error(`permission group failed: ${permissionGroup.status} ${permissionGroup.text}`);
 }
 const membership = await call('POST', `/api/permission-groups/${encodeURIComponent(permissionGroup.json.group.id)}/members`, { userId: account.json.id }, true);
 if (membership.status !== 200) throw new Error(`permission membership failed: ${membership.status} ${membership.text}`);
-const login = await call('POST', '/api/account/login', { email, password });
+const login = await call('POST', '/api/account/login', { email, password }, true);
 if (login.status !== 200) throw new Error(`login failed: ${login.status} ${login.text}`);
 
 const connection = await call('POST', '/api/connections', {
@@ -76,9 +87,35 @@ if (connection.status !== 200 || !connection.json?.connectionRef) {
   throw new Error(`connection failed: ${connection.status} ${connection.text}`);
 }
 const connectionRef = connection.json.connectionRef;
+const courseId = '101';
+const coursePath = `/api/courses/${encodeURIComponent(connectionRef)}/${courseId}`;
+const activitiesPath = `${coursePath}/activities`;
+const pendingPath = `/api/pending?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${courseId}`;
+const submissionsPath = `/api/submissions?connectionRef=${encodeURIComponent(connectionRef)}&courseId=${courseId}&assignmentId=5001&status=awaiting_grading&page=1&pageSize=25`;
+
+await waitFor('courses snapshot', `/api/courses?connectionRef=${encodeURIComponent(connectionRef)}`, payload => payload.meta?.source === 'snapshot');
+const coldActivities = await call('GET', activitiesPath);
+const coldPending = await call('GET', pendingPath);
+const coldSubmissions = await call('GET', submissionsPath);
+await waitFor('activities snapshot', activitiesPath, payload => payload.meta?.source === 'snapshot' && payload.meta?.complete === true);
+await waitFor('submissions snapshot', submissionsPath, payload => payload.meta?.source === 'snapshot' && payload.meta?.complete === true);
+await waitFor('pending snapshot', pendingPath, payload => payload.meta?.source === 'snapshot' && payload.meta?.complete === true);
+
+console.log(JSON.stringify({
+  endpoint: 'corrections-preparation',
+  initialResponses: {
+    activitiesMs: Number(coldActivities.elapsedMs.toFixed(1)),
+    pendingMs: Number(coldPending.elapsedMs.toFixed(1)),
+    submissionsMs: Number(coldSubmissions.elapsedMs.toFixed(1)),
+  },
+  statuses: [coldActivities.status, coldPending.status, coldSubmissions.status],
+}));
 
 const endpoints = [
   ['courses', `/api/courses?connectionRef=${encodeURIComponent(connectionRef)}`],
+  ['activities', activitiesPath],
+  ['pending', pendingPath],
+  ['submissions', submissionsPath],
   ['dashboard-summary', `/api/dashboard/summary?connectionRef=${encodeURIComponent(connectionRef)}`],
   ['dashboard-access', `/api/dashboard/access?connectionRef=${encodeURIComponent(connectionRef)}`],
   ['dashboard-pending', `/api/dashboard/pending?connectionRef=${encodeURIComponent(connectionRef)}`],

@@ -1,4 +1,5 @@
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Infrastructure;
@@ -81,16 +82,23 @@ internal static class LocalStubMoodleData
 
     public static IReadOnlyList<AssignmentSubmissionRecord> Submissions(string assignmentId, string? status)
     {
-        if (!string.Equals(assignmentId, AssignmentId, StringComparison.Ordinal) ||
-            (status is not null && !string.Equals(status, "notsubmitted", StringComparison.OrdinalIgnoreCase)))
+        if (!string.Equals(assignmentId, AssignmentId, StringComparison.Ordinal))
         {
             return [];
         }
 
-        return Participants
-            .Select((participant, index) => new AssignmentSubmissionRecord(
-                $"stub-submission-{index + 1}", participant.UserId, "notsubmitted", null, null, null, null, 0, false, []))
-            .ToArray();
+        var now = DateTimeOffset.UtcNow;
+        var rows = new[]
+        {
+            new AssignmentSubmissionRecord(
+                "stub-submission-1", "2001", "submitted", "notgraded", now.AddHours(-4), now.AddHours(-3), 1, 1, true,
+                [new AssignmentSubmissionFile("projeto-ana.pdf", "application/pdf", 2048, "https://moodle.local/pluginfile.php/1/projeto-ana.pdf")]),
+            new AssignmentSubmissionRecord("stub-submission-2", "2002", "notsubmitted", null, null, null, null, 0, false, []),
+            new AssignmentSubmissionRecord("stub-submission-3", "2003", "notsubmitted", null, null, null, null, 0, false, []),
+        };
+        return string.IsNullOrWhiteSpace(status)
+            ? rows
+            : rows.Where(row => string.Equals(row.Status, status, StringComparison.OrdinalIgnoreCase)).ToArray();
     }
 
     public static CourseGradebook Gradebook(string courseId, string studentId)
@@ -241,6 +249,22 @@ internal sealed class LocalStubMoodleAssignmentSubmissionsGateway : IMoodleAssig
 internal sealed class LocalStubMoodleCurrentUserIdGateway : IMoodleCurrentUserIdGateway
 {
     public Task<long> GetCurrentUserIdAsync(CancellationToken cancellationToken) => Task.FromResult(1000L);
+}
+
+internal sealed class LocalStubMoodleAssignmentGradeReadGateway : IMoodleAssignmentGradeReadGateway
+{
+    public Task<AssignmentExistingGrade?> GetExistingGradeAsync(
+        string userExternalId,
+        string assignmentId,
+        string studentId,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<AssignmentExistingGrade?>(new AssignmentExistingGrade(
+            assignmentId,
+            studentId,
+            Grade: null,
+            HasGrade: false,
+            Feedback: null,
+            GradeMax: 100m));
 }
 
 internal sealed class LocalStubMoodleGradebookGateway : IMoodleGradebookGateway

@@ -79,6 +79,32 @@ public sealed class MoodleEndpointValidatorTests
     }
 
     [Fact]
+    public async Task ValidateAsync_AceitaHostCorporativoExplicitamenteConfiavelComDnsPrivado()
+    {
+        var sut = CreateSut(
+            (_, _) => Task.FromResult(new[] { IPAddress.Parse("10.0.5.109") }),
+            ["ead.fieg.com.br"]);
+
+        var result = await sut.ValidateAsync(
+            "https://ead.fieg.com.br/moodle?token=nao-deve-permanecer",
+            CancellationToken.None);
+
+        Assert.Equal("ead.fieg.com.br", result.Host);
+        Assert.Empty(result.Query);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_NaoLiberaOutroHostComDnsPrivado()
+    {
+        var sut = CreateSut(
+            (_, _) => Task.FromResult(new[] { IPAddress.Parse("10.0.5.109") }),
+            ["ead.fieg.com.br"]);
+
+        await Assert.ThrowsAsync<MoodleApiException>(() =>
+            sut.ValidateAsync("https://outro-moodle.example.org", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task ValidateAsync_ResolveNovamenteERecusaMudancaParaEnderecoPrivado()
     {
         var dnsCalls = 0;
@@ -127,10 +153,12 @@ public sealed class MoodleEndpointValidatorTests
     }
 
     private static MoodleEndpointValidator CreateSut(
-        Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null) =>
+        Func<string, CancellationToken, Task<IPAddress[]>>? resolver = null,
+        IEnumerable<string>? trustedPrivateEndpointHosts = null) =>
         resolver is null
             ? new MoodleEndpointValidator(NullLogger<MoodleEndpointValidator>.Instance)
             : new MoodleEndpointValidator(
                 NullLogger<MoodleEndpointValidator>.Instance,
-                resolver);
+                resolver,
+                trustedPrivateEndpointHosts);
 }

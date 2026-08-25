@@ -81,7 +81,10 @@ export function createAppClient(fetchImpl: typeof fetch = fetch, timeoutMs = 300
       const text = await response.text();
       let body: AppErrorBody | undefined;
       if (text) { try { body = repairMojibake(JSON.parse(text)) as AppErrorBody; } catch { body = undefined; } }
-      if (!response.ok) throw new AppHttpError(response.status, body?.error?.message ?? body?.message ?? `App request failed (${response.status})`, responseCorrelationId, body);
+      const errorMessage = typeof (body as { error?: unknown } | undefined)?.error === 'string'
+        ? (body as { error: string }).error
+        : body?.error?.message;
+      if (!response.ok) throw new AppHttpError(response.status, errorMessage ?? body?.message ?? `App request failed (${response.status})`, responseCorrelationId, body);
       return (body ?? {}) as T;
     } catch (error) {
       if (error instanceof AppHttpError) throw error;

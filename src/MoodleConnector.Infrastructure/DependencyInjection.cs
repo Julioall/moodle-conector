@@ -140,7 +140,14 @@ public static class DependencyInjection
         }
         services.AddScoped<IMoodleForumGateway, MoodleForumGateway>();
         services.AddScoped<IMoodleAssignmentGradingGateway, MoodleAssignmentGradingGateway>();
-        services.AddScoped<IMoodleAssignmentGradeReadGateway, MoodleAssignmentGradeReadGateway>();
+        if (moodleApiOptions.UseStubData)
+        {
+            services.AddScoped<IMoodleAssignmentGradeReadGateway, LocalStubMoodleAssignmentGradeReadGateway>();
+        }
+        else
+        {
+            services.AddScoped<IMoodleAssignmentGradeReadGateway, MoodleAssignmentGradeReadGateway>();
+        }
         services.AddScoped<IMoodleAssignmentSubmissionStatusGateway, MoodleAssignmentSubmissionStatusGateway>();
         services.AddScoped<IMoodleGradingCapabilitiesGateway, MoodleGradingCapabilitiesGateway>();
 

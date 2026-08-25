@@ -62,6 +62,18 @@ if ($manifest.skills -ne "./skills/") {
     Fail "skills must point to ./skills/."
 }
 
+if ($manifest.interface -isnot [hashtable]) {
+    Fail "interface must be an object."
+}
+
+$defaultPrompts = $manifest.interface.defaultPrompt
+if ($defaultPrompts -isnot [System.Collections.IList] -or $defaultPrompts.Count -eq 0) {
+    Fail "interface.defaultPrompt must be a non-empty array of strings."
+}
+foreach ($defaultPrompt in $defaultPrompts) {
+    Require-NonEmptyString $defaultPrompt "interface.defaultPrompt entry"
+}
+
 $skillsRoot = Join-Path $pluginRoot "skills"
 if (-not (Test-Path -LiteralPath $skillsRoot -PathType Container)) {
     Fail "skills directory is missing."
@@ -87,11 +99,30 @@ if ($manifest.ContainsKey("apps")) {
         Fail ".app.json must contain only an apps object."
     }
 
+    if ($appManifest.apps.Count -eq 0) {
+        Fail ".app.json apps must contain at least one registered ChatGPT app."
+    }
+
     foreach ($app in $appManifest.apps.GetEnumerator()) {
+        Require-NonEmptyString $app.Key ".app.json app name"
         if ($app.Value -isnot [hashtable]) {
             Fail ".app.json entry '$($app.Key)' must be an object."
         }
+
+        foreach ($field in $app.Value.Keys) {
+            if ($field -notin @("id", "category")) {
+                Fail ".app.json entry '$($app.Key)' contains unsupported field '$field'."
+            }
+        }
+
         Require-NonEmptyString $app.Value.id ".app.json entry '$($app.Key)'.id"
+        if ($app.Value.id -notmatch '^plugin_asdk_app_[A-Za-z0-9_-]+$') {
+            Fail ".app.json entry '$($app.Key)'.id must start with plugin_asdk_app_."
+        }
+
+        if ($app.Value.ContainsKey("category")) {
+            Require-NonEmptyString $app.Value.category ".app.json entry '$($app.Key)'.category"
+        }
     }
 }
 

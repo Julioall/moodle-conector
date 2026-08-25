@@ -1229,10 +1229,14 @@ app.MapGet("/api/pending", async (
     var pendingRefreshQueued = false;
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
         dashboardCourses.Count > 0 &&
-        (refresh == true || pendingSnapshot is null || !pendingScopeMatches))
+        (refresh == true || pendingSnapshot is null || !pendingSnapshot.IsComplete || !pendingScopeMatches))
     {
         pendingRefreshQueued = await dashboardRefreshQueue.EnqueueAsync(new DashboardOverviewRefreshRequest(
-            identity.Id, identity.ConnectorClientId, resolved.Alias, dashboardCourses), cancellationToken);
+            identity.Id,
+            identity.ConnectorClientId,
+            resolved.Alias,
+            dashboardCourses,
+            Force: refresh == true || pendingSnapshot?.IsComplete == false || !pendingScopeMatches), cancellationToken);
     }
 
     var inactivityDays = Math.Clamp(periodDays ?? 14, 1, 3650);
@@ -1265,9 +1269,19 @@ app.MapGet("/api/pending", async (
     {
         warnings.AddRange(pendingSnapshot.Data.Warnings.Where(warning => warning.StartsWith($"[{resolvedCourseId}]", StringComparison.OrdinalIgnoreCase)));
     }
+    var pendingSource = participantsSnapshot is null || pendingSnapshot is null || pendingItemCoverageMissing
+        ? "background"
+        : "snapshot";
+    var pendingSnapshotAt = pendingSnapshot?.UpdatedAt ?? participantsSnapshot?.UpdatedAt;
+    long? pendingAgeSeconds = pendingSnapshotAt is null
+        ? null
+        : Math.Max(0, (long)(DateTimeOffset.UtcNow - pendingSnapshotAt.Value).TotalSeconds);
+    var pendingStale = participantsSnapshot?.IsStale == true || pendingSnapshot?.IsStale == true;
+    var pendingComplete = participantsSnapshot?.IsComplete == true && pendingSnapshot?.IsComplete == true && !pendingItemCoverageMissing;
     return Results.Ok(new AppListEnvelope<AppPendingDto>(
         items, new(currentPage, size, items.Length, currentPage * size < filtered.Length, generatedAt, effectiveConnectionRef,
-            warnings.Count > 0 ? warnings : null, filtered.Length)));
+            warnings.Count > 0 ? warnings : null, filtered.Length,
+            pendingSource, pendingSnapshotAt, pendingAgeSeconds, pendingStale, pendingRefreshQueued, pendingComplete)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/submissions", async (
@@ -1281,9 +1295,12 @@ app.MapGet("/api/submissions", async (
     DateTimeOffset? before,
     bool? includeLate,
     bool? includeUngraded,
+    bool? refresh,
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMediator mediator,
     CancellationToken cancellationToken) =>
@@ -1296,14 +1313,99 @@ app.MapGet("/api/submissions", async (
     if (string.IsNullOrWhiteSpace(courseId) || string.IsNullOrWhiteSpace(assignmentId))
         return Results.BadRequest(new { error = new { code = "invalid_submission_scope", message = "Curso e atividade são obrigatórios." } });
 
-    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
     var currentPage = Math.Max(page ?? 1, 1);
     var size = Math.Clamp(pageSize ?? 25, 1, 100);
     var filter = ParseAssignmentSubmissionFilter(status);
+    var normalizedCourseId = courseId.Trim();
+    var normalizedAssignmentId = assignmentId.Trim();
+    var snapshot = await snapshotStore.GetAsync<CourseAssignmentSubmissionsSnapshot>(
+        identity.Id,
+        resolved.Alias,
+        MoodleSnapshotDatasets.Submissions,
+        normalizedCourseId,
+        cancellationToken);
+    var snapshotAssignment = snapshot is null
+        ? null
+        : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, normalizedAssignmentId);
+
+    if (snapshot is not null && snapshotAssignment is not null)
+    {
+        var snapshotForResponse = snapshot;
+        var refreshQueued = false;
+        if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
+            (refresh == true || snapshotForResponse.IsStale || !snapshotForResponse.IsComplete || !snapshotAssignment.IsComplete))
+        {
+            refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                identity.Id,
+                identity.ConnectorClientId,
+                resolved.Alias,
+                identity.Id.ToString(),
+                Force: refresh == true,
+                Dataset: MoodleSnapshotDatasets.Submissions,
+                CourseId: normalizedCourseId,
+                Priority: 10), cancellationToken);
+        }
+
+        var snapshotPage = AssignmentSubmissionSnapshotProjector.ToPage(
+            snapshotAssignment,
+            normalizedCourseId,
+            filter,
+            currentPage,
+            size,
+            since,
+            before,
+            includeLate ?? true,
+            includeUngraded ?? true);
+        return Results.Ok(new AppEnvelope<AppSubmissionsPageDto>(
+            AppSubmissionContractMapper.ToPage(snapshotPage),
+            new(
+                snapshotForResponse.UpdatedAt,
+                connectionRef ?? resolved.Alias,
+                "snapshot",
+                snapshotForResponse.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshotForResponse.UpdatedAt).TotalSeconds),
+                snapshotForResponse.IsStale,
+                refreshQueued,
+                snapshotForResponse.IsComplete && snapshotAssignment.IsComplete)));
+    }
+
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        var refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id,
+            identity.ConnectorClientId,
+            resolved.Alias,
+            identity.Id.ToString(),
+            Force: refresh == true,
+            Dataset: MoodleSnapshotDatasets.Submissions,
+            CourseId: normalizedCourseId,
+            Priority: 10), cancellationToken);
+        var preparingPage = new AppSubmissionsPageDto(
+            normalizedCourseId,
+            normalizedAssignmentId,
+            null,
+            "Atividade selecionada",
+            currentPage,
+            size,
+            filter.ToString(),
+            includeLate ?? true,
+            includeUngraded ?? true,
+            since,
+            before,
+            0,
+            false,
+            []);
+        return Results.Ok(new AppEnvelope<AppSubmissionsPageDto>(
+            preparingPage,
+            new(DateTimeOffset.UtcNow, connectionRef ?? resolved.Alias, "background", null, null, false, refreshQueued, false)));
+    }
+
+    // Legacy connections without a connector client retain the previous synchronous path.
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
     var result = await mediator.Send(new ListAssignmentSubmissionsQuery(
         currentUserId.ToString(),
-        courseId.Trim(),
-        assignmentId.Trim(),
+        normalizedCourseId,
+        normalizedAssignmentId,
         filter,
         currentPage,
         size,
@@ -1327,6 +1429,8 @@ app.MapGet("/api/submissions/{courseId}/{assignmentId}/{studentId}", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMoodleAssignmentGradeReadGateway gradeReadGateway,
     IMoodleCourseContentsGateway contentsGateway,
@@ -1338,9 +1442,70 @@ app.MapGet("/api/submissions/{courseId}/{assignmentId}/{studentId}", async (
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var normalizedCourseId = courseId.Trim();
+    var normalizedAssignmentId = assignmentId.Trim();
+    var normalizedStudentId = studentId.Trim();
+    var snapshot = await snapshotStore.GetAsync<CourseAssignmentSubmissionsSnapshot>(
+        identity.Id,
+        resolved.Alias,
+        MoodleSnapshotDatasets.Submissions,
+        normalizedCourseId,
+        cancellationToken);
+    var snapshotAssignment = snapshot is null
+        ? null
+        : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, normalizedAssignmentId);
+    var snapshotSubmission = snapshotAssignment is null
+        ? null
+        : AssignmentSubmissionSnapshotProjector.FindStudent(snapshotAssignment, normalizedStudentId);
+    if (snapshotSubmission is not null)
+    {
+        if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
+            (snapshot!.IsStale || !snapshot.IsComplete || !snapshotAssignment!.IsComplete))
+        {
+            await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                identity.Id,
+                identity.ConnectorClientId,
+                resolved.Alias,
+                identity.Id.ToString(),
+                Dataset: MoodleSnapshotDatasets.Submissions,
+                CourseId: normalizedCourseId,
+                Priority: 10), cancellationToken);
+        }
+
+        // The current grade is re-read by the write preparation flow. Do not make
+        // opening a correction dialog wait on another Moodle round trip.
+        return Results.Ok(new AppEnvelope<AppSubmissionDto>(
+            AppSubmissionContractMapper.ToDto(snapshotSubmission),
+            new(
+                snapshot!.UpdatedAt,
+                connectionRef ?? resolved.Alias,
+                "snapshot",
+                snapshot.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                snapshot.IsStale,
+                false,
+                snapshot.IsComplete && snapshotAssignment!.IsComplete)));
+    }
+
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id,
+            identity.ConnectorClientId,
+            resolved.Alias,
+            identity.Id.ToString(),
+            Dataset: MoodleSnapshotDatasets.Submissions,
+            CourseId: normalizedCourseId,
+            Priority: 10), cancellationToken);
+        return Results.Json(
+            new { error = new { code = "submission_preparing", message = "Os dados da atividade ainda estão sendo preparados. Tente novamente em instantes." } },
+            statusCode: StatusCodes.Status409Conflict);
+    }
+
+    // Legacy connections without a connector client retain the previous synchronous path.
     var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
     var result = await mediator.Send(new GetStudentSubmissionQuery(
-        currentUserId.ToString(), courseId, assignmentId, studentId), cancellationToken);
+        currentUserId.ToString(), normalizedCourseId, normalizedAssignmentId, normalizedStudentId), cancellationToken);
     var gradeAssignmentId = assignmentId;
     try
     {
@@ -1567,7 +1732,8 @@ app.MapGet("/api/dashboard/{metric}", async (
                     identity.Id,
                     identity.ConnectorClientId ?? string.Empty,
                     effectiveConnectionRef,
-                    courses), cancellationToken);
+                    courses,
+                    Force: refresh == true || persistedPending?.IsComplete == false || !pendingSnapshotMatchesScope), cancellationToken);
         }
 
         AppDashboardPendingMetricDto response;
@@ -1880,13 +2046,14 @@ app.MapGet("/api/dashboard", async (
     var pendingRefreshQueued = false;
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
         dashboardCourses.Count > 0 &&
-        (refresh == true || pendingSnapshot is null || !pendingScopeMatches))
+        (refresh == true || pendingSnapshot is null || !pendingSnapshot.IsComplete || !pendingScopeMatches))
     {
         pendingRefreshQueued = await dashboardRefreshQueue.EnqueueAsync(new DashboardOverviewRefreshRequest(
             identity.Id,
             identity.ConnectorClientId,
             resolved.Alias,
-            dashboardCourses), cancellationToken);
+            dashboardCourses,
+            Force: refresh == true || pendingSnapshot?.IsComplete == false || !pendingScopeMatches), cancellationToken);
     }
 
     var courseDashboard = CourseDashboardSnapshotMapper.Create(

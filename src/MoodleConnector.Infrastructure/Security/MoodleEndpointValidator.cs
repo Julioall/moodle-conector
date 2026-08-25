@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.MoodleApi;
 
 namespace MoodleConnector.Infrastructure;
@@ -9,21 +10,32 @@ internal sealed class MoodleEndpointValidator : IMoodleEndpointValidator
 {
     private readonly ILogger<MoodleEndpointValidator> _logger;
     private readonly Func<string, CancellationToken, Task<IPAddress[]>> _resolveAddressesAsync;
+    private readonly HashSet<string> _trustedPrivateEndpointHosts;
 
-    public MoodleEndpointValidator(ILogger<MoodleEndpointValidator> logger)
+    public MoodleEndpointValidator(
+        ILogger<MoodleEndpointValidator> logger,
+        IOptions<MoodleApiOptions>? options = null)
         : this(
             logger,
             static async (host, cancellationToken) =>
-                await Dns.GetHostAddressesAsync(host, cancellationToken))
+                await Dns.GetHostAddressesAsync(host, cancellationToken),
+            options?.Value.TrustedPrivateEndpointHosts)
     {
     }
 
     internal MoodleEndpointValidator(
         ILogger<MoodleEndpointValidator> logger,
-        Func<string, CancellationToken, Task<IPAddress[]>> resolveAddressesAsync)
+        Func<string, CancellationToken, Task<IPAddress[]>> resolveAddressesAsync,
+        IEnumerable<string>? trustedPrivateEndpointHosts = null)
     {
         _logger = logger;
         _resolveAddressesAsync = resolveAddressesAsync;
+        _trustedPrivateEndpointHosts = new HashSet<string>(
+            (trustedPrivateEndpointHosts ?? [])
+                .Select(NormalizeTrustedHost)
+                .Where(host => host is not null)
+                .Cast<string>(),
+            StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<Uri> ValidateAsync(string baseUrl, CancellationToken cancellationToken)
@@ -63,7 +75,9 @@ internal sealed class MoodleEndpointValidator : IMoodleEndpointValidator
             throw Failure("The Moodle endpoint host could not be resolved.", exception);
         }
 
-        if (addresses.Length == 0 || addresses.Any(address => !IsPublicAddress(address)))
+        var allowsPrivateResolution = _trustedPrivateEndpointHosts.Contains(host);
+        if (addresses.Length == 0 ||
+            (!allowsPrivateResolution && addresses.Any(address => !IsPublicAddress(address))))
         {
             throw Failure("The Moodle endpoint resolves to a private, local, or reserved address.");
         }
@@ -90,6 +104,15 @@ internal sealed class MoodleEndpointValidator : IMoodleEndpointValidator
             failure.AuditId,
             failure.ErrorCode);
         return failure;
+    }
+
+    private static string? NormalizeTrustedHost(string? configuredHost)
+    {
+        var host = configuredHost?.Trim().TrimEnd('.');
+        return !string.IsNullOrWhiteSpace(host) &&
+               Uri.CheckHostName(host) == UriHostNameType.Dns
+            ? host.ToLowerInvariant()
+            : null;
     }
 
     private static bool IsPublicAddress(IPAddress address)
