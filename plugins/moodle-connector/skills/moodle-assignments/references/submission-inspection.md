@@ -30,7 +30,7 @@ Limites versionados relevantes: 25 MB por arquivo, 10 arquivos por submissao, 12
 Para um ZIP exportado localmente, execute:
 
 ```powershell
-python .agents/skills/moodle-assignments/scripts/inspect_submission_bundle.py "C:\caminho\entregas.zip" --pretty
+python plugins/moodle-connector/skills/moodle-assignments/scripts/inspect_submission_bundle.py "C:\caminho\entregas.zip" --pretty
 ```
 
 O script apenas inspeciona o arquivo: nao extrai para o disco, detecta assinaturas, lista entradas, identifica containers DOCX/XLSX/PPTX, percorre ZIPs internos ate a profundidade configurada e sinaliza path traversal, arquivos criptografados, excesso de membros, tamanho descomprimido e razao de compressao suspeita. Ele nao substitui o download/extração controlados do conector.

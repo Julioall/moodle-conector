@@ -8,7 +8,9 @@ Este é o ponto de entrada da documentação. Comece pela visão do produto e co
 2. [Roadmap](roadmap.md)
 3. [Papéis e escopos](architecture/roles-and-scopes.md)
 4. [ADR-0002 — acesso delimitado por equipe](architecture/adr-0002-team-scoped-access.md)
-5. [Padrão para novos documentos](documentation-standard.md)
+5. [Fronteiras de autenticação](architecture/authentication-boundaries.md)
+6. [Specs ativas de execução](specs/README.md)
+7. [Padrão para novos documentos](documentation-standard.md)
 
 ## Áreas canônicas
 
@@ -17,11 +19,13 @@ Este é o ponto de entrada da documentação. Comece pela visão do produto e co
 | Entender o produto | `product/product-architecture-review.md` |
 | Saber prioridades e jornadas | `roadmap.md` |
 | Entender arquitetura | `architecture/` |
-| Entender segurança e acesso | `security/auth-and-scopes.md` e `architecture/roles-and-scopes.md` |
+| Entender segurança e acesso | `security/auth-and-scopes.md`, `architecture/roles-and-scopes.md` e `architecture/authentication-boundaries.md` |
 | Configurar e operar localmente | `operations/` |
+| Certificar uma publicação | `operations/release-certification.md` |
 | Integrar com Moodle | `technical/moodle-webservice-setup.md` |
 | Consultar tools MCP | `technical/mcp-tools-catalog.md` |
 | Entender contratos técnicos | `technical/` |
+| Acompanhar mudanças em execução | `specs/` |
 | Consultar histórico | `archive/` |
 
 ## Regra de leitura

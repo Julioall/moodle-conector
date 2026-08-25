@@ -1,9 +1,11 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authentication.Cookies;
 
 namespace MoodleConnector.Presentation.Security;
 
 public static class MoodleScopePolicies
 {
+    public const string PortalSession = "portal.session";
     // Coarse scopes are reserved for universal connector primitives whose
     // remote operation is selected dynamically at runtime.
     public const string ReadAny = "moodle.read";
@@ -28,6 +30,9 @@ public static class MoodleScopePolicies
 
     public static void AddMoodleScopePolicies(this AuthorizationOptions options)
     {
+        options.AddPolicy(PortalSession, policy => policy
+            .AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser());
         options.AddPolicy(ReadCourses, policy => policy.RequireAssertion(context => HasScope(context, ReadCourses)));
         options.AddPolicy(ReadStudents, policy => policy.RequireAssertion(context => HasScope(context, ReadStudents)));
         options.AddPolicy(ReadGroups, policy => policy.RequireAssertion(context => HasScope(context, ReadGroups)));

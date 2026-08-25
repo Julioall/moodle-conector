@@ -25,21 +25,19 @@ curl http://127.0.0.1:8787/api/status
 
 ## VPS Com Domínio
 
-Configure DNS apontando `APP_DOMAIN` e `CLARIS_DOMAIN` para a VPS e habilite o profile HTTPS. O Caddy deste projeto e o unico proxy publico da VPS e encaminha o host Claris ao container do outro projeto pela rede Docker externa compartilhada:
+Configure DNS apontando `APP_DOMAIN` para a VPS e habilite o profile HTTPS. O Caddy deste projeto publica somente o Moodle Connector e sua SPA integrada:
 
 ```env
 APP_DOMAIN=moodle-conector.seu-dominio.com
-CLARIS_DOMAIN=claris.seu-dominio.com
-PUBLIC_PROXY_NETWORK=novascript-proxy
 COMPOSE_PROFILES=https
 CADDYFILE=./Caddyfile
 ```
 
-O Caddy publica o Moodle Connector e o frontend Claris em HTTPS:
+O Caddy publica o Moodle Connector e o portal integrado em HTTPS:
 
 ```bash
 curl https://moodle-conector.seu-dominio.com/health
-curl https://claris.seu-dominio.com/health
+curl https://moodle-conector.seu-dominio.com/
 ```
 
 O endpoint do ChatGPT App deve ser:
@@ -87,6 +85,7 @@ Configure o environment `moodle-connector` com os secrets:
 - `POSTGRES_PASSWORD`
 - `CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64`
 - `ADMIN_API_KEY`
+- `MEDIATR_LICENSE_KEY`
 - `OAUTH_CHATGPT_REDIRECT_URI`
 
 Secrets opcionais:
@@ -106,12 +105,11 @@ Variables opcionais:
 - `VPS_SSH_PORT` - padrão `22`
 - `APP_PORT` - padrão `8787`
 - `APP_DOMAIN` - domínio público usado pelo Caddy para HTTPS automático
-- `CLARIS_DOMAIN` - subdomínio público encaminhado para o frontend Claris; padrão `claris.novascript.com.br`
-- `PUBLIC_PROXY_NETWORK` - rede Docker externa compartilhada com o Claris; padrão `novascript-proxy`
 - `COMPOSE_PROFILES` - padrão `https`
 - `CADDYFILE` - padrão `./Caddyfile`
 - `MCP_REQUIRE_JWT` - padrão `true`
 - `MCP_REQUIRE_API_KEY` - padrão `false`
+- `FEATURES_MESSAGES_WRITE_ENABLED`, `FEATURES_SCHEDULED_MESSAGES_ENABLED`, `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED`, `FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED` e `FEATURES_COURSE_CONTENT_WRITE_ENABLED` - padrão `true`; defina explicitamente a política de escrita aprovada para o ambiente
 - `OAUTH_CLIENT_ID` - padrão `moodle`
 - `OAUTH_SCOPE_NAME` - padrão `moodle-mcp-audience`
 - `OAUTH_REQUIRE_HTTPS_METADATA` - padrão `true`
@@ -120,13 +118,13 @@ Variables opcionais:
 - `OAUTH_KEY_STORAGE_PATH` - padrão `/app/data/oauth`
 - `OAUTH_CERTIFICATE_YEARS` - padrão `5`
 - `RATE_LIMIT_WINDOW_SECONDS` - padrão `60`
-- `RATE_LIMIT_PORTAL_AUTH_PERMIT_LIMIT` - padrão `12`
+- `RATE_LIMIT_APP_AUTH_PERMIT_LIMIT` - padrão `12`
 - `RATE_LIMIT_ADMIN_API_PERMIT_LIMIT` - padrão `30`
 - `RATE_LIMIT_MCP_PERMIT_LIMIT` - padrão `120`
 - `POSTGRES_DB` - padrão `moodle_connector`
 - `POSTGRES_USER` - padrão `moodle_connector`
 - `COMPOSE_PROJECT_NAME` - padrão `moodle-connector`
-- `RESET_DATABASE_ON_DEPLOY` - padrão `true` durante o desenvolvimento; quando `true`, o deploy remove somente o volume PostgreSQL remoto antes de subir a aplicação.
+- `RESET_DATABASE_ON_DEPLOY` - padrão `false`; quando excepcionalmente `true` em desenvolvimento, o deploy remove somente o volume PostgreSQL remoto antes de subir a aplicação.
 
 O workflow sincroniza o código para a VPS, escreve `.env.production` remoto e executa:
 
@@ -134,7 +132,9 @@ O workflow sincroniza o código para a VPS, escreve `.env.production` remoto e e
 docker compose --env-file .env.production up -d --build --remove-orphans
 ```
 
-Ele cria a rede externa `PUBLIC_PROXY_NETWORK` quando ela ainda não existir. Faça o deploy deste projeto antes do Claris para o Caddy carregar o host adicional; em seguida, publique o frontend Claris, que entra na mesma rede sem expor portas públicas.
+O Compose de produção é autocontido: Caddy, aplicação e PostgreSQL ficam na rede padrão do projeto.
+A porta interna da aplicação é publicada somente em `127.0.0.1:${APP_PORT}` para healthchecks e
+diagnóstico local; o Caddy é a única entrada pública em 80/443.
 
 Antes do deploy, o workflow valida:
 
@@ -142,11 +142,13 @@ Antes do deploy, o workflow valida:
 - variáveis numéricas de porta, OAuth, rate limit e resiliência Moodle;
 - URLs OAuth com `https://` quando `OAUTH_REQUIRE_HTTPS_METADATA=true`;
 - `CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64` decodificando para exatamente 32 bytes;
+- presença de `MEDIATR_LICENSE_KEY`;
 - ausência de quebras de linha em secrets e variáveis que são gravadas no `.env.production`.
 
-Enquanto a VPS estiver sendo usada somente para desenvolvimento, `RESET_DATABASE_ON_DEPLOY=true` limpa o volume do PostgreSQL em cada deploy da `main`. Isso apaga usuários, conexões, memórias, auditorias, tarefas e demais registros do banco. O CI de PR não toca na VPS.
-
-Essa política não deve ser usada em produção. Antes de preservar dados, altere a variável de ambiente do GitHub para `RESET_DATABASE_ON_DEPLOY=false` e valide o procedimento de backup/rollback.
+Quando habilitado somente para desenvolvimento, `RESET_DATABASE_ON_DEPLOY=true` limpa o volume
+do PostgreSQL no deploy. Isso apaga usuários, conexões, memórias, auditorias, tarefas e demais
+registros do banco. O CI de PR não toca na VPS. Em produção, mantenha o valor padrão `false` e
+valide backup e rollback antes de qualquer alteração de schema.
 
 Como o banco de desenvolvimento é recriado a cada deploy, não criamos migrations evolutivas neste momento. O schema continua sendo aplicado pelos scripts versionados em `src/MoodleConnector.Infrastructure/Database/Scripts/`, de forma idempotente. Quando houver dados que precisem ser preservados, a política deverá mudar primeiro e só então migrations/alterações compatíveis deverão ser introduzidas.
 

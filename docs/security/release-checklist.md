@@ -5,6 +5,7 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
 ## Contrato ChatGPT Apps
 
 - [ ] `/mcp` responde via HTTPS público.
+- [ ] `scripts/verify-production-endpoint.ps1 -AppDomain <APP_DOMAIN> -RequireStrictTransportSecurity` passa após o deploy.
 - [ ] `/.well-known/oauth-protected-resource/mcp` aponta para o authorization server correto.
 - [ ] `/.well-known/oauth-authorization-server`, `/.well-known/openid-configuration` e `/.well-known/jwks` respondem sem erro.
 - [ ] `tools/list` expõe `securitySchemes` OAuth quando `McpServerSecurity:RequireJwt=true`.
@@ -22,6 +23,8 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
 - [ ] `OAuth__Issuer` e `OAuth__Audience` usam `https://` ou derivam de `APP_DOMAIN`.
 - [ ] `OAuth__KeyStoragePath` aponta para volume persistente.
 - [ ] Chave `ConnectorSecrets__EncryptionKeyBase64` decodifica para 32 bytes.
+- [ ] Secret `MEDIATR_LICENSE_KEY` contém uma licença MediatR válida e não é gravado em arquivos versionados.
+- [ ] Startup em produção rejeita connection string, chave de criptografia, chave administrativa e licença MediatR ausentes ou placeholders.
 
 ## Moodle E Credenciais
 
@@ -32,7 +35,7 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
 
 ## Escritas E Feature Flags
 
-- [ ] As flags de escrita refletem a política aprovada para o ambiente. No arquivo versionado atual, mensagens, notas, feedbacks e conteúdo estão habilitados; qualquer alteração deve ser registrada no release.
+- [ ] As flags `FEATURES_*_WRITE_ENABLED` refletem a política aprovada para o ambiente, estão registradas no release e são gravadas explicitamente pelo workflow de deploy; não dependem silenciosamente do padrão de `appsettings.json`.
 - [ ] Para cada escrita habilitada, `CanWrite`, escopo exigido, prévia, confirmação literal, expiração, reivindicação atômica e auditoria foram verificados.
 - [ ] `Features__DemoToolsEnabled=false` em qualquer endpoint submetido ao ChatGPT ou publicado.
 - [ ] Qualquer escrita nova usa fluxo `prepare_*` e `confirm_*`.

@@ -31,6 +31,19 @@ jobs:
           dotnet restore MoodleConnector.slnx
           dotnet build MoodleConnector.slnx --no-restore
           dotnet test MoodleConnector.slnx --no-build --no-restore
+      - name: Validate Plugin Package
+        shell: pwsh
+        run: ./scripts/validate-plugin.ps1
+      - name: Validate Generated Submission Tools
+        shell: pwsh
+        run: ./scripts/generate-chatgpt-app-submission.ps1 -Check
+      - name: Validate Packaged Skills
+        run: python plugins/moodle-connector/skills/moodle-core/scripts/check_skill_catalog.py --repo-root .
+      - name: Validate Documentation
+        shell: pwsh
+        run: ./scripts/check-documentation.ps1
       - name: Verify Production Container
         run: docker build --tag moodle-connector-app-v2-ci .
+      - name: Validate Caddy topology
+        run: docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -e APP_DOMAIN=moodle-connector.localhost caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 

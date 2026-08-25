@@ -824,6 +824,16 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.Equal(email, firstProfile.GetProperty("email").GetString());
         Assert.False(firstProfile.GetProperty("hasMoodleConnected").GetBoolean());
 
+        var teams = await client.GetFromJsonAsync<JsonElement>("/api/teams");
+        Assert.True(teams.GetProperty("ok").GetBoolean());
+
+        var permissionCatalog = await client.GetFromJsonAsync<JsonElement>("/api/permission-catalog");
+        Assert.True(permissionCatalog.GetProperty("ok").GetBoolean());
+        Assert.Contains("tool.connections.manage", permissionCatalog.GetProperty("permissions").EnumerateArray().Select(item => item.GetString()));
+
+        var permissionGroups = await client.GetFromJsonAsync<JsonElement>("/api/permission-groups");
+        Assert.True(permissionGroups.GetProperty("ok").GetBoolean());
+
         var logoutResponse = await client.PostAsync("/auth/logout", null);
         logoutResponse.EnsureSuccessStatusCode();
         await RefreshCsrfTokenAsync(client);
@@ -858,6 +868,149 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.Equal("goias", connection.GetProperty("alias").GetString());
         Assert.Equal("https://moodle.tests/ead", connection.GetProperty("baseUrl").GetString());
         Assert.True(connection.GetProperty("canWrite").GetBoolean());
+
+        var session = await client.GetFromJsonAsync<JsonElement>("/api/session");
+        Assert.True(session.GetProperty("data").GetProperty("authenticated").GetBoolean());
+        Assert.Equal("Professor Teste", session.GetProperty("data").GetProperty("user").GetProperty("name").GetString());
+
+        var connections = await client.GetFromJsonAsync<JsonElement>("/api/connections");
+        var portalConnection = Assert.Single(connections.GetProperty("data").EnumerateArray());
+        Assert.Equal("goias", portalConnection.GetProperty("connectionRef").GetString());
+        Assert.Contains("write", portalConnection.GetProperty("capabilities").EnumerateArray().Select(item => item.GetString()));
+    }
+
+    [Fact]
+    public async Task Login_html_rejeita_return_url_externo()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            HandleCookies = true,
+            AllowAutoRedirect = false
+        });
+        var email = $"login-html-{Guid.NewGuid():N}@example.com";
+        const string password = "senha-local-12345";
+        await RefreshCsrfTokenAsync(client);
+
+        var registerResponse = await client.PostAsJsonAsync("/api/account/register", new
+        {
+            name = "Professor Login HTML",
+            email,
+            password
+        });
+        registerResponse.EnsureSuccessStatusCode();
+
+        await RefreshCsrfTokenAsync(client);
+        var logoutResponse = await client.PostAsync("/auth/logout", null);
+        logoutResponse.EnsureSuccessStatusCode();
+
+        var loginResponse = await client.PostAsync("/auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["email"] = email,
+            ["password"] = password,
+            ["returnUrl"] = "//external.example/redirect"
+        }));
+
+        Assert.Equal(HttpStatusCode.Redirect, loginResponse.StatusCode);
+        Assert.Equal("/", loginResponse.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task Portal_privado_exige_sessao_cookie_e_preserva_bootstrap_publico()
+    {
+        var client = _factory.CreateClient();
+
+        var privateResponse = await client.GetAsync("/api/account/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, privateResponse.StatusCode);
+        var privateBody = await privateResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("portal_session_required", privateBody.GetProperty("error").GetString());
+
+        var gradingResponse = await client.GetAsync("/api/grading/batches");
+        Assert.Equal(HttpStatusCode.Unauthorized, gradingResponse.StatusCode);
+
+        var forumsResponse = await client.GetAsync("/api/courses/test/1/forums");
+        Assert.Equal(HttpStatusCode.Unauthorized, forumsResponse.StatusCode);
+
+        var messagesResponse = await client.GetAsync("/api/messages/conversations");
+        Assert.Equal(HttpStatusCode.Unauthorized, messagesResponse.StatusCode);
+
+        var statusResponse = await client.GetAsync("/api/status");
+        statusResponse.EnsureSuccessStatusCode();
+
+        var csrfResponse = await client.GetAsync("/api/csrf");
+        csrfResponse.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task Respostas_https_encaminhadas_incluem_hsts()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Forwarded-Proto", "https");
+
+        var response = await client.GetAsync("/health");
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("max-age=31536000", response.Headers.GetValues("Strict-Transport-Security").Single());
+    }
+
+    [Fact]
+    public async Task Rotas_legadas_do_portal_redirecionam_para_a_spa_canonica()
+    {
+        var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+            {
+                configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Features:AppV2Enabled"] = "true"
+                });
+            });
+        });
+        var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+
+        var appResponse = await client.GetAsync("/app.html");
+        Assert.Equal(HttpStatusCode.Redirect, appResponse.StatusCode);
+        Assert.Equal("/", appResponse.Headers.Location?.OriginalString);
+
+        var authResponse = await client.GetAsync("/auth.html?tab=register&error=acesso negado");
+        Assert.Equal(HttpStatusCode.Redirect, authResponse.StatusCode);
+        Assert.Equal("/?tab=register&error=acesso%20negado", authResponse.Headers.Location?.OriginalString);
+    }
+
+    [Fact]
+    public async Task Token_oauth_do_mcp_nao_substitui_sessao_cookie_do_portal()
+    {
+        using var factory = BuildJwtFactory(requireApiKey: false);
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", CreateJwt(connectorClientId: "jwt-client"));
+
+        var response = await client.GetAsync("/api/account/me");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("portal_session_required", body.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task Api_administrativa_exige_chave_propria_e_nao_aceita_sessao_ou_bearer()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/admin/connector-clients/register", new
+        {
+            clientId = "admin-boundary-test",
+            moodleAlias = "default",
+            moodleBaseUrl = "https://moodle.tests",
+            moodleUsername = "admin.test",
+            moodlePassword = "senha-teste",
+            moodleTarget = "default",
+            isDefault = true,
+            canWrite = false
+        });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     [Fact]
@@ -941,6 +1094,52 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.Equal(1, data.GetProperty("imported").GetInt32());
         Assert.Equal(0, data.GetProperty("updated").GetInt32());
         Assert.Equal(1, data.GetProperty("skipped").GetInt32());
+    }
+
+    [Fact]
+    public async Task Tarefas_do_portal_preservam_contrato_e_exigem_csrf()
+    {
+        var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            HandleCookies = true
+        });
+        await RefreshCsrfTokenAsync(client);
+
+        var registerResponse = await client.PostAsJsonAsync("/api/account/register", new
+        {
+            name = "Professor Tarefas",
+            email = $"tasks-{Guid.NewGuid():N}@example.com",
+            password = "senha-local-12345"
+        });
+        registerResponse.EnsureSuccessStatusCode();
+        await RefreshCsrfTokenAsync(client);
+
+        var createResponse = await client.PostAsJsonAsync("/api/tasks", new
+        {
+            title = "Conferir notas",
+            description = "Validar os lançamentos pendentes.",
+            status = "in_progress",
+            priority = "high",
+            actionType = "review",
+            scheduleHint = "Até sexta-feira"
+        });
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Conferir notas", created.GetProperty("data").GetProperty("title").GetString());
+        Assert.Equal("in_progress", created.GetProperty("data").GetProperty("status").GetString());
+
+        var listResponse = await client.GetAsync("/api/tasks");
+        listResponse.EnsureSuccessStatusCode();
+        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var item = Assert.Single(list.GetProperty("data").EnumerateArray());
+        Assert.Equal("Conferir notas", item.GetProperty("title").GetString());
+        Assert.Equal("high", item.GetProperty("priority").GetString());
+
+        client.DefaultRequestHeaders.Remove("X-CSRF-TOKEN");
+        var missingTokenResponse = await client.PostAsJsonAsync("/api/tasks", new { title = "Não deve criar" });
+        Assert.Equal(HttpStatusCode.BadRequest, missingTokenResponse.StatusCode);
+        var missingToken = await missingTokenResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("csrf_invalid", missingToken.GetProperty("error").GetProperty("code").GetString());
     }
 
     private static async Task RefreshCsrfTokenAsync(HttpClient client)

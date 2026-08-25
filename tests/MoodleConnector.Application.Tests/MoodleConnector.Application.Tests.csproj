@@ -21,6 +21,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\..\chatgpt-app-submission.json"
+          Link="chatgpt-app-submission.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\MoodleConnector.Application\MoodleConnector.Application.csproj" />
     <ProjectReference Include="..\..\src\MoodleConnector.Infrastructure\MoodleConnector.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\MoodleConnector.Presentation\MoodleConnector.Presentation.csproj" />

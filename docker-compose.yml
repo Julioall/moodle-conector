@@ -12,7 +12,9 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
     ports:
-      - "${APP_PORT:-8787}:8080"
+      # The reverse proxy is the only public entry point. Keep direct ASP.NET
+      # access on loopback for host health checks and local diagnostics.
+      - "127.0.0.1:${APP_PORT:-8787}:8080"
     volumes:
       - app-data:/app/data
     depends_on:
@@ -40,9 +42,6 @@ services:
       - ${CADDYFILE:-./Caddyfile}:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    networks:
-      - default
-      - public-proxy
     depends_on:
       app:
         condition: service_healthy
@@ -68,8 +67,3 @@ volumes:
   postgres-data:
   caddy-data:
   caddy-config:
-
-networks:
-  public-proxy:
-    name: ${PUBLIC_PROXY_NETWORK:-novascript-proxy}
-    external: true

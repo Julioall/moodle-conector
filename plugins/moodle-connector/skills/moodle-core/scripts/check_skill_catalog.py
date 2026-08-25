@@ -23,8 +23,10 @@ NON_CONNECTOR_REFS = {
 
 
 def find_repo_root(script_path: Path) -> Path:
-    # .../<repo>/.agents/skills/moodle-core/scripts/check_skill_catalog.py
-    return script_path.resolve().parents[4]
+    for parent in script_path.resolve().parents:
+        if (parent / "MoodleConnector.slnx").is_file() or (parent / "MoodleConnector.sln").is_file():
+            return parent
+    raise RuntimeError("Could not locate the Moodle Connector repository root.")
 
 
 def collect_names(source_root: Path) -> set[str]:
@@ -71,7 +73,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = (args.repo_root or find_repo_root(Path(__file__))).resolve()
-    skills_root = repo_root / ".agents" / "skills"
+    skills_root = repo_root / "plugins" / "moodle-connector" / "skills"
     source_root = repo_root / "src"
     if not skills_root.is_dir() or not source_root.is_dir():
         print(f"Repository layout not found below {repo_root}", file=sys.stderr)

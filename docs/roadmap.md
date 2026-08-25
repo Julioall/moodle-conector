@@ -97,9 +97,9 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Evidências necessárias / disponíveis:** texto institucional, canal, turma e destinatários autorizados; participantes visíveis e template informado pelo usuário.
 - **Funções Moodle / tool MCP:** `core_enrol_get_enrolled_users`, `core_message_send_instant_messages`; `preparar_mensagem_boas_vindas` / `confirmar_mensagem_boas_vindas`.
 - **Nível / cobertura e limites:** **Nível B**; envio é composto por mensagens individuais, sem broadcast nativo ou agendamento.
-- **Limitações:** `MessagesWriteEnabled=false` é o padrão e bloqueia a preparação e a confirmação de mensagens; a tool pode continuar visível para oferecer uma resposta explícita de indisponibilidade.
+- **Limitações:** quando `MessagesWriteEnabled=false`, os handlers bloqueiam tanto a preparação quanto a confirmação. O template local o desabilita, enquanto o valor efetivo de produção deve ser aprovado e configurado pelo operador; não há broadcast, agendamento ou garantia de leitura.
 - **Gate humano:** prévia com critérios, exclusões, destinatários e corpo sanitizado; confirmação literal antes do envio.
-- **Status / evidência de conclusão:** **parcial**; pares em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs` e testes de preparação em `tests/MoodleConnector.Application.Tests/Messages/PrepareTutorMessageCommandHandlerTests.cs`; o gate da flag está incompleto.
+- **Status / evidência de conclusão:** **parcial**; pares em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs` e testes de preparação/confirmação. O gate da flag é verificado novamente antes de preparar e executar.
 
 ## Jornada 2 — Acompanhamento semanal
 
@@ -223,7 +223,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Nível / cobertura e limites:** **Nível B** para o fluxo individual enquanto não houver teste dedicado ponta a ponta; uma escrita por estudante/tarefa.
 - **Limitações:** disponibilidade da função não prova permissão contextual; a escrita permanece bloqueada até a habilitação explícita de `AssignmentGradeWriteEnabled`.
 - **Gate humano:** justificativa, prévia, texto literal, escopo, `CanWrite`, flag, idempotência e auditoria.
-- **Status / evidência de conclusão:** implementação protegida por `AssignmentGradeWriteEnabled=false` como padrão e testes dedicados do fluxo individual.
+- **Status / evidência de conclusão:** implementação protegida por `AssignmentGradeWriteEnabled`, revalidada na preparação e na confirmação, com testes dedicados do fluxo individual. A flag precisa refletir a política aprovada do ambiente.
 
 ## Jornada 4 — Recuperação e intervenção pedagógica
 
@@ -271,7 +271,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Evidências necessárias / disponíveis:** motivo observável, exclusões, consentimento/canal e histórico; sinais e participantes visíveis.
 - **Funções Moodle / tool MCP:** `core_message_send_instant_messages`; pares `preparar_mensagem_*` / `confirmar_mensagem_*` de acesso, pendência e recuperação.
 - **Nível / cobertura e limites:** **Nível B**; mensagens individuais, sem broadcast/scheduler.
-- **Limitações:** não expor nota ou “risco” a terceiros; mensagens permanecem bloqueadas até a habilitação explícita de `MessagesWriteEnabled`.
+- **Limitações:** não expor nota ou “risco” a terceiros; quando `MessagesWriteEnabled=false`, a preparação e a confirmação são bloqueadas.
 - **Gate humano:** revisar linguagem epistêmica, destinatários e confirmação literal.
 - **Status / evidência de conclusão:** seis pares prepare/confirm existem, com gate efetivo na preparação e confirmação e cobertura de regressão.
 
@@ -297,7 +297,7 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Evidências necessárias / disponíveis:** finalidade, critério de seleção, exclusões, destinatários, corpo e canal; participantes e sinais observáveis das Jornadas 1–4.
 - **Funções Moodle / tool MCP:** `core_message_send_instant_messages`; seis pares específicos `preparar_mensagem_*` / `confirmar_mensagem_*` em `MoodleTutorMessageTools.cs`.
 - **Nível / cobertura e limites:** **Nível B**; cada destinatário recebe mensagem instantânea individual e o lote depende da seleção local.
-- **Limitações:** não há broadcast nativo, preferências completas de contato, agendamento ou garantia de leitura; `MessagesWriteEnabled` ainda não bloqueia efetivamente o fluxo.
+- **Limitações:** não há broadcast nativo, preferências completas de contato, agendamento ou garantia de leitura; `MessagesWriteEnabled` bloqueia efetivamente preparação e confirmação quando desabilitada.
 - **Gate humano:** prévia mostra curso, critérios, evidências, exclusões, quantidade/lista de destinatários e corpo sanitizado; confirmação literal, escopo, `CanWrite`, idempotência e auditoria.
 - **Status / evidência de conclusão:** tools em `src/MoodleConnector.Presentation/Tools/Messages/MoodleTutorMessageTools.cs`, com flag efetiva nos handlers de preparação e confirmação e cobertura de regressão.
 
@@ -475,7 +475,7 @@ Esta tabela preserva rastreabilidade histórica; as jornadas são a organizaçã
 | 8 — Progresso, conclusão e participação | 2 | parcial | Completion, acesso, fórum e submissões existem; semântica uniforme de vazio/cobertura falta. |
 | 9 — Risco e acompanhamento | 4 | parcial | Relatório de risco testado; contrato pedagógico e recuperação estruturada faltam. |
 | 10 — Relatórios | 6 | parcial | Cinco famílias de relatório existem, mas somente o semanal possui teste dedicado; fontes externas e cobertura uniforme faltam. |
-| 11 — Comunicação confirmada | 5 | parcial | Seis pares prepare/confirm existem; `MessagesWriteEnabled` ainda não é efetiva. |
+| 11 — Comunicação confirmada | 5 | parcial | Seis pares prepare/confirm existem; `MessagesWriteEnabled` é revalidada na preparação e na confirmação. |
 | 12 — Agendamento | 5 | planejado | Sem scheduler/worker/cancelamento; Nível D no contrato atual. |
 | 13 — Feedback assistido | 3 | parcial | Fluxo em lote substancialmente testado; qualidade/contexto dependem de revisão. |
 | 14 — Notas e avaliação crítica | 3, 7 | parcial | Nota individual prepare/confirm existe; default seguro da flag e decisão pedagógica permanecem pendentes. |

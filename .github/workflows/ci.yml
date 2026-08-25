@@ -7,16 +7,40 @@ on:
     paths:
       - src/**
       - tests/**
+      - plugins/**
+      - scripts/**
+      - public/**
+      - docs/**
+      - Dockerfile
+      - docker-compose.yml
+      - Caddyfile
+      - .dockerignore
+      - .env.example
+      - DEPLOY.md
+      - chatgpt-app-submission.json
       - MoodleConnector.slnx
       - .github/workflows/ci.yml
+      - .github/workflows/deploy-vps.yml
   pull_request:
     branches:
       - main
     paths:
       - src/**
       - tests/**
+      - plugins/**
+      - scripts/**
+      - public/**
+      - docs/**
+      - Dockerfile
+      - docker-compose.yml
+      - Caddyfile
+      - .dockerignore
+      - .env.example
+      - DEPLOY.md
+      - chatgpt-app-submission.json
       - MoodleConnector.slnx
       - .github/workflows/ci.yml
+      - .github/workflows/deploy-vps.yml
   workflow_dispatch:
 
 permissions:
@@ -45,10 +69,45 @@ jobs:
       - name: Restore
         run: dotnet restore MoodleConnector.slnx
 
-      - name: Test
+      - name: Build
         run: |
           unset APP_DOMAIN
           unset OAUTH_ISSUER
           unset OAUTH_AUDIENCE
           unset OAUTH_CHATGPT_REDIRECT_URI
-          dotnet test MoodleConnector.slnx --configuration Release --no-restore
+          dotnet build MoodleConnector.slnx --configuration Release --no-restore --no-incremental
+
+      - name: Test
+        run: dotnet test MoodleConnector.slnx --configuration Release --no-build --no-restore
+
+      - name: Validate plugin package
+        shell: pwsh
+        run: ./scripts/validate-plugin.ps1
+
+      - name: Validate generated submission tools
+        shell: pwsh
+        run: ./scripts/generate-chatgpt-app-submission.ps1 -Check
+
+      - name: Validate packaged skills
+        run: python plugins/moodle-connector/skills/moodle-core/scripts/check_skill_catalog.py --repo-root .
+      - name: Validate documentation
+        shell: pwsh
+        run: ./scripts/check-documentation.ps1
+
+      - name: Validate GitHub Actions
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.7
+
+      - name: Validate delivery topology
+        run: |
+          export ENV_FILE=.env.example
+          export POSTGRES_PASSWORD=ci-compose-validation-password
+          docker compose config --quiet
+          docker compose config --format json | python -c "import json, sys; ports = json.load(sys.stdin)['services']['app']['ports']; assert any(port.get('host_ip') == '127.0.0.1' and port.get('target') == 8080 for port in ports), 'app must bind only to 127.0.0.1'"
+          docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -e APP_DOMAIN=moodle-connector.localhost caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Build production image
+        run: docker build --tag moodle-connector-ci:local .
+
+      - name: Verify production container contract
+        shell: pwsh
+        run: ./scripts/verify-production-container.ps1 -Image moodle-connector-ci:local

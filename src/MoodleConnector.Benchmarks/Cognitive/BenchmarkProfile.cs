@@ -5,5 +5,5 @@ using MoodleConnector.Presentation.Configuration;
 public sealed record BenchmarkProfile(
     ToolExposureProfile Exposure,
     string ModelName,
-    bool UseSafeReadExecutor
+    bool UsePluginSkills
 );

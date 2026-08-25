@@ -537,7 +537,7 @@ public static class MoodleGradingReviewAppMetadata
         var configured = Environment.GetEnvironmentVariable("APP_DOMAIN");
         if (string.IsNullOrWhiteSpace(configured))
         {
-            return "https://novascript.com.br";
+            return "https://localhost";
         }
 
         configured = configured.Trim().TrimEnd('/');
@@ -549,7 +549,7 @@ public static class MoodleGradingReviewAppMetadata
 
         return Uri.TryCreate(configured, UriKind.Absolute, out var uri)
             ? uri.GetLeftPart(UriPartial.Authority)
-            : "https://novascript.com.br";
+            : "https://localhost";
     }
 }
 

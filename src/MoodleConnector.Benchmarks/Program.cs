@@ -26,6 +26,12 @@ class Program
 {
     static async Task Main(string[] args)
     {
+        if (args.Contains("--generate-submission", StringComparer.OrdinalIgnoreCase))
+        {
+            Environment.ExitCode = await ChatGptAppSubmissionGenerator.RunAsync(args);
+            return;
+        }
+
         Console.WriteLine("=======================================================");
         Console.WriteLine("  MoodleBench — Courses A × B × C — Experimento 1");
         Console.WriteLine("=======================================================");
@@ -896,7 +902,7 @@ class Program
         {
             var path = repoRoot is null
                 ? string.Empty
-                : Path.Combine(repoRoot, ".agents", "skills", skillName, "SKILL.md");
+                : Path.Combine(repoRoot, "plugins", "moodle-connector", "skills", skillName, "SKILL.md");
             var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
             var version = content
                 .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)

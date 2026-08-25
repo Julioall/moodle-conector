@@ -28,7 +28,7 @@ public sealed class PortalPlannerTagTools(
         ReadOnly = true,
         Destructive = false,
         Idempotent = true,
-        OpenWorld = true,
+        OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<PlannerTagResolutionResponse>))]
     [MoodleToolMetadata(

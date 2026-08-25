@@ -134,6 +134,20 @@
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
       }
     },
+    "confirm_individual_grade_launch": {
+      "annotations": {
+        "title": "Confirm Individual Grade Launch",
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates or updates a grade in the authenticated Moodle context after the server verifies authorization and explicit confirmation.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Writes a grade that may affect an academic record; the server requires a pending action, authorization and the exact confirmation text."
+      }
+    },
     "confirm_recovery_message": {
       "annotations": {
         "title": "Confirm Recovery Message",
@@ -1212,6 +1226,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "prepare_individual_grade_launch": {
+      "annotations": {
+        "title": "Prepare Individual Grade Launch",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a private pending action and preview in the authenticated Moodle or connector context; it does not write the grade to Moodle.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not write, delete, overwrite, revoke access, cancel state or send an irreversible action; a separate confirmation is required."
+      }
+    },
     "prepare_recovery_message": {
       "annotations": {
         "title": "Prepare Recovery Message",
@@ -1343,7 +1371,7 @@
         "title": "Resolver tags da agenda",
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": true,
+        "openWorldHint": false,
         "readOnlyHint": true
       },
       "justifications": {

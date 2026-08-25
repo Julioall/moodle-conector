@@ -15,6 +15,7 @@ Critérios: autoridade, atualidade, localização, não duplicação e rastreabi
 | `security` | autenticação, escopos e release gates |
 | `operations` | deploy, troubleshooting e operação |
 | `technical` | contratos, setup e modelos de implementação |
+| `specs` | contratos ativos de execução, critérios de aceite e evidências |
 | `archive` | relatórios, auditorias e planos históricos |
 
 Os documentos temáticos foram realocados para a taxonomia alvo. Planos e specs de trabalho foram preservados em `archive/superpowers`; arquivar não significa descartar conhecimento.
@@ -23,7 +24,7 @@ Os documentos temáticos foram realocados para a taxonomia alvo. Planos e specs 
 
 | Documento/pasta | Status | Ação |
 |---|---|---|
-| `README.md`, `DEPLOY.md` | Entradas e operação de raiz | Manter; alinhar links em revisão posterior. |
+| `README.md`, `DEPLOY.md` | Entradas e operação de raiz | Manter; encoding, links e defaults operacionais verificados. |
 | `docs/roadmap.md` | Fonte canônica de prioridades | Manter e atualizar para papéis, equipes e camadas. |
 | `docs/architecture/*` | Referência arquitetural | Manter; adicionar papéis/escopos e ADR-0002. |
 | `docs/security/*` | Referência de segurança | Manter; comparar divergências com `technical/security-model.md`. |
@@ -37,18 +38,21 @@ Os documentos temáticos foram realocados para a taxonomia alvo. Planos e specs 
 
 | Arquivo | Status | Ação |
 |---|---|---|
-| `README.md` | Entrada principal | Manter; alinhar links em passe futuro. |
-| `DEPLOY.md` | Operação de raiz | Manter; apontar para runbook futuramente. |
+| `README.md` | Entrada principal | Encoding UTF-8 e links locais verificados. |
+| `DEPLOY.md` | Operação de raiz | Manter como atalho para deploy; rollback canônico no runbook. |
 | `docs/architecture/adr-0001-capability-driven-moodle-api.md` | ADR vigente | Manter. |
 | `docs/architecture/chatgpt-app-oauth.md` | Arquitetura OAuth | Manter. |
 | `docs/architecture/pending-actions.md` | Arquitetura de confirmação | Manter. |
 | `docs/architecture/skill-registry-exposure.md` | Arquitetura MCP | Manter. |
 | `docs/architecture/tool-risk-levels.md` | Classificação de risco | Manter. |
 | `docs/architecture/adr-0002-team-scoped-access.md` | Nova decisão | Manter como ADR de acesso. |
+| `docs/architecture/adr-0003-plugin-mcp-portal-boundaries.md` | Decisão de fronteiras | Manter como ADR de produto e integração. |
+| `docs/specs/*` | Specs ativas | Manter como fonte de execução e rastreabilidade. |
 | `docs/architecture/roles-and-scopes.md` | Novo modelo | Manter como referência de papéis/escopos. |
 | `docs/security/auth-and-scopes.md` | Segurança | Manter; alinhar nomenclatura futuramente. |
 | `docs/security/release-checklist.md` | Gate operacional | Manter. |
 | `docs/operations/deploy-runbook.md` | Runbook | Manter. |
+| `docs/operations/release-certification.md` | Certificação de release | Manter como procedimento operacional da SPEC-0010. |
 | `docs/operations/troubleshooting-runbook.md` | Runbook | Manter. |
 | `docs/technical/audit-model.md` | Modelo técnico | Manter. |
 | `docs/technical/local-setup.md` | Setup | Manter. |
@@ -82,4 +86,7 @@ Documentos de segurança descrevem escopos e defaults com níveis de detalhe dif
 
 ## Resultado deste passe
 
-Criados os documentos de visão, papéis/escopos e ADR-0002; roadmap atualizado; auditoria e relatório de release antigos foram movidos para `archive`. Nenhum documento foi apagado e nenhuma alteração de produção foi feita.
+Criados os documentos de visão, papéis/escopos e ADRs; roadmap atualizado; auditoria e relatório
+de release antigos foram movidos para `archive`. O README foi normalizado para UTF-8, a ADR-0002
+recebeu o nome canônico e o verificador `scripts/check-documentation.ps1` cobre links locais,
+UTF-8 e padrões conhecidos de mojibake. Nenhum documento histórico foi apagado.

@@ -1,4 +1,4 @@
-﻿name: Deploy Moodle Connector to VPS
+name: Deploy Moodle Connector to VPS
 
 on:
   push:
@@ -29,12 +29,16 @@ env:
   VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT || '22' }}
   APP_PORT: ${{ vars.APP_PORT || '8787' }}
   APP_DOMAIN: ${{ vars.APP_DOMAIN || secrets.APP_DOMAIN || '' }}
-  CLARIS_DOMAIN: ${{ vars.CLARIS_DOMAIN || 'claris.novascript.com.br' }}
-  PUBLIC_PROXY_NETWORK: ${{ vars.PUBLIC_PROXY_NETWORK || 'novascript-proxy' }}
   COMPOSE_PROFILES: ${{ vars.COMPOSE_PROFILES || 'https' }}
   CADDYFILE: ${{ vars.CADDYFILE || './Caddyfile' }}
   MCP_REQUIRE_JWT: ${{ vars.MCP_REQUIRE_JWT || 'true' }}
   MCP_REQUIRE_API_KEY: ${{ vars.MCP_REQUIRE_API_KEY || 'false' }}
+  FEATURES_MESSAGES_WRITE_ENABLED: ${{ vars.FEATURES_MESSAGES_WRITE_ENABLED || 'true' }}
+  FEATURES_SCHEDULED_MESSAGES_ENABLED: ${{ vars.FEATURES_SCHEDULED_MESSAGES_ENABLED || 'true' }}
+  FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED: ${{ vars.FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED || 'true' }}
+  FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED: ${{ vars.FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED || 'true' }}
+  FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED: ${{ vars.FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED || 'true' }}
+  FEATURES_COURSE_CONTENT_WRITE_ENABLED: ${{ vars.FEATURES_COURSE_CONTENT_WRITE_ENABLED || 'true' }}
   OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || 'moodle' }}
   OAUTH_SCOPE_NAME: ${{ vars.OAUTH_SCOPE_NAME || 'moodle-mcp-audience' }}
   OAUTH_REQUIRE_HTTPS_METADATA: ${{ vars.OAUTH_REQUIRE_HTTPS_METADATA || 'true' }}
@@ -81,6 +85,7 @@ jobs:
           MOODLE_API_WRITE_SERVICE_TOKEN: ${{ secrets.MOODLE_API_WRITE_SERVICE_TOKEN }}
           MOODLE_PROXY_BASE_URL: ${{ secrets.MOODLE_PROXY_BASE_URL }}
           MOODLE_PROXY_API_KEY: ${{ secrets.MOODLE_PROXY_API_KEY }}
+          MEDIATR_LICENSE_KEY: ${{ secrets.MEDIATR_LICENSE_KEY }}
         run: |
           has_newline() {
             case "$1" in
@@ -118,30 +123,25 @@ jobs:
             esac
           }
 
-          require_network_name() {
-            case "$2" in
-              ''|*[!a-zA-Z0-9_.-]*) echo "::error::$1 must contain only letters, numbers, dot, underscore or hyphen" && exit 1 ;;
-            esac
-          }
-
           test -n "${{ secrets.VPS_HOST }}" || (echo "::error::Configure VPS_HOST" && exit 1)
           test -n "${{ secrets.VPS_USER }}" || (echo "::error::Configure VPS_USER" && exit 1)
           test -n "$VPS_AUTH_SECRET" || (echo "::error::Configure VPS_SSH_KEY with a private key or SSH password" && exit 1)
           test -n "${{ secrets.POSTGRES_PASSWORD }}" || (echo "::error::Configure POSTGRES_PASSWORD" && exit 1)
           test -n "${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}" || (echo "::error::Configure CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64" && exit 1)
           test -n "${{ secrets.ADMIN_API_KEY }}" || (echo "::error::Configure ADMIN_API_KEY" && exit 1)
+          test -n "$MEDIATR_LICENSE_KEY" || (echo "::error::Configure MEDIATR_LICENSE_KEY" && exit 1)
           test -n "$APP_DOMAIN" || (echo "::error::Configure APP_DOMAIN via variables or secrets" && exit 1)
 
           require_hostname APP_DOMAIN "$APP_DOMAIN"
-          require_hostname CLARIS_DOMAIN "$CLARIS_DOMAIN"
-          require_network_name PUBLIC_PROXY_NETWORK "$PUBLIC_PROXY_NETWORK"
-          if [ "$APP_DOMAIN" = "$CLARIS_DOMAIN" ]; then
-            echo "::error::CLARIS_DOMAIN must be different from APP_DOMAIN."
-            exit 1
-          fi
 
           require_bool MCP_REQUIRE_JWT "$MCP_REQUIRE_JWT"
           require_bool MCP_REQUIRE_API_KEY "$MCP_REQUIRE_API_KEY"
+          require_bool FEATURES_MESSAGES_WRITE_ENABLED "$FEATURES_MESSAGES_WRITE_ENABLED"
+          require_bool FEATURES_SCHEDULED_MESSAGES_ENABLED "$FEATURES_SCHEDULED_MESSAGES_ENABLED"
+          require_bool FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED "$FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED"
+          require_bool FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED "$FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED"
+          require_bool FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED "$FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED"
+          require_bool FEATURES_COURSE_CONTENT_WRITE_ENABLED "$FEATURES_COURSE_CONTENT_WRITE_ENABLED"
           require_bool RESET_DATABASE_ON_DEPLOY "$RESET_DATABASE_ON_DEPLOY"
           require_bool OAUTH_REQUIRE_HTTPS_METADATA "$OAUTH_REQUIRE_HTTPS_METADATA"
           require_int_range APP_PORT "$APP_PORT" 1 65535
@@ -204,8 +204,6 @@ jobs:
 
           for value in \
             "$APP_DOMAIN" \
-            "$CLARIS_DOMAIN" \
-            "$PUBLIC_PROXY_NETWORK" \
             "$OAUTH_ISSUER" \
             "$OAUTH_AUDIENCE" \
             "$OAUTH_CHATGPT_REDIRECT_URI" \
@@ -216,7 +214,8 @@ jobs:
             "$MOODLE_PROXY_API_KEY" \
             "${{ secrets.POSTGRES_PASSWORD }}" \
             "${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}" \
-            "${{ secrets.ADMIN_API_KEY }}"
+            "${{ secrets.ADMIN_API_KEY }}" \
+            "$MEDIATR_LICENSE_KEY"
           do
             if has_newline "$value"; then
               echo "::error::Secrets and deploy variables must not contain line breaks."
@@ -229,6 +228,13 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: src/MoodleConnector.Web/package-lock.json
+
       - name: Restore
         run: dotnet restore MoodleConnector.slnx
 
@@ -239,6 +245,41 @@ jobs:
           unset OAUTH_AUDIENCE
           unset OAUTH_CHATGPT_REDIRECT_URI
           dotnet test MoodleConnector.slnx --configuration Release --no-restore
+
+      - name: Validate production artifacts
+        shell: pwsh
+        run: |
+          ./scripts/validate-plugin.ps1
+          ./scripts/generate-chatgpt-app-submission.ps1 -Check
+
+      - name: Validate packaged skills
+        run: python plugins/moodle-connector/skills/moodle-core/scripts/check_skill_catalog.py --repo-root .
+      - name: Validate documentation
+        shell: pwsh
+        run: ./scripts/check-documentation.ps1
+
+      - name: Validate GitHub Actions
+        run: docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.7
+
+      - name: Validate Docker Compose configuration
+        env:
+          ENV_FILE: .env.example
+          POSTGRES_PASSWORD: ci-compose-validation-password
+        run: |
+          docker compose config --quiet
+          docker compose config --format json | python -c "import json, sys; ports = json.load(sys.stdin)['services']['app']['ports']; assert any(port.get('host_ip') == '127.0.0.1' and port.get('target') == 8080 for port in ports), 'app must bind only to 127.0.0.1'"
+
+      - name: Validate portal bundle
+        working-directory: src/MoodleConnector.Web
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Validate Caddy topology
+        run: docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" -e APP_DOMAIN=moodle-connector.localhost caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
       - name: Configure SSH auth
         run: |
@@ -338,10 +379,6 @@ jobs:
               exit 1
             fi
 
-            if ! \$SUDO docker network inspect '$PUBLIC_PROXY_NETWORK' >/dev/null 2>&1; then
-              \$SUDO docker network create '$PUBLIC_PROXY_NETWORK'
-            fi
-
             \$SUDO mkdir -p '$VPS_APP_DIR'
             \$SUDO chown -R '${{ secrets.VPS_USER }}': '$VPS_APP_DIR'"
 
@@ -379,6 +416,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64: ${{ secrets.CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64 }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          MEDIATR_LICENSE_KEY: ${{ secrets.MEDIATR_LICENSE_KEY }}
           MOODLE_API_BASE_URL: ${{ secrets.MOODLE_API_BASE_URL }}
           MOODLE_API_SERVICE_TOKEN: ${{ secrets.MOODLE_API_SERVICE_TOKEN }}
           MOODLE_API_WRITE_SERVICE_TOKEN: ${{ secrets.MOODLE_API_WRITE_SERVICE_TOKEN }}
@@ -398,8 +436,6 @@ jobs:
             printf 'GIT_COMMIT=%s\n' "$GITHUB_SHA"
             printf 'BUILD_DATE=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             printf 'APP_DOMAIN=%s\n' "$APP_DOMAIN"
-            printf 'CLARIS_DOMAIN=%s\n' "$CLARIS_DOMAIN"
-            printf 'PUBLIC_PROXY_NETWORK=%s\n' "$PUBLIC_PROXY_NETWORK"
             printf 'COMPOSE_PROFILES=%s\n' "$COMPOSE_PROFILES"
             printf 'CADDYFILE=%s\n' "$CADDYFILE"
             printf 'POSTGRES_DB=%s\n' "$POSTGRES_DB"
@@ -408,7 +444,15 @@ jobs:
             printf 'Postgres__ConnectionString=%s\n' "$CONNECTION_STRING"
             printf 'ConnectorSecrets__EncryptionKeyBase64=%s\n' "$CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64"
             printf 'AdminApi__ApiKey=%s\n' "$ADMIN_API_KEY"
+            printf 'MEDIATR_LICENSE_KEY=%s\n' "$MEDIATR_LICENSE_KEY"
             printf 'Features__AppV2Enabled=true\n'
+            printf 'Features__MessagesWriteEnabled=%s\n' "$FEATURES_MESSAGES_WRITE_ENABLED"
+            printf 'Features__ScheduledMessagesEnabled=%s\n' "$FEATURES_SCHEDULED_MESSAGES_ENABLED"
+            printf 'Features__AssignmentFeedbackWriteEnabled=%s\n' "$FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED"
+            printf 'Features__AssignmentGradeWriteEnabled=%s\n' "$FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED"
+            printf 'Features__UniversalMoodleWriteEnabled=%s\n' "$FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED"
+            printf 'Features__CourseContentWriteEnabled=%s\n' "$FEATURES_COURSE_CONTENT_WRITE_ENABLED"
+            printf 'Features__DemoToolsEnabled=false\n'
             printf 'McpServerSecurity__RequireJwt=%s\n' "$MCP_REQUIRE_JWT"
             printf 'McpServerSecurity__RequireApiKey=%s\n' "$MCP_REQUIRE_API_KEY"
             printf 'OAuth__Issuer=%s\n' "$OAUTH_ISSUER_EFFECTIVE"
@@ -507,4 +551,8 @@ jobs:
           else
             sshpass -p "$VPS_AUTH_SECRET" ssh -o ConnectTimeout=30 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_SCRIPT"
           fi
+
+      - name: Verify deployed public contract
+        shell: pwsh
+        run: ./scripts/verify-production-endpoint.ps1 -AppDomain "$env:APP_DOMAIN" -ExpectedGitCommit "$env:GITHUB_SHA" -RequireStrictTransportSecurity
 

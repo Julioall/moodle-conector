@@ -10,9 +10,9 @@ docker compose -f docker-compose.local.yml up -d --build
 
 URLs:
 
-- Portal: `http://127.0.0.1:8787/portal/`
+- Portal: `http://127.0.0.1:8787/`
 - Health: `http://127.0.0.1:8787/health/live`
-- Frontend Vite opcional: `http://127.0.0.1:4173/portal/`
+- Frontend Vite opcional: `http://127.0.0.1:4173/`
 
 O ambiente local habilita `PortalV2Enabled`, usa Postgres no próprio Compose e ativa os adaptadores Moodle stub. Nenhuma credencial Moodle, token ou chave de produção é usada.
 
@@ -32,7 +32,7 @@ npm --prefix src/MoodleConnector.Web run smoke
 ```powershell
 docker compose -f docker-compose.local.yml ps
 Invoke-WebRequest http://127.0.0.1:8787/health/live
-Invoke-WebRequest http://127.0.0.1:8787/portal/
+Invoke-WebRequest http://127.0.0.1:8787/
 
 npm --prefix src/MoodleConnector.Web run smoke:api
 npm --prefix src/MoodleConnector.Web run smoke:e2e

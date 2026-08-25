@@ -53,7 +53,7 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     private const string McpEndpoint = "/mcp";
     private const int MaxRetries = 7; // bounded backoff for recoverable rate limits
     public static readonly string CommitSha = ResolveCommitSha();
-    public const string BenchmarkVersion = "1.1.0";
+    public const string BenchmarkVersion = "1.2.0";
 
     public OpenAIResponsesBenchmarkDriver(
         ChatClient chatClient,
@@ -338,10 +338,12 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             }
         }
 
-        // 3. Setup conversation
+        // 3. Setup conversation. Plugin profiles receive the exact packaged
+        // skill content, so the benchmark can prove a skill influenced a run.
+        var skillBundle = LoadPluginSkillBundle(profile, task);
         var messages = new List<ChatMessage>
         {
-            new SystemChatMessage(BuildSystemPrompt(profile, task)),
+            new SystemChatMessage(BuildSystemPrompt(skillBundle)),
             new UserChatMessage(task.Prompt)
         };
 
@@ -419,7 +421,7 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
 
         // 5. Build traces
         var routing = new RoutingTrace(
-            SelectedSkill: ResolveSkillNames(profile, task),
+            SelectedSkill: skillBundle.SelectedNames,
             SelectedIntent: IntentMapper.ResolveOperation(selectedOperation ?? selectedTool ?? "none") ?? "unknown",
             SelectedOperation: selectedOperation ?? selectedTool ?? "none",
             SelectedConnection: selectedConnection,
@@ -438,7 +440,7 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
             TotalTokens: aggregatedPromptTokens + aggregatedCompletionTokens,
             ToolSchemaTokens: toolSchemaTokens,
             ToolManifestHash: toolManifestHash,
-            SkillManifestHash: ComputeSkillManifestHash(profile, task),
+            SkillManifestHash: skillBundle.ManifestHash,
             BenchmarkVersion: BenchmarkVersion,
             CommitSha: CommitSha
             ,ModelCalls: modelCalls
@@ -580,19 +582,15 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
     private static int EstimateTokens(string text)
         => string.IsNullOrWhiteSpace(text) ? 0 : Math.Max(1, (int)Math.Ceiling(text.Length / 4.0));
 
-    private static string BuildSystemPrompt(BenchmarkProfile profile, BenchmarkTask task)
+    private static string BuildSystemPrompt(BenchmarkSkillBundle skillBundle)
     {
         var prompt = "You are MoodleConnector, a helpful assistant. Use tools to interact with Moodle.";
-        if (!profile.UseSafeReadExecutor) return prompt;
-        var domainPrompt = task.Category.Equals("assignments", StringComparison.OrdinalIgnoreCase)
-            ? " For assignments, prefer list_course_assignments for activity discovery and the specialized submission tools for submissions/status."
-            : task.Category.Equals("students", StringComparison.OrdinalIgnoreCase)
-                ? " For students, prefer the specialized participant and group tools; preserve Moodle IDs and pagination."
-                : " Prefer the canonical Moodle course operations through moodle_execute_read for known course requests. " +
-                  "Use search or fetch only for discovery or when no registered Moodle operation covers the request. " +
-                  "For courses: list courses = core_enrol_get_users_courses; course details/search by id = core_course_get_courses_by_field; " +
-                  "course contents = core_course_get_contents.";
-        return prompt + domainPrompt + " Always pass the requested moodleAlias.";
+        if (skillBundle.IsEmpty) return prompt;
+
+        return $"{prompt}\n\n" +
+               "The following installed Moodle Connector skills are authoritative workflow guidance for this request. " +
+               "Follow them together with the available tool schemas.\n\n" +
+               skillBundle.PromptSection;
     }
 
     private static string? ExtractCanonicalOperation(string toolName, string argumentsJson)
@@ -660,31 +658,60 @@ public sealed class OpenAIResponsesBenchmarkDriver : IBenchmarkAgentDriver
         catch { return argumentsJson; }
     }
 
-    private static string ResolveSkillNames(BenchmarkProfile profile, BenchmarkTask task)
+    public static BenchmarkSkillBundle LoadPluginSkillBundle(
+        BenchmarkProfile profile,
+        BenchmarkTask task,
+        string? repositoryRoot = null)
     {
-        if (!profile.UseSafeReadExecutor) return "moodle-core";
-        return task.Category.ToLowerInvariant() switch
+        var skillNames = ResolveSkillNames(profile, task);
+        if (skillNames.Count == 0)
         {
-            "assignments" => "moodle-core,moodle-assignments",
-            "students" => "moodle-core,moodle-students",
-            _ => "moodle-core,moodle-courses"
-        };
-    }
+            return new BenchmarkSkillBundle([], string.Empty, string.Empty);
+        }
 
-    private static string ComputeSkillManifestHash(BenchmarkProfile profile, BenchmarkTask task)
-    {
-        var skillNames = ResolveSkillNames(profile, task).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var content = new StringBuilder();
-        var repoRoot = FindRepositoryRoot();
+        var repoRoot = repositoryRoot ?? FindRepositoryRoot();
+        if (string.IsNullOrWhiteSpace(repoRoot))
+        {
+            throw new InvalidOperationException("Plugin skill benchmark requires a Moodle Connector repository root.");
+        }
+
+        var prompt = new StringBuilder();
+        var manifest = new StringBuilder();
         foreach (var skillName in skillNames)
         {
-            var path = repoRoot is null
-                ? string.Empty
-                : Path.Combine(repoRoot, ".agents", "skills", skillName, "SKILL.md");
-            if (File.Exists(path)) content.AppendLine(File.ReadAllText(path));
-            else content.AppendLine(skillName);
+            var path = Path.Combine(repoRoot, "plugins", "moodle-connector", "skills", skillName, "SKILL.md");
+            if (!File.Exists(path))
+            {
+                throw new InvalidOperationException($"Packaged skill '{skillName}' was not found at '{path}'.");
+            }
+
+            var content = File.ReadAllText(path);
+            if (string.IsNullOrWhiteSpace(content))
+            {
+                throw new InvalidOperationException($"Packaged skill '{skillName}' is empty.");
+            }
+
+            var contentHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))).ToLowerInvariant();
+            manifest.Append(skillName).Append(':').Append(contentHash).Append('\n');
+            prompt.Append("## Installed skill: ").Append(skillName)
+                .Append(" (sha256: ").Append(contentHash).Append(")\n")
+                .Append(content.Trim()).Append("\n\n");
         }
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content.ToString()))).ToLowerInvariant();
+
+        var manifestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest.ToString()))).ToLowerInvariant();
+        return new BenchmarkSkillBundle(skillNames, prompt.ToString().TrimEnd(), manifestHash);
+    }
+
+    private static IReadOnlyList<string> ResolveSkillNames(BenchmarkProfile profile, BenchmarkTask task)
+    {
+        if (!profile.UsePluginSkills) return [];
+
+        return task.Category.ToLowerInvariant() switch
+        {
+            "assignments" => ["moodle-core", "moodle-assignments"],
+            "students" => ["moodle-core", "moodle-students"],
+            _ => ["moodle-core", "moodle-courses"]
+        };
     }
 
     private static string? FindRepositoryRoot()

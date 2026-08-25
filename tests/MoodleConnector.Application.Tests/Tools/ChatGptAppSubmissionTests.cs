@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Application.Tests.Tools;
@@ -13,6 +14,9 @@ public sealed class ChatGptAppSubmissionTests
         using var document = JsonDocument.Parse(File.ReadAllText(FindSubmissionPath()));
         var submissionTools = document.RootElement.GetProperty("tools");
         var attributes = RegisteredMcpToolContainers.AlwaysOn
+            .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
+                new FeatureOptions { DemoToolsEnabled = false },
+                new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }))
             .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
             .Select(method => (Method: method, Attribute: method.GetCustomAttribute<McpServerToolAttribute>()))
             .Where(item => item.Attribute is not null)

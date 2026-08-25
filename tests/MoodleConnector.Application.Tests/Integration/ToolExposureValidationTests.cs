@@ -5,6 +5,8 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using ModelContextProtocol.Server;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Presentation.Configuration;
 using MoodleConnector.Presentation.Security;
 using Xunit;
@@ -100,6 +102,120 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.DoesNotContain("prepare_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirm_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("future_unregistered_tool", tools, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Production_submission_matches_the_runtime_tools_list()
+    {
+        var runtimeTools = await GetToolsListAsync(_factory, "Production");
+        var submissionPath = Path.Combine(AppContext.BaseDirectory, "chatgpt-app-submission.json");
+
+        Assert.True(File.Exists(submissionPath), "chatgpt-app-submission.json must be available to integration tests.");
+
+        var submission = JsonNode.Parse(await File.ReadAllTextAsync(submissionPath));
+        var submissionTools = submission?["tools"]?.AsObject()
+            .Select(entry => entry.Key)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotNull(submissionTools);
+        Assert.Equal(
+            runtimeTools.OrderBy(name => name, StringComparer.Ordinal),
+            submissionTools!);
+    }
+
+    [Fact]
+    public void Production_submission_annotations_match_registered_tool_contracts()
+    {
+        var submissionTools = LoadSubmissionTools();
+        var productionContainers = RegisteredMcpToolContainers.AlwaysOn
+            .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
+                new FeatureOptions { DemoToolsEnabled = false },
+                new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
+        var contracts = productionContainers
+            .SelectMany(container => container.GetMethods())
+            .SelectMany(method => method.GetCustomAttributes(typeof(McpServerToolAttribute), inherit: true)
+                .Cast<McpServerToolAttribute>())
+            .Where(contract => !string.IsNullOrWhiteSpace(contract.Name))
+            .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
+
+        Assert.Equal(108, contracts.Count);
+        Assert.Equal(
+            contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
+            submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));
+
+        foreach (var (name, contract) in contracts)
+        {
+            Assert.NotNull(contract.OutputSchemaType);
+
+            var annotations = submissionTools[name]?["annotations"];
+            Assert.NotNull(annotations);
+            Assert.Equal(contract.ReadOnly, annotations!["readOnlyHint"]!.GetValue<bool>());
+            Assert.Equal(contract.Destructive, annotations["destructiveHint"]!.GetValue<bool>());
+            Assert.Equal(contract.Idempotent, annotations["idempotentHint"]!.GetValue<bool>());
+            Assert.Equal(contract.OpenWorld, annotations["openWorldHint"]!.GetValue<bool>());
+        }
+    }
+
+    [Fact]
+    public void Production_submission_tool_block_is_generated_from_registered_contracts()
+    {
+        var submission = LoadSubmission();
+
+        Assert.True(
+            JsonNode.DeepEquals(
+                ChatGptSubmissionToolCatalog.CreateProductionTools(),
+                submission["tools"]),
+            "The tools block must be regenerated from McpServerToolAttribute contracts instead of edited by hand.");
+    }
+
+    [Fact]
+    public void Submission_contains_the_required_review_metadata_and_cases()
+    {
+        var submission = LoadSubmission();
+        var appInfo = submission["app_info"]?.AsObject();
+        var testCases = submission["test_cases"]?.AsArray();
+        var negativeTestCases = submission["negative_test_cases"]?.AsArray();
+        var submissionTools = LoadSubmissionTools();
+
+        Assert.NotNull(appInfo);
+        Assert.False(string.IsNullOrWhiteSpace(appInfo!["display_name"]?.GetValue<string>()));
+        var subtitle = appInfo["subtitle"]?.GetValue<string>();
+        Assert.False(string.IsNullOrWhiteSpace(subtitle));
+        Assert.True(subtitle!.Length <= 30, "Submission subtitle must contain at most 30 characters.");
+        Assert.Contains(appInfo["category"]?.GetValue<string>(), new[]
+        {
+            "BUSINESS", "COLLABORATION", "DESIGN", "DEVELOPER_TOOLS", "EDUCATION", "ENTERTAINMENT",
+            "FINANCE", "FOOD", "LIFESTYLE", "NEWS", "PRODUCTIVITY", "SHOPPING", "TRAVEL"
+        });
+
+        Assert.NotNull(testCases);
+        Assert.NotNull(negativeTestCases);
+        Assert.Equal(5, testCases!.Count);
+        Assert.Equal(3, negativeTestCases!.Count);
+
+        foreach (var entry in submissionTools)
+        {
+            var annotations = entry.Value?["annotations"];
+            var justifications = entry.Value?["justifications"];
+
+            Assert.False(string.IsNullOrWhiteSpace(annotations?["title"]?.GetValue<string>()));
+            Assert.NotNull(annotations?["readOnlyHint"]);
+            Assert.NotNull(annotations?["openWorldHint"]);
+            Assert.NotNull(annotations?["destructiveHint"]);
+            Assert.False(string.IsNullOrWhiteSpace(justifications?["read_only_justification"]?.GetValue<string>()));
+            Assert.False(string.IsNullOrWhiteSpace(justifications?["open_world_justification"]?.GetValue<string>()));
+            Assert.False(string.IsNullOrWhiteSpace(justifications?["destructive_justification"]?.GetValue<string>()));
+        }
+
+        foreach (var testCase in testCases)
+        {
+            var toolName = testCase?["tools_triggered"]?.GetValue<string>();
+            Assert.False(string.IsNullOrWhiteSpace(toolName));
+            Assert.Contains(toolName!, submissionTools.Select(entry => entry.Key), StringComparer.Ordinal);
+        }
+
+        Assert.All(negativeTestCases, testCase => Assert.Null(testCase?["tools_triggered"]));
     }
 
     [Fact]
@@ -262,6 +378,25 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
             var combined = string.Join(string.Empty, dataLines);
             return JsonNode.Parse(combined);
         }
+    }
+
+    private static JsonObject LoadSubmission()
+    {
+        var submissionPath = Path.Combine(AppContext.BaseDirectory, "chatgpt-app-submission.json");
+        Assert.True(File.Exists(submissionPath), "chatgpt-app-submission.json must be available to integration tests.");
+
+        var submission = JsonNode.Parse(File.ReadAllText(submissionPath));
+        var root = submission?.AsObject();
+        Assert.NotNull(root);
+        return root!;
+    }
+
+    private static JsonObject LoadSubmissionTools()
+    {
+        var submission = LoadSubmission();
+        var tools = submission?["tools"]?.AsObject();
+        Assert.NotNull(tools);
+        return tools!;
     }
 
         private async Task<string> RegisterClientAsync(bool canWrite, WebApplicationFactory<Program>? factory = null)

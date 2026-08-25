@@ -52,6 +52,9 @@ O authorization server publica `/.well-known/openid-configuration` e `/.well-kno
 ## Portal Local
 
 O portal usa autenticação por cookie HttpOnly com `SameSite=Lax`. Em produção, o cookie é marcado como `Secure`.
+As rotas privadas de `/api` exigem a política `portal.session`, que aceita exclusivamente esse
+cookie: um Bearer JWT emitido para `/mcp` não funciona como sessão do portal. As exceções públicas
+estão documentadas em [fronteiras de autenticação](../architecture/authentication-boundaries.md).
 
 Controles aplicados:
 
@@ -60,6 +63,13 @@ Controles aplicados:
 - rate limit em cadastro, login, conexão Moodle, endpoint administrativo e `/mcp`;
 - senhas Moodle preservadas exatamente como informadas, sem `Trim()` no segredo.
 
+## Proxy E Headers De Transporte
+
+O container ASP.NET publica sua porta somente em loopback do host. O Caddy é a única entrada
+pública e encaminha protocolo, host e endereço do cliente; por isso o app pode reconhecer HTTPS
+e acrescentar `Strict-Transport-Security` como defesa em profundidade. O Caddy também remove o
+header `Server` do upstream. A certificação pós-deploy exige HSTS e rejeita exposição de Kestrel.
+
 ## Rate Limiting
 
 O `/mcp` aplica rate limit por usuário/conector depois da resolução de credenciais. A chave de partição usa `connector_client_id` quando disponível, `sub`/`NameIdentifier` quando aplicável, hash da API key como fallback autenticado, ou IP para chamadas de descoberta sem credencial.
@@ -67,7 +77,7 @@ O `/mcp` aplica rate limit por usuário/conector depois da resolução de creden
 Configurações:
 
 - `RateLimiting:WindowSeconds`;
-- `RateLimiting:PortalAuthPermitLimit`;
+- `RateLimiting:AppAuthPermitLimit`;
 - `RateLimiting:AdminApiPermitLimit`;
 - `RateLimiting:McpPermitLimit`.
 
@@ -125,6 +135,12 @@ Ordem de resolução:
 
 Credenciais Moodle e API key retornável ao usuário são protegidas por `AesGcmConnectorSecretProtector`.
 
+Em ambiente que não seja `Development` ou `Testing`, o host falha no startup se a connection string
+Postgres, a chave `ConnectorSecrets:EncryptionKeyBase64`, a chave `AdminApi:ApiKey` ou
+`MEDIATR_LICENSE_KEY` estiverem ausentes ou contiverem placeholders conhecidos. A chave de
+criptografia também deve ser Base64 válido de exatamente 32 bytes. Isso impede que um `.env.example`
+seja promovido acidentalmente e torna explícita a licença exigida pelo MediatR 13 em produção.
+
 Não devem ser logados:
 
 - JWT completo;
@@ -153,6 +169,11 @@ Os gateways `MoodleApi` e `MoodleProxy` aplicam timeout, retry de falhas transit
 
 ## Estado Atual Das Escritas
 
-Escritas reais no Moodle estão desabilitadas/não implementadas.
+Escritas reais controladas estão implementadas para fórum, mensagens, nota/feedback, conteúdo e
+o executor universal classificado. A configuração versionada atual habilita as flags de escrita,
+mas a promoção à VPS grava cada uma explicitamente a partir de variáveis `FEATURES_*`; o exemplo
+de ambiente mantém todas desabilitadas para rollout manual seguro.
 
-O fluxo base de pending actions está implementado e deve ser usado por qualquer escrita futura.
+Toda escrita exige `CanWrite`, permissão/escopo aplicável, capability Moodle, prévia, confirmação
+literal, expiração, execução única/idempotente e auditoria. O fluxo de pending actions é obrigatório
+para qualquer escrita nova.

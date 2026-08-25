@@ -18,6 +18,7 @@ Manter a documentação encontrável, previsível e sem múltiplas fontes concor
 | Conteúdo | Pasta |
 |---|---|
 | Decisões e limites | `docs/architecture/` |
+| Specs ativas de execução e rastreabilidade | `docs/specs/` |
 | Visão, jornadas e fronteiras do produto | `docs/product/` |
 | Segurança, privacidade e controles | `docs/security/` |
 | Deploy, setup operacional e troubleshooting | `docs/operations/` |
@@ -29,6 +30,11 @@ Manter a documentação encontrável, previsível e sem múltiplas fontes concor
 Todo documento deve declarar, quando aplicável: objetivo, escopo, status, autoridade, limitações e referências. Não declarar funcionalidades como implementadas sem evidência no código/testes ou sem marcar explicitamente como planejadas.
 
 ADRs devem conter no mínimo `Status`, `Contexto`, `Decisão` e `Consequências`.
+
+Specs ativas devem conter no mínimo `Status`, `Objetivo`, `Escopo`, `Fora de escopo`,
+`Dependências`, `Critérios de aceite`, `Validação`, `Rollout` e `Rollback`. O índice em
+`docs/specs/README.md` é a autoridade sobre seu estado; tarefas, PRs e evidências devem
+referenciar o identificador da spec, sem copiar decisões para planos paralelos.
 
 ## Regras de manutenção
 
