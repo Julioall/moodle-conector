@@ -155,10 +155,11 @@ export function AgendaPage() {
   const sortedItems = useMemo(() => [...agendaItems].sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime()), [agendaItems]);
   const groupedItems = useMemo(() => sortedItems.reduce<Record<string, AgendaItem[]>>((groups, item) => { const key = dateKey(item.date); groups[key] = [...(groups[key] ?? []), item]; return groups; }, {}), [sortedItems]);
   const resetForm = () => { setTitle(''); setDescription(''); setStartAt(''); setEndAt(''); setType('manual'); setEditingEvent(null); };
-  const handleSaved = () => { resetForm(); setFormOpen(false); void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); void client.invalidateQueries({ queryKey: ['app', 'dashboard'] }); };
+  const refreshPlannerCounters = () => void client.invalidateQueries({ queryKey: ['app', 'dashboard', 'summary'] });
+  const handleSaved = () => { resetForm(); setFormOpen(false); void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); refreshPlannerCounters(); };
   const create = useMutation({ mutationFn: (input: AgendaInput) => agendaGateway.create(input), onSuccess: handleSaved });
   const update = useMutation({ mutationFn: ({ id, input }: { id: string; input: AgendaInput }) => agendaGateway.update(id, input), onSuccess: handleSaved });
-  const remove = useMutation({ mutationFn: agendaGateway.remove, onSuccess: () => { setDeleteId(null); void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); } });
+  const remove = useMutation({ mutationFn: agendaGateway.remove, onSuccess: () => { setDeleteId(null); void client.invalidateQueries({ queryKey: ['app', 'agenda'] }); refreshPlannerCounters(); } });
   const importIcs = useMutation({
     mutationFn: agendaGateway.importIcs,
     onSuccess: ({ data }) => {
@@ -170,10 +171,11 @@ export function AgendaPage() {
       toast.success('Importação concluída', { description: summaries || 'Nenhum item foi encontrado no arquivo.' });
       void client.invalidateQueries({ queryKey: ['app', 'agenda'] });
       void client.invalidateQueries({ queryKey: ['app', 'tasks'] });
+      refreshPlannerCounters();
     },
     onError: (error) => toast.error('Não foi possível importar a agenda', { description: error instanceof Error ? error.message : undefined }),
   });
-  const updateTask = useMutation({ mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => tasksGateway.update(id, { status }), onSuccess: (response) => { setDetailTask(response.data); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); } });
+  const updateTask = useMutation({ mutationFn: ({ id, status }: { id: string; status: TaskStatus }) => tasksGateway.update(id, { status }), onSuccess: (response) => { setDetailTask(response.data); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); refreshPlannerCounters(); } });
   const openCreate = (date?: Date) => { resetForm(); if (date) { const next = new Date(date); next.setHours(9, 0, 0, 0); setStartAt(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}T09:00`); } setFormOpen(true); };
   const openEdit = (event: AgendaEvent) => { setEditingEvent(event); setTitle(event.title); setDescription(event.description ?? ''); setStartAt(toDateTimeLocal(event.startAt)); setEndAt(event.endAt ? toDateTimeLocal(event.endAt) : ''); setType(event.type); setFormOpen(true); };
   const saveEvent = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (!title.trim() || !startAt) return; const input = { title: title.trim(), description: description.trim() || undefined, startAt: new Date(startAt).toISOString(), endAt: endAt ? new Date(endAt).toISOString() : undefined, type }; if (editingEvent) update.mutate({ id: editingEvent.id, input }); else create.mutate(input); };

@@ -56,6 +56,7 @@ describe('DashboardPage', () => {
     view.unmount();
     render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/?connectionRef=demo']}><DashboardPage /></MemoryRouter></QueryClientProvider>);
     await waitFor(() => expect(screen.getByText('Pendências por curso')).toBeInTheDocument());
-    expect(dashboardGateway.getMetric).toHaveBeenCalledTimes(callsAfterInitialLoad);
+    expect(dashboardGateway.getMetric).toHaveBeenCalledTimes(callsAfterInitialLoad + 1);
+    expect(dashboardGateway.getMetric).toHaveBeenLastCalledWith('summary', 'demo');
   });
 });

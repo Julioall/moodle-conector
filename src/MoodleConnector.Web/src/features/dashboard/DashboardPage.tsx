@@ -13,6 +13,7 @@ import { useConnectionScope } from '../connections/useConnectionScope';
 import { dashboardGateway, type DashboardAccessMetric, type DashboardAccessSnapshot, type DashboardPendingMetric, type DashboardPriority, type DashboardSummaryMetric } from './dashboard-gateway';
 
 const DASHBOARD_STALE_TIME = 5 * 60_000;
+const DASHBOARD_SUMMARY_STALE_TIME = 0;
 const DASHBOARD_GC_TIME = 15 * 60_000;
 
 function ScopeLink({ connectionRef, courseId, studentId, children }: { connectionRef?: string; courseId?: string; studentId?: string; children: React.ReactNode }) {
@@ -129,8 +130,9 @@ export function DashboardPage() {
   const summaryQuery = useQuery<DashboardSummaryMetric>({
     queryKey: ['app', 'dashboard', 'summary', connectionRef],
     queryFn: () => dashboardGateway.getMetric<DashboardSummaryMetric>('summary', connectionRef),
-    enabled: Boolean(connectionRef),
-    staleTime: DASHBOARD_STALE_TIME,
+    enabled: true,
+    // Local planner counters must be current when returning from Tasks or Agenda.
+    staleTime: DASHBOARD_SUMMARY_STALE_TIME,
     gcTime: DASHBOARD_GC_TIME,
   });
   const pendingQuery = useQuery<DashboardPendingMetric>({
@@ -149,7 +151,7 @@ export function DashboardPage() {
     gcTime: DASHBOARD_GC_TIME,
   });
   const refresh = (metric: 'summary' | 'pending' | 'access') => {
-    if (!connectionRef) return;
+    if (!connectionRef && metric !== 'summary') return;
     void queryClient.fetchQuery({
       queryKey: ['app', 'dashboard', metric, connectionRef],
       queryFn: () => dashboardGateway.getMetric(metric, connectionRef, true),

@@ -269,15 +269,16 @@ export function TasksPage() {
   const total = filteredTasks.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const paginatedTasks = useMemo(() => filteredTasks.slice((page - 1) * pageSize, page * pageSize), [filteredTasks, page]);
+  const refreshPlannerCounters = () => void client.invalidateQueries({ queryKey: ['app', 'dashboard', 'summary'] });
 
   const create = useMutation({
     mutationFn: (input: TaskInput) => tasksGateway.create(input),
-    onSuccess: () => { setTaskActionError(null); setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); refreshPlannerCounters(); },
     onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível criar a tarefa.')),
   });
   const update = useMutation({
     mutationFn: ({ id, input }: { id: string; input: TaskInput }) => tasksGateway.update(id, input),
-    onSuccess: () => { setTaskActionError(null); setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setFormOpen(false); resetForm(); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); refreshPlannerCounters(); },
     onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível atualizar a tarefa.')),
   });
   const bulkUpdate = useMutation({
@@ -288,17 +289,17 @@ export function TasksPage() {
       }
       return results;
     },
-    onSuccess: () => { setTaskActionError(null); setSelectedTaskIds(new Set()); setSelectionMode(false); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setSelectedTaskIds(new Set()); setSelectionMode(false); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); refreshPlannerCounters(); },
     onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível atualizar os itens selecionados.')),
   });
   const remove = useMutation({
     mutationFn: tasksGateway.remove,
-    onSuccess: () => { setTaskActionError(null); setDeleteIds([]); setDetailTask(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setDeleteIds([]); setDetailTask(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); refreshPlannerCounters(); },
     onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Não foi possível remover a tarefa.')),
   });
   const removeMany = useMutation({
     mutationFn: tasksGateway.removeMany,
-    onSuccess: () => { setTaskActionError(null); setDeleteIds([]); setSelectedTaskIds(new Set()); setSelectionMode(false); setDetailTask(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); },
+    onSuccess: () => { setTaskActionError(null); setDeleteIds([]); setSelectedTaskIds(new Set()); setSelectionMode(false); setDetailTask(null); void client.invalidateQueries({ queryKey: ['app', 'tasks'] }); refreshPlannerCounters(); },
     onError: (error) => setTaskActionError(mutationErrorMessage(error, 'Nao foi possivel remover as tarefas selecionadas.')),
   });
 

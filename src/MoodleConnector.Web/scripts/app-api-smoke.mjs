@@ -53,6 +53,36 @@ if (dashboard.status !== 200 || !dashboardBody.data?.summary || !dashboardBody.m
   throw new Error(`Dashboard failed: ${dashboard.status} ${dashboard.body}`);
 }
 
+const refreshedCsrf = await call('GET', '/api/csrf', undefined, sessionCookie);
+const refreshedCsrfToken = JSON.parse(refreshedCsrf.body).token;
+const plannerCookie = refreshedCsrf.cookie ? `${sessionCookie}; ${refreshedCsrf.cookie}` : sessionCookie;
+if (refreshedCsrf.status !== 200 || !refreshedCsrfToken) {
+  throw new Error(`Planner CSRF bootstrap failed: ${refreshedCsrf.status} ${refreshedCsrf.body}`);
+}
+
+const now = new Date();
+const task = await call('POST', '/api/tasks', {
+  title: 'Task counter smoke',
+  status: 'todo',
+  priority: 'medium',
+  dueAt: now.toISOString(),
+}, plannerCookie, { 'x-csrf-token': refreshedCsrfToken });
+if (task.status !== 201) throw new Error(`Task creation failed: ${task.status} ${task.body}`);
+
+const event = await call('POST', '/api/agenda', {
+  title: 'Event counter smoke',
+  startAt: now.toISOString(),
+  endAt: new Date(now.getTime() + 60 * 60 * 1000).toISOString(),
+  type: 'manual',
+}, plannerCookie, { 'x-csrf-token': refreshedCsrfToken });
+if (event.status !== 201) throw new Error(`Event creation failed: ${event.status} ${event.body}`);
+
+const summary = await call('GET', '/api/dashboard/summary', undefined, plannerCookie);
+const summaryBody = JSON.parse(summary.body);
+if (summary.status !== 200 || summaryBody.data?.summary?.todayTasks !== 1 || summaryBody.data?.summary?.todayEvents !== 1) {
+  throw new Error(`Planner counters failed: ${summary.status} ${summary.body}`);
+}
+
 for (const path of ['/api/connections', '/api/courses', '/api/pending']) {
   const response = await call('GET', path, undefined, sessionCookie);
   const body = JSON.parse(response.body);
@@ -84,4 +114,5 @@ if (coursesBody.data?.[0]) {
 console.log(`PASS register ${registered.status}`);
 console.log(`PASS session ${session.status}`);
 console.log(`PASS dashboard ${dashboard.status}`);
+console.log('PASS planner counters without Moodle connection');
 

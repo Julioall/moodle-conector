@@ -2218,10 +2218,31 @@ app.MapGet("/api/dashboard/{metric}", async (
     {
         const string warning = "Nenhuma conexão Moodle foi configurada para esta conta.";
         var emptySummary = new AppDashboardSummaryDto(0, 0, 0, 0, 0);
+        if (normalizedMetric == "summary")
+        {
+            // Tasks and agenda belong to the local account, so they remain
+            // useful before the user connects a Moodle instance.
+            var todayStart = GetBrazilTodayStart(generatedAt);
+            var todayEnd = todayStart.AddDays(1);
+            var todayEvents = await dbContext.CalendarEvents.AsNoTracking()
+                .CountAsync(item => item.OwnerId == identity.Id &&
+                                    item.StartAt < todayEnd &&
+                                    (!item.EndAt.HasValue || item.EndAt > todayStart), cancellationToken);
+            var todayTasks = await dbContext.Tasks.AsNoTracking()
+                .CountAsync(item => item.OwnerId == identity.Id &&
+                                    item.Status != "done" &&
+                                    item.DueAt >= todayStart &&
+                                    item.DueAt < todayEnd, cancellationToken);
+            var summary = emptySummary with
+            {
+                TodayEvents = todayEvents,
+                TodayTasks = todayTasks,
+            };
+            return (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(
+                new(summary, [warning]), new(generatedAt, null)));
+        }
         return normalizedMetric switch
         {
-            "summary" => (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(
-                new(emptySummary, [warning]), new(generatedAt, null))),
             "pending" => (IResult)Results.Ok(new AppEnvelope<AppDashboardPendingMetricDto>(
                 new(emptySummary, [], [], [], [], [warning]), new(generatedAt, null))),
             "access" => (IResult)Results.Ok(new AppEnvelope<AppDashboardAccessMetricDto>(
@@ -2236,7 +2257,12 @@ app.MapGet("/api/dashboard/{metric}", async (
     var cacheKey = $"dashboard-metric:{identity.Id}:{effectiveConnectionRef}:{normalizedMetric}";
     var courseScopeCacheKey = $"dashboard-course-scope:{identity.Id}:{effectiveConnectionRef}";
 
-    if (normalizedMetric != "pending" && refresh != true && memoryCache.TryGetValue(cacheKey, out object? cached) && cached is not null)
+    // Planner counters are local, inexpensive reads and must reflect mutations
+    // immediately instead of serving the five-minute dashboard cache.
+    if (normalizedMetric is not ("pending" or "summary") &&
+        refresh != true &&
+        memoryCache.TryGetValue(cacheKey, out object? cached) &&
+        cached is not null)
     {
         return normalizedMetric switch
         {
@@ -2276,7 +2302,9 @@ app.MapGet("/api/dashboard/{metric}", async (
         var todayStart = GetBrazilTodayStart(generatedAt);
         var todayEnd = todayStart.AddDays(1);
         var todayEvents = await dbContext.CalendarEvents.AsNoTracking()
-            .CountAsync(item => item.OwnerId == identity.Id && item.StartAt >= todayStart && item.StartAt < todayEnd, cancellationToken);
+            .CountAsync(item => item.OwnerId == identity.Id &&
+                                item.StartAt < todayEnd &&
+                                (!item.EndAt.HasValue || item.EndAt > todayStart), cancellationToken);
         var todayTasks = await dbContext.Tasks.AsNoTracking()
             .CountAsync(item => item.OwnerId == identity.Id && item.Status != "done" && item.DueAt >= todayStart && item.DueAt < todayEnd, cancellationToken);
         var result = new AppDashboardSummaryMetricDto(
@@ -2286,7 +2314,6 @@ app.MapGet("/api/dashboard/{metric}", async (
                 TodayTasks = todayTasks,
             },
             courses.Count == 0 ? ["Nenhum curso em andamento foi encontrado em Meus Cursos."] : []);
-        memoryCache.Set(cacheKey, result, AppDashboardBudget.MetricCacheDuration);
         return (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
     }
 
@@ -2536,7 +2563,9 @@ app.MapGet("/api/dashboard", async (
     var todayStart = GetBrazilTodayStart(generatedAt);
     var todayEnd = todayStart.AddDays(1);
     var todayEvents = await dbContext.CalendarEvents.AsNoTracking()
-        .CountAsync(item => item.OwnerId == identity.Id && item.StartAt >= todayStart && item.StartAt < todayEnd, cancellationToken);
+        .CountAsync(item => item.OwnerId == identity.Id &&
+                            item.StartAt < todayEnd &&
+                            (!item.EndAt.HasValue || item.EndAt > todayStart), cancellationToken);
     var todayTasks = await dbContext.Tasks.AsNoTracking()
         .CountAsync(item => item.OwnerId == identity.Id && item.Status != "done" && item.DueAt >= todayStart && item.DueAt < todayEnd, cancellationToken);
 
