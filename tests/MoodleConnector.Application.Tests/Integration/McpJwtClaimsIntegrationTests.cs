@@ -953,6 +953,18 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
     }
 
     [Fact]
+    public async Task Host_de_testes_nao_herda_o_limite_de_requisicoes_de_producao()
+    {
+        var client = _factory.CreateClient();
+
+        for (var request = 0; request < 20; request++)
+        {
+            var response = await client.GetAsync("/api/csrf");
+            response.EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
     public async Task Rotas_legadas_do_portal_redirecionam_para_a_spa_canonica()
     {
         var factory = _factory.WithWebHostBuilder(builder =>
@@ -1446,11 +1458,6 @@ public sealed class McpTestWebApplicationFactory : WebApplicationFactory<Program
                 ["ConnectorSecrets:TokenCacheMinutes"] = "10",
                 ["AdminApi:HeaderName"] = "X-Admin-Api-Key",
                 ["AdminApi:ApiKey"] = "admin-tests-key",
-                // The fixture is shared by 755 integration tests. Keep production
-                // throttling intact while preventing test ordering/speed from making
-                // the portal's real app-auth limiter return 429 during setup.
-                ["RateLimiting:AppAuthPermitLimit"] = "1000",
-                ["RateLimiting:AdminApiPermitLimit"] = "1000",
                 ["OAuth:RequireHttpsMetadata"] = "false",
                 ["OAuth:ScopeName"] = "moodle-mcp-audience",
                 ["MoodleApi:UseStubData"] = "true",

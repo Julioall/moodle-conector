@@ -178,6 +178,15 @@ var rateLimitOptions = builder.Configuration
     .GetSection(ConnectorRateLimitOptions.SectionName)
     .Get<ConnectorRateLimitOptions>() ?? new ConnectorRateLimitOptions();
 var rateLimitWindow = TimeSpan.FromSeconds(Math.Clamp(rateLimitOptions.WindowSeconds, 1, 3600));
+// Integration tests share one in-memory host and can execute hundreds of portal
+// requests within a single production-sized rate-limit window. Keep the real
+// limits for every deployable environment while making the test host deterministic.
+var appAuthPermitLimit = builder.Environment.IsEnvironment("Testing")
+    ? 1000
+    : Math.Clamp(rateLimitOptions.AppAuthPermitLimit, 1, 1000);
+var adminApiPermitLimit = builder.Environment.IsEnvironment("Testing")
+    ? 1000
+    : Math.Clamp(rateLimitOptions.AdminApiPermitLimit, 1, 1000);
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -186,7 +195,7 @@ builder.Services.AddRateLimiter(options =>
             GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = Math.Clamp(rateLimitOptions.AppAuthPermitLimit, 1, 1000),
+                PermitLimit = appAuthPermitLimit,
                 Window = rateLimitWindow,
                 QueueLimit = 0,
                 AutoReplenishment = true
@@ -196,7 +205,7 @@ builder.Services.AddRateLimiter(options =>
             GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = Math.Clamp(rateLimitOptions.AdminApiPermitLimit, 1, 1000),
+                PermitLimit = adminApiPermitLimit,
                 Window = rateLimitWindow,
                 QueueLimit = 0,
                 AutoReplenishment = true
