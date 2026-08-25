@@ -150,7 +150,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         // Before lazy snapshots, a connection refresh scheduled four jobs for
         // every course. Clear only those precise legacy signatures, leaving
         // user-triggered jobs (which use priority 5, 10, or 20) untouched.
-        var removed = await db.MoodleSyncStates
+        var legacyStates = await db.MoodleSyncStates
             .Where(item =>
                 item.CourseId != string.Empty &&
                 (item.Status == "pending" || item.Status == "failed") &&
@@ -158,13 +158,15 @@ internal sealed class MoodleSnapshotSyncQueue(
                  (item.Dataset == MoodleSnapshotDatasets.Students && item.Priority == 30) ||
                  (item.Dataset == MoodleSnapshotDatasets.Groups && item.Priority == 60) ||
                  (item.Dataset == MoodleSnapshotDatasets.Submissions && item.Priority == 15)))
-            .ExecuteDeleteAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
 
-        if (removed > 0)
+        if (legacyStates.Count > 0)
         {
+            db.MoodleSyncStates.RemoveRange(legacyStates);
+            await db.SaveChangesAsync(cancellationToken);
             logger.LogInformation(
                 "Removed {Count} legacy eager Moodle snapshot jobs.",
-                removed);
+                legacyStates.Count);
         }
     }
 
