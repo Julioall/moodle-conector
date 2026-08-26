@@ -32,6 +32,29 @@ public sealed class MoodleUniversalWriteServiceTests
     }
 
     [Fact]
+    public async Task PrepareAsync_ExponePreviewSemanticoEEstimativaDeRecursos()
+    {
+        using var document = JsonDocument.Parse("[{\"touserid\":211211,\"text\":\"Ola\"},{\"touserid\":211212,\"text\":\"Oi\"}]");
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            profile: Profile(new MoodleFunctionDescriptor("core_message_send_instant_messages", MoodleFunctionRisk.ControlledWrite, true)));
+
+        var preview = await sut.PrepareAsync(
+            "core_message_send_instant_messages",
+            new Dictionary<string, object?> { ["messages"] = document.RootElement.Clone() },
+            CancellationToken.None);
+
+        Assert.Equal("Enviar mensagens instantaneas aos destinatarios informados.", preview.SemanticSummary);
+        Assert.Equal(2, preview.EstimatedAffectedRecords);
+        Assert.Contains("message", preview.AffectedResources!);
+        var change = Assert.Single(preview.Changes!, item => item.Name == "messages");
+        Assert.Equal("[2 itens]", change.NewValue);
+        Assert.Contains(preview.Warnings!, warning => warning.Contains("Valores anteriores", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ConfirmAsync_UsaTokenDoUsuarioEExecutaUmaVez()
     {
         var rest = new FakeRestClient();
@@ -59,6 +82,26 @@ public sealed class MoodleUniversalWriteServiceTests
         using var auditResponse = JsonDocument.Parse(audit.ResponseSummaryJson);
         Assert.True(auditResponse.RootElement.TryGetProperty("durationMs", out var duration));
         Assert.True(duration.GetInt64() >= 0);
+    }
+
+    [Fact]
+    public async Task ConfirmAsync_FalhaDeRedeMarcaExecucaoComoDesconhecidaENaoComoFalhaComum()
+    {
+        var rest = new FakeRestClient { WriteException = new HttpRequestException("connection reset") };
+        var pendingActions = new FakePendingActions();
+        var auditLogs = new FakeAuditLogs();
+        var sut = CreateService(rest, pendingActions, enabled: true, auditLogs: auditLogs);
+        var preview = await sut.PrepareAsync(
+            "mod_assign_save_grade",
+            new Dictionary<string, object?> { ["assignmentid"] = 10, ["userid"] = 20, ["grade"] = 85 },
+            CancellationToken.None);
+        pendingActions.Action!.Confirm("user", DateTimeOffset.UtcNow);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => sut.ConfirmAsync(preview.PendingActionId, preview.ConfirmationText, CancellationToken.None));
+
+        Assert.Equal(PendingActionStatus.ExecutionUnknown, pendingActions.Action!.Status);
+        Assert.Contains(auditLogs.Logs, log => log.Status == "write_execution_unknown");
+        Assert.DoesNotContain(auditLogs.Logs, log => log.Status == "write_failed");
     }
 
     [Fact]
@@ -210,6 +253,7 @@ public sealed class MoodleUniversalWriteServiceTests
     {
         public int Calls { get; private set; }
         public bool LastAllowServiceToken { get; private set; } = true;
+        public Exception? WriteException { get; set; }
 
         public Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName, IReadOnlyDictionary<string, object?> parameters, CancellationToken cancellationToken) =>
             CallAsync(connection, functionName, parameters, true, cancellationToken);
@@ -218,6 +262,19 @@ public sealed class MoodleUniversalWriteServiceTests
         {
             Calls++;
             LastAllowServiceToken = allowServiceToken;
+            using var document = JsonDocument.Parse("{\"result\":\"ok\"}");
+            return Task.FromResult(document.RootElement.Clone());
+        }
+
+        public Task<JsonElement> CallWriteAsync(MoodleConnectorCredentials connection, string functionName, IReadOnlyDictionary<string, object?> parameters, CancellationToken cancellationToken)
+        {
+            Calls++;
+            LastAllowServiceToken = false;
+            if (WriteException is not null)
+            {
+                return Task.FromException<JsonElement>(WriteException);
+            }
+
             using var document = JsonDocument.Parse("{\"result\":\"ok\"}");
             return Task.FromResult(document.RootElement.Clone());
         }

@@ -60,6 +60,12 @@ public sealed class ActionConfirmationService(
                 action.CorrelationId);
         }
 
+        if (action.Status == PendingActionStatus.ExecutionUnknown)
+        {
+            throw new InvalidOperationException(
+                "O resultado remoto desta acao e desconhecido. Reconcilie a acao antes de tentar qualquer nova execucao.");
+        }
+
         if (action.Status != PendingActionStatus.PendingConfirmation)
         {
             throw new InvalidOperationException($"A acao nao pode ser confirmada no estado {action.Status}.");

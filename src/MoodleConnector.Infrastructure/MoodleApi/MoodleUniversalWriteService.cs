@@ -52,6 +52,7 @@ internal sealed class MoodleUniversalWriteService(
 
             var parameterHash = CreateParameterHash(parameters);
             var confirmationText = $"CONFIRMAR ESCRITA MOODLE {descriptor.Name.ToUpperInvariant()} {parameterHash[..12].ToUpperInvariant()}";
+            var semanticPreview = BuildSemanticPreview(descriptor.Name, connection.Alias, parameters, parameterNames);
             var preview = new
             {
                 function = descriptor.Name,
@@ -59,6 +60,11 @@ internal sealed class MoodleUniversalWriteService(
                 parameterNames,
                 parameterHash,
                 risk = descriptor.Risk.ToString(),
+                semanticSummary = semanticPreview.Summary,
+                changes = semanticPreview.Changes,
+                affectedResources = semanticPreview.AffectedResources,
+                estimatedAffectedRecords = semanticPreview.EstimatedAffectedRecords,
+                warnings = semanticPreview.Warnings,
                 execution = "Nenhuma chamada foi enviada ao Moodle; confirme explicitamente para executar uma unica vez."
             };
             var payload = new UniversalMoodleWritePayload(
@@ -113,7 +119,12 @@ internal sealed class MoodleUniversalWriteService(
                 parameterNames,
                 parameterHash,
                 confirmationText,
-                pending.ExpiresAt);
+                pending.ExpiresAt,
+                semanticPreview.Summary,
+                semanticPreview.Changes,
+                semanticPreview.AffectedResources,
+                semanticPreview.EstimatedAffectedRecords,
+                semanticPreview.Warnings);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -187,7 +198,23 @@ internal sealed class MoodleUniversalWriteService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var errorCode = ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name;
-            await RecordExecutionAsync(action, payload, "write_failed", 0, startedAt, DateTimeOffset.UtcNow, stopwatch.ElapsedMilliseconds, errorCode, cancellationToken);
+            var executionUnknown = IsExecutionUnknown(ex);
+            if (executionUnknown)
+            {
+                action.MarkExecutionUnknown();
+            }
+
+            await pendingActionRepository.SaveChangesAsync(cancellationToken);
+            await RecordExecutionAsync(
+                action,
+                payload,
+                executionUnknown ? "write_execution_unknown" : "write_failed",
+                0,
+                startedAt,
+                DateTimeOffset.UtcNow,
+                stopwatch.ElapsedMilliseconds,
+                errorCode,
+                cancellationToken);
             await auditLogs.SaveChangesAsync(cancellationToken);
             throw;
         }
@@ -300,6 +327,120 @@ internal sealed class MoodleUniversalWriteService(
             throw new InvalidOperationException("A escrita universal Moodle esta desabilitada. Habilite Features:UniversalMoodleWriteEnabled somente apos revisao administrativa.");
         }
     }
+
+    private static bool IsExecutionUnknown(Exception exception)
+    {
+        if (exception is HttpRequestException)
+        {
+            return true;
+        }
+
+        return exception is MoodleApiException moodleException &&
+            MoodleErrorContract.NormalizeCode(moodleException.ErrorCode) is
+                MoodleErrorContract.NetworkError or MoodleErrorContract.RequestTimeout;
+    }
+
+    private static SemanticWritePreview BuildSemanticPreview(
+        string functionName,
+        string connectionAlias,
+        IReadOnlyDictionary<string, object?> parameters,
+        IReadOnlyList<string> parameterNames)
+    {
+        var changes = parameterNames
+            .Select(name => new MoodleWritePreviewChange(
+                name,
+                PreviousValue: null,
+                NewValue: FormatPreviewValue(parameters[name])))
+            .ToArray();
+
+        var normalized = functionName.Trim().ToLowerInvariant();
+        var summary = normalized switch
+        {
+            "mod_assign_save_grade" => "Atualizar a nota de uma entrega Moodle.",
+            "mod_assign_save_grades" => "Atualizar notas de varias entregas Moodle.",
+            "core_message_send_instant_messages" => "Enviar mensagens instantaneas aos destinatarios informados.",
+            "core_calendar_create_calendar_events" => "Criar eventos no calendario Moodle.",
+            _ => $"Executar a escrita Moodle '{functionName.Trim()}'."
+        };
+
+        var affectedResources = normalized switch
+        {
+            "mod_assign_save_grade" or "mod_assign_save_grades" => ["assignment", "submission", "grade"],
+            "core_message_send_instant_messages" => ["message", "recipient"],
+            "core_calendar_create_calendar_events" => ["calendar_event"],
+            _ => Array.Empty<string>()
+        };
+
+        var estimatedRecords = TryEstimateAffectedRecords(normalized, parameters);
+        var warnings = new List<string>
+        {
+            "Valores anteriores nao foram consultados por esta previa universal; revise o contexto antes de confirmar."
+        };
+        if (estimatedRecords is null)
+        {
+            warnings.Add("A quantidade de registros afetados nao foi determinada.");
+        }
+        if (string.IsNullOrWhiteSpace(connectionAlias))
+        {
+            warnings.Add("A conexao Moodle nao possui alias de exibicao.");
+        }
+
+        return new SemanticWritePreview(summary, changes, affectedResources, estimatedRecords, warnings);
+    }
+
+    private static int? TryEstimateAffectedRecords(
+        string functionName,
+        IReadOnlyDictionary<string, object?> parameters)
+    {
+        if (functionName == "core_message_send_instant_messages" &&
+            parameters.TryGetValue("messages", out var messages))
+        {
+            if (messages is JsonElement element && element.ValueKind == JsonValueKind.Array)
+            {
+                return element.GetArrayLength();
+            }
+
+            if (messages is System.Collections.ICollection collection)
+            {
+                return collection.Count;
+            }
+        }
+
+        return functionName == "mod_assign_save_grades" ? 1 : null;
+    }
+
+    private static string? FormatPreviewValue(object? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var text = value switch
+        {
+            JsonElement element => FormatJsonElement(element),
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+        };
+
+        const int maxLength = 160;
+        return text.Length <= maxLength ? text : $"{text[..maxLength]}...";
+    }
+
+    private static string FormatJsonElement(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Null or JsonValueKind.Undefined => string.Empty,
+        JsonValueKind.String => element.GetString() ?? string.Empty,
+        JsonValueKind.Array => $"[{element.GetArrayLength()} itens]",
+        JsonValueKind.Object => "{objeto}",
+        _ => element.GetRawText()
+    };
+
+    private sealed record SemanticWritePreview(
+        string Summary,
+        IReadOnlyList<MoodleWritePreviewChange> Changes,
+        IReadOnlyList<string> AffectedResources,
+        int? EstimatedAffectedRecords,
+        IReadOnlyList<string> Warnings);
 
     private static void EnsureNoSensitiveParameters(IReadOnlyDictionary<string, object?> parameters)
     {

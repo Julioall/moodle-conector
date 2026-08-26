@@ -103,7 +103,17 @@ public sealed record MoodleWritePreview(
     IReadOnlyList<string> ParameterNames,
     string ParameterHash,
     string ConfirmationText,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? SemanticSummary = null,
+    IReadOnlyList<MoodleWritePreviewChange>? Changes = null,
+    IReadOnlyList<string>? AffectedResources = null,
+    int? EstimatedAffectedRecords = null,
+    IReadOnlyList<string>? Warnings = null);
+
+public sealed record MoodleWritePreviewChange(
+    string Name,
+    string? PreviousValue,
+    string? NewValue);
 
 public sealed record MoodleWriteResult(
     string Status,

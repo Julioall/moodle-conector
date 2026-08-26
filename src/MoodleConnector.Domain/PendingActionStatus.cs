@@ -9,5 +9,10 @@ public enum PendingActionStatus
     Executed = 4,
     Expired = 5,
     Cancelled = 6,
-    Failed = 7
+    Failed = 7,
+    /// <summary>
+    /// The remote Moodle result cannot be determined. The action must not be
+    /// submitted again without an explicit reconciliation workflow.
+    /// </summary>
+    ExecutionUnknown = 8
 }

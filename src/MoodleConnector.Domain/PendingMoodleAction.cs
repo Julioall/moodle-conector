@@ -52,4 +52,12 @@ public sealed class PendingMoodleAction
         ConfirmedAt = confirmedAt;
         Status = PendingActionStatus.Confirmed;
     }
+
+    public void MarkExecutionUnknown()
+    {
+        if (Status == PendingActionStatus.Confirmed)
+        {
+            Status = PendingActionStatus.ExecutionUnknown;
+        }
+    }
 }
