@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -311,7 +312,7 @@ public sealed class ConfirmIndividualGradeCommandHandler(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await RecordAuditAsync(action, payload, "grade_failed",
-                new { error = ex.GetType().Name }, ex.GetType().Name, ex.Message, cancellationToken);
+                new { error = ex.GetType().Name }, ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name, ex.Message, cancellationToken);
             await auditLogs.SaveChangesAsync(cancellationToken);
 
             return new IndividualGradeSendResult(

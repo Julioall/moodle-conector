@@ -1,9 +1,9 @@
 {
   "OperationName": "core_enrol_get_enrolled_users",
-  "ConnectionId": "812d637a-2220-470c-b9cd-3dad919f6a4b",
+  "ConnectionId": "d773f672-a026-477b-91ae-0e2478adfeb0",
   "AliasAtValidation": "test_alias",
   "NormalizationProfile": "course-participants",
   "MoodleVersion": "test",
   "SemanticParityPercent": 100,
-  "ValidatedAt": "2026-08-21T11:09:40.9092849+00:00"
+  "ValidatedAt": "2026-08-26T23:36:58.0427152+00:00"
 }

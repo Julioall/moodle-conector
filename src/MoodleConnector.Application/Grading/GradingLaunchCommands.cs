@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -507,7 +508,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     payloadItem,
                     "commit_failed",
                     responseSummary: new { item.CommitStatus, exceptionType = ex.GetType().Name },
-                    errorCode: ex.GetType().Name,
+                    errorCode: ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name,
                     errorMessage: ex.Message,
                     cancellationToken);
             }
