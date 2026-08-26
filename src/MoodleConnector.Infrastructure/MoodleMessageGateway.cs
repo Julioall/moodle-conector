@@ -147,7 +147,7 @@ internal sealed class MoodleMessageGateway(
             formParams[$"messages[{i}][textformat]"] = "0";
         }
 
-        var payload = await restClient.CallAsync(credentials, SendMessagesFunction, formParams, allowServiceToken: false, cancellationToken);
+        var payload = await restClient.CallWriteAsync(credentials, SendMessagesFunction, formParams, cancellationToken);
         return ParseSendResult(payload.GetRawText(), recipientUserIds);
     }
 

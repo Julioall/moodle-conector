@@ -181,4 +181,16 @@ public class ToolMetadataRegistryTests
                 .Concat(RegisteredMcpToolContainers.Conditional.Select(container => container.ContainerType))
                 .ToArray());
     }
+
+    [Fact]
+    public void Disabled_write_features_hide_write_tools_but_keep_reads_available()
+    {
+        var features = new FeatureOptions();
+        var assignment = new AssignmentWriteFeatureOptions();
+
+        Assert.False(RegisteredMcpToolContainers.IsToolEnabled("moodle_prepare_write", features, assignment));
+        Assert.False(RegisteredMcpToolContainers.IsToolEnabled("prepare_welcome_message", features, assignment));
+        Assert.False(RegisteredMcpToolContainers.IsToolEnabled("prepare_individual_grade_launch", features, assignment));
+        Assert.True(RegisteredMcpToolContainers.IsToolEnabled("moodle_execute_read", features, assignment));
+    }
 }

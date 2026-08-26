@@ -10,7 +10,7 @@ As feature flags existem:
 
 ```json
 {
-  "MessagesWriteEnabled": true,
+  "MessagesWriteEnabled": false,
   "ScheduledMessagesEnabled": false
 }
 ```

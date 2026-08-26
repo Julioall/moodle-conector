@@ -212,6 +212,9 @@ public static class DependencyInjection
         this IHttpClientBuilder builder,
         MoodleHttpResilienceSettings settings)
     {
+        var retryPolicy = CreateRetryPolicy(settings);
+        var noRetryPolicy = Policy.NoOpAsync<HttpResponseMessage>();
+
         return builder
             .ConfigureHttpClient(client => client.Timeout = settings.Timeout)
             .ConfigurePrimaryHttpMessageHandler(() => CreatePooledHandler())
@@ -219,7 +222,7 @@ public static class DependencyInjection
             .AddPolicyHandler(
                 (_, _, _) => CreateCircuitBreakerPolicy(settings),
                 request => BuildCircuitBreakerPolicyKey(settings, request))
-            .AddPolicyHandler(CreateRetryPolicy(settings));
+            .AddPolicyHandler(request => IsAutomaticRetryDisabled(request) ? noRetryPolicy : retryPolicy);
     }
 
     private static MoodleHttpResilienceSettings CreateResilienceSettings(
@@ -248,6 +251,10 @@ public static class DependencyInjection
                 settings.RetryCount,
                 retryAttempt => TimeSpan.FromMilliseconds(200 * Math.Pow(2, retryAttempt - 1)));
     }
+
+    private static bool IsAutomaticRetryDisabled(HttpRequestMessage request) =>
+        request.Options.TryGetValue(MoodleHttpRequestOptions.DisableAutomaticRetry, out var disableRetry) &&
+        disableRetry;
 
     private static IAsyncPolicy<HttpResponseMessage> CreateCircuitBreakerPolicy(MoodleHttpResilienceSettings settings)
     {

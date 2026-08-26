@@ -111,7 +111,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var productionContainers = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { DemoToolsEnabled = false },
+                new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
 
         var publishedMetadata = productionContainers
@@ -159,7 +159,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         var submissionTools = LoadSubmissionTools();
         var productionContainers = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { DemoToolsEnabled = false },
+                new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
         var contracts = productionContainers
             .SelectMany(container => container.GetMethods())
@@ -322,7 +322,15 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                 {
                     ["MCP_EXPOSURE_PROFILE"] = exposureProfile,
                     ["McpServerSecurity:RequireApiKey"] = "true",
-                    ["McpServerSecurity:RequireJwt"] = "false"
+                    ["McpServerSecurity:RequireJwt"] = "false",
+                    // Explicitly opt into the complete write surface for this
+                    // catalog test; deploy defaults remain fail-closed.
+                    ["Features:MessagesWriteEnabled"] = "true",
+                    ["Features:ScheduledMessagesEnabled"] = "true",
+                    ["Features:AssignmentFeedbackWriteEnabled"] = "true",
+                    ["Features:AssignmentGradeWriteEnabled"] = "true",
+                    ["Features:UniversalMoodleWriteEnabled"] = "true",
+                    ["Features:CourseContentWriteEnabled"] = "true"
                 });
             });
         });

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
@@ -53,6 +54,41 @@ public sealed class MoodleRestClientTests
         Assert.DoesNotContain("secret-token", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task CallWriteAsync_AceitaRespostaVaziaDeEscrita()
+    {
+        var handler = new CapturingHandler(string.Empty);
+        using var client = new HttpClient(handler);
+        var sut = new MoodleRestClient(
+            client,
+            new FakeTokenProvider("secret-token"),
+            NullLogger<MoodleRestClient>.Instance);
+
+        var response = await sut.CallWriteAsync(
+            Connection(), "mod_assign_save_grade", new Dictionary<string, object?>(), CancellationToken.None);
+
+        Assert.Equal(JsonValueKind.Null, response.ValueKind);
+        Assert.True(handler.DisableAutomaticRetry);
+    }
+
+    [Fact]
+    public async Task CallAsync_MantemRespostaVaziaComoFalhaParaLeitura()
+    {
+        var handler = new CapturingHandler(string.Empty);
+        using var client = new HttpClient(handler);
+        var sut = new MoodleRestClient(
+            client,
+            new FakeTokenProvider("secret-token"),
+            NullLogger<MoodleRestClient>.Instance);
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.CallAsync(
+            Connection(), "mod_assign_get_submission_status", new Dictionary<string, object?>(), CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.InvalidResponse, error.ErrorCode);
+        Assert.Equal("Moodle returned an invalid response body.", error.Message);
+        Assert.False(handler.DisableAutomaticRetry);
+    }
+
     private static MoodleConnectorCredentials Connection() => new(
         "client", "connection", "goias", "https://moodle.example", "user", "password", "goias", false);
 
@@ -71,11 +107,15 @@ public sealed class MoodleRestClientTests
     {
         public Uri? RequestUri { get; private set; }
         public string Body { get; private set; } = string.Empty;
+        public bool DisableAutomaticRetry { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestUri = request.RequestUri;
             Body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(cancellationToken);
+            DisableAutomaticRetry = request.Options.TryGetValue(
+                MoodleHttpRequestOptions.DisableAutomaticRetry,
+                out var disableRetry) && disableRetry;
             return new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")

@@ -1175,7 +1175,16 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
                 {
                     ["MCP_EXPOSURE_PROFILE"] = exposureProfile,
                     ["McpServerSecurity:RequireApiKey"] = "true",
-                    ["McpServerSecurity:RequireJwt"] = "false"
+                    ["McpServerSecurity:RequireJwt"] = "false",
+                    // The integration suite exercises the complete registered
+                    // production surface. Production defaults remain fail-closed;
+                    // this test host opts into write tools explicitly.
+                    ["Features:MessagesWriteEnabled"] = "true",
+                    ["Features:ScheduledMessagesEnabled"] = "true",
+                    ["Features:AssignmentFeedbackWriteEnabled"] = "true",
+                    ["Features:AssignmentGradeWriteEnabled"] = "true",
+                    ["Features:UniversalMoodleWriteEnabled"] = "true",
+                    ["Features:CourseContentWriteEnabled"] = "true"
                 });
             });
         });
@@ -1462,7 +1471,13 @@ public sealed class McpTestWebApplicationFactory : WebApplicationFactory<Program
                 ["OAuth:ScopeName"] = "moodle-mcp-audience",
                 ["MoodleApi:UseStubData"] = "true",
                 ["MoodleApi:BaseUrl"] = "https://moodle.tests",
-                ["MoodleProxy:UseStubData"] = "true"
+                ["MoodleProxy:UseStubData"] = "true",
+                ["Features:MessagesWriteEnabled"] = "true",
+                ["Features:ScheduledMessagesEnabled"] = "true",
+                ["Features:AssignmentFeedbackWriteEnabled"] = "true",
+                ["Features:AssignmentGradeWriteEnabled"] = "true",
+                ["Features:UniversalMoodleWriteEnabled"] = "true",
+                ["Features:CourseContentWriteEnabled"] = "true"
             });
         });
 

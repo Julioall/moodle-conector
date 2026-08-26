@@ -18,13 +18,29 @@ internal sealed class MoodleRestClient(
         string functionName,
         IReadOnlyDictionary<string, object?> parameters,
         CancellationToken cancellationToken) =>
-        CallAsync(connection, functionName, parameters, allowServiceToken: true, cancellationToken);
+        CallCoreAsync(connection, functionName, parameters, allowServiceToken: true, allowEmptyResponse: false, cancellationToken);
 
     public async Task<JsonElement> CallAsync(
         MoodleConnectorCredentials connection,
         string functionName,
         IReadOnlyDictionary<string, object?> parameters,
         bool allowServiceToken,
+        CancellationToken cancellationToken)
+        => await CallCoreAsync(connection, functionName, parameters, allowServiceToken, allowEmptyResponse: false, cancellationToken);
+
+    public Task<JsonElement> CallWriteAsync(
+        MoodleConnectorCredentials connection,
+        string functionName,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken cancellationToken) =>
+        CallCoreAsync(connection, functionName, parameters, allowServiceToken: false, allowEmptyResponse: true, cancellationToken);
+
+    private async Task<JsonElement> CallCoreAsync(
+        MoodleConnectorCredentials connection,
+        string functionName,
+        IReadOnlyDictionary<string, object?> parameters,
+        bool allowServiceToken,
+        bool allowEmptyResponse,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(functionName))
@@ -50,7 +66,16 @@ internal sealed class MoodleRestClient(
             };
 
             using var content = new FormUrlEncodedContent(values);
-            using var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = content
+            };
+            if (allowEmptyResponse)
+            {
+                request.Options.Set(MoodleHttpRequestOptions.DisableAutomaticRetry, true);
+            }
+
+            using var response = await httpClient.SendAsync(request, cancellationToken);
             var payload = await response.Content.ReadAsStringAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -108,7 +133,7 @@ internal sealed class MoodleRestClient(
             JsonElement parsed;
             try
             {
-                parsed = MoodleResponseParser.Parse(payload);
+                parsed = MoodleResponseParser.Parse(payload, allowEmptyResponse);
             }
             catch (MoodleApiException remoteFailure)
             {
@@ -118,12 +143,17 @@ internal sealed class MoodleRestClient(
                     tokenProvider.Invalidate(connection);
                 }
 
+                var message = IsSafeRemoteErrorCode(remoteFailure.RemoteErrorCode)
+                    ? $"Moodle rejected the Web Service request (error code: {remoteFailure.RemoteErrorCode})."
+                    : MoodleErrorContract.NormalizeCode(remoteFailure.ErrorCode) == MoodleErrorContract.InvalidResponse
+                        ? "Moodle returned an invalid response body."
+                        : "Moodle returned a structured Web Service error.";
                 throw CreateFailure(
                     remoteFailure.ErrorCode,
                     connection,
                     endpoint,
                     normalizedFunction,
-                    "Moodle returned a structured or invalid response.",
+                    message,
                     (int)response.StatusCode,
                     remoteFailure,
                     auditId,
@@ -132,7 +162,8 @@ internal sealed class MoodleRestClient(
             }
 
             logger.LogInformation(
-                "Moodle read completed. AuditId={AuditId} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint} Function={Function} HttpStatus={HttpStatus} DurationMs={DurationMs}",
+                "Moodle {OperationKind} completed. AuditId={AuditId} ConnectionId={ConnectionId} Alias={Alias} Endpoint={Endpoint} Function={Function} HttpStatus={HttpStatus} DurationMs={DurationMs}",
+                allowEmptyResponse ? "write" : "read",
                 auditId,
                 connection.ConnectionId,
                 connection.Alias,
@@ -288,4 +319,9 @@ internal sealed class MoodleRestClient(
                (string.Equals(endpoint.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
                 IPAddress.TryParse(endpoint.Host, out var address) && IPAddress.IsLoopback(address));
     }
+
+    private static bool IsSafeRemoteErrorCode(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= 128 &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
 }

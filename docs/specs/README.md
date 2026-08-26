@@ -28,6 +28,12 @@ evidências.
 | [SPEC-0008](spec-0008-portal-topology.md) | Implementing | SPEC-0000 | Portal e URL canônicos |
 | [SPEC-0009](spec-0009-documentation-remediation.md) | Validated | SPEC-0000 | Documentação e encoding corrigidos |
 | [SPEC-0010](spec-0010-release-certification.md) | Implementing | Todas as anteriores | Release certificável |
+| [SPEC-0011](spec-0011-safe-moodle-writes.md) | Draft | — | Escritas sem retry cego e resultado remoto reconciliável |
+| [SPEC-0012](spec-0012-write-preview-risk-and-scopes.md) | Draft | SPEC-0011 | Confirmação semântica, impacto e scopes por domínio |
+| [SPEC-0013](spec-0013-capability-cache-and-tool-exposure.md) | Draft | — | Capabilities sem token e tools condicionais |
+| [SPEC-0014](spec-0014-canonical-mcp-surface.md) | Draft | SPEC-0013 | Catálogo MCP canônico com migração segura |
+| [SPEC-0015](spec-0015-current-state-and-analytical-snapshots.md) | Draft | SPEC-0013 | Base operacional de snapshots, consistente e performática |
+| [SPEC-0017](spec-0017-postgresql-concurrency-and-release-gates.md) | Draft | SPEC-0011, SPEC-0015 | Garantias PostgreSQL e gates de release |
 
 ## Regra de rastreabilidade
 

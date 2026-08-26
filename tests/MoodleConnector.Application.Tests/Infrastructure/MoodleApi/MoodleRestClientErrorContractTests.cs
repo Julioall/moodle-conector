@@ -28,6 +28,7 @@ public sealed class MoodleRestClientErrorContractTests
 
         Assert.Equal(expectedStableCode, MoodleErrorContract.Describe(error).ErrorCode);
         Assert.Equal(remoteCode, error.RemoteErrorCode);
+        Assert.Contains(remoteCode, error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("remote detail", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 

@@ -35,7 +35,7 @@ internal sealed class MoodleAssignmentGradingGateway(
             throw new InvalidOperationException("A conexao Moodle atual nao permite escrita.");
         }
 
-        await restClient.CallAsync(credentials, MoodleFunction, BuildParameters(request), allowServiceToken: false, cancellationToken);
+        await restClient.CallWriteAsync(credentials, MoodleFunction, BuildParameters(request), cancellationToken);
 
         return new AssignmentGradeWriteResult(
             Success: true,

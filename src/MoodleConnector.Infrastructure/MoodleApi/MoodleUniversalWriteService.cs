@@ -174,11 +174,10 @@ internal sealed class MoodleUniversalWriteService(
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var response = await restClient.CallAsync(
+            var response = await restClient.CallWriteAsync(
                 connection,
                 payload.Function,
                 values,
-                allowServiceToken: false,
                 cancellationToken);
             var responseSize = Encoding.UTF8.GetByteCount(response.GetRawText());
             await RecordExecutionAsync(action, payload, "write_executed", responseSize, startedAt, DateTimeOffset.UtcNow, stopwatch.ElapsedMilliseconds, null, cancellationToken);

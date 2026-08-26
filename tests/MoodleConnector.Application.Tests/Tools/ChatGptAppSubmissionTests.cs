@@ -15,7 +15,7 @@ public sealed class ChatGptAppSubmissionTests
         var submissionTools = document.RootElement.GetProperty("tools");
         var attributes = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { DemoToolsEnabled = false },
+                new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }))
             .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
             .Select(method => (Method: method, Attribute: method.GetCustomAttribute<McpServerToolAttribute>()))

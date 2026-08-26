@@ -12,6 +12,8 @@ using MoodleConnector.Presentation.Tools.Reports;
 using MoodleConnector.Presentation.Tools.Risk;
 using MoodleConnector.Presentation.Tools.Submissions;
 using MoodleConnector.Application.Configuration;
+using ModelContextProtocol.Server;
+using System.Reflection;
 
 namespace MoodleConnector.Presentation.Configuration;
 
@@ -26,7 +28,6 @@ public static class RegisteredMcpToolContainers
     [
         typeof(MoodleCoursesTools),
         typeof(MoodleUniversalTools),
-        typeof(MoodleUniversalWriteTools),
         typeof(MoodleParticipantsTools),
         typeof(MoodleCourseContentsTools),
         typeof(MoodleCourseActivitiesTools),
@@ -42,7 +43,6 @@ public static class RegisteredMcpToolContainers
         typeof(MoodleRiskAnalysisTools),
         typeof(MoodleGradingContextDiagnosticsTools),
         typeof(MoodleGradingReviewAppTools),
-        typeof(MoodleTutorMessageTools),
         typeof(MoodleReportTools),
         typeof(MoodleMonitorTools),
         typeof(MoodleMemoryTools),
@@ -56,11 +56,23 @@ public static class RegisteredMcpToolContainers
     public static IReadOnlyList<ConditionalMcpToolContainer> Conditional { get; } =
     [
         new(typeof(DemoPendingActionTools), "DemoToolsEnabled"),
-        new(typeof(MoodleIndividualGradeTools), "AssignmentGradeWriteEnabled")
+        new(typeof(MoodleIndividualGradeTools), "AssignmentGradeWriteEnabled"),
+        new(typeof(MoodleTutorMessageTools), "MessagesWriteEnabled"),
+        new(typeof(MoodleUniversalWriteTools), "UniversalMoodleWriteEnabled")
     ];
 
     public static IReadOnlyList<Type> All { get; } =
         AlwaysOn.Concat(Conditional.Select(container => container.ContainerType)).ToArray();
+
+    private static IReadOnlyDictionary<string, ConditionalMcpToolContainer> ConditionalByTool { get; } =
+        Conditional
+            .SelectMany(container => container.ContainerType
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .Select(method => (container, methodName: method.Name, attribute: method.GetCustomAttribute<McpServerToolAttribute>()))
+                .Where(item => item.attribute is not null)
+                .Select(item => (item.attribute!.Name ?? item.methodName, item.container)))
+            .Where(item => !string.IsNullOrWhiteSpace(item.Item1))
+            .ToDictionary(item => item.Item1, item => item.container, StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<Type> GetEnabledContainers(
         FeatureOptions featureOptions,
@@ -71,6 +83,15 @@ public static class RegisteredMcpToolContainers
             .Select(container => container.ContainerType)
             .ToArray();
     }
+
+    public static bool IsToolEnabled(
+        string toolName,
+        FeatureOptions featureOptions,
+        AssignmentWriteFeatureOptions assignmentWriteOptions)
+    {
+        return !ConditionalByTool.TryGetValue(toolName, out var container) ||
+            container.IsEnabled(featureOptions, assignmentWriteOptions);
+    }
 }
 
 public sealed record ConditionalMcpToolContainer(Type ContainerType, string FeatureFlag)
@@ -80,6 +101,8 @@ public sealed record ConditionalMcpToolContainer(Type ContainerType, string Feat
         {
             "DemoToolsEnabled" => featureOptions.DemoToolsEnabled,
             "AssignmentGradeWriteEnabled" => assignmentWriteOptions.AssignmentGradeWriteEnabled,
+            "MessagesWriteEnabled" => featureOptions.MessagesWriteEnabled,
+            "UniversalMoodleWriteEnabled" => featureOptions.UniversalMoodleWriteEnabled,
             _ => false
         };
 }

@@ -107,13 +107,13 @@ internal sealed partial class MoodleForumGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         EnsureCanWrite(credentials);
 
-        var payload = await restClient.CallAsync(credentials, AddDiscussionFunction, new Dictionary<string, object?>
+        var payload = await restClient.CallWriteAsync(credentials, AddDiscussionFunction, new Dictionary<string, object?>
         {
             ["forumid"] = normalizedForumId.ToString(CultureInfo.InvariantCulture),
             ["subject"] = subject.Trim(),
             ["message"] = messageHtml.Trim(),
             ["groupid"] = groupId.ToString(CultureInfo.InvariantCulture)
-        }, allowServiceToken: false, cancellationToken);
+        }, cancellationToken);
         var root = ParseMoodleSuccessPayload(payload.GetRawText(), "O Moodle rejeitou a criacao de discussao no forum");
         return new ForumWriteResult(
             Success: true,
@@ -141,13 +141,13 @@ internal sealed partial class MoodleForumGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         EnsureCanWrite(credentials);
 
-        var payload = await restClient.CallAsync(credentials, AddDiscussionPostFunction, new Dictionary<string, object?>
+        var payload = await restClient.CallWriteAsync(credentials, AddDiscussionPostFunction, new Dictionary<string, object?>
         {
             ["postid"] = normalizedPostId.ToString(CultureInfo.InvariantCulture),
             ["subject"] = subject.Trim(),
             ["message"] = messageHtml.Trim(),
             ["messageformat"] = HtmlMessageFormat
-        }, allowServiceToken: false, cancellationToken);
+        }, cancellationToken);
         var root = ParseMoodleSuccessPayload(payload.GetRawText(), "O Moodle rejeitou a resposta no forum");
         return new ForumWriteResult(
             Success: true,

@@ -1,6 +1,8 @@
-using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Caching.Memory;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain.Registry;
 
@@ -10,21 +12,24 @@ public sealed class CapabilityRegistry : ICapabilityRegistry
 {
     private readonly IMoodleRestClient _restClient;
     private readonly IMoodleConnectorCredentialsProvider? _credentialsProvider;
-    private readonly ConcurrentDictionary<string, CapabilitySnapshot> _cache = new();
+    private readonly IMemoryCache _cache;
 
     public CapabilityRegistry(
         IMoodleRestClient restClient,
-        IMoodleConnectorCredentialsProvider? credentialsProvider = null)
+        IMoodleConnectorCredentialsProvider? credentialsProvider = null,
+        IMemoryCache? cache = null)
     {
         _restClient = restClient;
         _credentialsProvider = credentialsProvider;
+        _cache = cache ?? new MemoryCache(new MemoryCacheOptions());
     }
 
     public async Task<CapabilitySnapshot> GetSnapshotAsync(ConnectionInfo connectionInfo, string userToken, CancellationToken cancellationToken = default)
     {
-        var cacheKey = $"{connectionInfo.ConnectionId}:{userToken}";
+        var credentialFingerprint = CreateCredentialFingerprint(userToken);
+        var cacheKey = CreateCacheKey(connectionInfo.ConnectionId, credentialFingerprint);
         
-        if (_cache.TryGetValue(cacheKey, out var snapshot) && (DateTimeOffset.UtcNow - snapshot.CapturedAt).TotalMinutes < 60)
+        if (_cache.TryGetValue<CapabilitySnapshot>(cacheKey, out var snapshot) && snapshot is not null)
         {
             return snapshot;
         }
@@ -66,18 +71,33 @@ public sealed class CapabilityRegistry : ICapabilityRegistry
 
         var newSnapshot = new CapabilitySnapshot(
             connectionInfo.ConnectionId,
-            userToken,
+            credentialFingerprint,
             functions,
             DateTimeOffset.UtcNow
         );
 
-        _cache[cacheKey] = newSnapshot;
+        _cache.Set(
+            cacheKey,
+            newSnapshot,
+            new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(60),
+                Size = 1
+            });
         return newSnapshot;
     }
 
     public void Invalidate(ConnectionInfo connectionInfo, string userToken)
     {
-        var cacheKey = $"{connectionInfo.ConnectionId}:{userToken}";
-        _cache.TryRemove(cacheKey, out _);
+        _cache.Remove(CreateCacheKey(connectionInfo.ConnectionId, CreateCredentialFingerprint(userToken)));
+    }
+
+    private static string CreateCacheKey(Guid connectionId, string credentialFingerprint) =>
+        $"moodle-capability:{connectionId:N}:{credentialFingerprint}";
+
+    private static string CreateCredentialFingerprint(string credentialReference)
+    {
+        var bytes = Encoding.UTF8.GetBytes(credentialReference ?? string.Empty);
+        return Convert.ToHexString(SHA256.HashData(bytes));
     }
 }

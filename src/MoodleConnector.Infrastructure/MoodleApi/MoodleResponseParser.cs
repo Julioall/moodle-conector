@@ -5,10 +5,16 @@ namespace MoodleConnector.Infrastructure.MoodleApi;
 
 internal static class MoodleResponseParser
 {
-    public static JsonElement Parse(string payload)
+    public static JsonElement Parse(string payload, bool allowEmptyResponse = false)
     {
         if (string.IsNullOrWhiteSpace(payload))
         {
+            if (allowEmptyResponse)
+            {
+                using var emptyDocument = JsonDocument.Parse("null");
+                return emptyDocument.RootElement.Clone();
+            }
+
             throw new MoodleApiException(
                 MoodleErrorContract.InvalidResponse,
                 "Moodle returned an empty response.");

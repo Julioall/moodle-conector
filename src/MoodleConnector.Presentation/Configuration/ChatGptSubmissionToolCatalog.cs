@@ -26,7 +26,12 @@ public static class ChatGptSubmissionToolCatalog
 
     public static JsonObject CreateProductionTools()
     {
-        var featureOptions = new FeatureOptions { DemoToolsEnabled = false };
+        var featureOptions = new FeatureOptions
+        {
+            DemoToolsEnabled = false,
+            MessagesWriteEnabled = true,
+            UniversalMoodleWriteEnabled = true
+        };
         var assignmentWrites = new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true };
         var contracts = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(featureOptions, assignmentWrites))

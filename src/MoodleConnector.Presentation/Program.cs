@@ -410,6 +410,23 @@ var mcpServerBuilder = builder.Services
             var registry = request.Services.GetService<ToolMetadataRegistry>();
             var httpContext = request.Services.GetService<IHttpContextAccessor>()?.HttpContext;
             var oauth = request.Services.GetRequiredService<IOptions<OAuthBrokerOptions>>().Value;
+            var featureOptions = request.Services.GetRequiredService<IOptions<FeatureOptions>>().Value;
+            var assignmentWriteOptions = request.Services.GetRequiredService<IOptions<AssignmentWriteFeatureOptions>>().Value;
+
+            // Keep registration complete so host-level configuration can be
+            // applied safely at request time, but never advertise disabled
+            // tools to the model.
+            for (var i = result.Tools.Count - 1; i >= 0; i--)
+            {
+                var tool = result.Tools[i];
+                if (tool is null || !RegisteredMcpToolContainers.IsToolEnabled(
+                        tool.Name ?? string.Empty,
+                        featureOptions,
+                        assignmentWriteOptions))
+                {
+                    result.Tools.RemoveAt(i);
+                }
+            }
 
             // Apply exposure policy BEFORE serialization/transport so JSON vs SSE is irrelevant.
             var policy = request.Services.GetService<IMcpToolExposurePolicy>();
@@ -476,24 +493,10 @@ var mcpServerBuilder = builder.Services
 
 // The same explicit catalog drives MCP registration and metadata registration.
 mcpServerBuilder
-    .WithTools((IEnumerable<Type>)RegisteredMcpToolContainers.AlwaysOn, JsonSerializerOptions.Default)
+    .WithTools((IEnumerable<Type>)RegisteredMcpToolContainers.All, JsonSerializerOptions.Default)
     .WithResources<MoodleGradingReviewAppResources>();
 
 // ToolMetadataRegistry was pre-populated and registered above; do not build temporary providers here.
-
-var featureOptions = builder.Configuration.GetSection(FeatureOptions.SectionName).Get<FeatureOptions>() ?? new FeatureOptions();
-var assignmentWriteOptions = builder.Configuration
-    .GetSection(AssignmentWriteFeatureOptions.SectionName)
-    .Get<AssignmentWriteFeatureOptions>() ?? new AssignmentWriteFeatureOptions();
-var enabledConditionalToolContainers = RegisteredMcpToolContainers.GetEnabledContainers(
-    featureOptions,
-    assignmentWriteOptions);
-if (enabledConditionalToolContainers.Count > 0)
-{
-    mcpServerBuilder.WithTools(
-        (IEnumerable<Type>)enabledConditionalToolContainers,
-        JsonSerializerOptions.Default);
-}
 
 var app = builder.Build();
 var appV2Enabled = builder.Configuration.GetValue<bool>("Features:AppV2Enabled");

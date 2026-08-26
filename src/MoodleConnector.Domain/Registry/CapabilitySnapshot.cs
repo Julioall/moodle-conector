@@ -2,7 +2,7 @@ namespace MoodleConnector.Domain.Registry;
 
 public sealed record CapabilitySnapshot(
     Guid ConnectionId,
-    string UserId, // The internal moodle token user ID
+    string CredentialFingerprint,
     HashSet<string> AvailableFunctions,
     DateTimeOffset CapturedAt
 )

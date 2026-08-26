@@ -9,6 +9,7 @@ public sealed class FeatureOptions
     public bool AssignmentFeedbackWriteEnabled { get; init; }
     public bool AssignmentGradeWriteEnabled { get; init; }
     public bool CourseContentWriteEnabled { get; init; }
+    public bool UniversalMoodleWriteEnabled { get; init; }
     public bool DemoToolsEnabled { get; init; }
     public bool AppV2Enabled { get; init; }
 }
