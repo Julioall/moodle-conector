@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft. Depende de SPEC-0011 e SPEC-0015.
+Implementing. Depende de SPEC-0011 e SPEC-0015.
 
 ## Objetivo
 
@@ -14,7 +14,7 @@ Produção usa Npgsql, índices únicos, JSONB, `ExecuteUpdateAsync`/`ExecuteDel
 
 ## Decisão e arquitetura-alvo
 
-- Criar projeto de integração PostgreSQL/Testcontainers, separado de unit tests.
+- Executar a integração PostgreSQL em um job com serviço PostgreSQL efêmero no CI; o teste também aceita uma connection string local para diagnóstico sem depender do daemon Docker do desenvolvedor.
 - Usar upsert ou recuperação explícita de unique violation onde instâncias concorrentes possam inserir a mesma chave.
 - CI de PR é obrigatório antes do merge; deploy mantém certificação de release e não substitui a proteção de branch.
 
@@ -28,14 +28,14 @@ Produção usa Npgsql, índices únicos, JSONB, `ExecuteUpdateAsync`/`ExecuteDel
 
 - [ ] Em duas instâncias, apenas uma conquista um lease ou confirma ação.
 - [ ] Inserções simultâneas convergem sem duplicação ou erro não tratado.
-- [ ] Testes PostgreSQL executam localmente e no CI com evidência de falha útil.
+- [ ] Testes PostgreSQL executam localmente quando `MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION` é definido e no CI com serviço efêmero, com evidência de falha útil.
 - [ ] Merge em `main` requer CI aprovado, conforme configuração administrativa documentada.
 
 ## Validação e evidências
 
 ```powershell
-dotnet test tests/MoodleConnector.Postgres.IntegrationTests
-dotnet test MoodleConnector.sln
+dotnet test tests/MoodleConnector.Application.Tests --filter FullyQualifiedName~MoodleSnapshotPostgresIntegrationTests
+dotnet test MoodleConnector.slnx
 ```
 
 ## Rollout e rollback

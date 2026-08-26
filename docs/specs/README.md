@@ -32,8 +32,8 @@ evidências.
 | [SPEC-0012](spec-0012-write-preview-risk-and-scopes.md) | Draft | SPEC-0011 | Confirmação semântica, impacto e scopes por domínio |
 | [SPEC-0013](spec-0013-capability-cache-and-tool-exposure.md) | Draft | — | Capabilities sem token e tools condicionais |
 | [SPEC-0014](spec-0014-canonical-mcp-surface.md) | Draft | SPEC-0013 | Catálogo MCP canônico com migração segura |
-| [SPEC-0015](spec-0015-current-state-and-analytical-snapshots.md) | Draft | SPEC-0013 | Base operacional de snapshots, consistente e performática |
-| [SPEC-0017](spec-0017-postgresql-concurrency-and-release-gates.md) | Draft | SPEC-0011, SPEC-0015 | Garantias PostgreSQL e gates de release |
+| [SPEC-0015](spec-0015-current-state-and-analytical-snapshots.md) | Implementing | SPEC-0013 | Base operacional de snapshots, consistente e performática |
+| [SPEC-0017](spec-0017-postgresql-concurrency-and-release-gates.md) | Implementing | SPEC-0011, SPEC-0015 | Garantias PostgreSQL e gates de release |
 
 ## Regra de rastreabilidade
 

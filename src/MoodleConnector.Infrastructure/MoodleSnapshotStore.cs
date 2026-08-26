@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
 
@@ -83,17 +84,23 @@ internal sealed class MoodleSnapshotStore(
 
         entity.ConnectionId = connectionId;
         entity.ConnectionAlias = connectionAlias;
-        entity.PayloadJson = payloadJson;
-        entity.Tier = tier;
-        entity.IsFrozen = frozen;
-        entity.UpdatedAt = now;
-        entity.FreshUntil = freshUntil;
-        entity.StaleUntil = staleUntil;
-        entity.LastError = null;
-        entity.PayloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payloadJson))).ToLowerInvariant();
-        entity.IsComplete = complete;
-        entity.RecordCount = recordCount;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        ApplySnapshot(entity, connectionId, connectionAlias, payloadJson, tier, frozen, complete, recordCount, now, freshUntil, staleUntil);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsUniqueViolation(exception) && entity.Id != Guid.Empty)
+        {
+            // Another worker may have inserted the same head between our read
+            // and insert. Detach the failed insert and converge on its head.
+            dbContext.Entry(entity).State = EntityState.Detached;
+            entity = await dbContext.MoodleSnapshots.SingleOrDefaultAsync(
+                item => item.OwnerId == ownerId && item.ConnectionId == connectionId && item.SnapshotType == normalizedDataset && item.CourseId == normalizedCourseId,
+                cancellationToken)
+                ?? throw new InvalidOperationException("O head do snapshot desapareceu durante o upsert concorrente.");
+            ApplySnapshot(entity, connectionId, connectionAlias, payloadJson, tier, frozen, complete, recordCount, now, freshUntil, staleUntil);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
         Invalidate(ownerId, connectionAlias, normalizedDataset, normalizedCourseId);
         metrics.RecordRefresh(normalizedDataset);
     }
@@ -174,6 +181,37 @@ internal sealed class MoodleSnapshotStore(
         $"legacy-{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"legacy:{ownerId:N}:{alias}"))).ToLowerInvariant()}";
 
     private static string Normalize(string value) => value.Trim().ToLowerInvariant();
+
+    private static void ApplySnapshot(
+        MoodleSnapshotEntity entity,
+        string connectionId,
+        string connectionAlias,
+        string payloadJson,
+        string tier,
+        bool frozen,
+        bool complete,
+        int recordCount,
+        DateTimeOffset now,
+        DateTimeOffset freshUntil,
+        DateTimeOffset staleUntil)
+    {
+        entity.ConnectionId = connectionId;
+        entity.ConnectionAlias = connectionAlias;
+        entity.PayloadJson = payloadJson;
+        entity.Tier = tier;
+        entity.IsFrozen = frozen;
+        entity.UpdatedAt = now;
+        entity.FreshUntil = freshUntil;
+        entity.StaleUntil = staleUntil;
+        entity.LastError = null;
+        entity.PayloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payloadJson))).ToLowerInvariant();
+        entity.IsComplete = complete;
+        entity.RecordCount = recordCount;
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException postgres &&
+        postgres.SqlState == PostgresErrorCodes.UniqueViolation;
 
     private static TimeSpan GetFreshTtl(string dataset, string tier, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : dataset switch

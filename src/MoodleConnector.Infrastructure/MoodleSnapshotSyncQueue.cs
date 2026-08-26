@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
@@ -854,6 +855,39 @@ internal sealed class MoodleSnapshotSyncQueue(
         var json = JsonSerializer.Serialize(payload, JsonOptions);
         var now = DateTimeOffset.UtcNow;
         var freshInterval = GetFreshInterval(type, tier, frozen);
+        ApplyQueueSnapshot(entity, work, json, tier, frozen, type, now, freshInterval, payload);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsUniqueViolation(exception))
+        {
+            db.Entry(entity).State = EntityState.Detached;
+            entity = await db.MoodleSnapshots.SingleOrDefaultAsync(
+                item => item.OwnerId == work.OwnerId &&
+                        item.ConnectionId == work.ConnectionId &&
+                        item.SnapshotType == type &&
+                        item.CourseId == courseId,
+                cancellationToken)
+                ?? throw new InvalidOperationException("O head do snapshot desapareceu durante o upsert concorrente.");
+            ApplyQueueSnapshot(entity, work, json, tier, frozen, type, now, freshInterval, payload);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private static void ApplyQueueSnapshot<T>(
+        MoodleSnapshotEntity entity,
+        SyncWork work,
+        string json,
+        string tier,
+        bool frozen,
+        string type,
+        DateTimeOffset now,
+        TimeSpan freshInterval,
+        T payload)
+    {
+        entity.ConnectionId = work.ConnectionId;
+        entity.ConnectionAlias = work.ConnectionAlias;
         entity.PayloadJson = json;
         entity.Tier = tier;
         entity.IsFrozen = frozen;
@@ -871,6 +905,10 @@ internal sealed class MoodleSnapshotSyncQueue(
         };
         entity.RecordCount = CountRecords(payload);
     }
+
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException postgres &&
+        postgres.SqlState == PostgresErrorCodes.UniqueViolation;
 
     private static TimeSpan GetFreshInterval(string type, string tier, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : type switch

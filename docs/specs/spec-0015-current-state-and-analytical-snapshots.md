@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft. Depende de SPEC-0013.
+Implementing. Depende de SPEC-0013.
 
 ## Objetivo
 
