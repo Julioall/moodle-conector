@@ -44,6 +44,7 @@ internal sealed class MoodleUniversalWriteService(
         {
             EnsureEnabled();
             var descriptor = await ResolveControlledWriteAsync(functionName, cancellationToken);
+            EnsureWriteScope(descriptor.Name);
             EnsureNoSensitiveParameters(parameters);
             if (!connection.CanWrite)
             {
@@ -161,6 +162,7 @@ internal sealed class MoodleUniversalWriteService(
         }
 
         await ResolveControlledWriteAsync(payload.Function, cancellationToken);
+        var requiredScope = GetRequiredWriteScope(payload.Function);
         var values = payload.Parameters.ToDictionary(
             pair => pair.Key,
             pair => (object?)pair.Value.Clone(),
@@ -173,7 +175,7 @@ internal sealed class MoodleUniversalWriteService(
         var confirmation = await confirmations.ConfirmAsync(
             pendingActionId,
             confirmationText,
-            requiredScope: "moodle.write",
+            requiredScope,
             cancellationToken);
 
         if (confirmation.Status == "already_confirmed")
@@ -245,6 +247,31 @@ internal sealed class MoodleUniversalWriteService(
 
         return descriptor;
     }
+
+    private void EnsureWriteScope(string functionName)
+    {
+        if (currentUser is null || currentUser.Scopes.Count == 0)
+        {
+            return;
+        }
+
+        var requiredScope = GetRequiredWriteScope(functionName);
+        if (!currentUser.HasScope(requiredScope))
+        {
+            throw new MoodleApiException(
+                "moodle_write_scope_required",
+                $"O escopo '{requiredScope}' e obrigatorio para esta familia de escrita.");
+        }
+    }
+
+    private string GetRequiredWriteScope(string functionName) => functionName.Trim().ToLowerInvariant() switch
+    {
+        "core_message_send_instant_messages" => "moodle.write.messages",
+        "mod_forum_add_discussion" or "mod_forum_add_discussion_post" => "moodle.write.forums",
+        "core_calendar_create_calendar_events" => "moodle.write.course_content",
+        "mod_assign_save_grade" or "mod_assign_save_grades" => "moodle.write.assignments.grade",
+        _ => "moodle.write"
+    };
 
     private Task RecordExecutionAsync(
         PendingMoodleAction action,

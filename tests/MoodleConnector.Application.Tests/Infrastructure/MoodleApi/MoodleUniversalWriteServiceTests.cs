@@ -117,6 +117,25 @@ public sealed class MoodleUniversalWriteServiceTests
     }
 
     [Fact]
+    public async Task PrepareAsync_ExigeEscopoDaFamiliaDeEscrita()
+    {
+        var user = new FakeCurrentUser("moodle.write.messages");
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            currentUser: user);
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+            "mod_assign_save_grade",
+            new Dictionary<string, object?> { ["assignmentid"] = 10, ["userid"] = 20, ["grade"] = 85 },
+            CancellationToken.None));
+
+        Assert.Equal("moodle_write_scope_required", error.ErrorCode);
+        Assert.Contains("moodle.write.assignments.grade", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ConfirmAsync_AcaoJaConfirmadaAindaValidaConfirmacaoESemReexecutar()
     {
         var rest = new FakeRestClient();
@@ -225,7 +244,8 @@ public sealed class MoodleUniversalWriteServiceTests
         bool enabled,
         MoodleFunctionProfile? profile = null,
         FakeAuditLogs? auditLogs = null,
-        FakeConfirmation? confirmation = null) => new(
+        FakeConfirmation? confirmation = null,
+        ICurrentUserContext? currentUser = null) => new(
             new FakeCatalog(profile ?? Profile(new MoodleFunctionDescriptor("mod_assign_save_grade", MoodleFunctionRisk.ControlledWrite, true))),
             rest,
             new FakeCredentialsProvider(),
@@ -233,7 +253,8 @@ public sealed class MoodleUniversalWriteServiceTests
             confirmation ?? new FakeConfirmation(),
             pendingActions,
             auditLogs ?? new FakeAuditLogs(),
-            Options.Create(new MoodleUniversalApiFeatureOptions { UniversalMoodleWriteEnabled = enabled }));
+            Options.Create(new MoodleUniversalApiFeatureOptions { UniversalMoodleWriteEnabled = enabled }),
+            currentUser);
 
     private static MoodleFunctionProfile Profile(MoodleFunctionDescriptor descriptor) => new(
         "connection", "goias", "Moodle", "4.5", 7, [descriptor], DateTimeOffset.UtcNow);
@@ -247,6 +268,14 @@ public sealed class MoodleUniversalWriteServiceTests
     {
         public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken) =>
             Task.FromResult(new MoodleConnectorCredentials("client", "connection", "goias", "https://moodle.example", "user", "password", "goias", true));
+    }
+
+    private sealed class FakeCurrentUser(string scope) : ICurrentUserContext
+    {
+        public string Subject => "user";
+        public string? Email => null;
+        public IReadOnlyCollection<string> Scopes => [scope];
+        public bool HasScope(string requestedScope) => Scopes.Contains(requestedScope, StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed class FakeRestClient : IMoodleRestClient
