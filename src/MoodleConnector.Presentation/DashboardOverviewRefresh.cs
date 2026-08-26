@@ -21,7 +21,8 @@ internal sealed record DashboardOverviewRefreshRequest(
     string ClientId,
     string ConnectionAlias,
     IReadOnlyList<CourseSummary> Courses,
-    bool Force = false);
+    bool Force = false,
+    string? ConnectionId = null);
 
 internal interface IDashboardOverviewRefreshQueue
 {
@@ -62,10 +63,15 @@ internal sealed class DashboardOverviewRefreshQueue(
 
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+        var connectionId = string.IsNullOrWhiteSpace(request.ConnectionId)
+            ? await MoodleConnectionIdentity.ResolveAsync(db, request.OwnerId, request.ClientId, request.ConnectionAlias, cancellationToken)
+            : request.ConnectionId.Trim();
+        request = request with { ConnectionId = connectionId };
         var now = DateTimeOffset.UtcNow;
         var state = await db.MoodleSyncStates.SingleOrDefaultAsync(item =>
             item.OwnerId == request.OwnerId &&
-            item.ConnectionAlias == request.ConnectionAlias &&
+            (item.ConnectionId == request.ConnectionId ||
+             (item.ConnectionId == string.Empty && item.ConnectionAlias == request.ConnectionAlias)) &&
             item.Dataset == MoodleSnapshotDatasets.DashboardPending &&
             item.CourseId == string.Empty, cancellationToken);
         if (state is not null && MoodleSyncLeasePolicy.IsActive(state, now))
@@ -93,7 +99,7 @@ internal sealed class DashboardOverviewRefreshQueue(
                 await db.SaveChangesAsync(cancellationToken);
             }
 
-            var dueKey = GetKey(request.OwnerId, request.ConnectionAlias);
+            var dueKey = GetKey(request.OwnerId, request.ConnectionId!);
             if (!queued.TryAdd(dueKey, 0)) return false;
             if (channel.Writer.TryWrite(request)) return true;
             queued.TryRemove(dueKey, out _);
@@ -106,6 +112,7 @@ internal sealed class DashboardOverviewRefreshQueue(
             {
                 Id = Guid.NewGuid(),
                 OwnerId = request.OwnerId,
+                ConnectionId = request.ConnectionId!,
                 ConnectionAlias = request.ConnectionAlias,
                 Dataset = MoodleSnapshotDatasets.DashboardPending,
                 CourseId = string.Empty,
@@ -113,6 +120,8 @@ internal sealed class DashboardOverviewRefreshQueue(
             db.MoodleSyncStates.Add(state);
         }
 
+        state.ConnectionId = request.ConnectionId!;
+        state.ConnectionAlias = request.ConnectionAlias;
         state.ClientId = request.ClientId;
         state.UserExternalId = request.OwnerId.ToString();
         state.Status = "pending";
@@ -122,7 +131,7 @@ internal sealed class DashboardOverviewRefreshQueue(
         state.UpdatedAt = now;
         await db.SaveChangesAsync(cancellationToken);
 
-        var key = GetKey(request.OwnerId, request.ConnectionAlias);
+        var key = GetKey(request.OwnerId, request.ConnectionId!);
         if (!queued.TryAdd(key, 0)) return false;
         if (channel.Writer.TryWrite(request)) return true;
         queued.TryRemove(key, out _);
@@ -197,8 +206,8 @@ internal sealed class DashboardOverviewRefreshQueue(
                 await CompleteEmptyStateAsync(db, state.Id, now, cancellationToken);
                 continue;
             }
-            var request = new DashboardOverviewRefreshRequest(state.OwnerId, state.ClientId, state.ConnectionAlias, scopedCourses);
-            var key = GetKey(request.OwnerId, request.ConnectionAlias);
+            var request = new DashboardOverviewRefreshRequest(state.OwnerId, state.ClientId, state.ConnectionAlias, scopedCourses, ConnectionId: state.ConnectionId);
+            var key = GetKey(request.OwnerId, request.ConnectionId ?? request.ConnectionAlias);
             if (queued.TryAdd(key, 0) && !channel.Writer.TryWrite(request)) queued.TryRemove(key, out _);
         }
     }
@@ -257,7 +266,7 @@ internal sealed class DashboardOverviewRefreshQueue(
 
     private async Task ProcessRequestAsync(DashboardOverviewRefreshRequest request, CancellationToken cancellationToken)
     {
-        var key = GetKey(request.OwnerId, request.ConnectionAlias);
+        var key = GetKey(request.OwnerId, request.ConnectionId ?? request.ConnectionAlias);
         CancellationTokenSource? leaseHeartbeatCancellation = null;
         Task? leaseHeartbeat = null;
         try
@@ -379,8 +388,13 @@ internal sealed class DashboardOverviewRefreshQueue(
         CancellationToken cancellationToken)
     {
         var db = services.GetRequiredService<ConnectorDbContext>();
+        var connectionId = string.IsNullOrWhiteSpace(request.ConnectionId)
+            ? await MoodleConnectionIdentity.ResolveAsync(db, request.OwnerId, request.ClientId, request.ConnectionAlias, cancellationToken)
+            : request.ConnectionId.Trim();
         var state = await db.MoodleSyncStates.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.OwnerId == request.OwnerId && item.ConnectionAlias == request.ConnectionAlias &&
+            item.OwnerId == request.OwnerId &&
+            (item.ConnectionId == connectionId ||
+             (item.ConnectionId == string.Empty && item.ConnectionAlias == request.ConnectionAlias)) &&
             item.Dataset == MoodleSnapshotDatasets.DashboardPending && item.CourseId == string.Empty,
             cancellationToken);
         if (state is null || state.NextSyncAt is not { } next || next > DateTimeOffset.UtcNow) return null;
@@ -404,22 +418,28 @@ internal sealed class DashboardOverviewRefreshQueue(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
+        var connectionId = string.IsNullOrWhiteSpace(request.ConnectionId)
+            ? await MoodleConnectionIdentity.ResolveAsync(db, request.OwnerId, request.ClientId, request.ConnectionAlias, cancellationToken)
+            : request.ConnectionId.Trim();
         var state = await db.MoodleSyncStates.SingleOrDefaultAsync(item =>
-            item.OwnerId == request.OwnerId && item.ConnectionAlias == request.ConnectionAlias &&
+            item.OwnerId == request.OwnerId &&
+            (item.ConnectionId == connectionId ||
+             (item.ConnectionId == string.Empty && item.ConnectionAlias == request.ConnectionAlias)) &&
             item.Dataset == MoodleSnapshotDatasets.DashboardPending && item.CourseId == string.Empty,
             cancellationToken);
         if (state is null) return;
         var seconds = Math.Min(3600, 30 * Math.Pow(2, Math.Max(0, state.AttemptCount - 1))) * (0.75 + Random.Shared.NextDouble() * 0.5);
         state.Status = "failed";
-        state.LastError = exception.Message.Length > 4000 ? exception.Message[..4000] : exception.Message;
+        var safeError = MoodleConnector.Application.MoodleApi.MoodleErrorContract.Describe(exception).Message;
+        state.LastError = safeError.Length > 4000 ? safeError[..4000] : safeError;
         state.NextSyncAt = DateTimeOffset.UtcNow.AddSeconds(seconds);
         state.LeaseUntil = null;
         state.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    private static string GetKey(Guid ownerId, string connectionAlias) =>
-        $"{ownerId}:{connectionAlias}";
+    private static string GetKey(Guid ownerId, string connectionRef) =>
+        $"{ownerId}:{connectionRef}";
 
     private static DateTimeOffset GetNextBrazilMidnight(DateTimeOffset now)
     {

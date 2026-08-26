@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,7 @@ internal sealed class MoodleSnapshotStore(
     private static readonly TimeSpan HotTtl = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan WarmTtl = TimeSpan.FromHours(2);
     private static readonly TimeSpan L1Duration = TimeSpan.FromSeconds(15);
+    private static readonly ConcurrentDictionary<string, long> CacheVersions = new(StringComparer.Ordinal);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
@@ -53,8 +55,13 @@ internal sealed class MoodleSnapshotStore(
     {
         var normalizedDataset = Normalize(dataset);
         var normalizedCourseId = courseId?.Trim() ?? string.Empty;
+        var connectionId = await MoodleConnectionIdentity.ResolveAsync(
+            dbContext, ownerId, string.Empty, connectionAlias, cancellationToken);
         var entity = await dbContext.MoodleSnapshots.SingleOrDefaultAsync(
-            item => item.OwnerId == ownerId && item.ConnectionAlias == connectionAlias && item.SnapshotType == normalizedDataset && item.CourseId == normalizedCourseId,
+            item => item.OwnerId == ownerId && item.ConnectionId == connectionId && item.SnapshotType == normalizedDataset && item.CourseId == normalizedCourseId,
+            cancellationToken);
+        entity ??= await dbContext.MoodleSnapshots.SingleOrDefaultAsync(
+            item => item.OwnerId == ownerId && item.ConnectionId == string.Empty && item.ConnectionAlias == connectionAlias && item.SnapshotType == normalizedDataset && item.CourseId == normalizedCourseId,
             cancellationToken);
         var freshUntil = now.Add(GetFreshTtl(normalizedDataset, tier, frozen));
         var staleUntil = freshUntil.Add(GetStaleWindow(normalizedDataset, frozen));
@@ -66,6 +73,7 @@ internal sealed class MoodleSnapshotStore(
             {
                 Id = Guid.NewGuid(),
                 OwnerId = ownerId,
+                ConnectionId = connectionId,
                 ConnectionAlias = connectionAlias,
                 SnapshotType = normalizedDataset,
                 CourseId = normalizedCourseId,
@@ -73,6 +81,8 @@ internal sealed class MoodleSnapshotStore(
             dbContext.MoodleSnapshots.Add(entity);
         }
 
+        entity.ConnectionId = connectionId;
+        entity.ConnectionAlias = connectionAlias;
         entity.PayloadJson = payloadJson;
         entity.Tier = tier;
         entity.IsFrozen = frozen;
@@ -88,14 +98,21 @@ internal sealed class MoodleSnapshotStore(
         metrics.RecordRefresh(normalizedDataset);
     }
 
-    public void Invalidate(Guid ownerId, string connectionAlias, string dataset, string courseId = "") =>
-        memoryCache.Remove(CacheKey(ownerId, connectionAlias, Normalize(dataset), courseId?.Trim() ?? string.Empty));
+    public void Invalidate(Guid ownerId, string connectionAlias, string dataset, string courseId = "")
+    {
+        var normalizedAlias = connectionAlias.Trim().ToLowerInvariant();
+        var scopeKey = $"{ownerId:N}:{normalizedAlias}";
+        CacheVersions.AddOrUpdate(scopeKey, 1, static (_, version) => version + 1);
+        memoryCache.Remove(CacheKey(ownerId, LegacyConnectionId(ownerId, normalizedAlias), normalizedAlias, Normalize(dataset), courseId?.Trim() ?? string.Empty));
+    }
 
     private async Task<MoodleSnapshotEnvelope<T>?> ReadAsync<T>(Guid ownerId, string connectionAlias, string type, string courseId, CancellationToken cancellationToken)
     {
         type = Normalize(type);
         courseId = courseId?.Trim() ?? string.Empty;
-        var key = CacheKey(ownerId, connectionAlias, type, courseId);
+        var connectionId = await MoodleConnectionIdentity.ResolveAsync(
+            dbContext, ownerId, string.Empty, connectionAlias, cancellationToken);
+        var key = CacheKey(ownerId, connectionId, connectionAlias, type, courseId);
         if (memoryCache.TryGetValue(key, out MoodleSnapshotEnvelope<T>? cached))
         {
             metrics.RecordL1Hit(type);
@@ -103,7 +120,9 @@ internal sealed class MoodleSnapshotStore(
         }
 
         var entity = await dbContext.Set<MoodleSnapshotEntity>().AsNoTracking()
-            .SingleOrDefaultAsync(item => item.OwnerId == ownerId && item.ConnectionAlias == connectionAlias && item.SnapshotType == type && item.CourseId == courseId, cancellationToken);
+            .SingleOrDefaultAsync(item => item.OwnerId == ownerId && item.ConnectionId == connectionId && item.SnapshotType == type && item.CourseId == courseId, cancellationToken);
+        entity ??= await dbContext.Set<MoodleSnapshotEntity>().AsNoTracking()
+            .SingleOrDefaultAsync(item => item.OwnerId == ownerId && item.ConnectionId == string.Empty && item.ConnectionAlias == connectionAlias && item.SnapshotType == type && item.CourseId == courseId, cancellationToken);
         if (entity is null)
         {
             metrics.RecordMiss(type);
@@ -145,8 +164,14 @@ internal sealed class MoodleSnapshotStore(
         }
     }
 
-    private static string CacheKey(Guid ownerId, string connectionAlias, string dataset, string courseId) =>
-        $"moodle-snapshot:{ownerId}:{connectionAlias}:{dataset}:{courseId}";
+    private static string CacheKey(Guid ownerId, string connectionId, string connectionAlias, string dataset, string courseId)
+    {
+        var version = CacheVersions.GetValueOrDefault($"{ownerId:N}:{connectionAlias.Trim().ToLowerInvariant()}");
+        return $"moodle-snapshot:{ownerId}:{connectionId}:{dataset}:{courseId}:v{version}";
+    }
+
+    private static string LegacyConnectionId(Guid ownerId, string alias) =>
+        $"legacy-{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"legacy:{ownerId:N}:{alias}"))).ToLowerInvariant()}";
 
     private static string Normalize(string value) => value.Trim().ToLowerInvariant();
 

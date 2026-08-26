@@ -10,7 +10,9 @@ public sealed record MoodleSnapshotSyncRequest(
     bool Force = false,
     string Dataset = MoodleSnapshotDatasets.Connection,
     string? CourseId = null,
-    int Priority = 50);
+    int Priority = 50,
+    string? ConnectionId = null,
+    string Trigger = "scheduled");
 
 public static class MoodleSnapshotDatasets
 {

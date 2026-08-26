@@ -26,6 +26,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<DashboardAccessSnapshotEntity> DashboardAccessSnapshots => Set<DashboardAccessSnapshotEntity>();
     public DbSet<MoodleSnapshotEntity> MoodleSnapshots => Set<MoodleSnapshotEntity>();
     public DbSet<MoodleSyncStateEntity> MoodleSyncStates => Set<MoodleSyncStateEntity>();
+    public DbSet<MoodleSnapshotRunEntity> MoodleSnapshotRuns => Set<MoodleSnapshotRunEntity>();
+    public DbSet<MoodleSnapshotRunItemEntity> MoodleSnapshotRunItems => Set<MoodleSnapshotRunItemEntity>();
     public DbSet<PlannerLinkEntity> PlannerLinks => Set<PlannerLinkEntity>();
     public DbSet<UserIgnoredCourseEntity> UserIgnoredCourses => Set<UserIgnoredCourseEntity>();
     public DbSet<UserTrackedCourseEntity> UserTrackedCourses => Set<UserTrackedCourseEntity>();
@@ -262,6 +264,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         var moodleSnapshot = modelBuilder.Entity<MoodleSnapshotEntity>();
         moodleSnapshot.ToTable("moodle_snapshots");
         moodleSnapshot.HasKey(x => x.Id);
+        moodleSnapshot.Property(x => x.ConnectionId).HasMaxLength(128).IsRequired();
         moodleSnapshot.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
         moodleSnapshot.Property(x => x.SnapshotType).HasMaxLength(32).IsRequired();
         moodleSnapshot.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
@@ -271,11 +274,15 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleSnapshot.Property(x => x.LastError).HasMaxLength(4000);
         moodleSnapshot.Property(x => x.PayloadHash).HasMaxLength(64);
         moodleSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.SnapshotType, x.CourseId }).IsUnique();
+        moodleSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionId, x.SnapshotType, x.CourseId })
+            .IsUnique()
+            .HasFilter("\"ConnectionId\" <> ''");
         moodleSnapshot.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.UpdatedAt });
 
         var moodleSyncState = modelBuilder.Entity<MoodleSyncStateEntity>();
         moodleSyncState.ToTable("moodle_sync_states");
         moodleSyncState.HasKey(x => x.Id);
+        moodleSyncState.Property(x => x.ConnectionId).HasMaxLength(128).IsRequired();
         moodleSyncState.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
         moodleSyncState.Property(x => x.Dataset).HasMaxLength(32).IsRequired();
         moodleSyncState.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
@@ -285,7 +292,33 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleSyncState.Property(x => x.ClientId).HasMaxLength(64).IsRequired();
         moodleSyncState.Property(x => x.UserExternalId).HasMaxLength(200).IsRequired();
         moodleSyncState.HasIndex(x => new { x.OwnerId, x.ConnectionAlias, x.Dataset, x.CourseId }).IsUnique();
+        moodleSyncState.HasIndex(x => new { x.OwnerId, x.ConnectionId, x.Dataset, x.CourseId })
+            .IsUnique()
+            .HasFilter("\"ConnectionId\" <> ''");
         moodleSyncState.HasIndex(x => new { x.Status, x.NextSyncAt, x.Priority });
+
+        var moodleSnapshotRun = modelBuilder.Entity<MoodleSnapshotRunEntity>();
+        moodleSnapshotRun.ToTable("moodle_snapshot_runs");
+        moodleSnapshotRun.HasKey(x => x.Id);
+        moodleSnapshotRun.Property(x => x.ConnectionId).HasMaxLength(128).IsRequired();
+        moodleSnapshotRun.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
+        moodleSnapshotRun.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        moodleSnapshotRun.Property(x => x.Trigger).HasMaxLength(32).IsRequired();
+        moodleSnapshotRun.Property(x => x.SynchronizerVersion).HasMaxLength(128).IsRequired();
+        moodleSnapshotRun.Property(x => x.Error).HasMaxLength(4000);
+        moodleSnapshotRun.HasIndex(x => new { x.OwnerId, x.ConnectionId, x.StartedAt });
+        moodleSnapshotRun.HasIndex(x => new { x.Status, x.StartedAt });
+
+        var moodleSnapshotRunItem = modelBuilder.Entity<MoodleSnapshotRunItemEntity>();
+        moodleSnapshotRunItem.ToTable("moodle_snapshot_run_items");
+        moodleSnapshotRunItem.HasKey(x => x.Id);
+        moodleSnapshotRunItem.Property(x => x.Dataset).HasMaxLength(32).IsRequired();
+        moodleSnapshotRunItem.Property(x => x.ResourceId).HasMaxLength(128).IsRequired();
+        moodleSnapshotRunItem.Property(x => x.Status).HasMaxLength(32).IsRequired();
+        moodleSnapshotRunItem.Property(x => x.PayloadHash).HasMaxLength(64);
+        moodleSnapshotRunItem.Property(x => x.Error).HasMaxLength(4000);
+        moodleSnapshotRunItem.HasIndex(x => new { x.RunId, x.Dataset, x.ResourceId }).IsUnique();
+        moodleSnapshotRunItem.HasIndex(x => new { x.Dataset, x.Status, x.StartedAt });
 
         var ignoredCourse = modelBuilder.Entity<UserIgnoredCourseEntity>();
         ignoredCourse.ToTable("user_ignored_courses");

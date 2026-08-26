@@ -200,4 +200,23 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (36, 'explicitly tracked course preferences'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task SnapshotIdentityAndRunsSchemaScript_DeveSerExpansivoEIdempotente()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "037_moodle_snapshot_connection_identity_and_runs.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de identidade dos snapshots nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("ConnectionId", sql, StringComparison.Ordinal);
+        Assert.Contains("moodle_snapshot_runs", sql, StringComparison.Ordinal);
+        Assert.Contains("moodle_snapshot_run_items", sql, StringComparison.Ordinal);
+        Assert.Contains("WHERE \"ConnectionId\" <> ''", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (37, 'stable snapshot connection identity and technical synchronization runs'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }
