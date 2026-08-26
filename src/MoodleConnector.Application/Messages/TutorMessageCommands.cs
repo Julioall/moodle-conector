@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -409,7 +410,7 @@ public sealed class ConfirmTutorMessageCommandHandler(
     : IRequestHandler<ConfirmTutorMessageCommand, TutorMessageSendResult>
 {
     private const string CommitToolName = "confirmar_mensagem_tutor";
-    private const string RequiredScope = "moodle.write";
+    private const string RequiredScope = "moodle.write.messages";
     private static readonly System.Text.Json.JsonSerializerOptions JsonOptions =
         new(System.Text.Json.JsonSerializerDefaults.Web);
 
@@ -531,15 +532,23 @@ public sealed class ConfirmTutorMessageCommandHandler(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            var executionUnknown = ex is HttpRequestException ||
+                ex is MoodleApiException moodleError &&
+                MoodleErrorContract.NormalizeCode(moodleError.ErrorCode) is MoodleErrorContract.NetworkError or MoodleErrorContract.RequestTimeout;
+            if (executionUnknown)
+            {
+                action.MarkExecutionUnknown();
+                await pendingActionRepository.SaveChangesAsync(cancellationToken);
+            }
             await RecordAuditAsync(
-                action, payload, "message_failed",
+                action, payload, executionUnknown ? "message_execution_unknown" : "message_failed",
                 new { error = ex.GetType().Name },
                 ex.GetType().Name, ex.Message,
                 cancellationToken);
             await auditLogRepository.SaveChangesAsync(cancellationToken);
 
             return new TutorMessageSendResult(
-                Status: "failed",
+                Status: executionUnknown ? "execution_unknown" : "failed",
                 PendingActionId: request.PendingActionId,
                 MessageType: payload.MessageType,
                 CourseId: payload.CourseId,

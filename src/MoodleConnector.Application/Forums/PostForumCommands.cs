@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -376,7 +377,7 @@ public sealed class ConfirmForumPostCommandHandler(
         var confirmation = await confirmations.ConfirmAsync(
             request.PendingActionId,
             request.ConfirmationText,
-            requiredScope: "moodle.write",
+            requiredScope: "moodle.write.forums",
             cancellationToken);
 
         if (confirmation.Status == "already_confirmed")
@@ -441,10 +442,18 @@ public sealed class ConfirmForumPostCommandHandler(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            var executionUnknown = ex is HttpRequestException ||
+                ex is MoodleApiException moodleError &&
+                MoodleErrorContract.NormalizeCode(moodleError.ErrorCode) is MoodleErrorContract.NetworkError or MoodleErrorContract.RequestTimeout;
+            if (executionUnknown)
+            {
+                action.MarkExecutionUnknown();
+                await pendingActions.SaveChangesAsync(cancellationToken);
+            }
             await RecordForumPostAuditAsync(
                 action,
                 payload,
-                "forum_post_failed",
+                executionUnknown ? "forum_post_execution_unknown" : "forum_post_failed",
                 new { exceptionType = ex.GetType().Name },
                 ex.GetType().Name,
                 ex.Message,
@@ -452,7 +461,7 @@ public sealed class ConfirmForumPostCommandHandler(
             await auditLogs.SaveChangesAsync(cancellationToken);
 
             return new ConfirmForumPostResult(
-                "failed",
+                executionUnknown ? "execution_unknown" : "failed",
                 request.PendingActionId,
                 payload.CourseId,
                 payload.ForumId,

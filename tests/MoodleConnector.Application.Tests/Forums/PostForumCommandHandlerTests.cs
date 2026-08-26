@@ -98,7 +98,7 @@ public sealed class PostForumCommandHandlerTests
         Assert.Equal("701", fixture.ForumGateway.LastForumId);
         Assert.Equal("Aviso", fixture.ForumGateway.LastSubject);
         Assert.Equal("<p>Mensagem.</p>", fixture.ForumGateway.LastMessageHtml);
-        Assert.Equal("moodle.write", fixture.Confirmations.LastRequiredScope);
+        Assert.Equal("moodle.write.forums", fixture.Confirmations.LastRequiredScope);
         var audit = Assert.Single(fixture.AuditLogs.Logs);
         Assert.Equal("forum_post_succeeded", audit.Status);
         Assert.Equal("mod_forum_add_discussion", audit.MoodleFunction);
