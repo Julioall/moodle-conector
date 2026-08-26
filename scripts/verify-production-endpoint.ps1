@@ -13,7 +13,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $baseUri = "https://$AppDomain"
-$expectedIssuer = $baseUri
+$expectedIssuer = "$baseUri/"
 $expectedAudience = "$baseUri/mcp"
 $failures = [System.Collections.Generic.List[string]]::new()
 
@@ -21,12 +21,21 @@ function Add-Failure([string]$Message) {
     $failures.Add($Message)
 }
 
+function Get-HttpStatusCodeFromException($Exception) {
+    $responseProperty = $Exception.PSObject.Properties['Response']
+    if ($null -eq $responseProperty -or $null -eq $responseProperty.Value) {
+        return $null
+    }
+
+    return [int]$responseProperty.Value.StatusCode
+}
+
 function Get-Response([string]$Path) {
     try {
         return Invoke-WebRequest -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 20 -Uri "$baseUri$Path"
     }
     catch {
-        $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+        $statusCode = Get-HttpStatusCodeFromException $_.Exception
         Add-Failure "GET $Path failed$(if ($null -ne $statusCode) { " with HTTP $statusCode" }): $($_.Exception.Message)"
         return $null
     }
@@ -120,10 +129,10 @@ if ($null -ne $protectedResource) {
 
 $openid = Read-JsonResponse (Get-Response '/.well-known/openid-configuration') '/.well-known/openid-configuration'
 if ($null -ne $openid) {
-    Require-Equal $openid.issuer "$expectedIssuer/" 'openid-configuration.issuer'
-    Require-Equal $openid.authorization_endpoint "$expectedIssuer/authorize" 'openid-configuration.authorization_endpoint'
-    Require-Equal $openid.token_endpoint "$expectedIssuer/token" 'openid-configuration.token_endpoint'
-    Require-Equal $openid.jwks_uri "$expectedIssuer/.well-known/jwks" 'openid-configuration.jwks_uri'
+    Require-Equal $openid.issuer $expectedIssuer 'openid-configuration.issuer'
+    Require-Equal $openid.authorization_endpoint "${expectedIssuer}authorize" 'openid-configuration.authorization_endpoint'
+    Require-Equal $openid.token_endpoint "${expectedIssuer}token" 'openid-configuration.token_endpoint'
+    Require-Equal $openid.jwks_uri "${expectedIssuer}.well-known/jwks" 'openid-configuration.jwks_uri'
 }
 
 $jwks = Read-JsonResponse (Get-Response '/.well-known/jwks') '/.well-known/jwks'
@@ -208,7 +217,7 @@ try {
     }
 }
 catch {
-    $statusCode = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { $null }
+    $statusCode = Get-HttpStatusCodeFromException $_.Exception
     Add-Failure "POST /mcp initialize failed$(if ($null -ne $statusCode) { " with HTTP $statusCode" }): $($_.Exception.Message)"
 }
 

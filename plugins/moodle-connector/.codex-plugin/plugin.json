@@ -1,6 +1,6 @@
 {
   "name": "moodle-connector",
-  "version": "0.1.0+codex.20260825172721",
+  "version": "0.1.0+codex.20260826035623",
   "description": "Fluxos seguros para cursos, atividades e acompanhamento no Moodle.",
   "author": {
     "name": "Moodle Connector contributors",

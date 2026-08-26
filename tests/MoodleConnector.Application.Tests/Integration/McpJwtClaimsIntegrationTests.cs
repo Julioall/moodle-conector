@@ -645,7 +645,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
 
             Assert.Equal("http://localhost/mcp", json.RootElement.GetProperty("resource").GetString());
             Assert.Equal(
-                JwtIssuer,
+                $"{JwtIssuer}/",
                 json.RootElement.GetProperty("authorization_servers")[0].GetString());
             Assert.Contains(
                 json.RootElement.GetProperty("scopes_supported").EnumerateArray(),
@@ -776,8 +776,8 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         using var openIdDiscovery = JsonDocument.Parse(openIdDiscoveryBody);
 
         Assert.Equal(
-            issuer.TrimEnd('/'),
-            openIdDiscovery.RootElement.GetProperty("issuer").GetString()?.TrimEnd('/'));
+            issuer,
+            openIdDiscovery.RootElement.GetProperty("issuer").GetString());
         Assert.Contains(
             openIdDiscovery.RootElement.GetProperty("code_challenge_methods_supported").EnumerateArray(),
             method => method.GetString() == "S256");
