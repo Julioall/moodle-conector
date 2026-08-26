@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft. Depende de SPEC-0011.
+Implementing. Depende de SPEC-0011.
 
 ## Objetivo
 

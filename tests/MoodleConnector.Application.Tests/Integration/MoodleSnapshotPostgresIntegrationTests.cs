@@ -49,8 +49,42 @@ public sealed class MoodleSnapshotPostgresIntegrationTests
                 MoodleTarget = alias,
                 IsActive = true,
             });
+            schemaDb.MoodleSyncStates.Add(new MoodleSyncStateEntity
+            {
+                Id = Guid.NewGuid(),
+                OwnerId = ownerId,
+                ConnectionId = connectionId,
+                ConnectionAlias = alias,
+                Dataset = "courses",
+                CourseId = string.Empty,
+                ClientId = clientId,
+                UserExternalId = ownerId.ToString("N"),
+                Status = "pending",
+                NextSyncAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow,
+            });
             await schemaDb.SaveChangesAsync();
         }
+
+        var claimTime = DateTimeOffset.UtcNow;
+        async Task<int> ClaimAsync()
+        {
+            await using var db = new ConnectorDbContext(options);
+            return await db.MoodleSyncStates
+                .Where(item => item.OwnerId == ownerId &&
+                               item.ConnectionId == connectionId &&
+                               item.Dataset == "courses" &&
+                               item.Status != "running" &&
+                               item.NextSyncAt <= claimTime)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.Status, "running")
+                    .SetProperty(item => item.LeaseUntil, claimTime.AddMinutes(30))
+                    .SetProperty(item => item.LastStartedAt, claimTime));
+        }
+
+        var claims = await Task.WhenAll(ClaimAsync(), ClaimAsync());
+        Assert.Equal(1, claims.Count(item => item == 1));
+        Assert.Equal(1, claims.Count(item => item == 0));
 
         async Task SaveAsync(string state)
         {
