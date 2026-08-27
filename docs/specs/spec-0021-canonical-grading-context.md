@@ -134,9 +134,11 @@ cobertura, flags de coleta, warnings e bloqueadores. A publicação calcula um `
 SHA-256 determinístico sobre o payload canônico; o timestamp operacional fica fora do hash e
 as coleções são copiadas defensivamente.
 
-Este incremento ainda não persiste snapshots nem troca os três consumidores legados para o
-novo contrato. Essa integração será feita em etapa separada, com dual-read/dual-write e
-validação de equivalência, para não introduzir divergência ou bloquear lotes antigos.
+Este incremento já publica um documento operacional append-only em
+`grading_context_snapshot` e registra no item a identidade correspondente. Ainda não troca
+os três consumidores legados para leitura exclusiva do snapshot; essa integração será feita
+em etapa separada, com dual-read/dual-write e validação de equivalência, para não introduzir
+divergência ou bloquear lotes antigos.
 
 O worker e o orquestrador local agora adaptam o contexto montado para essa identidade e
 persistem no item somente `ContextVersion`, `ContextHash` e `ContextStatus`. O texto da

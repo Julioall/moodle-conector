@@ -116,6 +116,10 @@ claims condicionais com ordenação por prioridade, renovação, liberação, ch
 recuperação de leases expirados em migração aditiva. O channel permanece como acelerador; o worker faz polling do job store e
 continua aceitando itens enfileirados pelo fluxo legado.
 
+O worker também evita reentrância do mesmo lote dentro do processo, quando o channel recebe
+uma duplicata enquanto o claim ainda está ativo. Isso complementa, sem substituir, a
+exclusão concorrente entre réplicas garantida pelo lease PostgreSQL.
+
 Este incremento ainda não move a ingestão pesada para fora do request, não implementa leases
 por item nem cleanup de retenção; essas entregas permanecem nas etapas seguintes.
 

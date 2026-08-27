@@ -312,6 +312,18 @@ public sealed class GradingContextSnapshot
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
+        var json = SerializeCanonicalPayload(snapshot);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Serializa apenas o payload versionado do contexto. O resultado é adequado
+    /// para armazenamento operacional e não inclui timestamp nem o próprio hash.
+    /// </summary>
+    public static string SerializeCanonicalPayload(GradingContextSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
         var payload = new CanonicalSnapshotPayload(
             snapshot.SchemaVersion,
             snapshot.Version,
@@ -339,8 +351,7 @@ public sealed class GradingContextSnapshot
             snapshot.IncludeSubmissionFiles,
             snapshot.IncludeCourseMaterials);
 
-        var json = JsonSerializer.Serialize(payload, HashJsonOptions);
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+        return JsonSerializer.Serialize(payload, HashJsonOptions);
     }
 
     private static void ValidateExtraction(GradingExtractionSummary extraction)

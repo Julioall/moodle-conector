@@ -39,6 +39,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<AssistedGradingItem> GradingItems => Set<AssistedGradingItem>();
     public DbSet<GradingArtifact> GradingArtifacts => Set<GradingArtifact>();
     public DbSet<GradingEvidence> GradingEvidence => Set<GradingEvidence>();
+    public DbSet<GradingContextSnapshotDocument> GradingContextSnapshots => Set<GradingContextSnapshotDocument>();
     public DbSet<UserMemory> UserMemories => Set<UserMemory>();
     public DbSet<UserMemoryDocument> UserMemoryDocuments => Set<UserMemoryDocument>();
     public DbSet<OpenIddictEntityFrameworkCoreApplication> OAuthApplications => Set<OpenIddictEntityFrameworkCoreApplication>();
@@ -519,6 +520,20 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
             .HasForeignKey(x => x.GradingItemId)
             .OnDelete(DeleteBehavior.Cascade);
         evidence.HasIndex(x => x.GradingItemId);
+
+        var contextSnapshot = modelBuilder.Entity<GradingContextSnapshotDocument>();
+        contextSnapshot.ToTable("grading_context_snapshot");
+        contextSnapshot.HasKey(x => x.Id);
+        contextSnapshot.Property(x => x.ContextHash).HasMaxLength(64).IsRequired();
+        contextSnapshot.Property(x => x.ContextStatus).HasMaxLength(32).IsRequired();
+        contextSnapshot.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
+        contextSnapshot.Property(x => x.CoverageJson).HasColumnType("jsonb");
+        contextSnapshot.HasOne<AssistedGradingItem>()
+            .WithMany()
+            .HasForeignKey(x => x.GradingItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+        contextSnapshot.HasIndex(x => new { x.GradingItemId, x.Version }).IsUnique();
+        contextSnapshot.HasIndex(x => new { x.GradingItemId, x.ContextHash }).IsUnique();
     }
 }
 

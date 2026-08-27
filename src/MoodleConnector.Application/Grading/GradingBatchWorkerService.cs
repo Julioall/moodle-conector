@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,8 @@ public sealed class GradingBatchWorkerService(
     IOptions<GradingLimitsOptions> limits,
     ILogger<GradingBatchWorkerService> logger) : BackgroundService
 {
+    private readonly ConcurrentDictionary<Guid, byte> activeBatches = new();
+
     private static readonly string WorkerId =
         $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
 
@@ -196,6 +199,27 @@ public sealed class GradingBatchWorkerService(
     }
 
     private async Task ProcessBatchAsync(Guid batchId, CancellationToken cancellationToken)
+    {
+        // O channel pode conter o mesmo lote mais de uma vez (por polling e por
+        // enqueue legado). O lease durável protege réplicas distintas; este
+        // guard protege também reentrância concorrente dentro do mesmo processo.
+        if (!activeBatches.TryAdd(batchId, 0))
+        {
+            logger.LogDebug("Lote {BatchId} já está em processamento neste worker; duplicata ignorada.", batchId);
+            return;
+        }
+
+        try
+        {
+            await ProcessBatchCoreAsync(batchId, cancellationToken);
+        }
+        finally
+        {
+            activeBatches.TryRemove(batchId, out _);
+        }
+    }
+
+    private async Task ProcessBatchCoreAsync(Guid batchId, CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
         var repository = scope.ServiceProvider.GetRequiredService<IGradingReviewRepository>();

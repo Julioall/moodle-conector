@@ -88,10 +88,10 @@ truncamento não declarado.
 
 **Incremento entregue:** o contrato imutável `GradingContextSnapshot` foi criado com
 identificadores Moodle tipados, proveniência, cobertura, estado de extração e hash
-determinístico. A persistência e a migração dos consumidores continuam pendentes e serão
-ativadas somente após os testes de equivalência da fase. O worker e o orquestrador local já
-registram no item a identidade (`ContextVersion`, `ContextHash`, `ContextStatus`) do contexto
-usado, sem duplicar o texto bruto da submissão.
+determinístico. A publicação append-only em `grading_context_snapshot` e a identidade no
+item (`ContextVersion`, `ContextHash`, `ContextStatus`) já estão ativas; os consumidores
+legados continuam em dual-read até os testes de equivalência da fase. O payload persistido
+mantém referências/metadados e não duplica o texto bruto da submissão.
 
 ### Fase 3 — proposta IA auditável e resistente a conteúdo hostil
 

@@ -12,7 +12,8 @@ namespace MoodleConnector.Application.Grading;
 public sealed class GradingItemProcessor(
     IGradingContextBuilder contextBuilder,
     IGradingAnalysisService analysisService,
-    ILogger<GradingItemProcessor> logger)
+    ILogger<GradingItemProcessor> logger,
+    IGradingContextSnapshotStore? snapshotStore = null)
 {
     public async Task ProcessItemAsync(
         AssistedGradingItem item,
@@ -38,6 +39,22 @@ public sealed class GradingItemProcessor(
             item,
             context,
             effectiveContextOptions);
+        if (item.ContextHash is not null &&
+            !string.Equals(item.ContextHash, contextSnapshot.ContextHash, StringComparison.Ordinal))
+        {
+            contextSnapshot = GradingContextSnapshotFactory.Create(
+                item,
+                context,
+                effectiveContextOptions,
+                version: (item.ContextVersion ?? 0) + 1);
+        }
+
+        if (snapshotStore is not null)
+        {
+            // O documento é publicado antes da análise; se a persistência falhar,
+            // o item não avança e o worker poderá retomá-lo com segurança.
+            await snapshotStore.PublishAsync(contextSnapshot, cancellationToken);
+        }
         item.RecordContextSnapshot(contextSnapshot);
 
         var readableText = FirstReadableText(context);

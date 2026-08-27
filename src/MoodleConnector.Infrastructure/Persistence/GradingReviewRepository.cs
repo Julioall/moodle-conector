@@ -4,7 +4,7 @@ using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Infrastructure;
 
-public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGradingReviewRepository, IGradingBatchJobStore
+public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGradingReviewRepository, IGradingBatchJobStore, IGradingContextSnapshotStore
 {
     public async Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
     {
@@ -29,6 +29,36 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
     public async Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
     {
         await dbContext.GradingEvidence.AddAsync(evidence, cancellationToken);
+    }
+
+    public async Task PublishAsync(
+        GradingContextSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var existsInUnitOfWork = dbContext.GradingContextSnapshots.Local.Any(document =>
+            document.GradingItemId == snapshot.ItemId &&
+            document.Version == snapshot.Version &&
+            document.ContextHash == snapshot.ContextHash);
+        if (existsInUnitOfWork)
+        {
+            return;
+        }
+
+        var exists = await dbContext.GradingContextSnapshots.AnyAsync(document =>
+            document.GradingItemId == snapshot.ItemId &&
+            document.Version == snapshot.Version &&
+            document.ContextHash == snapshot.ContextHash,
+            cancellationToken);
+        if (exists)
+        {
+            return;
+        }
+
+        await dbContext.GradingContextSnapshots.AddAsync(
+            GradingContextSnapshotDocument.FromSnapshot(snapshot),
+            cancellationToken);
     }
 
     public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)

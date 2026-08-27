@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Domain.Grading;
 using MoodleConnector.Infrastructure;
 
@@ -94,6 +95,50 @@ public sealed class GradingReviewRepositoryTests
         Assert.Equal("O texto menciona monitoramento e alerta.", saved.EvidenceText);
         Assert.Equal("Faltou exemplo operacional.", saved.GapsText);
         Assert.True(saved.TeacherReviewRequired);
+    }
+
+    [Fact]
+    public async Task ContextSnapshotStore_PublicaPayloadDeFormaIdempotente()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
+        var context = GradingContext.Build(
+            item.Id,
+            batch.Id,
+            "10",
+            "501",
+            "9001",
+            "101",
+            assignmentStatement: "Enunciado da atividade.",
+            criteria: "Descrever a solução.",
+            rubricDescription: null,
+            maxGrade: 10m,
+            gradeScale: null,
+            submissionText: "Texto que não deve ser duplicado no snapshot.",
+            attachedFiles: [],
+            courseMaterials: null,
+            teacherInstructions: "Seja claro.");
+        var snapshot = GradingContextSnapshotFactory.Create(
+            item,
+            context,
+            new GradingContextOptions());
+
+        IGradingContextSnapshotStore store = repository;
+        await store.PublishAsync(snapshot, CancellationToken.None);
+        await store.PublishAsync(snapshot, CancellationToken.None);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
+        var document = Assert.Single(dbContext.GradingContextSnapshots);
+        Assert.Equal(snapshot.ContextHash, document.ContextHash);
+        Assert.Equal(snapshot.Version, document.Version);
+        Assert.Contains("AssignmentStatement", document.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Texto que não deve ser duplicado", document.PayloadJson, StringComparison.Ordinal);
     }
 
     [Fact]
