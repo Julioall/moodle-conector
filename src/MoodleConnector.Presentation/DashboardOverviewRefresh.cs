@@ -9,6 +9,7 @@ using MoodleConnector.Application.Submissions.Queries;
 using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
 using MoodleConnector.Infrastructure.Configuration;
+using Npgsql;
 
 namespace MoodleConnector.Presentation;
 
@@ -72,74 +73,96 @@ internal sealed class DashboardOverviewRefreshQueue(
             ? await MoodleConnectionIdentity.ResolveAsync(db, request.OwnerId, request.ClientId, request.ConnectionAlias, cancellationToken)
             : request.ConnectionId.Trim();
         request = request with { ConnectionId = connectionId };
-        var now = DateTimeOffset.UtcNow;
-        var state = await db.MoodleSyncStates.SingleOrDefaultAsync(item =>
-            item.OwnerId == request.OwnerId &&
-            (item.ConnectionId == request.ConnectionId ||
-             (item.ConnectionId == string.Empty && item.ConnectionAlias == request.ConnectionAlias)) &&
-            item.Dataset == MoodleSnapshotDatasets.DashboardPending &&
-            item.CourseId == string.Empty, cancellationToken);
-        if (state is not null && MoodleSyncLeasePolicy.IsActive(state, now))
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            return false;
-        }
-
-        if (state is not null &&
-            state.Status == "pending" &&
-            state.NextSyncAt is { } nextSyncAt)
-        {
-            if (nextSyncAt > now)
+            var now = DateTimeOffset.UtcNow;
+            // The alias is the durable scope key, while the connection id keeps
+            // renamed aliases attached to the same durable state.
+            var state = await db.MoodleSyncStates.SingleOrDefaultAsync(item =>
+                item.OwnerId == request.OwnerId &&
+                (item.ConnectionId == request.ConnectionId ||
+                 item.ConnectionAlias == request.ConnectionAlias) &&
+                item.Dataset == MoodleSnapshotDatasets.DashboardPending &&
+                item.CourseId == string.Empty, cancellationToken);
+            if (state is not null && MoodleSyncLeasePolicy.IsActive(state, now))
             {
-                if (!request.Force)
-                {
-                    return false;
-                }
-
-                // A per-course snapshot can become ready after a dashboard
-                // attempt has scheduled its retry. Let an explicit force from
-                // the screen retry now instead of leaving the user in a
-                // preparatory state for the full backoff window.
-                state.NextSyncAt = now;
-                state.UpdatedAt = now;
-                await db.SaveChangesAsync(cancellationToken);
+                return false;
             }
 
-            var dueKey = GetKey(request.OwnerId, request.ConnectionId!);
-            if (!queued.TryAdd(dueKey, 0)) return false;
+            if (state is not null &&
+                state.Status == "pending" &&
+                state.NextSyncAt is { } nextSyncAt)
+            {
+                if (nextSyncAt > now)
+                {
+                    if (!request.Force)
+                    {
+                        return false;
+                    }
+
+                    // A per-course snapshot can become ready after a dashboard
+                    // attempt has scheduled its retry. Let an explicit force from
+                    // the screen retry now instead of leaving the user in a
+                    // preparatory state for the full backoff window.
+                    state.NextSyncAt = now;
+                    state.UpdatedAt = now;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+
+                var dueKey = GetKey(request.OwnerId, request.ConnectionId!);
+                if (!queued.TryAdd(dueKey, 0)) return false;
+                if (channel.Writer.TryWrite(request)) return true;
+                queued.TryRemove(dueKey, out _);
+                return false;
+            }
+
+            if (state is null)
+            {
+                state = new MoodleSyncStateEntity
+                {
+                    Id = Guid.NewGuid(),
+                    OwnerId = request.OwnerId,
+                    ConnectionId = request.ConnectionId!,
+                    ConnectionAlias = request.ConnectionAlias,
+                    Dataset = MoodleSnapshotDatasets.DashboardPending,
+                    CourseId = string.Empty,
+                };
+                db.MoodleSyncStates.Add(state);
+            }
+
+            state.ConnectionId = request.ConnectionId!;
+            state.ConnectionAlias = request.ConnectionAlias;
+            state.ClientId = request.ClientId;
+            state.UserExternalId = request.OwnerId.ToString();
+            state.Status = "pending";
+            state.NextSyncAt = now;
+            state.Priority = 5;
+            state.LastError = null;
+            state.UpdatedAt = now;
+
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception) when (IsSyncStateUniqueViolation(exception) && attempt == 0)
+            {
+                // Concurrent dashboard requests can observe an empty scope before
+                // either insert commits. Re-read the winner and re-evaluate it.
+                db.ChangeTracker.Clear();
+                continue;
+            }
+
+            var key = GetKey(request.OwnerId, request.ConnectionId!);
+            if (!queued.TryAdd(key, 0)) return false;
             if (channel.Writer.TryWrite(request)) return true;
-            queued.TryRemove(dueKey, out _);
+            queued.TryRemove(key, out _);
             return false;
         }
 
-        if (state is null)
-        {
-            state = new MoodleSyncStateEntity
-            {
-                Id = Guid.NewGuid(),
-                OwnerId = request.OwnerId,
-                ConnectionId = request.ConnectionId!,
-                ConnectionAlias = request.ConnectionAlias,
-                Dataset = MoodleSnapshotDatasets.DashboardPending,
-                CourseId = string.Empty,
-            };
-            db.MoodleSyncStates.Add(state);
-        }
-
-        state.ConnectionId = request.ConnectionId!;
-        state.ConnectionAlias = request.ConnectionAlias;
-        state.ClientId = request.ClientId;
-        state.UserExternalId = request.OwnerId.ToString();
-        state.Status = "pending";
-        state.NextSyncAt = now;
-        state.Priority = 5;
-        state.LastError = null;
-        state.UpdatedAt = now;
-        await db.SaveChangesAsync(cancellationToken);
-
-        var key = GetKey(request.OwnerId, request.ConnectionId!);
-        if (!queued.TryAdd(key, 0)) return false;
-        if (channel.Writer.TryWrite(request)) return true;
-        queued.TryRemove(key, out _);
+        logger.LogWarning(
+            "Não foi possível enfileirar a atualização do dashboard após uma corrida de escopo. OwnerId={OwnerId} Connection={ConnectionAlias}",
+            request.OwnerId,
+            request.ConnectionAlias);
         return false;
     }
 
@@ -584,6 +607,11 @@ internal sealed class DashboardOverviewRefreshQueue(
 
     private static string GetKey(Guid ownerId, string connectionRef) =>
         $"{ownerId}:{connectionRef}";
+
+    private static bool IsSyncStateUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException postgres &&
+        postgres.SqlState == PostgresErrorCodes.UniqueViolation &&
+        (postgres.ConstraintName is "IX_moodle_sync_states_scope" or "IX_moodle_sync_states_connection_scope");
 
     private static DateTimeOffset GetNextBrazilMidnight(DateTimeOffset now)
     {

@@ -2132,7 +2132,38 @@ app.MapGet("/api/schools", async (
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
-    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
+    try
+    {
+        resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    }
+    catch (MoodleApiException exception) when (
+        string.IsNullOrWhiteSpace(connectionRef) &&
+        exception.ErrorCode == "moodle_connection_not_found")
+    {
+        return Results.Ok(new
+        {
+            data = Array.Empty<CourseHierarchyNode>(),
+            meta = new
+            {
+                generatedAt = DateTimeOffset.UtcNow,
+                connectionRef = (string?)null
+            }
+        });
+    }
+
+    if (resolved is null && string.IsNullOrWhiteSpace(connectionRef))
+    {
+        return Results.Ok(new
+        {
+            data = Array.Empty<CourseHierarchyNode>(),
+            meta = new
+            {
+                generatedAt = DateTimeOffset.UtcNow,
+                connectionRef = (string?)null
+            }
+        });
+    }
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var nodes = await coursesGateway.GetMyCourseHierarchyAsync(identity.Id.ToString(), cancellationToken);
     return Results.Ok(new { data = nodes, meta = new { generatedAt = DateTimeOffset.UtcNow, connectionRef = resolved.Alias } });

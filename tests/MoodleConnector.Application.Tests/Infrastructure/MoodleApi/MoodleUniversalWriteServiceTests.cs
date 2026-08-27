@@ -26,6 +26,7 @@ public sealed class MoodleUniversalWriteServiceTests
 
         Assert.Equal(0, rest.Calls);
         Assert.Equal("mod_assign_save_grade", preview.Function);
+        Assert.Equal(1, preview.EstimatedAffectedRecords);
         Assert.Contains("grade", preview.ParameterNames);
         Assert.StartsWith("CONFIRMAR ESCRITA MOODLE", preview.ConfirmationText, StringComparison.Ordinal);
         Assert.NotNull(pendingActions.Action);
@@ -39,7 +40,8 @@ public sealed class MoodleUniversalWriteServiceTests
             new FakeRestClient(),
             new FakePendingActions(),
             enabled: true,
-            profile: Profile(new MoodleFunctionDescriptor("core_message_send_instant_messages", MoodleFunctionRisk.ControlledWrite, true)));
+            profile: Profile(new MoodleFunctionDescriptor("core_message_send_instant_messages", MoodleFunctionRisk.ControlledWrite, true)),
+            currentUser: new FakeCurrentUser("moodle.write.messages"));
 
         var preview = await sut.PrepareAsync(
             "core_message_send_instant_messages",
@@ -55,12 +57,70 @@ public sealed class MoodleUniversalWriteServiceTests
     }
 
     [Fact]
+    public async Task PrepareAsync_EstimativaDeLoteUsaQuantidadeEfetiva()
+    {
+        using var document = JsonDocument.Parse("[{\"assignmentid\":10},{\"assignmentid\":11},{\"assignmentid\":12}]");
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            profile: Profile(new MoodleFunctionDescriptor("mod_assign_save_grades", MoodleFunctionRisk.ControlledWrite, true)),
+            currentUser: new FakeCurrentUser("moodle.write.assignments.grade"));
+
+        var preview = await sut.PrepareAsync(
+            "mod_assign_save_grades",
+            new Dictionary<string, object?> { ["grades"] = document.RootElement.Clone() },
+            CancellationToken.None);
+
+        Assert.Equal(3, preview.EstimatedAffectedRecords);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_EstimativaDeCalendarioUsaQuantidadeEfetiva()
+    {
+        using var document = JsonDocument.Parse("[{\"courseid\":10},{\"courseid\":11}]");
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            profile: Profile(new MoodleFunctionDescriptor("core_calendar_create_calendar_events", MoodleFunctionRisk.ControlledWrite, true)),
+            currentUser: new FakeCurrentUser("moodle.write.course_content"));
+
+        var preview = await sut.PrepareAsync(
+            "core_calendar_create_calendar_events",
+            new Dictionary<string, object?> { ["events"] = document.RootElement.Clone() },
+            CancellationToken.None);
+
+        Assert.Equal(2, preview.EstimatedAffectedRecords);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_NaoInventaImpactoQuandoLoteNaoFoiInformado()
+    {
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            profile: Profile(new MoodleFunctionDescriptor("mod_assign_save_grades", MoodleFunctionRisk.ControlledWrite, true)),
+            currentUser: new FakeCurrentUser("moodle.write.assignments.grade"));
+
+        var preview = await sut.PrepareAsync(
+            "mod_assign_save_grades",
+            new Dictionary<string, object?>(),
+            CancellationToken.None);
+
+        Assert.Null(preview.EstimatedAffectedRecords);
+        Assert.Contains(preview.Warnings!, warning => warning.Contains("quantidade de registros afetados", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ConfirmAsync_UsaTokenDoUsuarioEExecutaUmaVez()
     {
         var rest = new FakeRestClient();
         var pendingActions = new FakePendingActions();
         var auditLogs = new FakeAuditLogs();
-        var sut = CreateService(rest, pendingActions, enabled: true, auditLogs: auditLogs);
+        var confirmation = new FakeConfirmation();
+        var sut = CreateService(rest, pendingActions, enabled: true, auditLogs: auditLogs, confirmation: confirmation);
         var preview = await sut.PrepareAsync(
             "mod_assign_save_grade",
             new Dictionary<string, object?> { ["assignmentid"] = 10, ["userid"] = 20, ["grade"] = 85 },
@@ -71,6 +131,7 @@ public sealed class MoodleUniversalWriteServiceTests
         Assert.Equal("executed", result.Status);
         Assert.Equal(1, rest.Calls);
         Assert.False(rest.LastAllowServiceToken);
+        Assert.Equal("moodle.write.assignments.grade", confirmation.LastRequiredScope);
         var prepared = Assert.Single(auditLogs.Logs, log => log.Status == "write_prepared");
         Assert.Equal(preview.PendingActionId, prepared.PendingActionId);
         Assert.Equal("connection", prepared.MoodleConnectionId);
@@ -118,7 +179,7 @@ public sealed class MoodleUniversalWriteServiceTests
     }
 
     [Fact]
-    public async Task PrepareAsync_RecusaEscritaSemSchemaSemanticoAprovado()
+    public async Task PrepareAsync_RecusaFuncaoControladaSemEscopoRegistrado()
     {
         var profile = Profile(new MoodleFunctionDescriptor("mod_assign_set_user_flags", MoodleFunctionRisk.ControlledWrite, true));
         var sut = CreateService(new FakeRestClient(), new FakePendingActions(), enabled: true, profile: profile);
@@ -126,7 +187,41 @@ public sealed class MoodleUniversalWriteServiceTests
         var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
             "mod_assign_set_user_flags", new Dictionary<string, object?>(), CancellationToken.None));
 
-        Assert.Equal("write_preview_schema_missing", error.ErrorCode);
+        Assert.Equal(MoodleErrorContract.WriteScopeNotRegistered, error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_BloqueiaFuncaoControladaSemEscopoRegistrado()
+    {
+        var profile = Profile(new MoodleFunctionDescriptor("mod_assign_set_user_flags", MoodleFunctionRisk.ControlledWrite, true));
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            profile: profile,
+            currentUser: new FakeCurrentUser("moodle.write"));
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+            "mod_assign_set_user_flags", new Dictionary<string, object?>(), CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.WriteScopeNotRegistered, error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_BloqueiaEscoposVaziosMesmoParaFuncaoConhecida()
+    {
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            currentUser: new FakeCurrentUser(string.Empty));
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+            "mod_assign_save_grade",
+            new Dictionary<string, object?> { ["assignmentid"] = 10, ["userid"] = 20, ["grade"] = 85 },
+            CancellationToken.None));
+
+        Assert.Equal("moodle_write_scope_required", error.ErrorCode);
     }
 
     [Fact]
@@ -206,7 +301,8 @@ public sealed class MoodleUniversalWriteServiceTests
             new FakeRestClient(),
             pendingActions,
             enabled: true,
-            profile: Profile(new MoodleFunctionDescriptor("core_message_send_instant_messages", MoodleFunctionRisk.ControlledWrite, true)));
+            profile: Profile(new MoodleFunctionDescriptor("core_message_send_instant_messages", MoodleFunctionRisk.ControlledWrite, true)),
+            currentUser: new FakeCurrentUser("moodle.write.messages"));
 
         var preview = await sut.PrepareAsync(
             "core_message_send_instant_messages",
@@ -267,7 +363,7 @@ public sealed class MoodleUniversalWriteServiceTests
             pendingActions,
             auditLogs ?? new FakeAuditLogs(),
             Options.Create(new MoodleUniversalApiFeatureOptions { UniversalMoodleWriteEnabled = enabled }),
-            currentUser);
+            currentUser ?? new FakeCurrentUser("moodle.write.assignments.grade"));
 
     private static MoodleFunctionProfile Profile(MoodleFunctionDescriptor descriptor) => new(
         "connection", "goias", "Moodle", "4.5", 7, [descriptor], DateTimeOffset.UtcNow);
@@ -366,9 +462,13 @@ public sealed class MoodleUniversalWriteServiceTests
     {
         public int Calls { get; private set; }
         public string StatusToReturn { get; set; } = "confirmed";
+        public string? LastRequiredScope { get; private set; }
 
-        public Task<ActionConfirmationResponse> ConfirmAsync(Guid pendingActionId, string confirmationText, string? requiredScope, CancellationToken cancellationToken) =>
-            Task.FromResult(CreateResponse(pendingActionId));
+        public Task<ActionConfirmationResponse> ConfirmAsync(Guid pendingActionId, string confirmationText, string? requiredScope, CancellationToken cancellationToken)
+        {
+            LastRequiredScope = requiredScope;
+            return Task.FromResult(CreateResponse(pendingActionId));
+        }
 
         private ActionConfirmationResponse CreateResponse(Guid pendingActionId)
         {

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Messages;
 using MoodleConnector.Application.Registry;
 using MoodleConnector.Infrastructure;
@@ -62,7 +63,26 @@ internal static class PortalMessagingEndpoints
             if (!HasAppPermission(context, AppPermissionCatalog.MessagesPrepare)) return Results.Forbid();
             var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
             if (identity is null) return Results.Unauthorized();
-            var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+            MoodleConnector.Domain.Registry.ConnectionInfo? resolved;
+            try
+            {
+                resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+            }
+            catch (MoodleApiException exception) when (
+                string.IsNullOrWhiteSpace(connectionRef) &&
+                exception.ErrorCode == "moodle_connection_not_found")
+            {
+                return Results.Ok(new AppEnvelope<AppMoodleConversationsDto>(
+                    new AppMoodleConversationsDto(1, 0, Array.Empty<AppMoodleConversationDto>()),
+                    new(DateTimeOffset.UtcNow, null)));
+            }
+
+            if (resolved is null && string.IsNullOrWhiteSpace(connectionRef))
+            {
+                return Results.Ok(new AppEnvelope<AppMoodleConversationsDto>(
+                    new AppMoodleConversationsDto(1, 0, Array.Empty<AppMoodleConversationDto>()),
+                    new(DateTimeOffset.UtcNow, null)));
+            }
             if (resolved is null)
                 return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
 

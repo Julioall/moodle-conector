@@ -92,6 +92,20 @@ for (const path of ['/api/connections', '/api/courses', '/api/pending']) {
   console.log(`PASS ${path} ${response.status}`);
 }
 
+const schools = await call('GET', '/api/schools', undefined, sessionCookie);
+const schoolsBody = JSON.parse(schools.body);
+if (schools.status !== 200 || !Array.isArray(schoolsBody.data) || !schoolsBody.meta?.generatedAt) {
+  throw new Error(`/api/schools without Moodle connection failed: ${schools.status} ${schools.body}`);
+}
+console.log(`PASS /api/schools without Moodle connection ${schools.status}`);
+
+const conversations = await call('GET', '/api/messages/conversations', undefined, sessionCookie);
+const conversationsBody = JSON.parse(conversations.body);
+if (conversations.status !== 200 || !Array.isArray(conversationsBody.data?.items) || !conversationsBody.meta?.generatedAt) {
+  throw new Error(`/api/messages/conversations without Moodle connection failed: ${conversations.status} ${conversations.body}`);
+}
+console.log(`PASS /api/messages/conversations without Moodle connection ${conversations.status}`);
+
 const courses = await call('GET', '/api/courses', undefined, sessionCookie);
 const coursesBody = JSON.parse(courses.body);
 if (coursesBody.data?.[0]) {

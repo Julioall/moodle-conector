@@ -140,7 +140,9 @@ internal sealed class MoodleMessageGateway(
 
         for (int i = 0; i < normalizedRecipientIds.Count; i++)
         {
+            var clientMessageId = i.ToString(CultureInfo.InvariantCulture);
             formParams[$"messages[{i}][touserid]"] = normalizedRecipientIds[i];
+            formParams[$"messages[{i}][clientmsgid]"] = clientMessageId;
             formParams[$"messages[{i}][text]"] = messageText;
             // The Claris composer sends plain text. Keeping the Moodle payload
             // plain also prevents user-entered markup from being interpreted.
@@ -229,75 +231,147 @@ internal sealed class MoodleMessageGateway(
         return property.ValueKind == JsonValueKind.String ? property.GetString() : property.ToString();
     }
 
-    private MessageSendResult ParseSendResult(string payload, IReadOnlyList<string> requested)
+    private static MessageSendResult ParseSendResult(string payload, IReadOnlyList<string> requested)
     {
         if (string.IsNullOrWhiteSpace(payload) ||
             string.Equals(payload.Trim(), "null", StringComparison.OrdinalIgnoreCase))
         {
-            // Empty response ? assume all sent (some Moodle versions return null on success)
+            // Some Moodle versions legitimately return null for a successful
+            // instant-message call. Preserve that documented compatibility case.
             return new MessageSendResult(true, requested.Count, 0, [], null);
         }
 
-        using var doc = JsonDocument.Parse(payload);
-        var root = doc.RootElement;
-
-        // Check for top-level error
-        if (root.ValueKind == JsonValueKind.Object &&
-            root.TryGetProperty("exception", out _))
+        JsonDocument doc;
+        try
         {
-            var errorCode = root.TryGetProperty("errorcode", out var errEl) ? errEl.GetString() : "moodle_error";
-            return new MessageSendResult(false, 0, requested.Count, requested.ToList(), errorCode);
+            doc = JsonDocument.Parse(payload);
+        }
+        catch (JsonException)
+        {
+            return AmbiguousResult(requested, "O Moodle retornou uma resposta inválida para o envio de mensagens.");
         }
 
-        // Response is an array of message results
-        if (root.ValueKind != JsonValueKind.Array)
+        using (doc)
         {
-            return new MessageSendResult(true, requested.Count, 0, [], null);
-        }
+            var root = doc.RootElement;
 
-        var failed = new List<string>();
-        var sent = 0;
-
-        foreach (var item in root.EnumerateArray())
-        {
-            if (item.ValueKind != JsonValueKind.Object) continue;
-
-            var msgUserId = item.TryGetProperty("msgid", out var msgIdEl) ? msgIdEl.GetInt64() : 0L;
-            var clientMsgId = item.TryGetProperty("clientmsgid", out var clientEl) ? clientEl.GetString() : null;
-
-            if (msgUserId < 0)
+            // Check for top-level error
+            if (root.ValueKind == JsonValueKind.Object &&
+                root.TryGetProperty("exception", out _))
             {
-                // Moodle returns msgid = -1 for failed deliveries
-                // clientmsgid is the index in the request
-                if (!string.IsNullOrEmpty(clientMsgId) &&
-                    int.TryParse(clientMsgId, out var idx) &&
-                    idx >= 0 && idx < requested.Count)
+                var errorCode = root.TryGetProperty("errorcode", out var errEl)
+                    ? ReadSafeErrorCode(errEl)
+                    : "moodle_error";
+                return new MessageSendResult(false, 0, requested.Count, requested.ToList(), errorCode);
+            }
+
+            // Response is an array of message results
+            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0)
+            {
+                return AmbiguousResult(requested, "O Moodle retornou uma resposta inesperada para o envio de mensagens.");
+            }
+
+            var seen = new bool[requested.Count];
+            var failed = new bool[requested.Count];
+            var sent = 0;
+
+            foreach (var item in root.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !TryReadClientMessageIndex(item, requested.Count, out var index) ||
+                    seen[index] ||
+                    !TryReadMessageId(item, out var messageId))
                 {
-                    failed.Add(requested[idx]);
+                    return AmbiguousResult(requested, "A resposta do Moodle não permitiu correlacionar com segurança todos os destinatários.");
+                }
+
+                seen[index] = true;
+
+                if (messageId < 0)
+                {
+                    // Moodle returns msgid = -1 for failed deliveries.
+                    failed[index] = true;
                 }
                 else
                 {
-                    failed.Add("unknown");
+                    sent++;
                 }
             }
-            else
+
+            if (seen.Any(item => !item))
             {
-                sent++;
+                return AmbiguousResult(requested, "A resposta do Moodle foi incompleta e não confirmou todos os destinatários.");
             }
-        }
 
-        if (sent == 0 && failed.Count == 0)
-        {
-            // Couldn't parse - assume success
-            return new MessageSendResult(true, requested.Count, 0, [], null);
+            var failedUserIds = failed
+                .Select((isFailed, index) => (isFailed, index))
+                .Where(item => item.isFailed)
+                .Select(item => requested[item.index])
+                .ToArray();
+            return new MessageSendResult(
+                Success: failedUserIds.Length == 0,
+                SentCount: sent,
+                FailedCount: failedUserIds.Length,
+                FailedUserIds: failedUserIds,
+                ErrorMessage: failedUserIds.Length > 0 ? $"Falha ao entregar mensagem para {failedUserIds.Length} destinatário(s)." : null);
         }
+    }
 
+    private static MessageSendResult AmbiguousResult(
+        IReadOnlyList<string> requested,
+        string message)
+    {
         return new MessageSendResult(
-            Success: failed.Count == 0,
-            SentCount: sent,
-            FailedCount: failed.Count,
-            FailedUserIds: failed,
-            ErrorMessage: failed.Count > 0 ? $"Falha ao entregar mensagem para {failed.Count} destinatário(s)." : null);
+            Success: false,
+            SentCount: 0,
+            FailedCount: requested.Count,
+            FailedUserIds: requested.ToArray(),
+            ErrorMessage: message);
+    }
+
+    private static bool TryReadClientMessageIndex(JsonElement item, int requestedCount, out int index)
+    {
+        index = -1;
+        if (!item.TryGetProperty("clientmsgid", out var property))
+        {
+            return false;
+        }
+
+        var raw = property.ValueKind switch
+        {
+            JsonValueKind.String => property.GetString(),
+            JsonValueKind.Number => property.ToString(),
+            _ => null
+        };
+        return raw is not null &&
+               int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out index) &&
+               index >= 0 && index < requestedCount;
+    }
+
+    private static bool TryReadMessageId(JsonElement item, out long messageId)
+    {
+        messageId = 0;
+        if (!item.TryGetProperty("msgid", out var property))
+        {
+            return false;
+        }
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number => property.TryGetInt64(out messageId),
+            JsonValueKind.String => long.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out messageId),
+            _ => false
+        };
+    }
+
+    private static string ReadSafeErrorCode(JsonElement element)
+    {
+        var value = element.ValueKind == JsonValueKind.String ? element.GetString() : element.ToString();
+        return !string.IsNullOrWhiteSpace(value) &&
+               value.Length <= 128 &&
+               value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-')
+            ? value
+            : "moodle_error";
     }
 
 }

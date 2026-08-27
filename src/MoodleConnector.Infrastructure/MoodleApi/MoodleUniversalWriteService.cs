@@ -22,7 +22,7 @@ internal sealed class MoodleUniversalWriteService(
     IPendingMoodleActionRepository pendingActionRepository,
     IMoodleAuditLogRepository auditLogs,
     IOptions<MoodleUniversalApiFeatureOptions> features,
-    ICurrentUserContext? currentUser = null,
+    ICurrentUserContext currentUser,
     IMoodleAssignmentGradeReadGateway? gradeReadGateway = null) : IMoodleUniversalWriteService
 {
     private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(15);
@@ -272,14 +272,6 @@ internal sealed class MoodleUniversalWriteService(
 
     private void EnsureWriteScope(string functionName)
     {
-        // A missing user context is only tolerated for low-level/unit construction.
-        // When a request has an authenticated principal, an empty scope set must
-        // fail closed instead of silently bypassing the write-family boundary.
-        if (currentUser is null)
-        {
-            return;
-        }
-
         var requiredScope = MoodleWriteScopePolicy.ForFunction(functionName);
         if (!currentUser.HasScope(requiredScope))
         {
@@ -344,8 +336,8 @@ internal sealed class MoodleUniversalWriteService(
             CorrelationId = Guid.NewGuid().ToString("N"),
             ToolName = "moodle_prepare_write",
             RiskLevel = ToolRiskLevel.CriticalHumanConfirmedWrite,
-            ActorSubject = string.IsNullOrWhiteSpace(currentUser?.Subject) ? "unknown" : currentUser.Subject,
-            ActorEmail = currentUser?.Email,
+            ActorSubject = string.IsNullOrWhiteSpace(currentUser.Subject) ? "unknown" : currentUser.Subject,
+            ActorEmail = currentUser.Email,
             MoodleConnectionId = connection.ConnectionId,
             MoodleConnectionAlias = connection.Alias,
             MoodleFunction = string.IsNullOrWhiteSpace(functionName) ? null : functionName.Trim(),
@@ -592,10 +584,12 @@ internal sealed class MoodleUniversalWriteService(
             }
         }
 
-        return functionName == "mod_assign_save_grades"
-            ? TryGetArrayCount(parameters, ["grades", "items", "gradeitems"]) ?? 1
+        return functionName == "mod_assign_save_grade"
+            ? 1
+            : functionName == "mod_assign_save_grades"
+            ? TryGetArrayCount(parameters, ["grades", "items", "gradeitems"])
             : functionName == "core_calendar_create_calendar_events"
-                ? TryGetArrayCount(parameters, ["events"]) ?? 1
+                ? TryGetArrayCount(parameters, ["events"])
                 : null;
     }
 

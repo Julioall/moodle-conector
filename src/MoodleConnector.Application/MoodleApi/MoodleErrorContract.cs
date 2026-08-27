@@ -18,6 +18,7 @@ public static class MoodleErrorContract
     public const string TokenDecryptionFailed = "moodle_token_decryption_failed";
     public const string AuthenticationFailed = "moodle_authentication_failed";
     public const string FunctionNotAllowed = "moodle_function_not_allowed";
+    public const string WriteScopeNotRegistered = "moodle_write_scope_not_registered";
     public const string PermissionDenied = "moodle_permission_denied";
     public const string RequestTimeout = "moodle_request_timeout";
     public const string NetworkError = "moodle_network_error";
@@ -61,6 +62,7 @@ public static class MoodleErrorContract
             FunctionNotAllowed or "function_not_available" or "function_not_discovered" or
                 "function_not_read_safe" or "function_not_allowed" or "webservice_function_not_allowed" or
                 "flow_unavailable" => FunctionNotAllowed,
+            WriteScopeNotRegistered => WriteScopeNotRegistered,
             PermissionDenied or "access_exception" or "accessexception" or "webservice_access_exception" or
                 "nopermissions" or "not_enrolled" => PermissionDenied,
             RequestTimeout or "timeout" or "moodle_timeout" => RequestTimeout,
@@ -83,6 +85,7 @@ public static class MoodleErrorContract
         TokenDecryptionFailed => "As credenciais da conexao Moodle nao puderam ser descriptografadas.",
         AuthenticationFailed => "O Moodle recusou as credenciais da conexao selecionada.",
         FunctionNotAllowed => "A funcao necessaria nao esta autorizada nesta conexao Moodle.",
+        WriteScopeNotRegistered => "A funcao Moodle nao possui um escopo de escrita explicitamente registrado.",
         PermissionDenied => "O usuario autenticado nao possui permissao para esta leitura no Moodle.",
         RequestTimeout => "O Moodle nao respondeu dentro do tempo limite.",
         NetworkError => "Nao foi possivel estabelecer comunicacao com o Moodle.",

@@ -145,8 +145,9 @@ internal static class ToolAuthorizationMapping
             }
         }
 
-        // The controlled universal write flow validates the same connection and
-        // capability gates as specialized write tools, but uses the coarse scope.
+        // Keep the coarse scope for compatibility with the universal tool's
+        // exposure contract. The executor still requires the function-specific
+        // write scope before preparing or confirming an operation.
         if (canDelegateMoodleWrite)
             scopes.Add(MoodleScopePolicies.WriteAny);
 

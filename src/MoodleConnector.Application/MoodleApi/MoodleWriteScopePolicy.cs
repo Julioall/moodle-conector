@@ -7,10 +7,10 @@ namespace MoodleConnector.Application.MoodleApi;
 /// </summary>
 public static class MoodleWriteScopePolicy
 {
-    public static string ForFunction(string functionName)
+    public static bool TryGetScope(string? functionName, out string scope)
     {
-        var normalized = functionName.Trim().ToLowerInvariant();
-        return normalized switch
+        var normalized = functionName?.Trim().ToLowerInvariant();
+        scope = normalized switch
         {
             "core_message_send_instant_messages" or
             "core_message_send_messages_to_conversation" => "moodle.write.messages",
@@ -19,8 +19,22 @@ public static class MoodleWriteScopePolicy
             "core_calendar_create_calendar_events" => "moodle.write.course_content",
             "mod_assign_save_grade" or
             "mod_assign_save_grades" => "moodle.write.assignments.grade",
-            _ => "moodle.write"
+            _ => string.Empty
         };
+
+        return scope.Length > 0;
+    }
+
+    public static string ForFunction(string functionName)
+    {
+        if (TryGetScope(functionName, out var scope))
+        {
+            return scope;
+        }
+
+        throw new MoodleApiException(
+            MoodleErrorContract.WriteScopeNotRegistered,
+            "A função Moodle não possui um escopo de escrita explicitamente registrado.");
     }
 }
 

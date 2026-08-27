@@ -66,70 +66,90 @@ internal sealed class MoodleSnapshotSyncQueue(
                 ? await MoodleConnectionIdentity.ResolveAsync(db, request.OwnerId, request.ClientId, request.ConnectionAlias, cancellationToken)
                 : request.ConnectionId.Trim()
         };
-        var state = await db.MoodleSyncStates.SingleOrDefaultAsync(
-            item => item.OwnerId == request.OwnerId &&
-                    (item.ConnectionId == request.ConnectionId ||
-                     (item.ConnectionId == string.Empty && item.ConnectionAlias == request.ConnectionAlias)) &&
-                    item.Dataset == request.Dataset &&
-                    item.CourseId == (request.CourseId ?? string.Empty),
-            cancellationToken);
-
-        if (state is not null && MoodleSyncLeasePolicy.IsActive(state, now))
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            // A running job already owns the key. A subsequent force refresh is
-            // represented by the next scheduled attempt instead of duplicating
-            // the expensive Moodle fan-out.
-            if (request.Force && !state.ForceRequested)
+            now = DateTimeOffset.UtcNow;
+            // The alias is the durable scope key, while the connection id keeps
+            // renamed aliases attached to the same durable state.
+            var state = await db.MoodleSyncStates.SingleOrDefaultAsync(
+                item => item.OwnerId == request.OwnerId &&
+                        (item.ConnectionId == request.ConnectionId ||
+                         item.ConnectionAlias == request.ConnectionAlias) &&
+                        item.Dataset == request.Dataset &&
+                        item.CourseId == (request.CourseId ?? string.Empty),
+                cancellationToken);
+
+            if (state is not null && MoodleSyncLeasePolicy.IsActive(state, now))
             {
-                state.ForceRequested = true;
-                state.NextSyncAt = now;
-                state.UpdatedAt = now;
-                await db.SaveChangesAsync(cancellationToken);
+                // A running job already owns the key. A subsequent force refresh is
+                // represented by the next scheduled attempt instead of duplicating
+                // the expensive Moodle fan-out.
+                if (request.Force && !state.ForceRequested)
+                {
+                    state.ForceRequested = true;
+                    state.NextSyncAt = now;
+                    state.UpdatedAt = now;
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+
+                return true;
             }
 
-            return true;
-        }
-
-        if (state is null)
-        {
-            state = new MoodleSyncStateEntity
+            if (state is null)
             {
-                Id = Guid.NewGuid(),
-                OwnerId = request.OwnerId,
-                ConnectionId = request.ConnectionId!,
-                ConnectionAlias = request.ConnectionAlias,
-                Dataset = request.Dataset,
-                CourseId = request.CourseId ?? string.Empty,
-            };
-            db.MoodleSyncStates.Add(state);
-        }
-        else if (!request.Force &&
-                 string.Equals(state.Status, "pending", StringComparison.OrdinalIgnoreCase) &&
-                 state.NextSyncAt is { } scheduled &&
-                 scheduled <= now)
-        {
-            // The durable work is already due. Avoid rewriting the same row on
-            // every dashboard poll; the in-memory signal remains enough.
+                state = new MoodleSyncStateEntity
+                {
+                    Id = Guid.NewGuid(),
+                    OwnerId = request.OwnerId,
+                    ConnectionId = request.ConnectionId!,
+                    ConnectionAlias = request.ConnectionAlias,
+                    Dataset = request.Dataset,
+                    CourseId = request.CourseId ?? string.Empty,
+                };
+                db.MoodleSyncStates.Add(state);
+            }
+            else if (!request.Force &&
+                     string.Equals(state.Status, "pending", StringComparison.OrdinalIgnoreCase) &&
+                     state.NextSyncAt is { } scheduled &&
+                     scheduled <= now)
+            {
+                // The durable work is already due. Avoid rewriting the same row on
+                // every dashboard poll; the in-memory signal remains enough.
+                return TryEnqueueSignal(request);
+            }
+            else if (!request.Force && state.NextSyncAt is { } next && next > now)
+            {
+                return false;
+            }
+
+            state.ConnectionId = request.ConnectionId!;
+            state.ConnectionAlias = request.ConnectionAlias;
+            state.ClientId = request.ClientId;
+            state.UserExternalId = request.UserExternalId;
+            state.Priority = Math.Clamp(request.Priority, 0, 1000);
+            state.Status = "pending";
+            state.NextSyncAt = now;
+            state.LastError = null;
+            state.ForceRequested |= request.Force;
+            state.UpdatedAt = now;
+
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException exception) when (IsSyncStateUniqueViolation(exception) && attempt == 0)
+            {
+                // Two requests can observe an empty scope before either insert
+                // commits. Detach the failed insert and converge on the row that
+                // won the unique scope constraint, then re-evaluate its lease.
+                db.ChangeTracker.Clear();
+                continue;
+            }
+
             return TryEnqueueSignal(request);
         }
-        else if (!request.Force && state.NextSyncAt is { } next && next > now)
-        {
-            return false;
-        }
 
-        state.ConnectionId = request.ConnectionId!;
-        state.ConnectionAlias = request.ConnectionAlias;
-        state.ClientId = request.ClientId;
-        state.UserExternalId = request.UserExternalId;
-        state.Priority = Math.Clamp(request.Priority, 0, 1000);
-        state.Status = "pending";
-        state.NextSyncAt = now;
-        state.LastError = null;
-        state.ForceRequested |= request.Force;
-        state.UpdatedAt = now;
-        await db.SaveChangesAsync(cancellationToken);
-
-        return TryEnqueueSignal(request);
+        throw new InvalidOperationException("Não foi possível enfileirar a sincronização Moodle após uma corrida de escopo.");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -1103,6 +1123,11 @@ internal sealed class MoodleSnapshotSyncQueue(
     private static bool IsUniqueViolation(DbUpdateException exception) =>
         exception.InnerException is PostgresException postgres &&
         postgres.SqlState == PostgresErrorCodes.UniqueViolation;
+
+    private static bool IsSyncStateUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException postgres &&
+        postgres.SqlState == PostgresErrorCodes.UniqueViolation &&
+        (postgres.ConstraintName is "IX_moodle_sync_states_scope" or "IX_moodle_sync_states_connection_scope");
 
     private static TimeSpan GetFreshInterval(string type, string tier, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : type switch
