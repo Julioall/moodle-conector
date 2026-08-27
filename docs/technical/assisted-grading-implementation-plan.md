@@ -113,6 +113,10 @@ a validação/normalização backend da proposta IA, ainda necessária para fech
 gateway de configurações também deixou de retornar `100` no perfil stub sem escala
 modelada; nesse caso a resposta é `MaxGrade=0` e a sugestão numérica permanece bloqueada.
 
+O adaptador legado de salvamento também foi endurecido: notas negativas ou acima da escala
+confirmada são rejeitadas, o campo nominal legado é ignorado e a confiança fica em `0` até
+que o contrato versionado de proposta com evidências e cobertura seja integrado.
+
 ### Fase 4 — job durável e processamento em escala
 
 **Spec:** 0022.

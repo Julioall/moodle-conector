@@ -136,6 +136,12 @@ da Fase 3 completa.
 Também foi removido o `100` implícito do gateway de configurações quando o perfil local usa
 stub: sem escala modelada, o stub retorna `MaxGrade=0`, mantendo a nota numérica bloqueada.
 
+No contrato legado `salvar_correcoes_ia_lote`, a entrada continua aceita para compatibilidade,
+mas não carrega evidências, cobertura nem confiança verificável. Por isso o backend agora
+atribui confiança `0`, ignora o campo nominal legado e rejeita notas negativas ou acima da
+escala confirmada. A proposta ainda exige revisão humana e não é promovida a uma proposta IA
+versionada até a implementação completa da Fase 3.
+
 ## Critérios de aceite
 
 - [ ] Escala não resolvida nunca produz `SuggestedGrade=100` nem permite lançamento
