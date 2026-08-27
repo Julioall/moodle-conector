@@ -43,6 +43,7 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(8.5m, fixture.PendingActions.LastPayload.Items[0].Grade);
         Assert.Equal("Feedback final revisado.", fixture.PendingActions.LastPayload.Items[0].FeedbackText);
         Assert.False(string.IsNullOrWhiteSpace(fixture.PendingActions.LastPayload.Items[0].DraftVersionHash));
+        Assert.Equal(fixture.GradingRepository.Items.Single().ContextHash, fixture.PendingActions.LastPayload.Items[0].ContextHash);
     }
 
     [Fact]
@@ -82,6 +83,7 @@ public sealed class GradingLaunchCommandHandlerTests
         var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
         item.SetDraft(8m, 0.8m, "Rascunho.");
         item.ApplyTeacherReview(12m, "Feedback final revisado.", "teacher-1", 321, "approved", "ok");
+        AttachVersionedContext(item, batch);
         await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
         await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
         await fixture.GradingRepository.AddEvidenceAsync(
@@ -129,6 +131,34 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Null(fixture.PendingActions.LastPayload);
         Assert.Contains(result.Warnings, warning => warning.Contains("nota final 12", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Warnings, warning => warning.Contains("nota maxima 10", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CreatePreview_BloqueiaItemLegadoSemContextoVersionado()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        item.ApplyTeacherReview(8.5m, "Feedback final revisado.", "teacher-1", 321, "approved", "ok");
+        await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
+        await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
+
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: true),
+            CancellationToken.None);
+
+        Assert.Equal(Guid.Empty, result.PendingActionId);
+        Assert.Equal(0, result.ReadyItems);
+        Assert.Equal(1, result.BlockedItems);
+        Assert.Null(fixture.PendingActions.LastPayload);
+        Assert.Contains(result.Warnings, warning => warning.Contains("contexto de correcao", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -222,6 +252,64 @@ public sealed class GradingLaunchCommandHandlerTests
 
         Assert.Equal(0, result.SentItems);
         Assert.Empty(fixture.Mediator.SavedGrades);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaPreviaLegadaSemContextoVersionado()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem(includeContext: false);
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal("grading_context_missing", Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked").ErrorCode);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaPreviaComContextoDivergente()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id, contextHash: "hash-contexto-antigo");
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal("grading_context_hash_mismatch", Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked").ErrorCode);
     }
 
     [Fact]
@@ -639,12 +727,16 @@ public sealed class GradingLaunchCommandHandlerTests
         public FakeCurrentUserContext CurrentUser { get; } = new(currentUserSubject, scopes);
         public FakeMoodleAssignmentSettingsGateway SettingsGateway { get; } = new();
 
-        public AssistedGradingBatch CreateBatchWithReviewedItem()
+        public AssistedGradingBatch CreateBatchWithReviewedItem(bool includeContext = true)
         {
             var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
             var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
             item.SetDraft(8m, 0.8m, "Rascunho.");
             item.ApplyTeacherReview(8.5m, "Feedback final revisado.", "teacher-1", 321, "approved", "ok");
+            if (includeContext)
+            {
+                AttachVersionedContext(item, batch);
+            }
             GradingRepository.Batches.Add(batch);
             GradingRepository.Items.Add(item);
             return batch;
@@ -654,7 +746,8 @@ public sealed class GradingLaunchCommandHandlerTests
             Guid batchId,
             Guid gradingItemId,
             string? draftVersionHash = null,
-            bool allowOverwriteExisting = false)
+            bool allowOverwriteExisting = false,
+            string? contextHash = null)
         {
             if (!SubmissionStatuses.Statuses.Any(status =>
                 status.AssignmentId == "501" &&
@@ -678,7 +771,8 @@ public sealed class GradingLaunchCommandHandlerTests
                         8.5m,
                         "Feedback final revisado.",
                         AttemptNumber: 0,
-                        DraftVersionHash: draftVersionHash ?? GradingDraftVersionHash.Compute(GradingRepository.Items.Single(item => item.Id == gradingItemId)))
+                        DraftVersionHash: draftVersionHash ?? GradingDraftVersionHash.Compute(GradingRepository.Items.Single(item => item.Id == gradingItemId)),
+                        ContextHash: contextHash ?? GradingRepository.Items.Single(item => item.Id == gradingItemId).ContextHash)
                 ],
                 allowOverwriteExisting);
 
@@ -697,6 +791,34 @@ public sealed class GradingLaunchCommandHandlerTests
                 CorrelationId = "audit-1"
             };
         }
+    }
+
+    private static void AttachVersionedContext(AssistedGradingItem item, AssistedGradingBatch batch)
+    {
+        var context = GradingContext.Build(
+            item.Id,
+            batch.Id,
+            "10",
+            "501",
+            "9001",
+            "101",
+            "Enunciado de teste",
+            "Criterio de teste",
+            null,
+            10m,
+            null,
+            "Entrega de teste",
+            [],
+            null,
+            null);
+        var snapshot = GradingContextSnapshotFactory.Create(
+            item,
+            context,
+            new GradingContextOptions(
+                IncludeRubric: true,
+                IncludeSubmissionFiles: true,
+                IncludeCourseMaterials: false));
+        item.RecordContextSnapshot(snapshot);
     }
 
     private sealed class FakeCurrentUserContext(string subject, IReadOnlyCollection<string>? scopes = null) : ICurrentUserContext

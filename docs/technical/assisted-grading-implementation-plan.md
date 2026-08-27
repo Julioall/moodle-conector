@@ -93,6 +93,10 @@ item (`ContextVersion`, `ContextHash`, `ContextStatus`) já estão ativas; os co
 legados continuam em dual-read até os testes de equivalência da fase. O payload persistido
 mantém referências/metadados e não duplica o texto bruto da submissão.
 
+O gate de lançamento também passou a carregar e revalidar `ContextHash` na pending action:
+itens sem contexto versionado, com contexto bloqueado ou com hash divergente não chegam ao
+Moodle e exigem uma nova prévia.
+
 ### Fase 3 — proposta IA auditável e resistente a conteúdo hostil
 
 **Spec:** 0020.

@@ -34,7 +34,8 @@ public sealed record GradingLaunchPreviewItem(
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("grade")] decimal Grade,
-    [property: JsonPropertyName("feedbackText")] string FeedbackText);
+    [property: JsonPropertyName("feedbackText")] string FeedbackText,
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
 
 public sealed record ConfirmMoodleBatchLaunchCommand(
     Guid PendingActionId,
@@ -65,7 +66,8 @@ public sealed record GradingLaunchPayloadItem(
     [property: JsonPropertyName("grade")] decimal Grade,
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
     [property: JsonPropertyName("attemptNumber")] int? AttemptNumber,
-    [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash);
+    [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
 
 public sealed record AssignmentExistingGrade(
     string AssignmentId,
@@ -108,10 +110,18 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             .Where(item => IsReadyForLaunch(item, request.OnlyReviewed))
             .ToArray();
         var scaleWarnings = new List<string>();
+        var contextWarnings = new List<string>();
         var ready = new List<AssistedGradingItem>();
         var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
         foreach (var item in launchable)
         {
+            if (!HasVersionedContext(item))
+            {
+                contextWarnings.Add(
+                    $"Item {item.Id}: contexto de correcao ausente ou legado; gere uma nova previa antes do lancamento.");
+                continue;
+            }
+
             var maxGrade = await GetKnownMaxGradeAsync(batch, item, settingsCache, cancellationToken);
             if (maxGrade is null)
             {
@@ -143,8 +153,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 Launches: [],
                 ConfirmationText: string.Empty,
                 ExpiresAt: null,
-                Warnings: scaleWarnings.Count > 0
-                    ? scaleWarnings
+                Warnings: scaleWarnings.Count > 0 || contextWarnings.Count > 0
+                    ? [.. contextWarnings, .. scaleWarnings]
                     : ["Nenhum item revisado e pronto para lancamento foi encontrado."]);
         }
 
@@ -191,7 +201,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             previewItems,
             pending.ConfirmationText,
             pending.ExpiresAt,
-            Warnings: BuildWarnings(blocked, scaleWarnings));
+            Warnings: BuildWarnings(blocked, scaleWarnings, contextWarnings));
     }
 
     private async Task<IReadOnlyList<AssistedGradingItem>> LoadBatchItemsAsync(
@@ -254,10 +264,15 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             !string.IsNullOrWhiteSpace(item.FinalFeedback);
     }
 
-    private static IReadOnlyList<string> BuildWarnings(int blocked, IReadOnlyList<string> scaleWarnings)
+    private static IReadOnlyList<string> BuildWarnings(
+        int blocked,
+        IReadOnlyList<string> scaleWarnings,
+        IReadOnlyList<string> contextWarnings)
     {
-        var warnings = new List<string>(scaleWarnings);
-        var otherBlocked = blocked - scaleWarnings.Count;
+        var warnings = new List<string>(contextWarnings.Count + scaleWarnings.Count);
+        warnings.AddRange(contextWarnings);
+        warnings.AddRange(scaleWarnings);
+        var otherBlocked = blocked - scaleWarnings.Count - contextWarnings.Count;
         if (otherBlocked > 0)
         {
             warnings.Add($"{otherBlocked} item(ns) bloqueado(s) por falta de revisao, nota final ou feedback final.");
@@ -282,7 +297,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.FinalGrade ?? 0,
             item.FinalFeedback ?? string.Empty,
             item.AttemptNumber,
-            GradingDraftVersionHash.Compute(item));
+            GradingDraftVersionHash.Compute(item),
+            item.ContextHash);
     }
 
     private static GradingLaunchPreviewItem ToPreviewItem(AssistedGradingItem item)
@@ -292,8 +308,16 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             item.FinalGrade ?? 0,
-            item.FinalFeedback ?? string.Empty);
+            item.FinalFeedback ?? string.Empty,
+            item.ContextHash);
     }
+
+    private static bool HasVersionedContext(AssistedGradingItem item) =>
+        item.ContextVersion is > 0 &&
+        !string.IsNullOrWhiteSpace(item.ContextHash) &&
+        !string.IsNullOrWhiteSpace(item.ContextStatus) &&
+        !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class ConfirmMoodleBatchLaunchCommandHandler(
@@ -375,6 +399,46 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
 
             if (item.CommitStatus == GradingCommitStatus.Succeeded)
             {
+                continue;
+            }
+
+            if (!HasVersionedContext(item))
+            {
+                var message = "O contexto versionado da correcao nao esta disponivel. Gere uma nova previa antes de lancar no Moodle.";
+                item.MarkCommitFailed(message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new { item.CommitStatus },
+                    errorCode: "grading_context_missing",
+                    errorMessage: message,
+                    cancellationToken);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(payloadItem.ContextHash) ||
+                !string.Equals(payloadItem.ContextHash, item.ContextHash, StringComparison.Ordinal))
+            {
+                var message = "O contexto de correcao mudou ou nao foi incluido na previa. Gere uma nova previa antes de lancar no Moodle.";
+                item.MarkCommitFailed(message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new
+                    {
+                        item.CommitStatus,
+                        expectedContextHash = payloadItem.ContextHash,
+                        currentContextHash = item.ContextHash
+                    },
+                    errorCode: "grading_context_hash_mismatch",
+                    errorMessage: message,
+                    cancellationToken);
                 continue;
             }
 
@@ -612,6 +676,13 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 "moodle_function_validation_failed");
         }
     }
+
+    private static bool HasVersionedContext(AssistedGradingItem item) =>
+        item.ContextVersion is > 0 &&
+        !string.IsNullOrWhiteSpace(item.ContextHash) &&
+        !string.IsNullOrWhiteSpace(item.ContextStatus) &&
+        !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
 
     private async Task<ExistingGradeValidationResult> GetExistingGradeValidationAsync(
         string userExternalId,

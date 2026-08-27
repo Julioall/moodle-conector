@@ -145,6 +145,11 @@ persistem no item somente `ContextVersion`, `ContextHash` e `ContextStatus`. O t
 submissão não é duplicado nessa coluna; continua nos artifacts sujeitos à retenção. Isso
 permite detectar qual contexto foi usado sem antecipar a migração completa dos consumidores.
 
+O preview e a confirmação do lançamento agora exigem identidade de contexto versionada e
+rejeitam itens legados, bloqueados ou payloads cuja hash não corresponda ao item atual. A
+hash canônica passou a acompanhar o payload da pending action, mantendo a revalidação sem
+reconstruir o contexto no momento da escrita Moodle.
+
 ## Critérios de aceite
 
 - [ ] Para um mesmo item, pré-validação, pacote IA, UI, preview e auditoria referenciam o
