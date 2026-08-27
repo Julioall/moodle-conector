@@ -30,32 +30,58 @@ internal sealed class MoodleAssignmentGradeReadGateway(
             throw new ArgumentException("O usuario Moodle e obrigatorio.", nameof(userExternalId));
         }
 
+        var grades = await GetExistingGradesAsync(
+            userExternalId,
+            assignmentId,
+            [studentId],
+            cancellationToken);
+        return grades.GetValueOrDefault(studentId);
+    }
+
+    public async Task<IReadOnlyDictionary<string, AssignmentExistingGrade>> GetExistingGradesAsync(
+        string userExternalId,
+        string assignmentId,
+        IReadOnlyCollection<string> studentIds,
+        CancellationToken cancellationToken)
+    {
+        if (_options.UseStubData || studentIds.Count == 0)
+        {
+            return new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (string.IsNullOrWhiteSpace(userExternalId))
+        {
+            throw new ArgumentException("O usuario Moodle e obrigatorio.", nameof(userExternalId));
+        }
+
         var assignmentIdNumber = ParseMoodleId(assignmentId, nameof(assignmentId));
-        var studentIdNumber = ParseMoodleId(studentId, nameof(studentId));
+        var requestedStudentIds = studentIds
+            .Select(studentId => ParseMoodleId(studentId, nameof(studentIds)))
+            .ToHashSet();
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var payload = await restClient.CallAsync(credentials, MoodleFunction, new Dictionary<string, object?>
         {
             ["assignmentids[0]"] = assignmentIdNumber.ToString(CultureInfo.InvariantCulture)
         }, cancellationToken);
-
-        return FindGrade(payload.GetRawText(), assignmentIdNumber, studentIdNumber);
+        return ParseGrades(payload.GetRawText(), assignmentIdNumber, requestedStudentIds);
     }
 
-    private static AssignmentExistingGrade? FindGrade(
+    private static IReadOnlyDictionary<string, AssignmentExistingGrade> ParseGrades(
         string payload,
         long assignmentId,
-        long studentId)
+        IReadOnlySet<long> requestedStudentIds)
     {
+        var result = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(payload))
         {
-            return null;
+            return result;
         }
 
         using var document = JsonDocument.Parse(payload);
         if (!document.RootElement.TryGetProperty("assignments", out var assignments) ||
             assignments.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return result;
         }
 
         foreach (var assignment in assignments.EnumerateArray())
@@ -69,15 +95,17 @@ internal sealed class MoodleAssignmentGradeReadGateway(
 
             foreach (var grade in grades.EnumerateArray())
             {
-                if (!MatchesLongProperty(grade, "userid", studentId))
+                if (!TryReadLongProperty(grade, "userid", out var studentId) ||
+                    !requestedStudentIds.Contains(studentId))
                 {
                     continue;
                 }
 
                 var parsedGrade = ReadDecimalProperty(grade, "grade");
-                return new AssignmentExistingGrade(
+                var studentIdText = studentId.ToString(CultureInfo.InvariantCulture);
+                result[studentIdText] = new AssignmentExistingGrade(
                     assignmentId.ToString(CultureInfo.InvariantCulture),
-                    studentId.ToString(CultureInfo.InvariantCulture),
+                    studentIdText,
                     parsedGrade,
                     HasGrade: parsedGrade is >= 0,
                     Feedback: ReadTextProperty(grade, "feedback")
@@ -87,18 +115,28 @@ internal sealed class MoodleAssignmentGradeReadGateway(
             }
         }
 
-        return null;
+        return result;
     }
 
     private static bool MatchesLongProperty(JsonElement element, string propertyName, long expected)
     {
-        return element.TryGetProperty(propertyName, out var value) &&
-            value.ValueKind switch
-            {
-                JsonValueKind.Number => value.TryGetInt64(out var actual) && actual == expected,
-                JsonValueKind.String => long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var actual) && actual == expected,
-                _ => false
-            };
+        return TryReadLongProperty(element, propertyName, out var actual) && actual == expected;
+    }
+
+    private static bool TryReadLongProperty(JsonElement element, string propertyName, out long result)
+    {
+        result = 0;
+        if (!element.TryGetProperty(propertyName, out var value))
+        {
+            return false;
+        }
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.Number => value.TryGetInt64(out result),
+            JsonValueKind.String => long.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out result),
+            _ => false
+        };
     }
 
     private static decimal? ReadDecimalProperty(JsonElement element, string propertyName)

@@ -190,9 +190,7 @@ humana e minimização de dados.
 | `prepare_individual_grade_launch` / `prepare_individual_grade_launch` | Preparar Nota Individual | `CriticalHumanConfirmedWrite` | Nota atual/prévia | Cria ação pendente | Implementadas (aliases PT/EN) |
 | `confirm_individual_grade_launch` / `confirm_individual_grade_launch` | Confirmar Nota Individual | `CriticalHumanConfirmedWrite` | Não | Nota/feedback individual no Moodle | Implementadas (aliases PT/EN) |
 | `get_grading_audit` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `grading-review-app` | Grading Review App | `ReadOnly` | Sim | Não | Implementada (MCP Resource) |
-| `prepare_demo_action` | Preparar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
-| `confirm_demo_action` | Confirmar Acao Demo | `HumanConfirmedWrite` | Não | Não executa escrita real | Implementada como demo |
+| `grading-review-app-v2` | Grading Review App | `ReadOnly` | Sim | Não | Implementada (MCP Resource) |
 
 ## Mensagens tipificadas do tutor
 
@@ -1024,35 +1022,6 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `prepare_demo_action`
-
-Descrição:
-
-- Cria uma ação pendente de demonstração.
-- Não executa escrita real no Moodle.
-- Útil para validar o fluxo prepare/confirm.
-
-Parâmetros:
-
-| Nome | Tipo | Descrição |
-| --- | --- | --- |
-| `message` | `string` | Texto demonstrativo exibido na prévia. |
-
-## `confirm_demo_action`
-
-Descrição:
-
-- Confirma uma ação pendente de demonstração.
-- Exige `pendingActionId` e texto exato de confirmação.
-- Não executa escrita real no Moodle.
-
-Parâmetros:
-
-| Nome | Tipo | Descrição |
-| --- | --- | --- |
-| `pendingActionId` | `Guid` | Identificador da ação pendente. |
-| `confirmationText` | `string` | Texto exato retornado na preparação. |
-
 ## `get_student_completion` / `get_student_completion`
 
 Descricao:
@@ -1338,13 +1307,12 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `grading-review-app`
+## `grading-review-app-v2`
 
 Descricao:
 
 - MCP Resource (nao tool): expoe a interface SPA de revisao de correcao assistida como HTML servido pelo servidor.
 - Acessivel via URI `ui://grading-review/v2/app.html`.
-- A URI legada `ui://grading-review/app.html` permanece disponivel para clientes com descriptor MCP em cache.
 - Nao executa escrita no Moodle e nao requer autenticacao adicional alem do token MCP.
 
 ## Planejado

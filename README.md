@@ -381,7 +381,7 @@ Contrato de ação pendente:
 {
   "status": "pending_confirmation",
   "pendingActionId": "00000000-0000-0000-0000-000000000000",
-  "toolName": "prepare_demo_action",
+  "toolName": "prepare_forum_post",
   "riskLevel": "HumanConfirmedWrite",
   "preview": {},
   "confirmationText": "CONFIRMAR ...",
@@ -389,7 +389,7 @@ Contrato de ação pendente:
 }
 ```
 
-O projeto mantém tools demo e também possui escritas reais confirmadas para fórum, mensagens individuais e nota/feedback. A conexão `CanWrite`, o escopo aplicável, a capability Moodle, a prévia, a confirmação e a auditoria continuam obrigatórios. As flags são verificadas pelos handlers antes de preparar ou confirmar uma escrita; o `appsettings.json` versionado as habilita, enquanto `.env.example` as desabilita para um rollout manual seguro. O workflow de deploy grava valores explícitos de variáveis `FEATURES_*` para que a política do ambiente não dependa desse padrão versionado.
+O projeto possui escritas reais confirmadas para fórum, mensagens individuais e nota/feedback. A conexão `CanWrite`, o escopo aplicável, a capability Moodle, a prévia, a confirmação e a auditoria continuam obrigatórios. As flags são verificadas pelos handlers antes de preparar ou confirmar uma escrita; o `appsettings.json` versionado as habilita, enquanto `.env.example` as desabilita para um rollout manual seguro. O workflow de deploy grava valores explícitos de variáveis `FEATURES_*` para que a política do ambiente não dependa desse padrão versionado.
 
 ## Tools Existentes
 
@@ -426,13 +426,6 @@ Estado interno (não altera o Moodle):
 | Tool | Descrição | Status |
 | --- | --- | --- |
 | `manage_user_memory` | Salva, lista ou remove memórias privadas e duráveis do usuário. A remoção é destrutiva para esse estado interno. | Implementada |
-
-Demo de pending action:
-
-| Tool | Descrição | Status |
-| --- | --- | --- |
-| `prepare_demo_action` | Cria ação pendente demonstrativa. Não executa escrita real no Moodle. | Implementada como demo |
-| `confirm_demo_action` | Confirma ação pendente demonstrativa. Não executa escrita real no Moodle. | Implementada como demo |
 
 ## Segurança
 

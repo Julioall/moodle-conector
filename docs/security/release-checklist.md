@@ -37,7 +37,6 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
 
 - [ ] As flags `FEATURES_*_WRITE_ENABLED` refletem a política aprovada para o ambiente, estão registradas no release e são gravadas explicitamente pelo workflow de deploy; não dependem silenciosamente do padrão de `appsettings.json`.
 - [ ] Para cada escrita habilitada, `CanWrite`, escopo exigido, prévia, confirmação literal, expiração, reivindicação atômica e auditoria foram verificados.
-- [ ] `Features__DemoToolsEnabled=false` em qualquer endpoint submetido ao ChatGPT ou publicado.
 - [ ] Qualquer escrita nova usa fluxo `prepare_*` e `confirm_*`.
 - [ ] Confirmação exige usuário correto, escopo requerido, expiração e texto exato.
 - [ ] Idempotência de confirmação está coberta por teste.

@@ -17,7 +17,7 @@ public sealed class ChatGptAppSubmissionTests
         var exposurePolicy = new CognitiveExposurePolicy(ToolExposureProfile.Production);
         var attributes = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
+                new FeatureOptions { MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }))
             .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Public))
             .Select(method => (Method: method, Attribute: method.GetCustomAttribute<McpServerToolAttribute>()))

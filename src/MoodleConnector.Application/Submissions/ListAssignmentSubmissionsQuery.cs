@@ -1,5 +1,6 @@
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Application.Submissions;
@@ -34,7 +35,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleParticipantsGateway participantsGateway,
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
-    IMoodleAssignmentSettingsGateway? assignmentSettingsGateway = null)
+    IMoodleAssignmentSettingsGateway? assignmentSettingsGateway = null,
+    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null)
     : IRequestHandler<ListAssignmentSubmissionsQuery, AssignmentSubmissionsPage?>
 {
     private const int ParticipantFetchPageSize = 100;
@@ -130,6 +132,25 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         bool? isGradable = assignmentSettings is null
             ? null
             : assignmentSettings.IsGradable ?? (assignmentSettings.MaxGrade > 0 ? true : null);
+        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades = null;
+        if (request.Filter == AssignmentSubmissionFilter.NeedsGrading && gradeReadGateway is not null)
+        {
+            try
+            {
+                existingGrades = await gradeReadGateway.GetExistingGradesAsync(
+                    request.UserExternalId,
+                    assignmentInstanceId,
+                    submissions.Select(submission => submission.UserId).ToArray(),
+                    cancellationToken);
+            }
+            catch
+            {
+                // Do not turn a missing grade capability into zero pending
+                // submissions. Fall back to Moodle's submission status.
+                existingGrades = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
         var rows = BuildRows(
             participants,
             submissions,
@@ -137,7 +158,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             request.Filter,
             request.IncludeLate,
             request.IncludeUngraded,
-            isGradable);
+            isGradable,
+            existingGrades);
         return new AssignmentSubmissionRows(
             course.CourseId,
             assignmentInstanceId,
@@ -219,7 +241,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         AssignmentSubmissionFilter filter,
         bool includeLate,
         bool includeUngraded,
-        bool? isGradable)
+        bool? isGradable,
+        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades = null)
     {
         var latestSubmissionByUser = submissions
             .GroupBy(submission => submission.UserId, StringComparer.OrdinalIgnoreCase)
@@ -238,12 +261,12 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         foreach (var participant in participants)
         {
             latestSubmissionByUser.TryGetValue(participant.UserId, out var submission);
-            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable));
+            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable, existingGrades));
         }
 
         foreach (var submission in latestSubmissionByUser.Values.Where(submission => !participantIds.Contains(submission.UserId)))
         {
-            rows.Add(ToSummary(submission.UserId, fullName: null, submission, dueAt, isGradable));
+            rows.Add(ToSummary(submission.UserId, fullName: null, submission, dueAt, isGradable, existingGrades));
         }
 
         return rows
@@ -259,7 +282,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         string? fullName,
         AssignmentSubmissionRecord? submission,
         DateTimeOffset? dueAt,
-        bool? isGradable)
+        bool? isGradable,
+        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades)
     {
         if (submission is null)
         {
@@ -283,7 +307,14 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
         var submittedAt = submitted ? submission.ModifiedAt ?? submission.CreatedAt : null;
         var late = submittedAt is not null && dueAt is not null && submittedAt > dueAt;
-        var needsGrading = isGradable != false && IsNeedsGrading(submission.GradingStatus, submitted);
+        AssignmentExistingGrade? existingGrade = null;
+        if (existingGrades is not null)
+        {
+            existingGrades.TryGetValue(userId, out existingGrade);
+        }
+        var hasMoodleGradeValue = existingGrade?.Grade is not null;
+        var needsGrading = IsNeedsGrading(submission.GradingStatus, submitted) &&
+            (existingGrades is null ? isGradable != false : !hasMoodleGradeValue);
 
         return new AssignmentSubmissionSummary(
             userId,

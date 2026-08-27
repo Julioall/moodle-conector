@@ -5,6 +5,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Completion.Queries;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Completion;
@@ -70,6 +71,10 @@ public sealed class MoodleCompletionTools(
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (MoodleApiException exception)
+        {
+            return ToolResultHelper.Error<CourseCompletionStatus>(exception);
         }
         catch
         {

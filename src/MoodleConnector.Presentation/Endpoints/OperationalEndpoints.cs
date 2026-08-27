@@ -31,12 +31,9 @@ internal static class OperationalEndpoints
             var publicBaseUrl = GetPublicBaseUrl(context);
             var gitCommit = configuration["GIT_COMMIT"] ?? "unknown";
             var buildDate = configuration["BUILD_DATE"] ?? "unknown";
-            var demoToolCount = inventory.Entries.Count(entry =>
-                entry.Family.Equals("demopendingaction", StringComparison.OrdinalIgnoreCase));
             var individualGradeToolCount = inventory.Entries.Count(entry =>
                 entry.Family.Contains("individualgrade", StringComparison.OrdinalIgnoreCase));
             var disabledToolCount =
-                             (features.Value.DemoToolsEnabled ? 0 : demoToolCount) +
                              (assignmentWrites.Value.AssignmentGradeWriteEnabled ? 0 : individualGradeToolCount);
             var toolsCount = inventory.Total - inventory.ProductionHiddenCount - disabledToolCount;
             return Results.Ok(new

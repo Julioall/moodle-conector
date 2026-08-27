@@ -93,10 +93,7 @@ public sealed class McpToolMetadataTests
             else
             {
                 Assert.True(attribute.Idempotent, $"{toolName} deve declarar Idempotent=true.");
-                if (toolType != typeof(DemoPendingActionTools))
-                {
-                    Assert.True(attribute.ReadOnly, $"{toolName} deve declarar ReadOnly=true enquanto for tool de leitura Moodle.");
-                }
+                Assert.True(attribute.ReadOnly, $"{toolName} deve declarar ReadOnly=true enquanto for tool de leitura Moodle.");
             }
         }
     }
@@ -229,8 +226,7 @@ public sealed class McpToolMetadataTests
             typeof(MoodleMemoryDocumentTools),
             typeof(MoodlePedagogyTools),
             typeof(MoodleTutorMessageTools),
-            typeof(MoodleUniversalWriteTools),
-            typeof(DemoPendingActionTools)
+            typeof(MoodleUniversalWriteTools)
         };
 
         foreach (var toolType in toolTypes)

@@ -5,6 +5,7 @@ using MediatR;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -281,12 +282,12 @@ public sealed class MoodleAssignmentSubmissionsTools(
                         var item = snapshot?.Data is null
                             ? null
                             : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, assignmentId);
-                        // Older persisted snapshots do not carry the grading
-                        // mode. Refresh before answering the dedicated
-                        // awaiting-grading filter so a legacy no-grade
-                        // activity cannot leak Moodle's raw notgraded flag.
+                        // The dedicated awaiting-grading filter needs the
+                        // current grade rows as well as submission status.
+                        // A snapshot only stores the latter, so it cannot
+                        // distinguish an empty grade from Moodle's -1 marker.
                         if (item is { IsComplete: true } &&
-                            (filter != AssignmentSubmissionFilter.NeedsGrading || item.IsGradable is not null))
+                            filter != AssignmentSubmissionFilter.NeedsGrading)
                         {
                             submissionsPage = AssignmentSubmissionSnapshotProjector.ToPage(
                                 item,
@@ -357,6 +358,10 @@ public sealed class MoodleAssignmentSubmissionsTools(
         catch (ArgumentOutOfRangeException ex)
         {
             return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(ex.Message);
+        }
+        catch (MoodleApiException ex)
+        {
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(ex);
         }
         catch
         {

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.MoodleApi;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -47,7 +48,7 @@ internal sealed class MoodleCompletionGateway(
             ["courseid"] = courseId.ToString(CultureInfo.InvariantCulture),
             ["userid"] = studentId.ToString(CultureInfo.InvariantCulture)
         }, cancellationToken);
-        return ParseActivitiesCompletion(payload.GetRawText());
+        return ParseActivitiesCompletion(payload.GetRawText(), "core_completion_get_activities_completion_status");
     }
 
     private async Task<(bool Completed, long Timecompleted)> FetchCourseCompletionAsync(
@@ -56,72 +57,81 @@ internal sealed class MoodleCompletionGateway(
         long studentId,
         CancellationToken cancellationToken)
     {
-        try
+        var payload = await restClient.CallAsync(credentials, "core_completion_get_course_completion_status", new Dictionary<string, object?>
         {
-            var payload = await restClient.CallAsync(credentials, "core_completion_get_course_completion_status", new Dictionary<string, object?>
-            {
-                ["courseid"] = courseId.ToString(CultureInfo.InvariantCulture),
-                ["userid"] = studentId.ToString(CultureInfo.InvariantCulture)
-            }, cancellationToken);
-            return ParseCourseCompletion(payload.GetRawText());
-        }
-        catch (MoodleConnector.Application.MoodleApi.MoodleApiException)
-        {
-            return (false, 0);
-        }
+            ["courseid"] = courseId.ToString(CultureInfo.InvariantCulture),
+            ["userid"] = studentId.ToString(CultureInfo.InvariantCulture)
+        }, cancellationToken);
+        return ParseCourseCompletion(payload.GetRawText(), "core_completion_get_course_completion_status");
     }
 
-    private static List<ActivityCompletionStatus> ParseActivitiesCompletion(string payload)
+    private static List<ActivityCompletionStatus> ParseActivitiesCompletion(string payload, string functionName)
     {
         var items = new List<ActivityCompletionStatus>();
 
         if (string.IsNullOrWhiteSpace(payload))
         {
-            return items;
+            throw InvalidCompletionPayload(functionName, "A resposta de conclusão de atividades está vazia.");
         }
 
-        using var document = JsonDocument.Parse(payload);
-        
-        if (!document.RootElement.TryGetProperty("statuses", out var statuses) || statuses.ValueKind != JsonValueKind.Array)
+        try
         {
-            return items;
-        }
+            using var document = JsonDocument.Parse(payload);
+            if (!document.RootElement.TryGetProperty("statuses", out var statuses) || statuses.ValueKind != JsonValueKind.Array)
+            {
+                throw InvalidCompletionPayload(functionName, "A resposta de conclusão de atividades não contém statuses.");
+            }
 
-        foreach (var status in statuses.EnumerateArray())
+            foreach (var status in statuses.EnumerateArray())
+            {
+                items.Add(new ActivityCompletionStatus(
+                    Cmid: ReadStringProperty(status, "cmid") ?? string.Empty,
+                    Modname: ReadStringProperty(status, "modname") ?? string.Empty,
+                    Instance: ReadStringProperty(status, "instance") ?? string.Empty,
+                    State: ReadLongProperty(status, "state") ?? 0,
+                    Timecompleted: ReadLongProperty(status, "timecompleted") ?? 0,
+                    Tracking: ReadLongProperty(status, "tracking") ?? 0,
+                    Overrideby: ReadStringProperty(status, "overrideby"),
+                    Valueused: ReadBoolProperty(status, "valueused")
+                ));
+            }
+        }
+        catch (JsonException exception)
         {
-            items.Add(new ActivityCompletionStatus(
-                Cmid: ReadStringProperty(status, "cmid") ?? string.Empty,
-                Modname: ReadStringProperty(status, "modname") ?? string.Empty,
-                Instance: ReadStringProperty(status, "instance") ?? string.Empty,
-                State: ReadLongProperty(status, "state") ?? 0,
-                Timecompleted: ReadLongProperty(status, "timecompleted") ?? 0,
-                Tracking: ReadLongProperty(status, "tracking") ?? 0,
-                Overrideby: ReadStringProperty(status, "overrideby"),
-                Valueused: ReadBoolProperty(status, "valueused")
-            ));
+            throw InvalidCompletionPayload(functionName, "A resposta de conclusão de atividades não é um JSON válido.", exception);
         }
 
         return items;
     }
 
-    private static (bool Completed, long Timecompleted) ParseCourseCompletion(string payload)
+    private static (bool Completed, long Timecompleted) ParseCourseCompletion(string payload, string functionName)
     {
         if (string.IsNullOrWhiteSpace(payload))
         {
-            return (false, 0);
+            throw InvalidCompletionPayload(functionName, "A resposta de conclusão do curso está vazia.");
         }
 
-        using var document = JsonDocument.Parse(payload);
-        
-        if (!document.RootElement.TryGetProperty("completionstatus", out var completionStatus) || completionStatus.ValueKind != JsonValueKind.Object)
+        try
         {
-            return (false, 0);
+            using var document = JsonDocument.Parse(payload);
+            if (!document.RootElement.TryGetProperty("completionstatus", out var completionStatus) || completionStatus.ValueKind != JsonValueKind.Object)
+            {
+                throw InvalidCompletionPayload(functionName, "A resposta de conclusão do curso não contém completionstatus.");
+            }
+
+            if (!TryReadBoolProperty(completionStatus, "completed", out var completed))
+            {
+                throw InvalidCompletionPayload(functionName, "A resposta de conclusão do curso não contém um estado completed válido.");
+            }
+
+            var timecompleted = ReadLongProperty(completionStatus, "timecompleted") ?? 0;
+
+            return (completed, timecompleted);
         }
-
-        var completed = ReadBoolProperty(completionStatus, "completed");
-        var timecompleted = ReadLongProperty(completionStatus, "timecompleted") ?? 0;
-
-        return (completed, timecompleted);
+        catch (JsonException exception)
+        {
+            throw InvalidCompletionPayload(functionName, "A resposta de conclusão do curso não é um JSON válido.", exception);
+        }
     }
 
     private static string? ReadStringProperty(JsonElement element, string propertyName)
@@ -150,16 +160,35 @@ internal sealed class MoodleCompletionGateway(
 
     private static bool ReadBoolProperty(JsonElement element, string propertyName)
     {
+        return TryReadBoolProperty(element, propertyName, out var value) && value;
+    }
+
+    private static bool TryReadBoolProperty(JsonElement element, string propertyName, out bool result)
+    {
         if (element.TryGetProperty(propertyName, out var value))
         {
-            if (value.ValueKind == JsonValueKind.True) return true;
-            if (value.ValueKind == JsonValueKind.False) return false;
-            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var num)) return num > 0;
-            if (value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out var b)) return b;
-            if (value.ValueKind == JsonValueKind.String && value.GetString() == "1") return true;
+            if (value.ValueKind == JsonValueKind.True) { result = true; return true; }
+            if (value.ValueKind == JsonValueKind.False) { result = false; return true; }
+            if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var num)) { result = num > 0; return true; }
+            if (value.ValueKind == JsonValueKind.String && bool.TryParse(value.GetString(), out var b)) { result = b; return true; }
+            if (value.ValueKind == JsonValueKind.String && value.GetString() == "1") { result = true; return true; }
+            if (value.ValueKind == JsonValueKind.String && value.GetString() == "0") { result = false; return true; }
         }
+
+        result = false;
         return false;
     }
+
+    private static MoodleApiException InvalidCompletionPayload(
+        string functionName,
+        string message,
+        Exception? innerException = null) =>
+        new(
+            MoodleErrorContract.InvalidResponse,
+            message,
+            innerException: innerException,
+            functionName: functionName,
+            stage: MoodleIntegrationStage.ResponseParsing);
 
     private static long ParseMoodleId(string value, string parameterName)
     {

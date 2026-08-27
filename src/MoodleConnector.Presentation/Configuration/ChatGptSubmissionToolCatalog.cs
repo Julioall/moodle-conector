@@ -30,7 +30,6 @@ public static class ChatGptSubmissionToolCatalog
         var exposurePolicy = new CognitiveExposurePolicy(ToolExposureProfile.Production);
         var featureOptions = new FeatureOptions
         {
-            DemoToolsEnabled = false,
             MessagesWriteEnabled = true,
             UniversalMoodleWriteEnabled = true
         };

@@ -131,7 +131,6 @@ https://<APP_DOMAIN>/mcp
 | `MoodleProxy` | `HttpRetryCount` | Tentativas adicionais para falhas transitórias HTTP ao chamar o proxy. `0` desabilita retry. Padrão: `2`. |
 | `MoodleProxy` | `CircuitBreakerHandledEventsAllowedBeforeBreaking` | Falhas transitórias antes de abrir o circuit breaker do proxy. `0` desabilita. Padrão: `5`. |
 | `MoodleProxy` | `CircuitBreakerDurationSeconds` | Tempo de abertura do circuit breaker do proxy. Padrão: `30`. |
-| `Features` | `DemoToolsEnabled` | Expõe tools demo de pending action. |
 
 ## Observações
 

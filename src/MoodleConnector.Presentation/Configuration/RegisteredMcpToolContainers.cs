@@ -56,7 +56,6 @@ public static class RegisteredMcpToolContainers
 
     public static IReadOnlyList<ConditionalMcpToolContainer> Conditional { get; } =
     [
-        new(typeof(DemoPendingActionTools), "DemoToolsEnabled"),
         new(typeof(MoodleIndividualGradeTools), "AssignmentGradeWriteEnabled"),
         new(typeof(MoodleTutorMessageTools), "MessagesWriteEnabled"),
         new(typeof(MoodleUniversalWriteTools), "UniversalMoodleWriteEnabled")
@@ -100,7 +99,6 @@ public sealed record ConditionalMcpToolContainer(Type ContainerType, string Feat
     public bool IsEnabled(FeatureOptions featureOptions, AssignmentWriteFeatureOptions assignmentWriteOptions) =>
         FeatureFlag switch
         {
-            "DemoToolsEnabled" => featureOptions.DemoToolsEnabled,
             "AssignmentGradeWriteEnabled" => assignmentWriteOptions.AssignmentGradeWriteEnabled,
             "MessagesWriteEnabled" => featureOptions.MessagesWriteEnabled,
             "UniversalMoodleWriteEnabled" => featureOptions.UniversalMoodleWriteEnabled,

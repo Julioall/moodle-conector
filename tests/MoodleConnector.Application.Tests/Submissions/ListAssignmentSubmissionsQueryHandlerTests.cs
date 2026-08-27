@@ -1,4 +1,5 @@
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 
@@ -145,19 +146,30 @@ public class ListAssignmentSubmissionsQueryHandlerTests
     }
 
     [Fact]
-    public async Task Nao_deve_listar_aguardando_correcao_quando_atividade_nao_tem_nota()
+    public async Task Deve_usar_grade_vazia_para_distinguir_entregas_que_ainda_precisam_de_avaliacao()
     {
         var sut = CreateHandler(
             submissionsGateway: new FakeSubmissionsGateway
             {
                 Records =
                 [
-                    Submitted("9001", "101", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded")
+                    Submitted("9001", "101", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded"),
+                    Submitted("9002", "102", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded"),
+                    Submitted("9003", "103", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded")
                 ]
             },
             settingsGateway: new FakeAssignmentSettingsGateway
             {
                 Settings = new AssignmentSettingsSummary("501", 0m, "Atividade sem nota", IsGradable: false)
+            },
+            gradeReadGateway: new FakeAssignmentGradeReadGateway
+            {
+                Grades = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["101"] = new("501", "101", Grade: null, HasGrade: false),
+                    ["102"] = new("501", "102", Grade: -1m, HasGrade: false),
+                    ["103"] = new("501", "103", Grade: null, HasGrade: false)
+                }
             });
 
         var result = await sut.Handle(
@@ -175,8 +187,9 @@ public class ListAssignmentSubmissionsQueryHandlerTests
             CancellationToken.None);
 
         Assert.NotNull(result);
-        Assert.Empty(result!.Submissions);
-        Assert.Equal(0, result.Total);
+        Assert.Equal(2, result!.Total);
+        Assert.Equal(["101", "103"], result.Submissions.Select(submission => submission.UserId));
+        Assert.All(result.Submissions, submission => Assert.True(submission.NeedsGrading));
     }
 
     [Fact]
@@ -287,14 +300,16 @@ public class ListAssignmentSubmissionsQueryHandlerTests
     private static ListAssignmentSubmissionsQueryHandler CreateHandler(
         FakeContentsGateway? contentsGateway = null,
         FakeSubmissionsGateway? submissionsGateway = null,
-        FakeAssignmentSettingsGateway? settingsGateway = null)
+        FakeAssignmentSettingsGateway? settingsGateway = null,
+        FakeAssignmentGradeReadGateway? gradeReadGateway = null)
     {
         return new ListAssignmentSubmissionsQueryHandler(
             new FakeCoursesGateway(),
             contentsGateway ?? new FakeContentsGateway(),
             new FakeParticipantsGateway(),
             submissionsGateway ?? new FakeSubmissionsGateway(),
-            settingsGateway);
+            settingsGateway,
+            gradeReadGateway);
     }
 
     private static AssignmentSubmissionRecord Submitted(
@@ -486,5 +501,25 @@ public class ListAssignmentSubmissionsQueryHandlerTests
             string courseId,
             string assignmentId,
             CancellationToken cancellationToken) => Task.FromResult(Settings);
+    }
+
+    private sealed class FakeAssignmentGradeReadGateway : IMoodleAssignmentGradeReadGateway
+    {
+        public IReadOnlyDictionary<string, AssignmentExistingGrade> Grades { get; init; } =
+            new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+
+        public Task<AssignmentExistingGrade?> GetExistingGradeAsync(
+            string userExternalId,
+            string assignmentId,
+            string studentId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Grades.GetValueOrDefault(studentId));
+
+        public Task<IReadOnlyDictionary<string, AssignmentExistingGrade>> GetExistingGradesAsync(
+            string userExternalId,
+            string assignmentId,
+            IReadOnlyCollection<string> studentIds,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Grades);
     }
 }

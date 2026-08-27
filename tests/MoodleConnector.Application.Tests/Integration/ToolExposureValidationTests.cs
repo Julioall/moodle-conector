@@ -119,7 +119,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var productionContainers = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
+                new FeatureOptions { MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
 
         var publishedMetadata = productionContainers
@@ -165,7 +165,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         var submissionTools = LoadSubmissionTools();
         var productionContainers = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
+                new FeatureOptions { MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
         var metadataRegistry = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
         var exposurePolicy = new CognitiveExposurePolicy(ToolExposureProfile.Production);

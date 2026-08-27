@@ -10,9 +10,9 @@ Reduzir a carga cognitiva do catálogo MCP sem remover intenções pedagógicas 
 
 ## Contexto e evidência atual
 
-O catálogo atual possui 111 entradas registradas em 30 containers (`AlwaysOn` e
-condicionais). Com as flags de escrita de catálogo habilitadas e as tools de demo
-desligadas, a superfície `Production` contém 104 tools: cinco diagnósticos técnicos
+O catálogo atual possui 109 entradas registradas em 29 containers (`AlwaysOn` e
+condicionais). Com as flags de escrita de catálogo habilitadas, a superfície `Production`
+contém 104 tools: cinco diagnósticos técnicos
 são ocultados cognitivamente. O `tools/list` aplica
 feature flags, OAuth scopes, capabilities Moodle e `CognitiveExposurePolicy`
 antes da serialização.

@@ -147,7 +147,7 @@ public class ToolMetadataRegistryTests
     {
         var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
 
-        Assert.Equal(111, reg.Entries.Count);
+        Assert.Equal(109, reg.Entries.Count);
         Assert.All(reg.Entries, entry =>
         {
             Assert.False(string.IsNullOrWhiteSpace(entry.Key));
@@ -181,10 +181,10 @@ public class ToolMetadataRegistryTests
         Assert.Equal(canonicalSubmission.RequiredMoodleCapabilities, submissionAlias.RequiredMoodleCapabilities);
 
         var inventory = new ToolSurfaceInventory(reg);
-        Assert.Equal(111, inventory.Total);
-        Assert.Equal(11, inventory.StructuralCount);
+        Assert.Equal(109, inventory.Total);
+        Assert.Equal(9, inventory.StructuralCount);
         Assert.Equal(51, inventory.SpecializedCount);
-        Assert.Equal(29, inventory.ControlledWriteCount);
+        Assert.Equal(27, inventory.ControlledWriteCount);
         Assert.Equal(0, inventory.DeprecatedCount);
         Assert.Equal(5, inventory.DiagnosticCount);
         Assert.Equal(5, inventory.ProductionHiddenCount);
@@ -195,11 +195,12 @@ public class ToolMetadataRegistryTests
     public void Catalog_is_the_single_source_for_conditional_mcp_registration()
     {
         var enabled = RegisteredMcpToolContainers.GetEnabledContainers(
-            new FeatureOptions { DemoToolsEnabled = true },
+            new FeatureOptions(),
             new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = false });
 
-        Assert.Contains(typeof(DemoPendingActionTools), enabled);
         Assert.DoesNotContain(typeof(MoodleIndividualGradeTools), enabled);
+        Assert.False(new ToolMetadataRegistry(RegisteredMcpToolContainers.All).TryGet("prepare_demo_action", out _));
+        Assert.False(new ToolMetadataRegistry(RegisteredMcpToolContainers.All).TryGet("confirm_demo_action", out _));
         Assert.Equal(
             RegisteredMcpToolContainers.All,
             RegisteredMcpToolContainers.AlwaysOn

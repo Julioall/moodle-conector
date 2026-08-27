@@ -37,6 +37,8 @@ public sealed class McpGradingResourceTransportTests : IClassFixture<McpTestWebA
         Assert.NotNull(resources);
         Assert.Contains(resources!, resource =>
             resource?["uri"]?.GetValue<string>() == "ui://grading-review/v2/app.html");
+        Assert.DoesNotContain(resources!, resource =>
+            resource?["uri"]?.GetValue<string>() == "ui://grading-review/app.html");
 
         var read = await SendAsync(client, "resources/read", new JsonObject
         {
@@ -49,15 +51,6 @@ public sealed class McpGradingResourceTransportTests : IClassFixture<McpTestWebA
             content?["mimeType"]?.GetValue<string>() == "text/html;profile=mcp-app" &&
             content?["text"]?.ToString().Contains("id=\"app\"", StringComparison.Ordinal) == true);
 
-        var legacyRead = await SendAsync(client, "resources/read", new JsonObject
-        {
-            ["uri"] = "ui://grading-review/app.html"
-        }, "resource-read-legacy", sessionId);
-        var legacyContents = legacyRead.Body?["result"]?["contents"]?.AsArray();
-        Assert.NotNull(legacyContents);
-        Assert.Contains(legacyContents!, content =>
-            content?["uri"]?.GetValue<string>() == "ui://grading-review/app.html" &&
-            content?["mimeType"]?.GetValue<string>() == "text/html;profile=mcp-app");
     }
 
     private static async Task<(JsonNode? Body, string? SessionId)> SendAsync(

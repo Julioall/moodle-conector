@@ -726,17 +726,13 @@ class Program
                 ToolExposureProfile.Full or
                 ToolExposureProfile.FullWithCoursesSkill or
                 ToolExposureProfile.SkillCoursesOptimized;
-            var previousDemoFlag = Environment.GetEnvironmentVariable("Features__DemoToolsEnabled");
             var previousGradeFlag = Environment.GetEnvironmentVariable("Features__AssignmentGradeWriteEnabled");
             try
             {
                 // Environment variables are a higher-priority configuration source
-                // in WebApplicationFactory. Set both flags explicitly so Full is
+                // in WebApplicationFactory. Set the grade flag explicitly so Full is
                 // truly the complete declared catalog while Production remains
                 // filtered by feature flags and the metadata exposure policy.
-                Environment.SetEnvironmentVariable(
-                    "Features__DemoToolsEnabled",
-                    includeAllCatalogTools ? "true" : "false");
                 Environment.SetEnvironmentVariable("Features__AssignmentGradeWriteEnabled", "true");
 
                 using var factory = BuildFactory(
@@ -754,7 +750,6 @@ class Program
             }
             finally
             {
-                Environment.SetEnvironmentVariable("Features__DemoToolsEnabled", previousDemoFlag);
                 Environment.SetEnvironmentVariable("Features__AssignmentGradeWriteEnabled", previousGradeFlag);
             }
         }
@@ -1022,7 +1017,6 @@ class Program
                         { "McpServerSecurity:RequireApiKey", "true" },
                         { "McpServerSecurity:RequireJwt", "false" },
                         { "ConnectorSecrets:EncryptionKeyBase64", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=" },
-                        { "Features:DemoToolsEnabled", includeAllCatalogTools ? "true" : "false" },
                         { "Features:AssignmentGradeWriteEnabled", "true" }
                     });
                 });
