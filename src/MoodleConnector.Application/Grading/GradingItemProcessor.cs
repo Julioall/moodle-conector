@@ -17,14 +17,16 @@ public sealed class GradingItemProcessor(
     public async Task ProcessItemAsync(
         AssistedGradingItem item,
         IGradingReviewRepository repository,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? teacherInstructions = null)
     {
         var context = await contextBuilder.BuildAsync(
             item,
             new GradingContextOptions(
                 IncludeRubric: true,
                 IncludeSubmissionFiles: true,
-                IncludeCourseMaterials: true),
+                IncludeCourseMaterials: true,
+                TeacherInstructions: teacherInstructions),
             cancellationToken);
 
         var readableText = FirstReadableText(context);

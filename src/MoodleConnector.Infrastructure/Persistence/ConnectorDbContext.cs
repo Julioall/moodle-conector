@@ -460,6 +460,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
                 value => value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
                 value => value.ToArray()));
         batch.Property(x => x.CreatedBySubject).HasMaxLength(200).IsRequired();
+        batch.Property(x => x.TeacherInstructions).HasMaxLength(8000);
+        batch.Property(x => x.Priority).HasMaxLength(16).IsRequired();
         batch.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
         batch.HasIndex(x => new { x.CreatedBySubject, x.Status });
         batch.HasIndex(x => new { x.CourseId, x.Status });

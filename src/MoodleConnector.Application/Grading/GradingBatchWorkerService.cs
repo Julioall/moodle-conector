@@ -142,7 +142,11 @@ public sealed class GradingBatchWorkerService(
 
             try
             {
-                await processor.ProcessItemAsync(item, repository, cancellationToken);
+                await processor.ProcessItemAsync(
+                    item,
+                    repository,
+                    cancellationToken,
+                    batch.TeacherInstructions);
             }
             catch (OperationCanceledException)
             {

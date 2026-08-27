@@ -34,7 +34,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 AssignmentIds: ["501"],
                 SubmissionIds: [],
                 MaxItems: 25,
-                OnlyAwaitingGrading: true),
+                OnlyAwaitingGrading: true,
+                TeacherInstructions: "Priorize clareza.",
+                Priority: "high"),
             CancellationToken.None);
 
         Assert.NotEqual(Guid.Empty, result.BatchJobId);
@@ -44,6 +46,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(2, result.AcceptedItems);
         Assert.Equal(0, result.BlockedItems);
         Assert.Single(repository.Batches);
+        Assert.Equal("Priorize clareza.", repository.Batches.Single().TeacherInstructions);
+        Assert.Equal("high", repository.Batches.Single().Priority);
         Assert.Equal(2, repository.Items.Count);
         Assert.All(repository.Items, item => Assert.Equal(GradingItemStatus.Pending, item.Status));
         Assert.Equal(AssignmentSubmissionFilter.NeedsGrading, mediator.LastListQuery!.Filter);
@@ -134,6 +138,45 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             artifact.Filename == "Tarefa 1" &&
             artifact.ExtractedTextRef!.Contains("Descricao da tarefa SAP 01", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(fileGateway.DownloadedFileUrls, url => url == "https://moodle.example/pluginfile.php/orientacoes.pdf");
+    }
+
+    [Fact]
+    public async Task CreateBatch_SemMateriaisDoCurso_NaoBaixaModulosVizinhos()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var fileGateway = new FakeSubmissionFileGateway();
+        var contentsGateway = new FakeCourseContentsGateway();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            orchestrator,
+            contentsGateway,
+            fileGateway,
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway());
+
+        await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: ["9001"],
+                MaxItems: 25,
+                OnlyAwaitingGrading: true,
+                IncludeRubric: true,
+                IncludeSubmissionFiles: false,
+                IncludeCourseMaterials: false),
+            CancellationToken.None);
+
+        Assert.Equal(1, contentsGateway.CallCount);
+        Assert.Empty(fileGateway.DownloadedFileUrls);
+        Assert.Contains(repository.Artifacts, artifact => artifact.Filename == "Tarefa 1");
+        Assert.DoesNotContain(repository.Artifacts, artifact => artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf");
     }
 
     [Fact]

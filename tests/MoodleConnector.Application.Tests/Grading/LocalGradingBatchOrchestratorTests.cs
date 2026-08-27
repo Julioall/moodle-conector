@@ -27,6 +27,39 @@ public sealed class LocalGradingBatchOrchestratorTests
     }
 
     [Fact]
+    public async Task EnqueueAsync_PropagaInstrucoesPersistidasAoContexto()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            teacherInstructions: "Use linguagem acolhedora.");
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(), item.Id, "submission_file", "entrega.txt", "text/plain", "sha-1", 120,
+            "succeeded", "Texto legivel da entrega.", null, DateTimeOffset.UtcNow));
+
+        var contextBuilder = new CapturingContextBuilder();
+        var sut = new LocalGradingBatchOrchestrator(
+            repository,
+            DefaultLimits(),
+            new GradingItemProcessor(
+                contextBuilder,
+                new FakeGradingAnalysisService(),
+                NullLogger<GradingItemProcessor>.Instance),
+            NullLogger<LocalGradingBatchOrchestrator>.Instance);
+
+        await sut.EnqueueAsync(batch.Id, CancellationToken.None);
+
+        Assert.Equal("Use linguagem acolhedora.", contextBuilder.LastTeacherInstructions);
+    }
+
+    [Fact]
     public async Task EnqueueAsync_ComArtefatoExtraido_MarcaAwaitingAiEAtualizaContadores()
     {
         var repository = new FakeGradingReviewRepository();
@@ -525,6 +558,35 @@ public sealed class LocalGradingBatchOrchestratorTests
                     : [new GradingFileInfo("entrega.txt", "text/plain", 120, "sha-1", text, true)],
                 courseMaterials: null,
                 teacherInstructions: options.TeacherInstructions);
+        }
+    }
+
+    private sealed class CapturingContextBuilder : IGradingContextBuilder
+    {
+        public string? LastTeacherInstructions { get; private set; }
+
+        public Task<GradingContext> BuildAsync(
+            AssistedGradingItem item,
+            GradingContextOptions options,
+            CancellationToken cancellationToken)
+        {
+            LastTeacherInstructions = options.TeacherInstructions;
+            return Task.FromResult(GradingContext.Build(
+                item.Id,
+                item.BatchId,
+                item.CourseId.ToString(),
+                item.AssignmentId.ToString(),
+                item.SubmissionId?.ToString(),
+                item.MoodleUserId.ToString(),
+                assignmentStatement: "Enunciado.",
+                criteria: "Criterio.",
+                rubricDescription: null,
+                maxGrade: 10m,
+                gradeScale: null,
+                submissionText: "Texto legivel da entrega.",
+                attachedFiles: [],
+                courseMaterials: null,
+                teacherInstructions: options.TeacherInstructions));
         }
     }
 

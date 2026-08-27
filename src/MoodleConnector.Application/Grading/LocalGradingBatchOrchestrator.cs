@@ -61,7 +61,11 @@ public sealed class LocalGradingBatchOrchestrator(
         {
             try
             {
-                await itemProcessor.ProcessItemAsync(item, repository, cancellationToken);
+                await itemProcessor.ProcessItemAsync(
+                    item,
+                    repository,
+                    cancellationToken,
+                    batch.TeacherInstructions);
             }
             catch (OperationCanceledException)
             {

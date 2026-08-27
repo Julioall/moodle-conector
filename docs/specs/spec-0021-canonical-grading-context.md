@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft.
+In Progress.
 
 ## Objetivo
 
@@ -112,6 +112,16 @@ artifact até a proposta final.
    snapshot por `ContextHash`.
 6. Implementar seleção por chunks/coverage e bloquear truncamento não declarado.
 7. Remover reconstruções legadas após evidência de equivalência e janela de compatibilidade.
+
+### Incremento inicial implementado
+
+O lote agora persiste `TeacherInstructions` (e a prioridade declarada) em migração aditiva
+e o worker/orquestrador local repassa a instrução persistida ao `GradingContextBuilder`.
+Isso fecha a perda de contexto entre criação e processamento sem antecipar o snapshot
+canônico, a fila durável ou a coleta assíncrona previstos nas próximas etapas.
+Além disso, a opção `includeCourseMaterials=false` agora impede a coleta e o download de
+módulos vizinhos; a descrição da própria atividade continua disponível quando a rubrica foi
+solicitada.
 
 ## Critérios de aceite
 

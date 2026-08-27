@@ -27,6 +27,31 @@ public sealed class GradingDomainTests
     }
 
     [Fact]
+    public void AssistedGradingBatch_Create_PersisteConfiguracaoDoProfessorComValoresNormalizados()
+    {
+        var batch = AssistedGradingBatch.Create(
+            courseId: 10,
+            assignmentIds: [501],
+            createdBySubject: "teacher-1",
+            createdByMoodleUserId: 321,
+            totalItems: 1,
+            teacherInstructions: "  Valorize clareza e evidencias.  ",
+            priority: " HIGH ");
+
+        Assert.Equal("Valorize clareza e evidencias.", batch.TeacherInstructions);
+        Assert.Equal("high", batch.Priority);
+    }
+
+    [Fact]
+    public void AssistedGradingBatch_Create_RejeitaConfiguracaoInvalida()
+    {
+        Assert.Throws<ArgumentException>(() => AssistedGradingBatch.Create(
+            10, [501], "teacher-1", 321, 1, priority: "urgent"));
+        Assert.Throws<ArgumentException>(() => AssistedGradingBatch.Create(
+            10, [501], "teacher-1", 321, 1, teacherInstructions: new string('x', 8001)));
+    }
+
+    [Fact]
     public void AssistedGradingItem_ApplyTeacherReview_SeparaNotaSugeridaDeNotaFinal()
     {
         var item = AssistedGradingItem.Create(

@@ -25,6 +25,8 @@ acadêmico além da política aprovada.
   porém o fluxo de criação ainda concentra trabalho no request.
 - `RawFileRetentionDays` e `DraftRetentionDays` estão configurados, mas não há evidência
   de cleanup efetivo. `ExtractedTextRef` pode conter texto integral da entrega.
+- A prioridade declarada agora é persistida no lote, mas ainda não altera a ordem de
+  processamento até a fila durável da Fase 4.
 - O processamento persiste estados em conjuntos grandes, ampliando a janela de perda e de
   duplicação após falha.
 

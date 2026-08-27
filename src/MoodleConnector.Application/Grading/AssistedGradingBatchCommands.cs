@@ -354,7 +354,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             assignmentIdsAsLong,
             currentUser.Subject,
             moodleUserId,
-            selectedItems.Count);
+            selectedItems.Count,
+            request.TeacherInstructions,
+            request.Priority);
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
@@ -390,6 +392,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     request.UserExternalId,
                     item,
                     assignmentContextCache,
+                    request.IncludeCourseMaterials,
                     warnings,
                     cancellationToken);
             }
@@ -571,6 +574,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         string userExternalId,
         AssistedGradingItem item,
         Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>> assignmentContextCache,
+        bool includeCourseMaterials,
         List<string> warnings,
         CancellationToken cancellationToken)
     {
@@ -580,6 +584,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             templates = await BuildAssignmentContextTemplatesAsync(
                 userExternalId,
                 item,
+                includeCourseMaterials,
                 warnings,
                 cancellationToken);
             assignmentContextCache[cacheKey] = templates;
@@ -594,6 +599,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     private async Task<IReadOnlyList<ContextArtifactTemplate>> BuildAssignmentContextTemplatesAsync(
         string userExternalId,
         AssistedGradingItem item,
+        bool includeCourseMaterials,
         List<string> warnings,
         CancellationToken cancellationToken)
     {
@@ -639,6 +645,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 ExtractionStatus.Succeeded,
                 assignmentModule.Description,
                 SummaryRef: "assignment_description"));
+        }
+
+        if (!includeCourseMaterials)
+        {
+            return templates;
         }
 
         var modules = section.Modules.ToArray();

@@ -25,7 +25,8 @@ explícito antes de qualquer lançamento no Moodle.
   uniforme.
 - A edição usa `ExpectedReviewStatus`, embora já exista `GradingDraftVersionHash` para
   controle otimista mais forte.
-- `Priority` é aceito no contrato, mas a fila FIFO não demonstra que altera a ordem.
+- `Priority` é persistida no lote, mas a fila local ainda não demonstra que altera a ordem;
+  a semântica observável continua reservada à SPEC-0022.
 
 ## Decisão e arquitetura-alvo
 
