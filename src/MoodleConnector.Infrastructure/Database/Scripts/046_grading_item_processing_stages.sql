@@ -7,6 +7,7 @@ ALTER TABLE grading_item
 UPDATE grading_item
 SET "ProcessingStage" = CASE
     WHEN "Status" IN ('ReadyForReview', 'DraftReady', 'ReadyToCommit', 'Committed') THEN 'completed'
+    WHEN "Status" IN ('Analyzing', 'AwaitingAiAnalysis') THEN 'analysis'
     WHEN "Status" IN ('Blocked', 'Failed') THEN 'failed'
     ELSE 'pending'
 END

@@ -361,7 +361,12 @@ public sealed class GradingBatchWorkerService(
                         batch.IncludeSubmissionFiles,
                         batch.IncludeCourseMaterials,
                         batch.TeacherInstructions));
-                item.MarkProcessingStage(GradingProcessingStage.Completed);
+                item.MarkProcessingStage(
+                    item.Status == GradingItemStatus.AwaitingAiAnalysis
+                        ? GradingProcessingStage.Analysis
+                        : item.Status is GradingItemStatus.Blocked or GradingItemStatus.Failed
+                            ? GradingProcessingStage.Failed
+                            : GradingProcessingStage.Completed);
 
                 if (jobStore is not null)
                 {
