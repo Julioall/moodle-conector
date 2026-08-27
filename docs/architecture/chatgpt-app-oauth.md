@@ -55,13 +55,13 @@ Quando `OAuth__Issuer` e `OAuth__Audience` ficam vazios, a aplicação deriva am
 `/.well-known/oauth-protected-resource/mcp` deve retornar:
 
 - `resource = https://<APP_DOMAIN>/mcp`;
-- `authorization_servers = ["https://<APP_DOMAIN>"]`;
+- `authorization_servers = ["https://<APP_DOMAIN>/"]` (a mesma representação exata do issuer OIDC e do parâmetro `iss` no callback);
 - `scopes_supported` contendo `openid`, `profile`, `email`, `offline_access` e `moodle-mcp-audience`;
 - `bearer_methods_supported = ["header"]`.
 
 `/.well-known/oauth-authorization-server` deve retornar:
 
-- `issuer = https://<APP_DOMAIN>`;
+- `issuer = https://<APP_DOMAIN>/`;
 - `authorization_endpoint = https://<APP_DOMAIN>/authorize`;
 - `token_endpoint = https://<APP_DOMAIN>/token`;
 - `jwks_uri = https://<APP_DOMAIN>/.well-known/jwks`;

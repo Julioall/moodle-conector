@@ -153,9 +153,16 @@ internal static class OperationalEndpoints
 
     public static string ResolveOAuthIssuer(OAuthBrokerOptions options, string publicBaseUrl)
     {
-        return string.IsNullOrWhiteSpace(options.Issuer)
-            ? publicBaseUrl.TrimEnd('/')
-            : options.Issuer.TrimEnd('/');
+        var configuredIssuer = string.IsNullOrWhiteSpace(options.Issuer)
+            ? publicBaseUrl
+            : options.Issuer.Trim();
+
+        // OpenIddict serializes the issuer as an absolute URI. Return the same
+        // canonical representation from every OAuth discovery surface so the
+        // `iss` parameter in the authorization response matches exactly.
+        return Uri.TryCreate(configuredIssuer, UriKind.Absolute, out var issuerUri)
+            ? issuerUri.AbsoluteUri
+            : configuredIssuer;
     }
 
     public static string ResolveOAuthAudience(OAuthBrokerOptions options, string publicBaseUrl, string mcpPath)
