@@ -15,7 +15,8 @@ public sealed record SaveAssignmentGradeCommand(
     int AttemptNumber,
     bool AddAttempt,
     bool ApplyToAll,
-    string WorkflowState) : IRequest<AssignmentGradeWriteResult>;
+    string WorkflowState,
+    string? CourseId = null) : IRequest<AssignmentGradeWriteResult>;
 
 public sealed record AssignmentGradeWriteRequest(
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
@@ -34,10 +35,11 @@ public sealed record AssignmentGradeWriteResult(
 
 public sealed class SaveAssignmentGradeCommandHandler(
     IMoodleAssignmentGradingGateway gateway,
-    IOptions<AssignmentWriteFeatureOptions> features)
+    IOptions<AssignmentWriteFeatureOptions> features,
+    IMoodleAssignmentSettingsGateway settingsGateway)
     : IRequestHandler<SaveAssignmentGradeCommand, AssignmentGradeWriteResult>
 {
-    public Task<AssignmentGradeWriteResult> Handle(
+    public async Task<AssignmentGradeWriteResult> Handle(
         SaveAssignmentGradeCommand request,
         CancellationToken cancellationToken)
     {
@@ -72,6 +74,37 @@ public sealed class SaveAssignmentGradeCommandHandler(
             throw new InvalidOperationException("A escrita de feedback em tarefas esta desabilitada por feature flag.");
         }
 
+        AssignmentSettingsSummary? settings;
+        if (string.IsNullOrWhiteSpace(request.CourseId))
+        {
+            throw new InvalidOperationException("O curso da tarefa nao foi informado; escala maxima nao pode ser confirmada.");
+        }
+
+        try
+        {
+            settings = await settingsGateway.GetAssignmentSettingsAsync(
+                request.UserExternalId.Trim(),
+                request.CourseId.Trim(),
+                request.AssignmentId.Trim(),
+                cancellationToken);
+        }
+        catch
+        {
+            throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; lancamento bloqueado.");
+        }
+
+        if (settings?.MaxGrade is not > 0)
+        {
+            throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; lancamento bloqueado.");
+        }
+
+        if (request.Grade > settings.MaxGrade)
+        {
+            throw new ArgumentOutOfRangeException(
+                "grade",
+                $"A nota deve estar entre 0 e {settings.MaxGrade.ToString(System.Globalization.CultureInfo.InvariantCulture)}.");
+        }
+
         var writeRequest = new AssignmentGradeWriteRequest(
             request.AssignmentId.Trim(),
             request.StudentId.Trim(),
@@ -82,7 +115,7 @@ public sealed class SaveAssignmentGradeCommandHandler(
             request.ApplyToAll,
             string.IsNullOrWhiteSpace(request.WorkflowState) ? "graded" : request.WorkflowState.Trim());
 
-        return gateway.SaveGradeAsync(
+        return await gateway.SaveGradeAsync(
             request.UserExternalId.Trim(),
             writeRequest,
             cancellationToken);

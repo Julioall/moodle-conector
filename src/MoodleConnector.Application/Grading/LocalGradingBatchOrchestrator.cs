@@ -51,11 +51,11 @@ public sealed class LocalGradingBatchOrchestrator(
             batchId,
             totalItems);
 
-        var items = await repository.ListItemsByBatchAsync(
+        var items = await GradingItemProcessor.LoadAllBatchItemsAsync(
+            repository,
             batchId,
-            page: 1,
-            pageSize: maxItems,
-            cancellationToken);
+            cancellationToken,
+            maxItems);
 
         foreach (var item in items.Where(item => item.Status == GradingItemStatus.Pending))
         {

@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft.
+In Progress.
 
 ## Objetivo
 
@@ -13,8 +13,8 @@ explícito antes de qualquer lançamento no Moodle.
 ## Contexto e evidência atual
 
 - `GradingReviewRepository.ListItemsByBatchAsync` limita uma página a 100 itens.
-- O worker e a prévia de lançamento possuem caminhos que tentam carregar um lote inteiro
-  em uma única chamada; um lote configurado com até 400 itens pode deixar itens `Pending`.
+- O worker, a orquestração local e a prévia de lançamento precisam consumir a primitive de
+  paginação para que um lote configurado com até 400 itens não deixe itens `Pending`.
 - `CancelAssistedGradingBatchCommandHandler` precisa aplicar o mesmo
   `GradingAccessControl.EnsureCanAccessBatch` usado pelas consultas e edições.
 - `ProcessedItems`, `BlockedItems`, `FailedItems` e `PendingItems` não possuem uma

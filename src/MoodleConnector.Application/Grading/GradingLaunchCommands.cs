@@ -85,7 +85,8 @@ public sealed record AssignmentSubmissionAttemptStatus(
 public sealed class CreateGradingLaunchPreviewCommandHandler(
     IGradingReviewRepository repository,
     IPendingActionService pendingActions,
-    ICurrentUserContext currentUser)
+    ICurrentUserContext currentUser,
+    IMoodleAssignmentSettingsGateway settingsGateway)
     : IRequestHandler<CreateGradingLaunchPreviewCommand, CreateGradingLaunchPreviewResult>
 {
     private const string ToolName = "criar_previa_lancamento_lote";
@@ -108,10 +109,18 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             .ToArray();
         var scaleWarnings = new List<string>();
         var ready = new List<AssistedGradingItem>();
+        var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
         foreach (var item in launchable)
         {
-            var maxGrade = await GetKnownMaxGradeAsync(item.Id, cancellationToken);
-            if (maxGrade is not null && item.FinalGrade > maxGrade)
+            var maxGrade = await GetKnownMaxGradeAsync(batch, item, settingsCache, cancellationToken);
+            if (maxGrade is null)
+            {
+                scaleWarnings.Add(
+                    $"Item {item.Id}: nota maxima da atividade nao foi confirmada; lancamento numerico bloqueado.");
+                continue;
+            }
+
+            if (item.FinalGrade > maxGrade)
             {
                 scaleWarnings.Add(
                     $"Item {item.Id}: nota final {FormatGrade(item.FinalGrade!.Value)} excede nota maxima {FormatGrade(maxGrade.Value)} identificada pelos criterios.");
@@ -190,16 +199,43 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         CancellationToken cancellationToken)
     {
         var total = await repository.CountItemsByBatchAsync(batchId, cancellationToken);
-        return await repository.ListItemsByBatchAsync(
+        return await GradingItemProcessor.LoadAllBatchItemsAsync(
+            repository,
             batchId,
-            page: 1,
-            pageSize: Math.Max(1, total),
-            cancellationToken);
+            cancellationToken,
+            Math.Max(1, total));
     }
 
-    private async Task<decimal?> GetKnownMaxGradeAsync(Guid gradingItemId, CancellationToken cancellationToken)
+    private async Task<decimal?> GetKnownMaxGradeAsync(
+        AssistedGradingBatch batch,
+        AssistedGradingItem item,
+        IDictionary<long, AssignmentSettingsSummary?> settingsCache,
+        CancellationToken cancellationToken)
     {
-        var evidence = await repository.ListEvidenceByItemAsync(gradingItemId, cancellationToken);
+        if (!settingsCache.TryGetValue(item.AssignmentId, out var settings))
+        {
+            try
+            {
+                settings = await settingsGateway.GetAssignmentSettingsAsync(
+                    batch.CreatedBySubject,
+                    item.CourseId.ToString(CultureInfo.InvariantCulture),
+                    item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                    cancellationToken);
+            }
+            catch
+            {
+                settings = null;
+            }
+
+            settingsCache[item.AssignmentId] = settings;
+        }
+
+        if (settings?.MaxGrade > 0)
+        {
+            return settings.MaxGrade;
+        }
+
+        var evidence = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
         var maxPoints = evidence
             .Select(item => item.MaxPoints)
             .Where(points => points is > 0)
@@ -485,7 +521,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                         payloadItem.AttemptNumber ?? -1,
                         AddAttempt: false,
                         ApplyToAll: false,
-                        WorkflowState: "graded"),
+                        WorkflowState: "graded",
+                        CourseId: payloadItem.CourseId),
                     cancellationToken);
                 item.MarkCommitSucceeded();
                 await RecordCommitAuditAsync(
@@ -530,6 +567,16 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     break;
                 }
             }
+        }
+
+        var batch = await repository.GetBatchAsync(payload.BatchJobId, cancellationToken);
+        if (batch is not null)
+        {
+            var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(
+                repository,
+                batch.Id,
+                cancellationToken);
+            GradingItemProcessor.UpdateBatchCounters(batch, allItems);
         }
 
         await repository.SaveChangesAsync(cancellationToken);

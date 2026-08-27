@@ -3334,7 +3334,13 @@ public sealed record UpdateIgnoredCoursesInput(string? ConnectionRef, IReadOnlyL
 public sealed record UpdateTrackedCoursesInput(string? ConnectionRef, IReadOnlyList<string>? CourseIds, bool Tracked);
 public sealed record SetUserPermissionInput(string Permission, bool IsAllowed);
 
-public sealed record ReviewGradingItemInput(decimal? FinalGrade, string? FinalFeedback, string? TeacherDecision, string? ReviewNotes, string? ExpectedReviewStatus);
+public sealed record ReviewGradingItemInput(
+    decimal? FinalGrade,
+    string? FinalFeedback,
+    string? TeacherDecision,
+    string? ReviewNotes,
+    string? ExpectedReviewStatus,
+    string? ExpectedDraftVersionHash);
 public sealed record PreviewGradingBatchInput(
     Guid[]? GradingItemIds,
     bool OnlyReviewed = true,

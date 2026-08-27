@@ -171,7 +171,7 @@ public sealed class MoodleGradingReviewAppTools(
                 : null;
             var suggestedGrade = detail?.SuggestedGrade ?? context?.SuggestedGrade;
             var draftFeedback = detail?.DraftFeedback ?? context?.DraftFeedback;
-            var maxGrade = context?.MaxGrade ?? 100m;
+            var maxGrade = context?.MaxGrade ?? 0m;
             var assignmentName = context?.AssignmentName;
             var confidence = detail?.Confidence ?? context?.Confidence;
             var workflowState = ResolveWorkflowState(item.Status, item.ReviewStatus, item.CommitStatus);
@@ -363,7 +363,9 @@ public sealed class MoodleGradingReviewAppTools(
                 ? item.FinalFeedback
                 : item.DraftFeedback;
             var grade = displayGrade.HasValue
-                ? $"{displayGrade.Value:F1}/{item.MaxGrade:F0}"
+                ? item.MaxGrade > 0
+                    ? $"{displayGrade.Value:F1}/{item.MaxGrade:F0}"
+                    : $"{displayGrade.Value:F1}/?"
                 : "—";
 
             sb.AppendLine("---");

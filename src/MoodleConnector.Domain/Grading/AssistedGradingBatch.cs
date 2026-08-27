@@ -90,6 +90,17 @@ public sealed class AssistedGradingBatch
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void MarkCompleted()
+    {
+        if (Status == GradingBatchStatus.Cancelled)
+        {
+            return;
+        }
+
+        Status = GradingBatchStatus.Completed;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void Cancel()
     {
         if (Status is GradingBatchStatus.Completed or GradingBatchStatus.Cancelled)

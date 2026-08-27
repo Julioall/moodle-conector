@@ -111,7 +111,8 @@ internal static class PortalGradingEndpoints
                         input.FinalFeedback ?? "",
                         input.TeacherDecision ?? "approved",
                         input.ReviewNotes,
-                        input.ExpectedReviewStatus ?? "NotReviewed"),
+                        input.ExpectedReviewStatus ?? "NotReviewed",
+                        input.ExpectedDraftVersionHash),
                     cancellationToken);
                 return Results.Ok(result);
             }

@@ -38,6 +38,16 @@ public sealed class IndividualGradeCommandHandlerTests
             => Task.FromResult(new PendingActionResponse("pending", ActionIdToReturn, toolName, riskLevel, preview, confirmationText, DateTimeOffset.UtcNow.Add(expiresIn)));
     }
 
+    private sealed class FakeAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway
+    {
+        public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
+            string userExternalId,
+            string courseId,
+            string assignmentId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<AssignmentSettingsSummary?>(new AssignmentSettingsSummary(assignmentId, 10m));
+    }
+
     private PrepareIndividualGradeCommandHandler CreatePrepareHandler(bool gradeWriteEnabled = true)
     {
         var options = Options.Create(new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = gradeWriteEnabled });
@@ -46,7 +56,8 @@ public sealed class IndividualGradeCommandHandlerTests
             new FakeCurrentUserIdGateway(),
             new FakeParticipantsGateway(),
             new FakePendingActionService(),
-            options);
+            options,
+            new FakeAssignmentSettingsGateway());
     }
 
     [Fact]

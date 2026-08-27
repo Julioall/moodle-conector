@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft.
+In Progress.
 
 ## Objetivo
 
@@ -12,10 +12,10 @@ fluxo humano de revisão e o lançamento seguro da SPEC-0011.
 
 ## Contexto e evidência atual
 
-- `GradingContextBuilder`, o fluxo individual e `prepare_ai_grading_batch` usam `100` como
-  fallback quando a nota máxima não é obtida.
-- `AssistedGradingItem.SetDraft`, `ApplyTeacherReview` e `SaveAssignmentGradeCommand`
-  verificam o limite inferior, mas não impõem sempre o limite máximo conhecido.
+- Os fluxos de contexto, revisão, lançamento individual e pacote IA devem preservar escala
+  desconhecida sem convertê-la em `100`.
+- `AssistedGradingItem.SetDraft`, `ApplyTeacherReview`, `SaveAssignmentGradeCommand` e os
+  handlers de lançamento precisam validar o limite máximo quando a escala é conhecida.
 - O contrato atual do gateway representa apenas `AssignmentId`, `MaxGrade` e `Name`, sem
   distinguir escala conhecida, desconhecida ou escala nominal.
 - A resposta da IA contém basicamente nota e feedback; o pipeline aceita confiança fixa
@@ -34,7 +34,9 @@ fluxo humano de revisão e o lançamento seguro da SPEC-0011.
 1. Criar o value object `GradingScale` com `Type` (`Points`, `Scale`, `Unknown`),
    `MaxPoints`, `ScaleId`, `ScaleValues`, `Source` e evidência de verificação.
 2. `Unknown` não será convertido em 100: a IA poderá produzir análise textual e feedback
-   condicional, mas `SuggestedGrade` ficará nulo e qualquer lançamento será bloqueado.
+   condicional, mas `SuggestedGrade` ficará nulo e qualquer lançamento será bloqueado. Nos
+   DTOs MCP legados, `maxGrade=0` representa escala não confirmada para preservar o tipo
+   numérico do contrato.
 3. Toda nota será validada contra a escala resolvida no domínio e novamente no preview e
    no comando de lançamento. Escalas nominais deverão ser mapeadas explicitamente; não se
    presume que sejam pontos.

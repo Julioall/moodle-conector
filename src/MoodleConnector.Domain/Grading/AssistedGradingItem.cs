@@ -89,11 +89,18 @@ public sealed class AssistedGradingItem
         decimal? suggestedGrade,
         decimal? confidence,
         string draftFeedback,
-        string? privateNotesToTeacher = null)
+        string? privateNotesToTeacher = null,
+        decimal? maxGrade = null)
     {
         if (suggestedGrade < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(suggestedGrade), "A nota sugerida nao pode ser negativa.");
+        }
+
+        if (suggestedGrade is not null && maxGrade is not null &&
+            (maxGrade <= 0 || suggestedGrade > maxGrade))
+        {
+            throw new ArgumentOutOfRangeException(nameof(suggestedGrade), "A nota sugerida excede a nota maxima da atividade.");
         }
 
         if (confidence is < 0 or > 1)
@@ -161,11 +168,18 @@ public sealed class AssistedGradingItem
         string reviewedBySubject,
         long? reviewedByMoodleUserId,
         string? teacherDecision = null,
-        string? reviewNotes = null)
+        string? reviewNotes = null,
+        decimal? maxGrade = null)
     {
         if (finalGrade < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(finalGrade), "A nota final nao pode ser negativa.");
+        }
+
+        if (finalGrade is not null && maxGrade is not null &&
+            (maxGrade <= 0 || finalGrade > maxGrade))
+        {
+            throw new ArgumentOutOfRangeException(nameof(finalGrade), "A nota final excede a nota maxima da atividade.");
         }
 
         if (string.IsNullOrWhiteSpace(finalFeedback))

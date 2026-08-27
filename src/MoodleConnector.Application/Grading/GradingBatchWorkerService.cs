@@ -109,11 +109,11 @@ public sealed class GradingBatchWorkerService(
             return;
         }
 
-        var items = await repository.ListItemsByBatchAsync(
+        var items = await GradingItemProcessor.LoadAllBatchItemsAsync(
+            repository,
             batchId,
-            page: 1,
-            pageSize: maxItems,
-            cancellationToken);
+            cancellationToken,
+            maxItems);
 
         var pendingItems = items.Where(item => item.Status == GradingItemStatus.Pending).ToArray();
 
@@ -160,11 +160,11 @@ public sealed class GradingBatchWorkerService(
         }
 
         // Recarregar todos para contadores atualizados.
-        var allItems = await repository.ListItemsByBatchAsync(
+        var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(
+            repository,
             batchId,
-            page: 1,
-            pageSize: maxItems,
-            cancellationToken);
+            cancellationToken,
+            maxItems);
 
         GradingItemProcessor.UpdateBatchCounters(batch, allItems);
         await repository.SaveChangesAsync(cancellationToken);

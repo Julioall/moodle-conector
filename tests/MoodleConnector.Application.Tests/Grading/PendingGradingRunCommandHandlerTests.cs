@@ -186,7 +186,8 @@ public sealed class PendingGradingRunCommandHandlerTests
             repository,
             new RunCurrentUserContext("teacher-1"),
             new RunMoodleUserResolver(),
-            new RunAuditLogRepository());
+            new RunAuditLogRepository(),
+            new RunAssignmentSettingsGateway());
 
         var result = await sut.Handle(
             new SaveAiGradingBatchCommand(

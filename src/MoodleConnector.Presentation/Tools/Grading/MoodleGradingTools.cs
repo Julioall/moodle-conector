@@ -396,6 +396,8 @@ public sealed class MoodleGradingTools(
         string? reviewNotes = null,
         [Description("Status de revisao visto antes da edicao. Use NotReviewed ao revisar um rascunho ainda nao revisado.")]
         string expectedReviewStatus = "NotReviewed",
+        [Description("Hash da versao do rascunho lida pelo cliente; bloqueia sobrescrita concorrente quando divergente.")]
+        string? expectedDraftVersionHash = null,
         CancellationToken cancellationToken = default)
     {
         return UpdateDraftCoreAsync(
@@ -405,6 +407,7 @@ public sealed class MoodleGradingTools(
             teacherDecision,
             reviewNotes,
             expectedReviewStatus,
+            expectedDraftVersionHash,
             cancellationToken);
     }
 
@@ -440,7 +443,8 @@ public sealed class MoodleGradingTools(
                     item.FinalFeedback,
                     item.TeacherDecision,
                     item.ReviewNotes,
-                    item.ExpectedReviewStatus), cancellationToken);
+                    item.ExpectedReviewStatus,
+                    item.ExpectedDraftVersionHash), cancellationToken);
                 savedIds.Add(item.GradingItemId);
             }
             catch (OperationCanceledException)
@@ -1634,6 +1638,7 @@ public sealed class MoodleGradingTools(
         string teacherDecision,
         string? reviewNotes,
         string expectedReviewStatus,
+        string? expectedDraftVersionHash,
         CancellationToken cancellationToken)
     {
         if (gradingItemId == Guid.Empty)
@@ -1661,7 +1666,8 @@ public sealed class MoodleGradingTools(
                     finalFeedback,
                     teacherDecision,
                     reviewNotes,
-                    expectedReviewStatus),
+                    expectedReviewStatus,
+                    expectedDraftVersionHash),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -2048,7 +2054,9 @@ public sealed class MoodleGradingTools(
                 : item.TextTruncated
                     ? $"texto truncado ({item.ExtractedText.Length} chars)"
                     : $"texto completo ({item.ExtractedText.Length} chars)";
-            var gradeInfo = $"nota maxima: {item.MaxGrade}";
+            var gradeInfo = item.MaxGrade > 0
+                ? $"nota maxima: {item.MaxGrade}"
+                : "nota maxima: nao confirmada (sugestao numerica bloqueada)";
             sb.AppendLine($"- **Aluno {item.StudentId}** (item {item.GradingItemId}): {textInfo}, {gradeInfo}");
         }
 
@@ -2240,7 +2248,9 @@ public sealed class MoodleGradingTools(
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"## Contexto para Correcao — {data.AssignmentName ?? $"Tarefa {data.AssignmentId}"}");
         sb.AppendLine();
-        sb.AppendLine($"**Nota maxima:** {data.MaxGrade} pontos");
+        sb.AppendLine(data.MaxGrade > 0
+            ? $"**Nota maxima:** {data.MaxGrade} pontos"
+            : "**Nota maxima:** nao confirmada — sugestao numerica bloqueada");
         sb.AppendLine($"**Aluno (ID):** {data.StudentId}");
         sb.AppendLine($"**Item ID:** {data.GradingItemId}");
         sb.AppendLine();
@@ -2289,7 +2299,8 @@ public sealed record ReviewedGradingDraftInput(
     [property: JsonPropertyName("finalFeedback")] string FinalFeedback,
     [property: JsonPropertyName("teacherDecision")] string TeacherDecision,
     [property: JsonPropertyName("reviewNotes")] string? ReviewNotes = null,
-    [property: JsonPropertyName("expectedReviewStatus")] string ExpectedReviewStatus = "NotReviewed");
+    [property: JsonPropertyName("expectedReviewStatus")] string ExpectedReviewStatus = "NotReviewed",
+    [property: JsonPropertyName("expectedDraftVersionHash")] string? ExpectedDraftVersionHash = null);
 
 public sealed record BatchDraftUpdateFailure(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,

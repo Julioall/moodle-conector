@@ -23,7 +23,8 @@ public sealed class SaveAssignmentGradeCommandHandlerTests
                 AttemptNumber: -1,
                 AddAttempt: false,
                 ApplyToAll: false,
-                WorkflowState: "graded"),
+                WorkflowState: "graded",
+                CourseId: "10"),
             CancellationToken.None);
 
         Assert.True(result.Success);
@@ -114,6 +115,38 @@ public sealed class SaveAssignmentGradeCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_RejeitaNotaAcimaDaEscalaConfirmada()
+    {
+        var gateway = new FakeMoodleAssignmentGradingGateway();
+        var sut = CreateHandler(gateway);
+
+        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            sut.Handle(
+                new SaveAssignmentGradeCommand(
+                    "321", "501", "101", 11m, "Feedback.", -1, false, false, "graded", "10"),
+                CancellationToken.None));
+
+        Assert.Equal("grade", ex.ParamName);
+        Assert.Null(gateway.LastRequest);
+    }
+
+    [Fact]
+    public async Task Handle_BloqueiaQuandoEscalaNaoPodeSerConfirmada()
+    {
+        var gateway = new FakeMoodleAssignmentGradingGateway();
+        var sut = CreateHandler(gateway, maxGrade: 0m);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sut.Handle(
+                new SaveAssignmentGradeCommand(
+                    "321", "501", "101", 8m, "Feedback.", -1, false, false, "graded", "10"),
+                CancellationToken.None));
+
+        Assert.Contains("escala maxima", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(gateway.LastRequest);
+    }
+
+    [Fact]
     public async Task Handle_BloqueiaFeedbackQuandoFlagDeFeedbackEstaDesabilitada()
     {
         var gateway = new FakeMoodleAssignmentGradingGateway();
@@ -143,7 +176,8 @@ public sealed class SaveAssignmentGradeCommandHandlerTests
     private static SaveAssignmentGradeCommandHandler CreateHandler(
         FakeMoodleAssignmentGradingGateway gateway,
         bool assignmentGradeWriteEnabled = true,
-        bool assignmentFeedbackWriteEnabled = true)
+        bool assignmentFeedbackWriteEnabled = true,
+        decimal maxGrade = 10m)
     {
         return new SaveAssignmentGradeCommandHandler(
             gateway,
@@ -151,7 +185,8 @@ public sealed class SaveAssignmentGradeCommandHandlerTests
             {
                 AssignmentGradeWriteEnabled = assignmentGradeWriteEnabled,
                 AssignmentFeedbackWriteEnabled = assignmentFeedbackWriteEnabled
-            }));
+            }),
+            new FakeMoodleAssignmentSettingsGateway(maxGrade));
     }
 
     private sealed class FakeMoodleAssignmentGradingGateway : IMoodleAssignmentGradingGateway
@@ -172,5 +207,15 @@ public sealed class SaveAssignmentGradeCommandHandlerTests
                 MoodleFunction: "mod_assign_save_grade",
                 MoodleStatus: "ok"));
         }
+    }
+
+    private sealed class FakeMoodleAssignmentSettingsGateway(decimal maxGrade) : IMoodleAssignmentSettingsGateway
+    {
+        public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
+            string userExternalId,
+            string courseId,
+            string assignmentId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<AssignmentSettingsSummary?>(new AssignmentSettingsSummary(assignmentId, maxGrade));
     }
 }

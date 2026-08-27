@@ -19,7 +19,8 @@ public sealed class GradingLaunchCommandHandlerTests
         var sut = new CreateGradingLaunchPreviewCommandHandler(
             fixture.GradingRepository,
             fixture.PendingActions,
-            fixture.CurrentUser);
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
 
         var result = await sut.Handle(
             new CreateGradingLaunchPreviewCommand(
@@ -56,7 +57,8 @@ public sealed class GradingLaunchCommandHandlerTests
         var sut = new CreateGradingLaunchPreviewCommandHandler(
             fixture.GradingRepository,
             fixture.PendingActions,
-            fixture.CurrentUser);
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
 
         var result = await sut.Handle(
             new CreateGradingLaunchPreviewCommand(
@@ -111,7 +113,8 @@ public sealed class GradingLaunchCommandHandlerTests
         var sut = new CreateGradingLaunchPreviewCommandHandler(
             fixture.GradingRepository,
             fixture.PendingActions,
-            fixture.CurrentUser);
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
 
         var result = await sut.Handle(
             new CreateGradingLaunchPreviewCommand(
@@ -136,7 +139,8 @@ public sealed class GradingLaunchCommandHandlerTests
         var sut = new CreateGradingLaunchPreviewCommandHandler(
             fixture.GradingRepository,
             fixture.PendingActions,
-            fixture.CurrentUser);
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
 
         var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             sut.Handle(
@@ -633,6 +637,7 @@ public sealed class GradingLaunchCommandHandlerTests
         public FakeAuditLogRepository AuditLogs { get; } = new();
         public FakeMediator Mediator { get; } = new();
         public FakeCurrentUserContext CurrentUser { get; } = new(currentUserSubject, scopes);
+        public FakeMoodleAssignmentSettingsGateway SettingsGateway { get; } = new();
 
         public AssistedGradingBatch CreateBatchWithReviewedItem()
         {
@@ -704,6 +709,16 @@ public sealed class GradingLaunchCommandHandlerTests
         {
             return Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    private sealed class FakeMoodleAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway
+    {
+        public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
+            string userExternalId,
+            string courseId,
+            string assignmentId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<AssignmentSettingsSummary?>(new AssignmentSettingsSummary(assignmentId, 10m, "Atividade"));
     }
 
     private sealed class FakeGradingReviewRepository : IGradingReviewRepository

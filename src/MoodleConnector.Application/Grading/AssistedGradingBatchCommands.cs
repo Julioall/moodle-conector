@@ -176,7 +176,8 @@ public sealed record UpdateAssistedGradingDraftCommand(
     string FinalFeedback,
     string TeacherDecision,
     string? ReviewNotes,
-    string ExpectedReviewStatus) : IRequest<AssistedGradingItemDetailResult>;
+    string ExpectedReviewStatus,
+    string? ExpectedDraftVersionHash = null) : IRequest<AssistedGradingItemDetailResult>;
 
 public sealed class CreateAssistedGradingBatchCommandHandler(
     IGradingReviewRepository repository,
@@ -896,7 +897,8 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
     IGradingReviewRepository repository,
     ICurrentUserContext currentUser,
     IMoodleUserResolver moodleUserResolver,
-    IMoodleAuditLogRepository auditLogs)
+    IMoodleAuditLogRepository auditLogs,
+    IMoodleAssignmentSettingsGateway settingsGateway)
     : IRequestHandler<UpdateAssistedGradingDraftCommand, AssistedGradingItemDetailResult>
 {
     public async Task<AssistedGradingItemDetailResult> Handle(
@@ -914,6 +916,18 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
+        var currentDraftVersionHash = GradingDraftVersionHash.Compute(item);
+        if (!string.IsNullOrWhiteSpace(request.ExpectedDraftVersionHash) &&
+            !string.Equals(currentDraftVersionHash, request.ExpectedDraftVersionHash, StringComparison.Ordinal))
+        {
+            if (MatchesExistingReview(item, request))
+            {
+                return await ToDetailResultAsync(item, cancellationToken);
+            }
+
+            throw new InvalidOperationException("O rascunho foi alterado desde a ultima leitura. Consulte o item novamente antes de sobrescrever.");
+        }
+
         if (!string.Equals(item.ReviewStatus.ToString(), request.ExpectedReviewStatus, StringComparison.OrdinalIgnoreCase))
         {
             if (MatchesExistingReview(item, request))
@@ -924,6 +938,29 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             throw new InvalidOperationException("O rascunho foi alterado desde a ultima leitura. Consulte o item novamente antes de sobrescrever.");
         }
 
+        decimal? maxGrade = null;
+        if (request.FinalGrade is not null)
+        {
+            try
+            {
+                var settings = await settingsGateway.GetAssignmentSettingsAsync(
+                    batch.CreatedBySubject,
+                    item.CourseId.ToString(CultureInfo.InvariantCulture),
+                    item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                    cancellationToken);
+                maxGrade = settings?.MaxGrade > 0 ? settings.MaxGrade : null;
+            }
+            catch
+            {
+                maxGrade = null;
+            }
+
+            if (maxGrade is null)
+            {
+                throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; nota numerica bloqueada.");
+            }
+        }
+
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         item.ApplyTeacherReview(
             request.FinalGrade,
@@ -931,7 +968,8 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             currentUser.Subject,
             moodleUserId,
             request.TeacherDecision,
-            request.ReviewNotes);
+            request.ReviewNotes,
+            maxGrade);
 
         var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
         var fileHashes = artifacts
@@ -961,6 +999,7 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
                 request.TeacherDecision,
                 request.ReviewNotes,
                 request.ExpectedReviewStatus,
+                request.ExpectedDraftVersionHash,
                 draftVersionHash,
                 fileHashes
             }),
@@ -1105,7 +1144,11 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             errorsByCategory[category] = current + 1;
         }
 
-        var metrics = BuildMetrics(batch);
+        var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(
+            repository,
+            batch.Id,
+            cancellationToken);
+        var metrics = BuildMetrics(batch, allItems);
 
         return new AssistedGradingBatchStatusResult(
             batch.Id,
@@ -1136,15 +1179,23 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             item.CommitStatus.ToString());
     }
 
-    private static GradingBatchProcessingMetrics BuildMetrics(AssistedGradingBatch batch)
+    private static GradingBatchProcessingMetrics BuildMetrics(
+        AssistedGradingBatch batch,
+        IReadOnlyList<AssistedGradingItem> items)
     {
         var total = batch.TotalItems > 0 ? batch.TotalItems : 1;
         var progressPercent = (int)Math.Round((double)batch.ProcessedItems / total * 100);
         var readyPercent = (int)Math.Round((double)batch.ReadyItems / total * 100);
         var blockedPercent = (int)Math.Round((double)batch.BlockedItems / total * 100);
         var failedPercent = (int)Math.Round((double)batch.FailedItems / total * 100);
-        var pendingItems = Math.Max(0, batch.TotalItems - batch.ProcessedItems - batch.BlockedItems - batch.FailedItems);
-        var canLaunch = batch.ReadyItems > 0 &&
+        // ProcessedItems já é a união dos estados terminais; subtrair
+        // bloqueados/falhos novamente produzia uma contagem pendente inflada.
+        var pendingItems = Math.Max(0, batch.TotalItems - batch.ProcessedItems);
+        var canLaunch = items.Any(item =>
+                item.Status == GradingItemStatus.ReadyToCommit &&
+                item.CommitStatus == GradingCommitStatus.Pending &&
+                item.FinalGrade is not null &&
+                !string.IsNullOrWhiteSpace(item.FinalFeedback)) &&
             batch.Status is GradingBatchStatus.ReadyForReview or GradingBatchStatus.Processing;
 
         return new GradingBatchProcessingMetrics(
@@ -1561,7 +1612,8 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
 
 public sealed class CancelAssistedGradingBatchCommandHandler(
     IGradingBatchOrchestrator orchestrator,
-    IGradingReviewRepository repository)
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser)
     : IRequestHandler<CancelAssistedGradingBatchCommand, CancelAssistedGradingBatchResult>
 {
     public async Task<CancelAssistedGradingBatchResult> Handle(
@@ -1575,6 +1627,7 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
 
         var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
         await orchestrator.CancelAsync(batch.Id, cancellationToken);
 
@@ -1599,6 +1652,7 @@ public sealed record GradingContextForChatResult(
     [property: JsonPropertyName("courseId")] string CourseId,
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
+    // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
     [property: JsonPropertyName("submissionId")] string? SubmissionId,
     [property: JsonPropertyName("studentId")] string StudentId,
@@ -1666,7 +1720,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         var assignmentName = contextArtifact?.Filename;
 
         // MaxGrade + assignment name via API Moodle
-        decimal maxGrade = 100m;
+        decimal? maxGrade = null;
         try
         {
             var settings = await settingsGateway.GetAssignmentSettingsAsync(
@@ -1680,7 +1734,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             }
             else
             {
-                warnings.Add("Nota maxima nao encontrada via API Moodle. Usando padrao 100.");
+                warnings.Add("Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
             }
 
             // Override assignmentName with the real Moodle name when available
@@ -1691,7 +1745,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         }
         catch
         {
-            warnings.Add("Falha ao buscar nota maxima via API Moodle. Usando padrao 100.");
+            warnings.Add("Falha ao buscar nota maxima via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
         }
 
         // Critérios extraídos (se existirem do processamento anterior)
@@ -1700,12 +1754,15 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             ? string.Join("\n", evidence.Select(e => $"- {e.CriterionText}"))
             : null;
 
+        var gradeInstruction = maxGrade is decimal knownMax
+            ? $"A nota maxima desta atividade e {knownMax} pontos. Sugira uma nota de 0 a {knownMax}."
+            : "A escala de notas desta atividade nao foi confirmada. Nao sugira nem calcule nota numerica; produza somente feedback qualitativo e sinalize a necessidade de confirmacao manual.";
         var instructions = $"Voce e um tutor educacional. Analise a entrega do aluno comparando com o enunciado da atividade. " +
-            $"A nota maxima desta atividade e {maxGrade} pontos. " +
+            gradeInstruction + " " +
             $"Gere um feedback pedagogico em linguagem natural (paragrafos, nao listas) que: " +
             $"1) Reconheca os pontos fortes citando elementos concretos da entrega; " +
             $"2) Indique melhorias especificas quando houver lacunas; " +
-            $"3) Sugira uma nota de 0 a {maxGrade}. " +
+            (maxGrade is not null ? "3) Sugira uma nota somente dentro da escala confirmada. " : "3) Nao inclua nota numerica. ") +
             $"O feedback deve ser adequado para colar diretamente no Moodle. " +
             $"Apos gerar, apresente ao tutor para revisao antes de salvar.";
 
@@ -1715,7 +1772,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             item.CourseId.ToString(CultureInfo.InvariantCulture),
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             assignmentName,
-            maxGrade,
+            maxGrade ?? 0m,
             item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             assignmentStatement,
@@ -1752,6 +1809,7 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("submissionId")] string? SubmissionId,
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
+    // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
     [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
     [property: JsonPropertyName("extractedCriteria")] string? ExtractedCriteria,
@@ -1858,7 +1916,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 : null;
 
             // MaxGrade via API Moodle (cache por assignmentId)
-            decimal maxGrade = 100m;
+            decimal? maxGrade = null;
             if (!settingsCache.TryGetValue(item.AssignmentId, out var settings))
             {
                 try
@@ -1883,7 +1941,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             }
             else
             {
-                itemWarnings.Add("Nota maxima nao encontrada via API Moodle. Usando padrao 100.");
+                itemWarnings.Add("Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
             }
 
             packageItems.Add(new AiGradingBatchItemPackage(
@@ -1892,7 +1950,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
                 item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
                 assignmentName,
-                maxGrade,
+                maxGrade ?? 0m,
                 assignmentStatement,
                 extractedCriteria,
                 combinedSubmission,
@@ -1919,7 +1977,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- Tom acolhedor e profissional. Sem julgamentos pessoais, ironias ou comparacoes.\n" +
             "- Escreva em paragrafos (nao use listas com marcadores).\n" +
             "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
-            "- Atribua uma nota de 0 ate a nota maxima informada.\n" +
+            "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
             "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida SEMPRE chame revisar_feedbacks_lote para que o professor revise e edite os feedbacks na interface antes de lancar. Nunca pule a revisao.";
 
@@ -1979,7 +2037,8 @@ public sealed class SaveAiGradingBatchCommandHandler(
     IGradingReviewRepository repository,
     ICurrentUserContext currentUser,
     IMoodleUserResolver moodleUserResolver,
-    IMoodleAuditLogRepository auditLogs)
+    IMoodleAuditLogRepository auditLogs,
+    IMoodleAssignmentSettingsGateway settingsGateway)
     : IRequestHandler<SaveAiGradingBatchCommand, SaveAiGradingBatchResult>
 {
     public async Task<SaveAiGradingBatchResult> Handle(
@@ -2005,6 +2064,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
         var savedCount = 0;
         var skippedCount = 0;
         var failedCount = 0;
+        var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
 
         foreach (var input in request.Items)
         {
@@ -2063,11 +2123,51 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     continue;
                 }
 
+                decimal? maxGrade = null;
+                if (input.Nota is not null)
+                {
+                    if (!settingsCache.TryGetValue(item.AssignmentId, out var settings))
+                    {
+                        try
+                        {
+                            settings = await settingsGateway.GetAssignmentSettingsAsync(
+                                batch.CreatedBySubject,
+                                item.CourseId.ToString(CultureInfo.InvariantCulture),
+                                item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                                cancellationToken);
+                        }
+                        catch
+                        {
+                            settings = null;
+                        }
+
+                        settingsCache[item.AssignmentId] = settings;
+                    }
+
+                    maxGrade = settings?.MaxGrade > 0 ? settings.MaxGrade : null;
+                    if (maxGrade is null)
+                    {
+                        warnings.Add($"Item {input.GradingItemId} ignorado: escala maxima nao confirmada; nota numerica bloqueada.");
+                        skippedCount++;
+                        continue;
+                    }
+
+                    if (input.Nota > maxGrade)
+                    {
+                        warnings.Add($"Item {input.GradingItemId} ignorado: nota excede a escala maxima confirmada.");
+                        skippedCount++;
+                        continue;
+                    }
+                }
+
                 item.SetDraft(
                     suggestedGrade: input.Nota,
                     confidence: 0.85m,
                     draftFeedback: input.Feedback,
-                    privateNotesToTeacher: "Feedback e nota gerados pela IA. Revisao humana obrigatoria antes do lancamento.");
+                    privateNotesToTeacher: input.Nota is null
+                        ? "Feedback gerado pela IA; escala numerica nao confirmada. Revisao humana e confirmacao da escala obrigatorias."
+                        : "Feedback e nota gerados pela IA. Revisao humana obrigatoria antes do lancamento.",
+                    maxGrade: maxGrade);
 
                 savedCount++;
             }

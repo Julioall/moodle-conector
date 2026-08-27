@@ -64,8 +64,8 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Null(item.SuggestedGrade);
         Assert.Null(item.DraftFeedback);
         Assert.Contains("Pre-validacao concluida", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
-        Assert.Equal(1, batch.ProcessedItems);
+        Assert.Equal(GradingBatchStatus.Processing, batch.Status);
+        Assert.Equal(0, batch.ProcessedItems);
         Assert.Equal(0, batch.ReadyItems);  // AwaitingAiAnalysis is not "ready" yet
         Assert.Equal(0, batch.BlockedItems);
         Assert.Equal(1, repository.SaveChangesCount);
@@ -219,8 +219,8 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Contains("Falha ao processar", failedItem.DraftFeedback, StringComparison.OrdinalIgnoreCase);
         // IA-first: non-failed item goes to AwaitingAiAnalysis
         Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, readyItem.Status);
-        Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
-        Assert.Equal(2, batch.ProcessedItems);
+        Assert.Equal(GradingBatchStatus.Processing, batch.Status);
+        Assert.Equal(1, batch.ProcessedItems);
         Assert.Equal(0, batch.ReadyItems);  // AwaitingAiAnalysis not counted as ready
         Assert.Equal(1, batch.FailedItems);
         Assert.Equal(1, repository.SaveChangesCount);
@@ -257,8 +257,8 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Equal("Rascunho anterior.", alreadyProcessedItem.DraftFeedback);
         // IA-first: pending item blocked because FakeGradingContextBuilder has no artifacts for it,
         // leading to empty text → Blocked status. But the previously processed item retains its draft.
-        Assert.Equal(GradingBatchStatus.ReadyForReview, batch.Status);
-        Assert.Equal(2, batch.ProcessedItems);
+        Assert.Equal(GradingBatchStatus.Processing, batch.Status);
+        Assert.Equal(1, batch.ProcessedItems);
         Assert.Equal(1, repository.SaveChangesCount);
     }
 
@@ -290,6 +290,29 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Equal(GradingItemStatus.Pending, item.Status);
         Assert.Equal(GradingBatchStatus.Cancelled, batch.Status);
         Assert.Equal(0, repository.SaveChangesCount);
+    }
+
+    [Fact]
+    public async Task LoadAllBatchItemsAsync_PaginaLotesAcimaDoLimiteDoRepositorio()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 250);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        for (var index = 0; index < 250; index++)
+        {
+            await repository.AddItemAsync(
+                AssistedGradingItem.Create(batch.Id, 10, 501, 9000 + index, 1000 + index, 0),
+                CancellationToken.None);
+        }
+
+        var items = await GradingItemProcessor.LoadAllBatchItemsAsync(
+            repository,
+            batch.Id,
+            CancellationToken.None,
+            pageSize: 400);
+
+        Assert.Equal(250, items.Count);
+        Assert.Equal(250, items.Select(item => item.Id).Distinct().Count());
     }
 
     [Fact]
@@ -420,7 +443,11 @@ public sealed class LocalGradingBatchOrchestratorTests
         public Task<IReadOnlyList<AssistedGradingItem>> ListItemsByBatchAsync(
             Guid batchId, int page, int pageSize, CancellationToken cancellationToken)
         {
-            var result = Items.Where(i => i.BatchId == batchId).Take(pageSize).ToArray();
+            var result = Items
+                .Where(i => i.BatchId == batchId)
+                .Skip((Math.Max(1, page) - 1) * pageSize)
+                .Take(pageSize)
+                .ToArray();
             return Task.FromResult<IReadOnlyList<AssistedGradingItem>>(result);
         }
 
@@ -588,4 +615,3 @@ public sealed class LocalGradingBatchOrchestratorTests
             => Task.FromResult(new CriteriaGenerationResult("fake", request.MaxGrade, 0m, [], [], null));
     }
 }
-

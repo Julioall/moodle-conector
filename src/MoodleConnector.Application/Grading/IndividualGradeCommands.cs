@@ -72,6 +72,7 @@ public sealed class PrepareIndividualGradeCommandHandler(
     IMoodleParticipantsGateway participantsGateway,
     IPendingActionService pendingActions,
     IOptions<AssignmentWriteFeatureOptions> features,
+    IMoodleAssignmentSettingsGateway settingsGateway,
     IMoodleCourseContentsGateway? contentsGateway = null)
     : IRequestHandler<PrepareIndividualGradeCommand, IndividualGradePrepareResult>
 {
@@ -134,6 +135,33 @@ public sealed class PrepareIndividualGradeCommandHandler(
 
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
 
+        AssignmentSettingsSummary? settings;
+        try
+        {
+            settings = await settingsGateway.GetAssignmentSettingsAsync(
+                currentUserExternalId,
+                request.CourseId.Trim(),
+                effectiveAssignmentId,
+                cancellationToken);
+        }
+        catch
+        {
+            settings = null;
+        }
+
+        if (settings?.MaxGrade is not > 0)
+        {
+            throw new InvalidOperationException(
+                "A escala maxima da tarefa nao pode ser confirmada; lancamento bloqueado.");
+        }
+
+        if (request.ProposedGrade > settings.MaxGrade)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(request.ProposedGrade),
+                "A nota proposta excede a nota maxima confirmada da tarefa.");
+        }
+
         // 3. Resolve student name (best effort)
         string studentName = request.StudentId;
         try
@@ -185,7 +213,7 @@ public sealed class PrepareIndividualGradeCommandHandler(
             StudentFullName: studentName,
             CourseId: request.CourseId,
             ProposedGrade: request.ProposedGrade,
-            GradeMax: existing?.GradeMax,
+            GradeMax: settings.MaxGrade,
             PreviousGrade: existing?.HasGrade == true ? existing.Grade : null,
             PreviousFeedback: existing?.Feedback,
             ConfirmationText: confirmationText,
@@ -246,7 +274,8 @@ public sealed class ConfirmIndividualGradeCommandHandler(
     IActionConfirmationService confirmations,
     IMoodleAssignmentGradingGateway gradingGateway,
     IMoodleAuditLogRepository auditLogs,
-    IOptions<AssignmentWriteFeatureOptions> features)
+    IOptions<AssignmentWriteFeatureOptions> features,
+    IMoodleAssignmentSettingsGateway settingsGateway)
     : IRequestHandler<ConfirmIndividualGradeCommand, IndividualGradeSendResult>
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -291,6 +320,26 @@ public sealed class ConfirmIndividualGradeCommandHandler(
 
         var userExternalId = action.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture)
             ?? action.CreatedBySubject;
+
+        AssignmentSettingsSummary? settings;
+        try
+        {
+            settings = await settingsGateway.GetAssignmentSettingsAsync(
+                userExternalId,
+                payload.CourseId,
+                payload.AssignmentId,
+                cancellationToken);
+        }
+        catch
+        {
+            settings = null;
+        }
+
+        if (settings?.MaxGrade is not > 0 || payload.ProposedGrade > settings.MaxGrade)
+        {
+            throw new InvalidOperationException(
+                "A escala maxima da tarefa nao pode ser confirmada ou a nota excede a escala; lancamento bloqueado.");
+        }
 
         // 5. Launch grade to Moodle
         AssignmentGradeWriteResult writeResult;

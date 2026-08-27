@@ -439,6 +439,35 @@ public sealed class GradingContextBuilderTests
         Assert.Null(context.TeacherInstructions);
     }
 
+    [Fact]
+    public async Task BuildAsync_SemEscalaConhecida_NaoInventaCemPontos()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 10, 501, 9001, 101, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            "enunciado.txt",
+            "text/plain",
+            "sha-1",
+            SizeBytes: 100,
+            ExtractionStatus: "succeeded",
+            ExtractedTextRef: "Elabore uma resposta fundamentada.",
+            SummaryRef: null,
+            CreatedAt: DateTimeOffset.UtcNow));
+
+        var context = await new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService())
+            .BuildAsync(item, new GradingContextOptions(IncludeCourseMaterials: true), CancellationToken.None);
+
+        Assert.Null(context.MaxGrade);
+    }
+
     [Theory]
     [InlineData(null, true)]
     [InlineData("", true)]

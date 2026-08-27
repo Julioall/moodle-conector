@@ -81,6 +81,21 @@ public sealed class GradingDomainTests
     }
 
     [Fact]
+    public void AssistedGradingItem_RejectsGradeAboveKnownScale()
+    {
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 10, 501, 9001, 101, 0);
+
+        var draftEx = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            item.SetDraft(11m, 0.8m, "Rascunho.", maxGrade: 10m));
+        Assert.Equal("suggestedGrade", draftEx.ParamName);
+
+        item.SetDraft(8m, 0.8m, "Rascunho.", maxGrade: 10m);
+        var reviewEx = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            item.ApplyTeacherReview(10.1m, "Feedback.", "teacher-1", 321, maxGrade: 10m));
+        Assert.Equal("finalGrade", reviewEx.ParamName);
+    }
+
+    [Fact]
     public void GradingContext_HasMinimumContext_FicaFalseQuandoHaBloqueadoresMesmoComArquivo()
     {
         var context = GradingContext.Build(

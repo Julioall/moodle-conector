@@ -203,14 +203,14 @@ public sealed partial class GradingContextBuilder(
             }
         }
 
-        // Fallback final: usar padrão Moodle (100 pontos) quando todas as fontes falham.
-        // O Moodle v5 cria atividades com grade=100 por padrão. Melhor estimar com 100
-        // e reduzir confiança do que não gerar nota nenhuma.
-        if (maxGrade == null || maxGrade == 0m)
+        // Não inventar uma escala quando Moodle não a informa. A ausência de
+        // MaxGrade deve permanecer explícita para que os fluxos de sugestão e
+        // lançamento numérico possam bloquear de forma segura.
+        if (maxGrade is null or 0m)
         {
-            maxGrade = 100m;
-            logger?.LogInformation(
-                "MaxGrade nao identificada para assignment {AssignmentId}. Usando padrao Moodle (100 pontos).",
+            maxGrade = null;
+            logger?.LogWarning(
+                "MaxGrade nao identificada para assignment {AssignmentId}; sugestao numerica sera bloqueada.",
                 item.AssignmentId);
         }
 

@@ -92,15 +92,24 @@ public sealed class GradingItemProcessor(
         AssistedGradingBatch batch,
         IReadOnlyList<AssistedGradingItem> items)
     {
-        var readyItems = items.Count(item =>
-            item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit);
+        // ReadyItems representa somente rascunhos que aguardam revisão humana.
+        // Itens ReadyToCommit são launchPending e não devem inflar essa métrica.
+        var readyItems = items.Count(item => item.Status == GradingItemStatus.DraftReady);
         var blockedItems = items.Count(item => item.Status == GradingItemStatus.Blocked);
         var failedItems = items.Count(item => item.Status == GradingItemStatus.Failed);
-        var awaitingAiItems = items.Count(item => item.Status == GradingItemStatus.AwaitingAiAnalysis);
-        var processedItems = readyItems + blockedItems + failedItems + awaitingAiItems +
-            items.Count(item => item.Status == GradingItemStatus.Committed);
+        var processedItems = items.Count(item => item.Status is
+            GradingItemStatus.DraftReady or
+            GradingItemStatus.ReadyToCommit or
+            GradingItemStatus.Committed or
+            GradingItemStatus.Blocked or
+            GradingItemStatus.Failed);
 
         batch.UpdateCounters(processedItems, readyItems, blockedItems, failedItems);
+
+        if (items.Count > 0 && items.All(item => item.Status == GradingItemStatus.Committed))
+        {
+            batch.MarkCompleted();
+        }
     }
 
     /// <summary>
@@ -113,13 +122,17 @@ public sealed class GradingItemProcessor(
         CancellationToken cancellationToken,
         int pageSize = 100)
     {
+        // O repositório aplica um limite de segurança de 100 itens por página.
+        // Normalizar aqui evita que um chamador que solicite, por exemplo, 400
+        // itens interprete a primeira página truncada como o lote completo.
+        var effectivePageSize = Math.Clamp(pageSize, 1, 100);
         var allItems = new List<AssistedGradingItem>();
         var page = 1;
         while (true)
         {
-            var pageItems = await repository.ListItemsByBatchAsync(batchId, page, pageSize, cancellationToken);
+            var pageItems = await repository.ListItemsByBatchAsync(batchId, page, effectivePageSize, cancellationToken);
             allItems.AddRange(pageItems);
-            if (pageItems.Count < pageSize)
+            if (pageItems.Count < effectivePageSize)
             {
                 break;
             }

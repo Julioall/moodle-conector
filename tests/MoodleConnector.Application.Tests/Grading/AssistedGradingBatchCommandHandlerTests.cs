@@ -233,7 +233,10 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
         await repository.AddBatchAsync(batch, CancellationToken.None);
         orchestrator.BatchLookup = id => repository.Batches.SingleOrDefault(candidate => candidate.Id == id);
-        var sut = new CancelAssistedGradingBatchCommandHandler(orchestrator, repository);
+        var sut = new CancelAssistedGradingBatchCommandHandler(
+            orchestrator,
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
 
         var result = await sut.Handle(
             new CancelAssistedGradingBatchCommand(batch.Id),
@@ -243,6 +246,24 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(batch.Id, result.BatchJobId);
         Assert.Equal("Cancelled", result.Status);
         Assert.Contains("cancelado", result.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CancelBatch_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        var sut = new CancelAssistedGradingBatchCommandHandler(
+            orchestrator,
+            repository,
+            new FakeCurrentUserContext("teacher-2"));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            sut.Handle(new CancelAssistedGradingBatchCommand(batch.Id), CancellationToken.None));
+
+        Assert.Null(orchestrator.LastCancelledBatchId);
     }
 
     [Fact]
@@ -508,7 +529,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             repository,
             new FakeCurrentUserContext("teacher-1"),
             new FakeMoodleUserResolver(321),
-            new FakeAuditLogRepository());
+            new FakeAuditLogRepository(),
+            new FakeMoodleAssignmentSettingsGateway());
 
         var result = await sut.Handle(
             new UpdateAssistedGradingDraftCommand(
@@ -546,7 +568,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             repository,
             new FakeCurrentUserContext("teacher-1"),
             new FakeMoodleUserResolver(321),
-            new FakeAuditLogRepository());
+            new FakeAuditLogRepository(),
+            new FakeMoodleAssignmentSettingsGateway());
 
         var result = await sut.Handle(
             new UpdateAssistedGradingDraftCommand(
@@ -576,7 +599,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             repository,
             new FakeCurrentUserContext("teacher-1"),
             new FakeMoodleUserResolver(321),
-            new FakeAuditLogRepository());
+            new FakeAuditLogRepository(),
+            new FakeMoodleAssignmentSettingsGateway());
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             sut.Handle(
@@ -656,7 +680,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             repository,
             new FakeCurrentUserContext("teacher-2"),
             new FakeMoodleUserResolver(654),
-            new FakeAuditLogRepository());
+            new FakeAuditLogRepository(),
+            new FakeMoodleAssignmentSettingsGateway());
 
         var ex = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             sut.Handle(
@@ -776,6 +801,16 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         {
             return Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
         }
+    }
+
+    private sealed class FakeMoodleAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway
+    {
+        public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
+            string userExternalId,
+            string courseId,
+            string assignmentId,
+            CancellationToken cancellationToken)
+            => Task.FromResult<AssignmentSettingsSummary?>(new AssignmentSettingsSummary(assignmentId, 10m));
     }
 
     private sealed class FakeMoodleUserResolver(long? moodleUserId) : IMoodleUserResolver
