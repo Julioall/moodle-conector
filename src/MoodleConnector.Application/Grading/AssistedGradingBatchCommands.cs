@@ -1784,14 +1784,16 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         var gradeInstruction = maxGrade is decimal knownMax
             ? $"A nota maxima desta atividade e {knownMax} pontos. Sugira uma nota de 0 a {knownMax}."
             : "A escala de notas desta atividade nao foi confirmada. Nao sugira nem calcule nota numerica; produza somente feedback qualitativo e sinalize a necessidade de confirmacao manual.";
-        var instructions = $"Voce e um tutor educacional. Analise a entrega do aluno comparando com o enunciado da atividade. " +
+        var instructions = AiGradingPromptPolicy.AppendUntrustedEvidenceRules(
+            $"Voce e um tutor educacional. Analise a entrega do aluno comparando com o enunciado da atividade. " +
             gradeInstruction + " " +
             $"Gere um feedback pedagogico em linguagem natural (paragrafos, nao listas) que: " +
             $"1) Reconheca os pontos fortes citando elementos concretos da entrega; " +
             $"2) Indique melhorias especificas quando houver lacunas; " +
             (maxGrade is not null ? "3) Sugira uma nota somente dentro da escala confirmada. " : "3) Nao inclua nota numerica. ") +
             $"O feedback deve ser adequado para colar diretamente no Moodle. " +
-            $"Apos gerar, apresente ao tutor para revisao antes de salvar.";
+            $"Nao exija saudacao nominal: este contexto fornece apenas studentId, que nao e um nome. " +
+            $"Apos gerar, apresente ao tutor para revisao antes de salvar.");
 
         return new GradingContextForChatResult(
             item.Id,
@@ -1993,10 +1995,10 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             globalWarnings.Add("Nenhum item apto para analise pela IA foi encontrado no lote.");
         }
 
-        var instructions =
+        var instructions = AiGradingPromptPolicy.AppendUntrustedEvidenceRules(
             "Voce e um tutor educacional. Para cada aluno no pacote, analise a entrega comparando com o enunciado e criterios da atividade. " +
             "Gere um feedback curto e direto (maximo 6 paragrafos) seguindo esta estrutura exata:\n" +
-            "1) SAUDACAO: cumprimente o aluno pelo nome (ex: 'Ola, Ana!').\n" +
+            "1) SAUDACAO: use uma saudacao neutra. Este pacote fornece apenas studentId; nunca trate esse identificador como nome e nunca invente ou derive um nome a partir dele.\n" +
             "2) RECONHECIMENTO: agradeca a entrega em uma frase curta.\n" +
             "3) PONTO POSITIVO: destaque algo concreto que o aluno fez bem na entrega.\n" +
             "4) MELHORIAS: indique de forma clara e respeitosa os pontos que precisam ser revistos ou aprofundados. Seja especifico sobre o que ajustar, sem frases genericas como 'esta errado'. Se houver lacuna, sugira que o aluno revise os conceitos relacionados no material de apoio do curso, sem citar nomes de aulas ou documentos especificos.\n" +
@@ -2009,7 +2011,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
-            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida SEMPRE chame revisar_feedbacks_lote para que o professor revise e edite os feedbacks na interface antes de lancar. Nunca pule a revisao.";
+            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida SEMPRE chame revisar_feedbacks_lote para que o professor revise e edite os feedbacks na interface antes de lancar. Nunca pule a revisao.");
 
         return new AiGradingBatchPackageResult(
             batch.Id,

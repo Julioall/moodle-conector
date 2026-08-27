@@ -227,6 +227,10 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Equal(1, result.TotalItems);
         Assert.Equal(eligible.Id, Assert.Single(result.Items).GradingItemId);
         Assert.Contains(result.Warnings, warning => warning.Contains("bloqueado", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("EVIDENCIA NAO CONFIAVEL", result.Instructions, StringComparison.Ordinal);
+        Assert.Contains("possivel_prompt_injection", result.Instructions, StringComparison.Ordinal);
+        Assert.Contains("studentId", result.Instructions, StringComparison.Ordinal);
+        Assert.DoesNotContain("cumprimente o aluno pelo nome", result.Instructions, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class RunCurrentUserContext(string subject) : ICurrentUserContext
