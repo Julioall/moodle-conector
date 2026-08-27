@@ -34,6 +34,10 @@ evidências.
 | [SPEC-0014](spec-0014-canonical-mcp-surface.md) | Draft | SPEC-0013 | Catálogo MCP canônico com migração segura |
 | [SPEC-0015](spec-0015-current-state-and-analytical-snapshots.md) | Implementing | SPEC-0013 | Base operacional de snapshots, consistente e performática |
 | [SPEC-0017](spec-0017-postgresql-concurrency-and-release-gates.md) | Implementing | SPEC-0011, SPEC-0015 | Garantias PostgreSQL e gates de release |
+| [SPEC-0019](spec-0019-assisted-grading-batch-integrity.md) | Draft | SPEC-0011, SPEC-0012, SPEC-0022 | Integridade, autorização e lifecycle dos lotes de correção |
+| [SPEC-0020](spec-0020-assisted-grading-academic-safety.md) | Draft | SPEC-0011, SPEC-0012, SPEC-0021 | Escala acadêmica e proposta de correção por IA segura |
+| [SPEC-0021](spec-0021-canonical-grading-context.md) | Draft | SPEC-0012, SPEC-0015, SPEC-0020 | Contexto canônico e evidência versionada |
+| [SPEC-0022](spec-0022-durable-assisted-grading-jobs.md) | Draft | SPEC-0017, SPEC-0019, SPEC-0020, SPEC-0021 | Jobs duráveis, ingestão assíncrona e retenção |
 
 ## Regra de rastreabilidade
 

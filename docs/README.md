@@ -11,6 +11,7 @@ Este é o ponto de entrada da documentação. Comece pela visão do produto e co
 5. [Fronteiras de autenticação](architecture/authentication-boundaries.md)
 6. [Specs ativas de execução](specs/README.md)
 7. [Padrão para novos documentos](documentation-standard.md)
+8. [Plano de implementação da correção assistida](technical/assisted-grading-implementation-plan.md)
 
 ## Áreas canônicas
 

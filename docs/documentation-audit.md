@@ -48,6 +48,7 @@ Os documentos temáticos foram realocados para a taxonomia alvo. Planos e specs 
 | `docs/architecture/adr-0002-team-scoped-access.md` | Nova decisão | Manter como ADR de acesso. |
 | `docs/architecture/adr-0003-plugin-mcp-portal-boundaries.md` | Decisão de fronteiras | Manter como ADR de produto e integração. |
 | `docs/specs/*` | Specs ativas | Manter como fonte de execução e rastreabilidade. |
+| `docs/technical/assisted-grading-implementation-plan.md` | Plano técnico ativo | Manter; referencia as specs 0019–0022 e não substitui seus contratos. |
 | `docs/architecture/roles-and-scopes.md` | Novo modelo | Manter como referência de papéis/escopos. |
 | `docs/security/auth-and-scopes.md` | Segurança | Manter; alinhar nomenclatura futuramente. |
 | `docs/security/release-checklist.md` | Gate operacional | Manter. |
