@@ -27,6 +27,9 @@ acadêmico além da política aprovada.
   de cleanup efetivo. `ExtractedTextRef` pode conter texto integral da entrega.
 - A prioridade declarada agora é persistida e participa da ordem inicial de claim durável;
   aging/fairness e limites de starvation ainda ficam para a Fase 4.
+- O claim durável por lote já existe, mas o processamento de itens ainda precisava de uma
+  barreira própria para evitar duplicação quando uma réplica reinicia ou quando o canal
+  entrega o mesmo lote novamente.
 - O processamento persiste estados em conjuntos grandes, ampliando a janela de perda e de
   duplicação após falha.
 
@@ -120,8 +123,22 @@ O worker também evita reentrância do mesmo lote dentro do processo, quando o c
 uma duplicata enquanto o claim ainda está ativo. Isso complementa, sem substituir, a
 exclusão concorrente entre réplicas garantida pelo lease PostgreSQL.
 
-Este incremento ainda não move a ingestão pesada para fora do request, não implementa leases
-por item nem cleanup de retenção; essas entregas permanecem nas etapas seguintes.
+Este incremento ainda não move a ingestão pesada para fora do request nem implementa cleanup
+de retenção; essas entregas permanecem nas etapas seguintes.
+
+### Incremento de lease por item
+
+O worker agora também reclama cada item `Pending` com lease condicional e contador atômico
+de tentativas. A liberação ocorre somente após a persistência do resultado; em cancelamento,
+falha de processo ou expiração do lease, o item permanece recuperável pelo job store. A
+recuperação de leases expirados é executada junto com a recuperação de lotes no startup.
+As operações suportam InMemory para testes e PostgreSQL com `ExecuteUpdateAsync` para evitar
+duplo claim entre réplicas. O lease por item é uma proteção de coordenação e não substitui
+autorização, capability ou os guardrails de escrita Moodle.
+
+Este incremento ainda não move a ingestão pesada para fora do request nem implementa cleanup,
+fairness/aging ou checkpoints por etapa do item; essas entregas permanecem nas etapas
+seguintes.
 
 ## Critérios de aceite
 
@@ -129,7 +146,9 @@ por item nem cleanup de retenção; essas entregas permanecem nas etapas seguint
       `batchJobId` recuperável.
 - [ ] Queda entre persistência `Pending` e enqueue não deixa o lote órfão após restart.
 - [ ] Duas réplicas não processam o mesmo item simultaneamente; lease expirado é retomado
-      com tentativa contabilizada.
+      com tentativa contabilizada. A fundação de claim/renew/release/recovery por item já
+      está implementada e coberta no repositório; falta a evidência PostgreSQL específica
+      do item e o checkpoint por etapa.
 - [ ] Processamento parcial retoma do último checkpoint sem duplicar artifacts ou propostas.
 - [ ] `Priority` altera a ordem de claim sob carga e mantém fairness; ou o parâmetro é
       deprecado/removido antes do release.

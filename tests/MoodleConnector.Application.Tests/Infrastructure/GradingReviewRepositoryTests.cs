@@ -225,6 +225,121 @@ public sealed class GradingReviewRepositoryTests
         Assert.Equal([high.Id, normal.Id, low.Id], claims.Select(claim => claim.BatchId));
     }
 
+    [Fact]
+    public async Task JobStore_LeasePorItemImpedeDuplicacaoRenovaLiberaEContaTentativas()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        await dbContext.SaveChangesAsync();
+
+        var claimTime = DateTimeOffset.UtcNow;
+        var first = await store.TryClaimItemAsync(
+            batch.Id,
+            item.Id,
+            "worker-a",
+            claimTime,
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None);
+        var second = await store.TryClaimItemAsync(
+            batch.Id,
+            item.Id,
+            "worker-b",
+            claimTime,
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None);
+
+        Assert.NotNull(first);
+        Assert.Equal(1, first!.AttemptCount);
+        Assert.Null(second);
+        Assert.False(await store.RenewItemLeaseAsync(
+            batch.Id,
+            item.Id,
+            "worker-b",
+            claimTime.AddMinutes(1),
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None));
+        Assert.True(await store.RenewItemLeaseAsync(
+            batch.Id,
+            item.Id,
+            "worker-a",
+            claimTime.AddMinutes(1),
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None));
+        Assert.False(await store.ReleaseItemLeaseAsync(
+            batch.Id,
+            item.Id,
+            "worker-b",
+            claimTime.AddMinutes(2),
+            "ignored",
+            null,
+            CancellationToken.None));
+        Assert.True(await store.ReleaseItemLeaseAsync(
+            batch.Id,
+            item.Id,
+            "worker-a",
+            claimTime.AddMinutes(2),
+            "processing_failed",
+            claimTime.AddMinutes(3),
+            CancellationToken.None));
+
+        var blockedRetry = await store.TryClaimItemAsync(
+            batch.Id,
+            item.Id,
+            "worker-c",
+            claimTime.AddMinutes(2).AddSeconds(30),
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None);
+        Assert.Null(blockedRetry);
+
+        var retry = await store.TryClaimItemAsync(
+            batch.Id,
+            item.Id,
+            "worker-c",
+            claimTime.AddMinutes(3),
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None);
+        Assert.NotNull(retry);
+        Assert.Equal(2, retry!.AttemptCount);
+
+        var saved = await store.GetItemAsync(item.Id, CancellationToken.None);
+        Assert.Equal("worker-c", saved!.LeaseOwner);
+        Assert.Equal(2, saved.AttemptCount);
+    }
+
+    [Fact]
+    public async Task JobStore_LeasePorItemExpiradoPodeSerRecuperado()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        await dbContext.SaveChangesAsync();
+
+        var claimTime = DateTimeOffset.UtcNow;
+        Assert.NotNull(await store.TryClaimItemAsync(
+            batch.Id,
+            item.Id,
+            "worker-a",
+            claimTime,
+            TimeSpan.FromMinutes(1),
+            CancellationToken.None));
+
+        Assert.Equal(1, await store.RecoverExpiredItemLeasesAsync(
+            claimTime.AddMinutes(2),
+            CancellationToken.None));
+
+        var recovered = await store.GetItemAsync(item.Id, CancellationToken.None);
+        Assert.Null(recovered!.LeaseOwner);
+        Assert.Null(recovered.LeaseUntil);
+        Assert.Equal(claimTime.AddMinutes(2), recovered.NextAttemptAt);
+    }
+
     private static ConnectorDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ConnectorDbContext>()

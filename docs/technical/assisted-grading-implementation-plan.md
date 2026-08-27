@@ -105,6 +105,12 @@ injection; nome autorizado ou remoção da saudação nominal; adaptador para re
 redistribuem pontos; prompt injection não altera instruções; UI e auditoria exibem
 incerteza/evidência; contrato legado vira revisão obrigatória.
 
+**Incremento entregue:** a política compartilhada `AiGradingPromptPolicy` foi aplicada aos
+fluxos de contexto para chat e pacote em lote. A fronteira entre instruções confiáveis e
+evidência Moodle não confiável agora é explícita, e a saudação nominal não é exigida quando
+o pacote contém apenas `studentId`. Isso reduz risco de prompt injection, mas não substitui
+a validação/normalização backend da proposta IA, ainda necessária para fechar o gate.
+
 ### Fase 4 — job durável e processamento em escala
 
 **Spec:** 0022.
@@ -116,6 +122,12 @@ cleanup de retenção; métricas/alertas.
 **Gate de saída:** queda entre save e enqueue é recuperada; não há processamento duplicado
 concorrente; 400 itens retomam por checkpoint; cleanup preserva auditoria; PostgreSQL CI
 aprovado.
+
+**Incremento entregue:** além do claim/lease por lote, itens `Pending` possuem claim,
+renovação, liberação, recuperação de expiração e contador atômico de tentativas. O worker
+reclama o item antes de processá-lo e libera o lease após persistir o resultado; a fundação
+continua compatível com o canal local como acelerador. Ingestão leve, fairness, cleanup e
+checkpoints por etapa permanecem pendentes.
 
 ### Fase 5 — rollout e certificação
 

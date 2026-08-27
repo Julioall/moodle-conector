@@ -63,6 +63,21 @@ public sealed class AssistedGradingItem
 
     public string? ContextStatus { get; private set; }
 
+    /// <summary>
+    /// Identificador efêmero do worker que está processando este item.
+    /// O lease é um mecanismo de coordenação e nunca substitui autorização.
+    /// Não contém credenciais nem dados do estudante.
+    /// </summary>
+    public string? LeaseOwner { get; private set; }
+
+    public DateTimeOffset? LeaseUntil { get; private set; }
+
+    public int AttemptCount { get; private set; }
+
+    public DateTimeOffset? NextAttemptAt { get; private set; }
+
+    public string? LastErrorCode { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private init; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedAt { get; private set; } = DateTimeOffset.UtcNow;
@@ -280,5 +295,94 @@ public sealed class AssistedGradingItem
         CommitStatus = GradingCommitStatus.Pending;
         CommitError = null;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Tenta reservar o item para uma etapa de processamento interno.
+    /// Itens já concluídos não podem ser reclamados novamente. Um lease ativo
+    /// de qualquer worker bloqueia a operação até expirar ou ser liberado.
+    /// </summary>
+    public bool TryAcquireLease(string workerId, DateTimeOffset now, TimeSpan leaseDuration)
+    {
+        ValidateLeaseArguments(workerId, leaseDuration);
+        if (Status != GradingItemStatus.Pending ||
+            NextAttemptAt is { } nextAttemptAt && nextAttemptAt > now ||
+            LeaseUntil is { } leaseUntil && leaseUntil > now)
+        {
+            return false;
+        }
+
+        AttemptCount++;
+        LeaseOwner = workerId.Trim();
+        LeaseUntil = now.Add(leaseDuration);
+        NextAttemptAt = null;
+        UpdatedAt = now;
+        return true;
+    }
+
+    public bool RenewLease(string workerId, DateTimeOffset now, TimeSpan leaseDuration)
+    {
+        ValidateLeaseArguments(workerId, leaseDuration);
+        if (Status != GradingItemStatus.Pending ||
+            !string.Equals(LeaseOwner, workerId.Trim(), StringComparison.Ordinal) ||
+            LeaseUntil is not { } leaseUntil || leaseUntil <= now)
+        {
+            return false;
+        }
+
+        LeaseUntil = now.Add(leaseDuration);
+        UpdatedAt = now;
+        return true;
+    }
+
+    public bool ReleaseLease(
+        string workerId,
+        DateTimeOffset now,
+        string? errorCode = null,
+        DateTimeOffset? nextAttemptAt = null)
+    {
+        if (string.IsNullOrWhiteSpace(workerId) ||
+            !string.Equals(LeaseOwner, workerId.Trim(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        LeaseOwner = null;
+        LeaseUntil = null;
+        LastErrorCode = string.IsNullOrWhiteSpace(errorCode)
+            ? null
+            : errorCode.Trim()[..Math.Min(120, errorCode.Trim().Length)];
+        NextAttemptAt = nextAttemptAt;
+        UpdatedAt = now;
+        return true;
+    }
+
+    public bool RecoverExpiredLease(DateTimeOffset now)
+    {
+        if (Status != GradingItemStatus.Pending ||
+            LeaseUntil is not { } leaseUntil ||
+            leaseUntil > now)
+        {
+            return false;
+        }
+
+        LeaseOwner = null;
+        LeaseUntil = null;
+        NextAttemptAt = now;
+        UpdatedAt = now;
+        return true;
+    }
+
+    private static void ValidateLeaseArguments(string workerId, TimeSpan leaseDuration)
+    {
+        if (string.IsNullOrWhiteSpace(workerId))
+        {
+            throw new ArgumentException("O worker do item e obrigatorio.", nameof(workerId));
+        }
+
+        if (leaseDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration), "A duracao do lease deve ser positiva.");
+        }
     }
 }

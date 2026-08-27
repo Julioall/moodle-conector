@@ -47,10 +47,50 @@ public interface IGradingBatchJobStore
     Task<int> RecoverExpiredBatchLeasesAsync(
         DateTimeOffset now,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reserva um item pendente para uma etapa de processamento interno.
+    /// O claim é condicional e seguro para múltiplas réplicas.
+    /// </summary>
+    Task<GradingItemLeaseClaim?> TryClaimItemAsync(
+        Guid batchId,
+        Guid itemId,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken);
+
+    Task<bool> RenewItemLeaseAsync(
+        Guid batchId,
+        Guid itemId,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken);
+
+    Task<bool> ReleaseItemLeaseAsync(
+        Guid batchId,
+        Guid itemId,
+        string workerId,
+        DateTimeOffset now,
+        string? errorCode,
+        DateTimeOffset? nextAttemptAt,
+        CancellationToken cancellationToken);
+
+    Task<int> RecoverExpiredItemLeasesAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken);
 }
 
 public sealed record GradingBatchLeaseClaim(
     Guid BatchId,
+    string WorkerId,
+    DateTimeOffset LeaseUntil,
+    int AttemptCount);
+
+public sealed record GradingItemLeaseClaim(
+    Guid BatchId,
+    Guid ItemId,
     string WorkerId,
     DateTimeOffset LeaseUntil,
     int AttemptCount);

@@ -312,4 +312,29 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (43, 'canonical grading context snapshots'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task GradingItemLeaseScript_DeveSerAditivoEConterClaimIdempotente()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "044_grading_item_leases.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de lease por item nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"LeaseOwner\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"LeaseUntil\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"AttemptCount\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"NextAttemptAt\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"LastErrorCode\"", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_item_JobClaim", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (44, 'assisted grading item leases'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

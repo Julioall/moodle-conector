@@ -145,12 +145,21 @@ public sealed class GradingBatchWorkerService(
     {
         using var scope = scopeFactory.CreateScope();
         var jobStore = scope.ServiceProvider.GetRequiredService<IGradingBatchJobStore>();
+        var now = DateTimeOffset.UtcNow;
         var recovered = await jobStore.RecoverExpiredBatchLeasesAsync(
-            DateTimeOffset.UtcNow,
+            now,
+            cancellationToken);
+        var recoveredItems = await jobStore.RecoverExpiredItemLeasesAsync(
+            now,
             cancellationToken);
         if (recovered > 0)
         {
             logger.LogInformation("Recuperados {Count} lease(s) expirado(s) de lotes de correção.", recovered);
+        }
+
+        if (recoveredItems > 0)
+        {
+            logger.LogInformation("Recuperados {Count} lease(s) expirado(s) de itens de correção.", recoveredItems);
         }
     }
 
@@ -279,6 +288,7 @@ public sealed class GradingBatchWorkerService(
             pendingItems.Length,
             items.Count);
 
+        var claimedItemIds = new List<Guid>(pendingItems.Length);
         foreach (var item in pendingItems)
         {
             if (cancellationToken.IsCancellationRequested)
@@ -318,6 +328,26 @@ public sealed class GradingBatchWorkerService(
                 {
                     logger.LogWarning("Lease do lote {BatchId} expirou durante o processamento.", batchId);
                     return;
+                }
+
+                if (jobStore is not null && await jobStore.TryClaimItemAsync(
+                        batchId,
+                        item.Id,
+                        WorkerId,
+                        DateTimeOffset.UtcNow,
+                        LeaseDuration,
+                        cancellationToken) is null)
+                {
+                    logger.LogDebug(
+                        "Item {GradingItemId} do lote {BatchId} já possui claim ativo ou não está pronto; ignorado.",
+                        item.Id,
+                        batchId);
+                    continue;
+                }
+
+                if (jobStore is not null)
+                {
+                    claimedItemIds.Add(item.Id);
                 }
 
                 await processor.ProcessItemAsync(
@@ -384,6 +414,18 @@ public sealed class GradingBatchWorkerService(
 
         if (jobStore is not null)
         {
+            foreach (var itemId in claimedItemIds)
+            {
+                await jobStore.ReleaseItemLeaseAsync(
+                    batchId,
+                    itemId,
+                    WorkerId,
+                    DateTimeOffset.UtcNow,
+                    errorCode: null,
+                    nextAttemptAt: null,
+                    cancellationToken);
+            }
+
             await jobStore.ReleaseBatchLeaseAsync(
                 batchId,
                 WorkerId,

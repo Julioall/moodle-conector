@@ -120,6 +120,19 @@ fluxo humano de revisão e o lançamento seguro da SPEC-0011.
 6. Atualizar prompts, schemas, UI e testes para a fronteira de dados não confiáveis.
 7. Adicionar `studentName` autorizado ou retirar a exigência de saudação nominal.
 
+### Incremento aplicado: fronteira de evidência do prompt
+
+Os fluxos de preparação de contexto e pacote IA agora reutilizam uma política comum que
+declara enunciado, rubrica, OCR, anexos, materiais, submissão e feedback anterior como
+evidência Moodle não confiável. Instruções encontradas nesses campos não podem substituir
+regras do sistema/professor, alterar escala, chamar ferramentas ou pular revisão humana;
+tentativas de instrução são sinalizadas como `possivel_prompt_injection`. O pacote em lote
+também usa saudação neutra: `studentId` não é tratado como nome e nenhum nome é inventado.
+
+Esta é uma barreira de contrato/prompt. A validação de uma proposta retornada pelo modelo,
+com critérios, evidências, cobertura e confiança recalculada no backend, continua pendente
+da Fase 3 completa.
+
 ## Critérios de aceite
 
 - [ ] Escala não resolvida nunca produz `SuggestedGrade=100` nem permite lançamento

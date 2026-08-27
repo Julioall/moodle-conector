@@ -485,6 +485,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         item.Property(x => x.IdempotencyKey).HasMaxLength(64);
         item.Property(x => x.ContextHash).HasMaxLength(64);
         item.Property(x => x.ContextStatus).HasMaxLength(32);
+        item.Property(x => x.LeaseOwner).HasMaxLength(200);
+        item.Property(x => x.LastErrorCode).HasMaxLength(120);
         item.HasOne<AssistedGradingBatch>()
             .WithMany()
             .HasForeignKey(x => x.BatchId)
@@ -495,6 +497,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         item.HasIndex(x => x.CommitStatus);
         item.HasIndex(x => x.IdempotencyKey).IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
         item.HasIndex(x => new { x.ContextHash, x.ContextVersion });
+        item.HasIndex(x => new { x.BatchId, x.Status, x.NextAttemptAt, x.LeaseUntil });
 
         var artifact = modelBuilder.Entity<GradingArtifact>();
         artifact.ToTable("grading_artifact");

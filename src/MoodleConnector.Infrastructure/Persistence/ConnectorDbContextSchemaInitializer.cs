@@ -48,6 +48,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "041_grading_batch_configuration.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "042_grading_context_identity.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "043_grading_context_snapshots.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "044_grading_item_leases.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(
