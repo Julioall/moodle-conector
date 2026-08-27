@@ -55,6 +55,12 @@ public sealed class ToolSurfaceInventory
     public int DeprecatedCount => Entries.Count(entry =>
         string.Equals(entry.ExposureStatus, "Deprecated", StringComparison.OrdinalIgnoreCase));
 
+    public int DiagnosticCount => Entries.Count(entry =>
+        string.Equals(entry.ExposureStatus, "Diagnostic", StringComparison.OrdinalIgnoreCase));
+
+    public int ProductionHiddenCount => Entries.Count(entry =>
+        CognitiveExposurePolicy.IsProductionHiddenStatus(entry.ExposureStatus));
+
     public int CompatibilityAliasCount => Entries.Count(entry =>
         !string.IsNullOrWhiteSpace(entry.CompatibilityAliasOf));
 }

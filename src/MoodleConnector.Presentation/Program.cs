@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Builder;
 using System.Security.Cryptography.X509Certificates;
@@ -350,37 +351,56 @@ var mcpServerBuilder = builder.Services
     {
         filters.AddCallToolFilter(next => async (request, cancellationToken) =>
         {
+            var toolName = request.Params?.Name ?? string.Empty;
+            var registry = request.Services?.GetService<ToolMetadataRegistry>();
+            MoodleToolMetadataAttribute? metadata = null;
+            registry?.TryGet(toolName, out metadata);
+            var telemetry = request.Services?.GetService<IMcpToolUsageTelemetry>();
+            var exposureProfile = request.Services?.GetService<IConfiguration>()?["MCP_EXPOSURE_PROFILE"] ?? "Production";
+            var stopwatch = Stopwatch.StartNew();
+            var outcome = "error";
+            string? errorCode = null;
+
             try
             {
-                var toolName = request.Params?.Name ?? string.Empty;
-                var registry = request.Services?.GetService<ToolMetadataRegistry>();
-                if (registry is null || !registry.TryGet(toolName, out var metadata) || metadata is null ||
+                if (registry is null || !registry.TryGet(toolName, out metadata) || metadata is null ||
                     string.IsNullOrWhiteSpace(metadata.RequiredPlatformPermission))
                 {
+                    errorCode = "platform_permission_not_configured";
+                    outcome = "denied";
                     return ToolResultHelper.Error<object>(
                         "Esta tool não possui uma permissão de plataforma configurada e foi bloqueada.",
-                        errorCode: "platform_permission_not_configured");
+                        errorCode: errorCode);
                 }
 
                 var httpContext = request.Services?.GetService<IHttpContextAccessor>()?.HttpContext;
                 if (!HasLinkedMoodleConnection(httpContext?.User))
                 {
+                    errorCode = "moodle_connection_not_linked";
+                    outcome = "denied";
                     return ToolResultHelper.Error<object>(
                         "A tool exige uma conexão Moodle autenticada e vinculada ao token.",
-                        errorCode: "moodle_connection_not_linked");
+                        errorCode: errorCode);
                 }
 
                 if (httpContext is not null &&
                     HasBearerToken(httpContext) &&
                     !HasRequiredOAuthScopes(httpContext.User, toolName, metadata))
                 {
+                    errorCode = MoodleErrorContract.PermissionDenied;
+                    outcome = "denied";
                     return CreateMcpOAuthScopeDeniedToolResult(httpContext, toolName, metadata);
                 }
 
-                return await next(request, cancellationToken);
+                var result = await next(request, cancellationToken);
+                outcome = result.IsError == true ? "error" : "success";
+                errorCode = result.IsError == true ? "tool_result_error" : null;
+                return result;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                outcome = "canceled";
+                errorCode = "request_canceled";
                 throw;
             }
             catch (Exception exception)
@@ -394,7 +414,29 @@ var mcpServerBuilder = builder.Services
                         "Unhandled MCP tool exception was converted to a structured result. AuditId={AuditId} ErrorCode={ErrorCode}",
                         descriptor.AuditId,
                         descriptor.ErrorCode);
+                outcome = "error";
+                errorCode = descriptor.ErrorCode;
                 return ToolResultHelper.Error<object>(exception);
+            }
+            finally
+            {
+                try
+                {
+                    telemetry?.RecordInvocation(
+                        metadata is null ? "unknown" : toolName,
+                        metadata?.CanonicalOperation,
+                        metadata?.CompatibilityAliasOf,
+                        exposureProfile,
+                        outcome,
+                        errorCode,
+                        stopwatch.Elapsed.TotalMilliseconds);
+                }
+                catch (Exception telemetryException)
+                {
+                    request.Services?.GetService<ILoggerFactory>()?
+                        .CreateLogger("MoodleConnector.McpToolTelemetry")
+                        .LogWarning(telemetryException, "MCP tool telemetry could not be recorded.");
+                }
             }
         });
 

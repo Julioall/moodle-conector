@@ -26,6 +26,8 @@ public static class ChatGptSubmissionToolCatalog
 
     public static JsonObject CreateProductionTools()
     {
+        var metadataRegistry = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
+        var exposurePolicy = new CognitiveExposurePolicy(ToolExposureProfile.Production);
         var featureOptions = new FeatureOptions
         {
             DemoToolsEnabled = false,
@@ -39,6 +41,8 @@ public static class ChatGptSubmissionToolCatalog
             .SelectMany(method => method.GetCustomAttributes(typeof(McpServerToolAttribute), inherit: true)
                 .Cast<McpServerToolAttribute>())
             .Where(contract => !string.IsNullOrWhiteSpace(contract.Name))
+            .Where(contract => metadataRegistry.TryGet(contract.Name!, out var metadata) &&
+                               exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .OrderBy(contract => contract.Name, StringComparer.Ordinal)
             .ToArray();
 

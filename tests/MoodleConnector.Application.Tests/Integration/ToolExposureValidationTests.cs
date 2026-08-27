@@ -89,10 +89,16 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var tools = await GetToolsListAsync(_factory, "Production");
 
-        Assert.True(tools.Count <= 109, $"A exposição de produção não pode exceder o catálogo registrado: {tools.Count}.");
+        Assert.True(tools.Count <= 104, $"A exposição de produção não pode exceder o catálogo cognitivo: {tools.Count}.");
         Assert.Contains("moodle_execute_read", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_prepare_write", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_confirm_write", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("moodle_list_available_flows", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("moodle_diagnose_connection", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("moodle_list_functions", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("moodle_check_function", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("discover_grading_functions", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("execute_grading_discovery", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("list_all_gradable_submissions", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("list_gradable_submissions", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("search", tools, StringComparer.OrdinalIgnoreCase);
@@ -161,14 +167,18 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
                 new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
+        var metadataRegistry = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
+        var exposurePolicy = new CognitiveExposurePolicy(ToolExposureProfile.Production);
         var contracts = productionContainers
             .SelectMany(container => container.GetMethods())
             .SelectMany(method => method.GetCustomAttributes(typeof(McpServerToolAttribute), inherit: true)
                 .Cast<McpServerToolAttribute>())
             .Where(contract => !string.IsNullOrWhiteSpace(contract.Name))
+            .Where(contract => metadataRegistry.TryGet(contract.Name!, out var metadata) &&
+                               exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
 
-        Assert.Equal(109, contracts.Count);
+        Assert.Equal(104, contracts.Count);
         Assert.Equal(
             contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
             submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));

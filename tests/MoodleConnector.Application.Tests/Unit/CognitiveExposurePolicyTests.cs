@@ -102,4 +102,24 @@ public class CognitiveExposurePolicyTests
         Assert.True(new CognitiveExposurePolicy(ToolExposureProfile.Full)
             .ShouldExpose("get_submission_status", metadata));
     }
+
+    [Theory]
+    [InlineData("Diagnostic")]
+    [InlineData("Internal")]
+    public void Production_hides_technical_metadata_but_full_keeps_it_callable(string exposureStatus)
+    {
+        var metadata = new MoodleToolMetadataAttribute
+        {
+            Family = "discovery",
+            Kind = "diagnostic",
+            Classification = "R6",
+            ExposureStatus = exposureStatus,
+            Structural = true
+        };
+
+        Assert.False(new CognitiveExposurePolicy(ToolExposureProfile.Production)
+            .ShouldExpose("moodle_check_function", metadata));
+        Assert.True(new CognitiveExposurePolicy(ToolExposureProfile.Full)
+            .ShouldExpose("moodle_check_function", metadata));
+    }
 }

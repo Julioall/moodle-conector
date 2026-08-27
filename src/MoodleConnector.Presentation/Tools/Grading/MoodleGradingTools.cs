@@ -11,6 +11,7 @@ using MoodleConnector.Application.Submissions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
 using MoodleConnector.Presentation.Tools;
+using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
@@ -30,6 +31,15 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<DiscoverMoodleGradingFunctionsResponse>))]
+    [MoodleToolMetadata(
+        Family = "grading",
+        Classification = "R6",
+        Kind = "diagnostic",
+        CanonicalOperation = "grading.diagnostics.capabilities",
+        Structural = false,
+        ExposureStatus = "Diagnostic",
+        ExposureReason = "Descoberta tecnica de pre-requisitos da correcao assistida; suporte e troubleshooting, nao intencao de correcao.",
+        Evidence = "Implementacao MoodleGradingTools.DescobrirFuncoesMoodleCorrecaoAsync; preservada em Full e callable por compatibilidade.")]
     [Description("Verifica quais funcoes Moodle necessarias para correcao assistida estao habilitadas no servico atual. Nao baixa entregas nem executa escrita.")]
     public Task<CallToolResult> DescobrirFuncoesMoodleCorrecaoAsync(
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
@@ -48,6 +58,15 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GradingTechnicalDiscoveryReport>))]
+    [MoodleToolMetadata(
+        Family = "grading",
+        Classification = "R6",
+        Kind = "diagnostic",
+        CanonicalOperation = "grading.diagnostics.discovery_report",
+        Structural = false,
+        ExposureStatus = "Diagnostic",
+        ExposureReason = "Relatorio tecnico detalhado de capacidades e pre-requisitos; o fluxo de grading exposto usa a estrategia registrada.",
+        Evidence = "Implementacao MoodleGradingTools.ExecutarDescobertaTecnicaCorrecaoAsync; preservada em Full e callable por compatibilidade.")]
     [Description("Consolida a descoberta tecnica da correcao assistida: funcoes Moodle, anexos, mod_assign_save_grade, permissao de escrita, rubricas/escalas e modo de token. Nao baixa arquivos nem escreve no Moodle.")]
     public Task<CallToolResult> ExecutarDescobertaTecnicaCorrecaoAsync(
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]

@@ -77,7 +77,7 @@ public sealed class BenchmarkGateEvaluator
 {
     private const double TaskSuccessTolerancePp = 2.0;     // -2pp allowed
     // Schema token reduction gate — recalibrated per experiment scope:
-    //   Courses-only (R1/R2):  ~2-4% of total 97-tool schema  → gate: >= 2%
+    //   Courses-only (R1/R2):  ~2-4% of the complete schema → gate: >= 2%
     //   Multi-family (future): Courses + Assignments + Students → gate: >= 40%
     // The baseline is supplied by the caller, so C is compared with B.
     private const double SchemaTokenReductionMin = 2.0;    // >= 2% for Courses-only experiment

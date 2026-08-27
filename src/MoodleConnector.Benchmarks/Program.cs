@@ -733,7 +733,7 @@ class Program
                 // Environment variables are a higher-priority configuration source
                 // in WebApplicationFactory. Set both flags explicitly so Full is
                 // truly the complete declared catalog while Production remains
-                // the default 95-tool surface.
+                // filtered by feature flags and the metadata exposure policy.
                 Environment.SetEnvironmentVariable(
                     "Features__DemoToolsEnabled",
                     includeAllCatalogTools ? "true" : "false");
@@ -762,9 +762,7 @@ class Program
         var catalogInventory = new ToolSurfaceInventory(
             new ToolMetadataRegistry(RegisteredMcpToolContainers.All));
         var productionRow = rows.Single(row => row.Profile.Equals("Production", StringComparison.OrdinalIgnoreCase));
-        var hiddenByExposurePolicy = catalogInventory.Entries.Count(entry =>
-            entry.ExposureStatus.Equals("ApprovedForHide", StringComparison.OrdinalIgnoreCase) ||
-            entry.ExposureStatus.Equals("Deprecated", StringComparison.OrdinalIgnoreCase));
+        var hiddenByExposurePolicy = catalogInventory.ProductionHiddenCount;
         var catalog = new SchemaCatalogSummary(
             catalogInventory.Total,
             productionRow.ToolCount,

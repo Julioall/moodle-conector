@@ -16,6 +16,11 @@ public sealed class MoodleToolMetadataAttribute : Attribute
     /// </summary>
     public string CompatibilityAliasOf { get; set; } = string.Empty;
     public bool Structural { get; set; }
+    /// <summary>
+    /// Exposure decision consumed by the profile policy. Production hides
+    /// Diagnostic/Internal, Deprecated and ApprovedForHide entries; Full keeps them
+    /// callable for support and migration.
+    /// </summary>
     public string ExposureStatus { get; set; } = "Keep";
     public string ExposureReason { get; set; } = string.Empty;
     public string Evidence { get; set; } = string.Empty;

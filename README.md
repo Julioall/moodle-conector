@@ -397,16 +397,15 @@ Tools universais de leitura:
 
 | Tool | Descrição | Status |
 | --- | --- | --- |
-| `moodle_diagnose_connection` | Descobre o perfil técnico da conexão, sem expor segredos. | Implementada |
-| `moodle_list_functions` | Lista as funções Web Service habilitadas para o token. | Implementada |
-| `moodle_check_function` | Verifica disponibilidade e classificação de risco local. | Implementada |
-| `moodle_describe_function` | Descreve disponibilidade e classificação de risco local. | Implementada |
-| `moodle_list_available_flows` | Mostra estratégias selecionadas e funções ausentes por fluxo. | Implementada |
+| `moodle_diagnose_connection` | Descobre o perfil técnico da conexão, sem expor segredos. | Implementada; diagnóstico técnico oculto em `Production` |
+| `moodle_list_functions` | Lista as funções Web Service habilitadas para o token. | Implementada; diagnóstico técnico oculto em `Production` |
+| `moodle_check_function` | Verifica disponibilidade e classificação de risco local. | Implementada; diagnóstico técnico oculto em `Production` |
+| `moodle_list_available_flows` | Mostra estratégias selecionadas e funções ausentes por fluxo. | Implementada; exposta em `Production` |
 | `moodle_execute_read` | Executa somente funções explicitamente classificadas como leitura segura. | Implementada |
 | `moodle_prepare_write` | Cria prévia de escrita controlada sem chamar o Moodle. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
 | `moodle_confirm_write` | Executa uma prévia confirmada uma única vez. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
 
-As chamadas universais usam `POST /webservice/rest/server.php`, serializam arrays e objetos no formato nativo do Moodle e nunca inserem o token na URL. Uma função descoberta, mas ainda não classificada no catálogo local, é tratada como `Unknown` e recusada pela tool de execução. `moodle_prepare_write` e `moodle_confirm_write` só permitem funções explicitamente classificadas como escrita controlada, com `UniversalMoodleWriteEnabled=true`, `CanWrite`, confirmação literal, auditoria e execução única; funções destrutivas continuam bloqueadas.
+As chamadas universais usam `POST /webservice/rest/server.php`, serializam arrays e objetos no formato nativo do Moodle e nunca inserem o token na URL. Uma função descoberta, mas ainda não classificada no catálogo local, é tratada como `Unknown` e recusada pela tool de execução. `moodle_prepare_write` e `moodle_confirm_write` só permitem funções explicitamente classificadas como escrita controlada, com `UniversalMoodleWriteEnabled=true`, `CanWrite`, confirmação literal, auditoria e execução única; funções destrutivas continuam bloqueadas. O diagnóstico técnico continua callable por nome e no perfil `Full`, mas não é anunciado ao modelo em `Production`.
 
 Leitura:
 

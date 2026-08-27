@@ -14,7 +14,19 @@ public enum ToolExposureProfile
 
 public sealed class CognitiveExposurePolicy : IMcpToolExposurePolicy
 {
+    private static readonly string[] ProductionHiddenStatuses =
+    [
+        "ApprovedForHide",
+        "Deprecated",
+        "Diagnostic",
+        "Internal"
+    ];
+
     private readonly ToolExposureProfile _profile;
+
+    internal static bool IsProductionHiddenStatus(string? status) =>
+        !string.IsNullOrWhiteSpace(status) &&
+        ProductionHiddenStatuses.Contains(status, StringComparer.OrdinalIgnoreCase);
 
     public CognitiveExposurePolicy(ToolExposureProfile profile)
     {
@@ -31,9 +43,7 @@ public sealed class CognitiveExposurePolicy : IMcpToolExposurePolicy
             return _profile is ToolExposureProfile.Full or ToolExposureProfile.FullWithCoursesSkill;
         }
 
-        if (_profile == ToolExposureProfile.Production &&
-            (string.Equals(metadata.ExposureStatus, "ApprovedForHide", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(metadata.ExposureStatus, "Deprecated", StringComparison.OrdinalIgnoreCase)))
+        if (_profile == ToolExposureProfile.Production && IsProductionHiddenStatus(metadata.ExposureStatus))
             return false;
 
         if (_profile == ToolExposureProfile.SkillCoursesHideGetCourse && toolName.Equals("get_course", StringComparison.OrdinalIgnoreCase))

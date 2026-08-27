@@ -35,9 +35,10 @@ internal static class OperationalEndpoints
                 entry.Family.Equals("demopendingaction", StringComparison.OrdinalIgnoreCase));
             var individualGradeToolCount = inventory.Entries.Count(entry =>
                 entry.Family.Contains("individualgrade", StringComparison.OrdinalIgnoreCase));
-            var toolsCount = inventory.Total -
-                             (features.Value.DemoToolsEnabled ? 0 : demoToolCount) -
+            var disabledToolCount =
+                             (features.Value.DemoToolsEnabled ? 0 : demoToolCount) +
                              (assignmentWrites.Value.AssignmentGradeWriteEnabled ? 0 : individualGradeToolCount);
+            var toolsCount = inventory.Total - inventory.ProductionHiddenCount - disabledToolCount;
             return Results.Ok(new
             {
                 ok = true,

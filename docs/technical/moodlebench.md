@@ -48,4 +48,4 @@ $env:MOODLEBENCH_SCHEMA_ONLY = 'true'
 dotnet run --project src/MoodleConnector.Benchmarks/MoodleConnector.Benchmarks.csproj --no-build
 ```
 
-Esse probe não chama o modelo. Ele mede Full (97), Production (95), hashes e schemas completos, e falha se o catálogo/manifesto divergirem.
+Esse probe não chama o modelo. Ele mede Full (111), Production (104), hashes e schemas completos, e falha se o catálogo/manifesto divergirem.

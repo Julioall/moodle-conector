@@ -1,6 +1,6 @@
 # Catálogo de Tools MCP
 
-Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`.
+Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`. O catálogo completo possui 111 tools; `Production` expõe 104 com flags condicionais de escrita habilitadas, ocultando cinco tools de diagnóstico técnico por `ExposureStatus=Diagnostic`. O perfil `Full` mantém todas as tools registradas para suporte e migração.
 
 ## Memória e orientações pedagógicas
 
@@ -79,10 +79,10 @@ humana e minimização de dados.
 
 | Tool | Título | Risco | Leitura | Escrita | Status |
 | --- | --- | --- | --- | --- | --- |
-| `moodle_diagnose_connection` | Diagnosticar Conexão Moodle | `ReadOnly` | Verifica conectividade, site, funções, permissão de escrita e fluxos disponíveis | Não | Implementada |
-| `moodle_list_functions` | Listar Funções Moodle | `ReadOnly` | Lista por conexão as funções autorizadas pelo serviço | Não | Implementada |
-| `moodle_describe_function` / `moodle_check_function` | Descrever Função Moodle | `ReadOnly` | Consulta disponibilidade e classificação local de risco | Não | Implementadas |
-| `moodle_list_available_flows` | Listar Fluxos Moodle Disponíveis | `ReadOnly` | Mostra a estratégia compatível e as funções ausentes | Não | Implementada |
+| `moodle_diagnose_connection` | Diagnosticar Conexão Moodle | `ReadOnly` | Verifica conectividade, site, funções, permissão de escrita e fluxos disponíveis | Não | Implementada; diagnóstico técnico, oculta em `Production` |
+| `moodle_list_functions` | Listar Funções Moodle | `ReadOnly` | Lista por conexão as funções autorizadas pelo serviço | Não | Implementada; diagnóstico técnico, oculta em `Production` |
+| `moodle_check_function` | Verificar Função Moodle | `ReadOnly` | Consulta disponibilidade e classificação local de risco | Não | Implementada; diagnóstico técnico, oculta em `Production` |
+| `moodle_list_available_flows` | Listar Fluxos Moodle Disponíveis | `ReadOnly` | Mostra a estratégia compatível e as funções ausentes | Não | Implementada; exposta em `Production` para roteamento |
 | `moodle_execute_read` | Executar Leitura Moodle | `ReadOnly` | Executa somente funções classificadas como leitura | Não | Implementada |
 | `moodle_prepare_write` | Preparar Escrita Moodle | `HumanConfirmedWrite` | Prévia, hash de parâmetros e ação pendente | Não | Implementada; desativada por padrão |
 | `moodle_confirm_write` | Confirmar Escrita Moodle | `HumanConfirmedWrite` | Não | Executa escrita controlada após confirmação literal | Implementada; desativada por padrão |
@@ -163,9 +163,9 @@ humana e minimização de dados.
 | `get_student_gradebook` | Get Student Gradebook | `SensitiveRead` | Sim | Não | Implementada |
 | `report_students_at_risk` | Gerar Relatorio Risco Estudantes | `SensitiveRead` | Sim | Não | Implementada |
 | `report_students_at_risk` | Report Students at Risk | `SensitiveRead` | Sim | Não | Implementada |
-| `discover_grading_functions` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Implementada |
-| `execute_grading_discovery` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada |
+| `discover_grading_functions` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada; diagnóstico técnico, oculta em `Production` |
+| `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Não registrada; referência histórica |
+| `execute_grading_discovery` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada; diagnóstico técnico, oculta em `Production` |
 | `list_all_gradable_submissions` | Listar Todas as Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
 | `create_assisted_grading_batch` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
 | `get_grading_batch_status` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
@@ -717,7 +717,7 @@ Descrição:
 - O nome permanece registrado e exposto enquanto não houver telemetria
   suficiente para ocultá-lo com segurança da superfície `Production`.
 
-## `discover_grading_functions` / `discover_moodle_grading_functions`
+## `discover_grading_functions`
 
 Descricao:
 

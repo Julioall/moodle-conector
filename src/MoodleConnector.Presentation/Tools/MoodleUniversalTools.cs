@@ -10,6 +10,7 @@ using MoodleConnector.Application.Registry;
 using MoodleConnector.Domain.Registry;
 using MoodleConnector.Application.Tools;
 using Microsoft.Extensions.Logging;
+using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Presentation.Tools;
 
@@ -28,6 +29,15 @@ public sealed class MoodleUniversalTools(
     [McpServerTool(Name = "moodle_diagnose_connection", Title = "Diagnosticar Conexao Moodle",
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleConnectionDiagnostic>))]
+    [MoodleToolMetadata(
+        Family = "discovery",
+        Classification = "R6",
+        Kind = "diagnostic",
+        CanonicalOperation = "connector.diagnostics.connection",
+        Structural = true,
+        ExposureStatus = "Diagnostic",
+        ExposureReason = "Diagnostico tecnico detalhado para suporte e validacao de conexao; nao e necessario na superficie cognitiva normal.",
+        Evidence = "Implementacao MoodleUniversalTools.DiagnoseConnectionAsync; preservada em Full e callable por compatibilidade.")]
     [Description("Verifica a conexao Moodle selecionada e descobre as funcoes Web Service efetivamente habilitadas para o token. Nao expõe tokens ou senhas.")]
     public async Task<CallToolResult> DiagnoseConnectionAsync(
         [Description("Alias opcional da conexao Moodle.")] string? moodleAlias = null,
@@ -155,6 +165,15 @@ public sealed class MoodleUniversalTools(
     [McpServerTool(Name = "moodle_list_functions", Title = "Listar Funcoes Moodle",
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<IReadOnlyList<MoodleFunctionDescriptor>>))]
+    [MoodleToolMetadata(
+        Family = "discovery",
+        Classification = "R6",
+        Kind = "diagnostic",
+        CanonicalOperation = "connector.diagnostics.functions",
+        Structural = true,
+        ExposureStatus = "Diagnostic",
+        ExposureReason = "Lista tecnica de funcoes Moodle para suporte e troubleshooting; fluxos de negocio usam capabilities internamente.",
+        Evidence = "Implementacao MoodleUniversalTools.ListFunctionsAsync; preservada em Full e callable por compatibilidade.")]
     [Description("Lista as funcoes Web Service habilitadas para a conexao Moodle atual. Funcoes desconhecidas permanecem classificadas como Unknown e nao podem ser executadas pela tool de leitura.")]
     public async Task<CallToolResult> ListFunctionsAsync(
         [Description("Termo opcional para filtrar o nome da funcao.")] string? search = null,
@@ -186,6 +205,15 @@ public sealed class MoodleUniversalTools(
     [McpServerTool(Name = "moodle_check_function", Title = "Verificar Funcao Moodle",
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleFunctionDescriptor>))]
+    [MoodleToolMetadata(
+        Family = "discovery",
+        Classification = "R6",
+        Kind = "diagnostic",
+        CanonicalOperation = "connector.diagnostics.function",
+        Structural = true,
+        ExposureStatus = "Diagnostic",
+        ExposureReason = "Verificacao tecnica de uma funcao remota para suporte; nao representa uma intencao academica distinta.",
+        Evidence = "Implementacao MoodleUniversalTools.CheckFunctionAsync; preservada em Full e callable por compatibilidade.")]
     [Description("Confirma se uma funcao Moodle esta disponivel para o token atual e informa sua classificacao de risco local.")]
     public async Task<CallToolResult> CheckFunctionAsync(
         [Description("Nome exato da funcao Web Service Moodle.")] string functionName,
@@ -223,6 +251,15 @@ public sealed class MoodleUniversalTools(
     [McpServerTool(Name = "moodle_list_available_flows", Title = "Listar Fluxos Moodle Disponiveis",
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<IReadOnlyCollection<BusinessFlowAvailability>>))]
+    [MoodleToolMetadata(
+        Family = "discovery",
+        Classification = "R6",
+        Kind = "capability-discovery",
+        CanonicalOperation = "connector.capabilities.flows",
+        Structural = true,
+        ExposureStatus = "Keep",
+        ExposureReason = "Descoberta de fluxos disponiveis orienta clientes sem descoberta dinamica e preserva fallback explicito.",
+        Evidence = "Referenciado pelo ADR-0001 e pelas skills de cursos/core; permanece exposto em Production.")]
     [Description("Avalia os fluxos acadêmicos registrados para a conexão Moodle atual, selecionando a melhor estratégia ou informando as funções ausentes.")]
     public async Task<CallToolResult> ListAvailableFlowsAsync(
         [Description("Alias opcional da conexão Moodle.")] string? moodleAlias = null,

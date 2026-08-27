@@ -22,12 +22,12 @@ prompt
 
 ## Inventário atual
 
-- 111 métodos MCP são descobertos nas classes de tools; o perfil `Production` expõe 109 no catálogo completo porque os dois tools de demonstração são feature-gated e desabilitados por padrão. Os tools de lançamento de nota seguem a configuração `AssignmentGradeWriteEnabled`.
+- 111 métodos MCP são descobertos nas classes de tools; o catálogo completo com flags condicionais habilitadas contém 111 entradas. O perfil `Production` expõe 104: dois tools de demonstração são feature-gated e cinco diagnósticos técnicos são ocultados cognitivamente. Os tools de lançamento de nota seguem a configuração `AssignmentGradeWriteEnabled`.
 - Cada entrada do `ToolMetadataRegistry` possui `TechnicalClassification`, `ExposureStatus`, `ExposureReason`, `Evidence` e, quando aplicável, `CompatibilityAliasOf`. O alias `get_submission_status` aponta para `get_student_submission` sem alterar o nome registrado.
 - O catálogo de containers é declarado em `RegisteredMcpToolContainers`; não existe varredura global de assemblies. Reflection é usada somente uma vez, sobre tipos explicitamente registrados durante o startup.
 - As funções de leitura conhecidas pela `MoodleReadFunctionPolicy` são registradas no `OperationRegistry`; funções não registradas não são executáveis pelo `SafeReadExecutor`.
 - As funções de escrita controlada são registradas como `ControlledWrite` e não passam pelo executor genérico.
-- O perfil padrão é `Production`: apenas metadata registrada é exposta, itens `Deprecated`/`ApprovedForHide` são ocultados e metadata ausente falha fechado. `Full` e os perfis incrementais são ferramentas de diagnóstico/benchmark; o inventário schema-only habilita explicitamente flags condicionais em Full para medir as 111 entradas do catálogo, enquanto Production mede as 109 expostas.
+- O perfil padrão é `Production`: apenas metadata registrada é exposta, itens `Deprecated`/`ApprovedForHide`/`Diagnostic`/`Internal` são ocultados e metadata ausente falha fechado. `Full` e os perfis incrementais são ferramentas de diagnóstico/benchmark; o inventário schema-only habilita explicitamente flags condicionais em Full para medir as 111 entradas do catálogo, enquanto Production mede as 104 expostas.
 - `list_my_courses`, `search_courses` e `get_course` permanecem expostas nesta release. A evidência histórica é preservada, mas nenhuma delas é `ApprovedForHide` ou `Deprecated`.
 
 ## Writes
@@ -62,6 +62,18 @@ O MoodleBench não faz parte do CI normal. Durante desenvolvimento, use coortes 
 O MoodleBench mede `ToolSchemaTokens` pela serialização completa de cada descriptor retornado por `tools/list` (nome, descrição, `inputSchema`, `outputSchema`, annotations e demais campos públicos), usando a mesma superfície que é enviada ao modelo. Essa medida é determinística e não depende de quota. Um run LLM inválido não pode fornecer métricas cognitivas nem aprovação para hide.
 
 O filtro de exposure é aplicado ao catálogo antes da serialização MCP. Não existe reescrita posterior de JSON/SSE para esconder tools.
+
+As tools marcadas com `ExposureStatus=Diagnostic` continuam registradas e callable em
+`Full`, mas não aparecem em `Production`: `moodle_diagnose_connection`,
+`moodle_list_functions`, `moodle_check_function`, `discover_grading_functions` e
+`execute_grading_discovery`. `moodle_list_available_flows` permanece exposta porque
+clientes sem descoberta dinâmica e as skills de cursos/core dependem dela para escolher
+estratégias e fallbacks.
+
+A interface `IMcpToolUsageTelemetry` registra somente métricas agregadas de invocação,
+resultado, duração, operação canônica, alias e perfil de exposição. Argumentos,
+payloads, tokens, e-mails e identificadores de usuário não são registrados. Essa
+evidência deve preceder qualquer futura ocultação de aliases de compatibilidade.
 
 Os contratos host `search` e `fetch` permanecem registrados, com nomes, schemas e exposição `Production` cobertos por testes contratuais.
 

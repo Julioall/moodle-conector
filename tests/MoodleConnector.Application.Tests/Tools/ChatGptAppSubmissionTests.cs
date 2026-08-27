@@ -13,6 +13,8 @@ public sealed class ChatGptAppSubmissionTests
     {
         using var document = JsonDocument.Parse(File.ReadAllText(FindSubmissionPath()));
         var submissionTools = document.RootElement.GetProperty("tools");
+        var metadataRegistry = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
+        var exposurePolicy = new CognitiveExposurePolicy(ToolExposureProfile.Production);
         var attributes = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
                 new FeatureOptions { DemoToolsEnabled = false, MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
@@ -21,6 +23,8 @@ public sealed class ChatGptAppSubmissionTests
             .Select(method => (Method: method, Attribute: method.GetCustomAttribute<McpServerToolAttribute>()))
             .Where(item => item.Attribute is not null)
             .Select(item => (Name: item.Attribute!.Name ?? item.Method.Name, Attribute: item.Attribute!))
+            .Where(item => metadataRegistry.TryGet(item.Name, out var metadata) &&
+                           exposurePolicy.ShouldExpose(item.Name, metadata))
             .ToDictionary(item => item.Name, StringComparer.Ordinal);
 
         Assert.Equal(attributes.Keys.OrderBy(name => name), submissionTools.EnumerateObject().Select(property => property.Name).OrderBy(name => name));

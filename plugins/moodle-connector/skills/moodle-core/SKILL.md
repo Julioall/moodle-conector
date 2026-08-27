@@ -10,9 +10,9 @@ Use esta skill como fundamento de toda tarefa que consulta ou altera um ambiente
 ## Resolucao e capabilities
 
 1. Preserve o alias informado pelo usuario. Sem alias, use a conexao padrao configurada; nao assuma FIEG quando houver mais de uma conexao possivel.
-2. Use `moodle_diagnose_connection` para diagnostico completo, identidade, `CanWrite` e funcoes descobertas.
-3. Use `moodle_list_functions` para listar somente funcoes de leitura permitidas e `moodle_check_function` para uma funcao exata.
-4. Use `moodle_list_available_flows` para descobrir estrategias e fallbacks registrados antes de escolher uma rota composta.
+2. Use `moodle_list_available_flows` para descobrir estrategias e fallbacks registrados antes de escolher uma rota composta; ela permanece na superficie `Production`.
+3. `moodle_diagnose_connection`, `moodle_list_functions` e `moodle_check_function` sao diagnosticos tecnicos preservados por nome e no perfil `Full`; use-os somente quando o cliente os oferecer explicitamente ou houver necessidade de suporte.
+4. Consulte capabilities por meio das tools especializadas e dos fluxos registrados antes de chamar uma primitive universal.
 5. Solicite `forceRefresh=true` somente quando nao houver snapshot valido, ele estiver obsoleto, a conexao/credencial mudar ou uma funcao esperada desaparecer.
 
 O registro de capabilities informa disponibilidade tecnica, nao prova permissao contextual em curso, atividade, grupo ou estudante. Se a funcao estiver ausente, retorne `funcao_indisponivel` ou a falha equivalente; nunca trate isso como resultado vazio.

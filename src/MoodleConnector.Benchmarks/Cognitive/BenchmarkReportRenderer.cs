@@ -39,7 +39,7 @@ public static class BenchmarkReportRenderer
         sb.AppendLine();
         sb.AppendLine("| Profile | Exposure | Description |");
         sb.AppendLine("|---------|----------|-------------|");
-        sb.AppendLine("| **A** | Full (97 tools) | Baseline - todas as wrappers expostas |");
+        sb.AppendLine("| **A** | Full (111 tools) | Baseline - todas as tools registradas |");
         sb.AppendLine("| **B** | Full + courses SKILL | Baseline + SKILL hint, wrappers ainda visíveis |");
         sb.AppendLine("| **C** | SKILL focused | Wrappers R1/R2 de Courses escondidas |");
         sb.AppendLine();

@@ -260,34 +260,6 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
-    "discover_grading_functions": {
-      "annotations": {
-        "title": "Discover Grading Functions",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
-    "execute_grading_discovery": {
-      "annotations": {
-        "title": "Execute Grading Discovery",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
     "export_course_grades_excel": {
       "annotations": {
         "title": "Export Course Grades to Excel",
@@ -1058,20 +1030,6 @@
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
       }
     },
-    "moodle_check_function": {
-      "annotations": {
-        "title": "Verificar Funcao Moodle",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
     "moodle_confirm_write": {
       "annotations": {
         "title": "Confirmar Escrita Moodle",
@@ -1084,20 +1042,6 @@
         "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
         "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
-      }
-    },
-    "moodle_diagnose_connection": {
-      "annotations": {
-        "title": "Diagnosticar Conexao Moodle",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
     "moodle_execute_read": {
@@ -1117,20 +1061,6 @@
     "moodle_list_available_flows": {
       "annotations": {
         "title": "Listar Fluxos Moodle Disponiveis",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
-    "moodle_list_functions": {
-      "annotations": {
-        "title": "Listar Funcoes Moodle",
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,

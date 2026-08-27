@@ -12,7 +12,8 @@ Reduzir a carga cognitiva do catálogo MCP sem remover intenções pedagógicas 
 
 O catálogo atual possui 111 entradas registradas em 30 containers (`AlwaysOn` e
 condicionais). Com as flags de escrita de catálogo habilitadas e as tools de demo
-desligadas, a superfície `Production` contém 109 tools. O `tools/list` aplica
+desligadas, a superfície `Production` contém 104 tools: cinco diagnósticos técnicos
+são ocultados cognitivamente. O `tools/list` aplica
 feature flags, OAuth scopes, capabilities Moodle e `CognitiveExposurePolicy`
 antes da serialização.
 
@@ -30,6 +31,23 @@ conteúdos, atividades, submissões filtradas, relatórios e revisão de lote fo
 classificados como semanticamente distintos por diferença de contrato, filtro,
 paginação, fonte, normalização, artefato, segurança ou workflow.
 
+### Exposição cognitiva e evidência
+
+As tools `moodle_diagnose_connection`, `moodle_list_functions`,
+`moodle_check_function`, `discover_grading_functions` e
+`execute_grading_discovery` são tecnicamente úteis, mas foram classificadas como
+`ExposureStatus=Diagnostic`: permanecem registradas e disponíveis no perfil `Full`,
+sem poluir a seleção normal em `Production`. `moodle_list_available_flows` não foi
+ocultada porque é uma primitive de capability usada por clientes sem descoberta
+dinâmica e pelas skills de roteamento.
+
+O filtro usa o status de metadata de forma genérica (`Diagnostic`/`Internal` não são
+anunciados em `Production`); não há regras específicas por
+nome de tool. Invocações são contabilizadas por `IMcpToolUsageTelemetry` com tags de
+baixa cardinalidade (`tool`, `CanonicalOperation`, alias, perfil, resultado e duração),
+sem argumentos, payloads, tokens ou PII. A telemetria permite medir uso de aliases
+antes de qualquer remoção ou ocultação adicional.
+
 ## Decisão e arquitetura-alvo
 
 Manter primitives estruturais seguras e tools especializadas que agregam, normalizam ou aplicam regra acadêmica. Wrappers pass-through tornam-se candidatos a deprecação somente depois de telemetria e migração das skills.
@@ -46,9 +64,9 @@ Manter primitives estruturais seguras e tools especializadas que agregam, normal
 
 ## Critérios de aceite
 
-- [ ] Cada tool pública tem justificativa de permanência, sucessora ou data de retirada.
+- [x] Cada tool pública tem justificativa de permanência, sucessora ou data de retirada.
 - [ ] Nenhum wrapper é removido sem telemetria de uso e release de compatibilidade.
-- [ ] Manifesto de produção exclui tools ocultas pela SPEC-0013.
+- [x] Manifesto de produção exclui tools ocultas pela SPEC-0013.
 - [x] Cada alias técnico identificado declara a operação canônica e a sucessora
       preferida sem remover o nome registrado.
 - [x] Nenhuma intent tool foi ocultada apenas por compartilhar um gateway ou
