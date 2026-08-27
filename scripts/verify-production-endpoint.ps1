@@ -206,8 +206,12 @@ try {
             if ($tools.Count -lt 1) {
                 Add-Failure 'POST /mcp tools/list must expose at least one tool.'
             }
-            elseif ($null -ne $status -and $tools.Count -ne [int]$status.toolsCount) {
-                Add-Failure "POST /mcp tools/list exposed $($tools.Count) tools, but /api/status reports $($status.toolsCount)."
+            elseif ($null -ne $status -and $tools.Count -gt [int]$status.toolsCount) {
+                # /api/status reports the registered, feature-enabled inventory.
+                # tools/list is request-specific and may legitimately be smaller
+                # after OAuth scopes, linked-connection policy, and Moodle
+                # capability filtering are applied.
+                Add-Failure "POST /mcp tools/list exposed $($tools.Count) tools, more than the /api/status inventory of $($status.toolsCount)."
             }
 
             if (@($tools | Where-Object { $null -eq $_.outputSchema }).Count -gt 0) {
