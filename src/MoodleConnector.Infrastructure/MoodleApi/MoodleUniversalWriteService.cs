@@ -272,7 +272,10 @@ internal sealed class MoodleUniversalWriteService(
 
     private void EnsureWriteScope(string functionName)
     {
-        if (currentUser is null || currentUser.Scopes.Count == 0)
+        // A missing user context is only tolerated for low-level/unit construction.
+        // When a request has an authenticated principal, an empty scope set must
+        // fail closed instead of silently bypassing the write-family boundary.
+        if (currentUser is null)
         {
             return;
         }
