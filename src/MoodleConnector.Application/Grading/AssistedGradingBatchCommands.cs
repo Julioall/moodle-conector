@@ -2052,6 +2052,8 @@ public sealed record SaveAiGradingBatchCommand(
 
 public sealed record AiGradingItemInput(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    // Mantido apenas para compatibilidade com clientes legados. O nome não é
+    // fonte de identidade nem é persistido: o item usa somente MoodleUserId.
     [property: JsonPropertyName("nome")] string? Nome,
     [property: JsonPropertyName("nota")] decimal? Nota,
     [property: JsonPropertyName("feedback")] string Feedback);
@@ -2073,6 +2075,13 @@ public sealed class SaveAiGradingBatchCommandHandler(
     IMoodleAssignmentSettingsGateway settingsGateway)
     : IRequestHandler<SaveAiGradingBatchCommand, SaveAiGradingBatchResult>
 {
+    // O contrato atual de salvar_correcoes_ia_lote é legado: não transporta
+    // evidências, cobertura nem confiança calculada. Portanto, ele nunca pode
+    // promover uma nota para alta confiança por presunção. A revisão humana
+    // continua obrigatória e a confiança é explicitamente zero até que uma
+    // proposta versionada seja integrada ao pipeline.
+    private const decimal LegacyAiProposalConfidence = 0m;
+
     public async Task<SaveAiGradingBatchResult> Handle(
         SaveAiGradingBatchCommand request,
         CancellationToken cancellationToken)
@@ -2112,6 +2121,13 @@ public sealed class SaveAiGradingBatchCommandHandler(
                 if (string.IsNullOrWhiteSpace(input.Feedback))
                 {
                     warnings.Add($"Item {input.GradingItemId} ignorado: feedback vazio.");
+                    skippedCount++;
+                    continue;
+                }
+
+                if (input.Nota is < 0)
+                {
+                    warnings.Add($"Item {input.GradingItemId} ignorado: nota negativa nao e permitida.");
                     skippedCount++;
                     continue;
                 }
@@ -2194,11 +2210,11 @@ public sealed class SaveAiGradingBatchCommandHandler(
 
                 item.SetDraft(
                     suggestedGrade: input.Nota,
-                    confidence: 0.85m,
+                    confidence: LegacyAiProposalConfidence,
                     draftFeedback: input.Feedback,
                     privateNotesToTeacher: input.Nota is null
-                        ? "Feedback gerado pela IA; escala numerica nao confirmada. Revisao humana e confirmacao da escala obrigatorias."
-                        : "Feedback e nota gerados pela IA. Revisao humana obrigatoria antes do lancamento.",
+                        ? "Proposta IA legada sem evidencias ou confianca calculada; escala numerica nao confirmada. Revisao humana e confirmacao da escala obrigatorias."
+                        : "Proposta IA legada sem evidencias ou confianca calculada. Revisao humana obrigatoria antes do lancamento.",
                     maxGrade: maxGrade);
 
                 savedCount++;

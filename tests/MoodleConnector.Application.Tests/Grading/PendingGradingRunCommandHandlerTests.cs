@@ -203,6 +203,68 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Equal(GradingItemStatus.Blocked, blocked.Status);
         Assert.Contains("corrompido", blocked.DraftFeedback, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(GradingItemStatus.DraftReady, eligible.Status);
+        Assert.Equal(0m, eligible.Confidence);
+        Assert.DoesNotContain("Aluno apto", eligible.DraftFeedback, StringComparison.Ordinal);
+        Assert.DoesNotContain("Aluno apto", eligible.PrivateNotesToTeacher, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SaveAiBatch_RejeitaNotaNegativaSemAlterarItem()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new SaveAiGradingBatchCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunMoodleUserResolver(),
+            new RunAuditLogRepository(),
+            new RunAssignmentSettingsGateway());
+
+        var result = await sut.Handle(
+            new SaveAiGradingBatchCommand(
+                batch.Id,
+                [new AiGradingItemInput(item.Id, "Nome legado ignorado", -0.01m, "Feedback valido.")]),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SavedItems);
+        Assert.Equal(1, result.SkippedItems);
+        Assert.Contains(result.Warnings, warning => warning.Contains("negativa", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, item.Status);
+        Assert.Null(item.SuggestedGrade);
+        Assert.Null(item.Confidence);
+    }
+
+    [Fact]
+    public async Task SaveAiBatch_RejeitaNotaAcimaDaEscalaConfirmadaSemAlterarItem()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new SaveAiGradingBatchCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunMoodleUserResolver(),
+            new RunAuditLogRepository(),
+            new RunAssignmentSettingsGateway(maxGrade: 10m));
+
+        var result = await sut.Handle(
+            new SaveAiGradingBatchCommand(
+                batch.Id,
+                [new AiGradingItemInput(item.Id, "Nome legado ignorado", 10.01m, "Feedback valido.")]),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SavedItems);
+        Assert.Equal(1, result.SkippedItems);
+        Assert.Contains(result.Warnings, warning => warning.Contains("escala maxima", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, item.Status);
+        Assert.Null(item.SuggestedGrade);
     }
 
     [Fact]
@@ -258,14 +320,14 @@ public sealed class PendingGradingRunCommandHandlerTests
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
-    private sealed class RunAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway
+    private sealed class RunAssignmentSettingsGateway(decimal maxGrade = 10m) : IMoodleAssignmentSettingsGateway
     {
         public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
             string userExternalId,
             string courseId,
             string assignmentId,
             CancellationToken cancellationToken) =>
-            Task.FromResult<AssignmentSettingsSummary?>(new AssignmentSettingsSummary(assignmentId, 10m, "Atividade avaliativa"));
+            Task.FromResult<AssignmentSettingsSummary?>(new AssignmentSettingsSummary(assignmentId, maxGrade, "Atividade avaliativa"));
     }
 
     private sealed class RunCourseContentsGateway : IMoodleCourseContentsGateway
