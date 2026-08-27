@@ -149,15 +149,38 @@ preservados. Auditoria, snapshots de contexto, evidências e ações pendentes n
 O store PostgreSQL usa atualização set-based; o adaptador InMemory cobre o mesmo contrato
 para testes. Falhas são registradas como warning e não são convertidas em sucesso silencioso.
 
-Ainda permanecem pendentes a criação leve (download/extraction fora do request), checkpoints
-por etapa. A ordenação durável já promove lotes com mais de 30 minutos antes da prioridade,
-evitando starvation sob carga contínua; a política ainda deve receber métricas de idade no
-rollout.
+A criação leve e os checkpoints de estágio foram implementados no incremento seguinte. A
+ordenação durável já promove lotes com mais de 30 minutos antes da prioridade, evitando
+starvation sob carga contínua; a política ainda deve receber métricas de idade no rollout.
+
+### Incremento de criação leve e ingestão diferida
+
+O caminho de criação agora pode ser executado com `GradingLimits:DeferHeavyIngestion=true`.
+Nesse modo, o request continua resolvendo e autorizando as submissões, mas persiste somente
+artifacts de referência (`ExtractionStatus=pending`) e não baixa arquivos, extrai conteúdo ou
+consulta materiais de curso. URLs persistidas são normalizadas para remover query string,
+fragmento e informações de usuário; tokens Moodle nunca fazem parte do artifact.
+
+O `GradingBatchWorkerService` materializa as referências em um escopo próprio, usando o
+`ConnectorClientId` e o alias de conexão persistidos no lote para recuperar credenciais sem
+`HttpContext`. Cada download/extraction atualiza o artifact individualmente e salva a
+transição antes de o item avançar para o contexto. O processamento também registra checkpoints
+de `Ingestion`, `Context` e `Analysis`; a callback de checkpoint é usada apenas pelo worker,
+preservando o contrato de uma única persistência do orquestrador inline de testes/legado.
+
+O valor padrão da opção permanece `false` para compatibilidade de hosts que não recarregaram a
+configuração. O `appsettings.json` do host já habilita o modo diferido para o rollout padrão;
+hosts podem desabilitá-lo explicitamente durante a migração. A fila durável continua sendo a
+fonte de recuperação, e o canal local permanece somente como acelerador.
 
 ## Critérios de aceite
 
 - [ ] Criar um lote de 400 itens não executa download/extraction no request e retorna um
       `batchJobId` recuperável.
+- [x] Com `DeferHeavyIngestion=true`, o request não executa download/extraction nem consulta
+      materiais pesados; referências e a migração `048_grading_artifact_deferred_source` são
+      cobertas por testes unitários/schema. A carga de 400 itens ainda precisa de teste de
+      desempenho/integracão antes de marcar o aceite completo.
 - [ ] Queda entre persistência `Pending` e enqueue não deixa o lote órfão após restart.
 - [ ] Duas réplicas não processam o mesmo item simultaneamente; lease expirado é retomado
       com tentativa contabilizada. A fundação de claim/renew/release/recovery por item já

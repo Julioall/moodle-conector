@@ -1,9 +1,12 @@
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 using MoodleConnector.Domain.Grading;
+using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace MoodleConnector.Application.Tests.Grading;
 
@@ -100,6 +103,126 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Contains("https://moodle.example/pluginfile.php/entrega.txt", fileGateway.DownloadedFileUrls);
         Assert.Contains("entrega.txt", extraction.Filenames);
         Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
+    }
+
+    [Fact]
+    public async Task CreateBatch_ComIngestaoDiferida_NaoBaixaExtraiNemConsultaConteudoPesado()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var fileGateway = new FakeSubmissionFileGateway();
+        var extraction = new FakeDocumentExtractionService();
+        var contentsGateway = new FakeCourseContentsGateway();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            new FakeMediator(),
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeGradingBatchOrchestrator(),
+            contentsGateway,
+            fileGateway,
+            extraction,
+            new FakeAssignmentSubmissionsGateway(),
+            Options.Create(new GradingLimitsOptions { DeferHeavyIngestion = true }));
+
+        await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: ["9001"],
+                MaxItems: 25,
+                OnlyAwaitingGrading: true,
+                IncludeRubric: true,
+                IncludeSubmissionFiles: true,
+                IncludeCourseMaterials: true,
+                PrefetchedSubmissions:
+                [
+                    new AssignmentSubmissionSummary(
+                        "101",
+                        "Ana Souza",
+                        "9001",
+                        "submitted",
+                        "notgraded",
+                        Submitted: true,
+                        Late: false,
+                        NeedsGrading: true,
+                        SubmittedAt: null,
+                        ModifiedAt: null,
+                        AttemptNumber: 0,
+                        FileCount: 1,
+                        HasOnlineText: false,
+                        Files:
+                        [
+                            new AssignmentSubmissionFile(
+                                "entrega.txt",
+                                "text/plain",
+                                31,
+                                "https://moodle.example/pluginfile.php/entrega.txt?token=nao-persistir")
+                        ])
+                ]),
+            CancellationToken.None);
+
+        var artifact = Assert.Single(repository.Artifacts, item => item.ArtifactType == "submission_file");
+        Assert.Equal(ExtractionStatus.Pending, artifact.ExtractionStatus);
+        Assert.Equal("https://moodle.example/pluginfile.php/entrega.txt", artifact.SourceUrl);
+        Assert.Equal("pending_ingestion", artifact.SummaryRef);
+        Assert.Empty(fileGateway.DownloadedFileUrls);
+        Assert.Empty(extraction.Filenames);
+        Assert.Equal(0, contentsGateway.CallCount);
+    }
+
+    [Fact]
+    public async Task IngestionService_MaterializaReferenciaPendenteEAtualizaArtifact()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var fileGateway = new FakeSubmissionFileGateway();
+        var extraction = new FakeDocumentExtractionService();
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            includeRubric: false,
+            includeSubmissionFiles: true,
+            includeCourseMaterials: false);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "submission_file",
+                "entrega.txt",
+                "text/plain",
+                Sha256: null,
+                SizeBytes: 31,
+                ExtractionStatus.Pending,
+                ExtractedTextRef: null,
+                SummaryRef: "pending_ingestion",
+                DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/entrega.txt"),
+            CancellationToken.None);
+
+        var sut = new GradingArtifactIngestionService(
+            repository,
+            new FakeAssignmentSubmissionsGateway(),
+            new FakeCourseContentsGateway(),
+            fileGateway,
+            extraction,
+            Options.Create(new GradingLimitsOptions()),
+            NullLogger<GradingArtifactIngestionService>.Instance);
+
+        await sut.IngestPendingAsync(batch, item, CancellationToken.None);
+
+        var artifact = Assert.Single(repository.Artifacts);
+        Assert.Equal(ExtractionStatus.Succeeded, artifact.ExtractionStatus);
+        Assert.Equal("Texto extraido real da submissao.", artifact.ExtractedTextRef);
+        Assert.Null(artifact.SourceUrl);
+        Assert.Contains("https://moodle.example/pluginfile.php/entrega.txt", fileGateway.DownloadedFileUrls);
+        Assert.Contains("entrega.txt", extraction.Filenames);
     }
 
     [Fact]
@@ -807,6 +930,18 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
         {
             Artifacts.Add(artifact);
+            return Task.CompletedTask;
+        }
+
+        public Task UpdateArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
+        {
+            var index = Artifacts.FindIndex(existing => existing.Id == artifact.Id);
+            if (index < 0)
+            {
+                throw new InvalidOperationException("Artifact nao encontrado no fake.");
+            }
+
+            Artifacts[index] = artifact;
             return Task.CompletedTask;
         }
 

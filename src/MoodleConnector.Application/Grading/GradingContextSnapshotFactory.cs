@@ -57,6 +57,7 @@ public static class GradingContextSnapshotFactory
                 : artifact.ChunkCount);
         var isPartial = context.Blockers.Count > 0 ||
             artifacts.Any(artifact => artifact.IsTruncated ||
+                artifact.ExtractionStatus == ExtractionStatus.Pending ||
                 ExtractionStatus.IsFailure(artifact.ExtractionStatus));
 
         var extraction = new GradingExtractionSummary(

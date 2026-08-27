@@ -9,9 +9,9 @@ using System.Text.RegularExpressions;
 namespace MoodleConnector.Application.Grading;
 
 /// <summary>
-/// Implementação MVP do construtor de contexto de correção.
-/// Reutiliza artefatos já extraídos salvos no repositório.
-/// Download e extração de novos arquivos ficam para fase futura (sem Moodle real).
+/// Construtor de contexto de correção.
+/// Reutiliza artifacts persistidos pelo request leve ou pelo worker de ingestão;
+/// este componente não baixa arquivos nem executa trabalho pesado.
 /// </summary>
 public sealed partial class GradingContextBuilder(
     IGradingReviewRepository repository,

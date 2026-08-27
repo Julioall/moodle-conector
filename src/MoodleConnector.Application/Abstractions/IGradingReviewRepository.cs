@@ -12,6 +12,9 @@ public interface IGradingReviewRepository
 
     Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken);
 
+    Task UpdateArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("Este repositorio nao suporta atualizacao de artifacts.");
+
     Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken);
 
     Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken);

@@ -190,7 +190,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     IMoodleSubmissionFileGateway fileGateway,
     IDocumentExtractionService extractionService,
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
-    IOptions<GradingLimitsOptions>? limits = null)
+    IOptions<GradingLimitsOptions>? limits = null,
+    IConnectorExecutionContext? executionContext = null,
+    IMoodleConnectionSelection? connectionSelection = null)
     : IRequestHandler<CreateAssistedGradingBatchCommand, CreateAssistedGradingBatchResult>
 {
     private readonly GradingLimitsOptions _limits = limits?.Value ?? new GradingLimitsOptions();
@@ -359,7 +361,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             priority: request.Priority,
             includeRubric: request.IncludeRubric,
             includeSubmissionFiles: request.IncludeSubmissionFiles,
-            includeCourseMaterials: request.IncludeCourseMaterials);
+            includeCourseMaterials: request.IncludeCourseMaterials,
+            connectorClientId: executionContext?.ClientId,
+            connectionAlias: connectionSelection?.Alias);
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
@@ -389,7 +393,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     cancellationToken);
             }
 
-            if (request.IncludeRubric || request.IncludeCourseMaterials)
+            if ((request.IncludeRubric || request.IncludeCourseMaterials) && !_limits.DeferHeavyIngestion)
             {
                 await AddAssignmentContextArtifactsAsync(
                     request.UserExternalId,
@@ -516,6 +520,35 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             {
                 warnings.Add($"Nao foi possivel re-obter anexos da entrega (assignment {assignmentId}, student {studentId}): {ex.Message}");
             }
+        }
+
+        if (_limits.DeferHeavyIngestion)
+        {
+            foreach (var file in effectiveFiles.Take(maxFiles))
+            {
+                var sourceUrl = GradingArtifactSourceReference.Normalize(file.FileUrl);
+                await repository.AddArtifactAsync(
+                    new GradingArtifact(
+                        Guid.NewGuid(),
+                        gradingItemId,
+                        "submission_file",
+                        file.Filename,
+                        file.MimeType,
+                        Sha256: null,
+                        file.SizeBytes,
+                        sourceUrl is null
+                            ? ExtractionStatus.Failed
+                            : ExtractionStatus.Pending,
+                        ExtractedTextRef: null,
+                        SummaryRef: sourceUrl is null
+                            ? "source_url_invalid"
+                            : "pending_ingestion",
+                        DateTimeOffset.UtcNow,
+                        sourceUrl),
+                    cancellationToken);
+            }
+
+            return;
         }
 
         foreach (var file in effectiveFiles.Take(maxFiles))

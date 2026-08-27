@@ -16,6 +16,14 @@ public sealed class AssistedGradingBatch
 
     public long? CreatedByMoodleUserId { get; private init; }
 
+    /// <summary>
+    /// Identidade não secreta necessária para um worker recuperar a conexão
+    /// correta sem depender de HttpContext. Tokens permanecem fora do lote.
+    /// </summary>
+    public string? ConnectorClientId { get; private init; }
+
+    public string? ConnectionAlias { get; private init; }
+
     public GradingBatchStatus Status { get; private set; } = GradingBatchStatus.Pending;
 
     public int TotalItems { get; private init; }
@@ -76,7 +84,9 @@ public sealed class AssistedGradingBatch
         string priority = "normal",
         bool includeRubric = true,
         bool includeSubmissionFiles = true,
-        bool includeCourseMaterials = false)
+        bool includeCourseMaterials = false,
+        string? connectorClientId = null,
+        string? connectionAlias = null)
     {
         if (courseId <= 0)
         {
@@ -124,6 +134,8 @@ public sealed class AssistedGradingBatch
             AssignmentIds = assignmentIds.Distinct().ToArray(),
             CreatedBySubject = createdBySubject.Trim(),
             CreatedByMoodleUserId = createdByMoodleUserId,
+            ConnectorClientId = string.IsNullOrWhiteSpace(connectorClientId) ? null : connectorClientId.Trim(),
+            ConnectionAlias = string.IsNullOrWhiteSpace(connectionAlias) ? null : connectionAlias.Trim(),
             TotalItems = totalItems,
             TeacherInstructions = normalizedTeacherInstructions,
             Priority = normalizedPriority,

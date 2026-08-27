@@ -28,6 +28,22 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         await dbContext.GradingArtifacts.AddAsync(artifact, cancellationToken);
     }
 
+    public Task UpdateArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(artifact);
+        var tracked = dbContext.GradingArtifacts.Local.SingleOrDefault(item => item.Id == artifact.Id);
+        if (tracked is not null)
+        {
+            dbContext.Entry(tracked).CurrentValues.SetValues(artifact);
+        }
+        else
+        {
+            dbContext.GradingArtifacts.Update(artifact);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken)
     {
         await dbContext.GradingEvidence.AddAsync(evidence, cancellationToken);
@@ -348,9 +364,13 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
                 .SetProperty(batch => batch.NextAttemptAt, (DateTimeOffset?)null)
                 .SetProperty(batch => batch.UpdatedAt, now), cancellationToken);
 
-        return updated == 1
-            ? new GradingBatchLeaseClaim(batchId, normalizedWorkerId, leaseUntil, attemptCount)
-            : null;
+        if (updated != 1)
+        {
+            return null;
+        }
+
+        await RefreshTrackedBatchAsync(batchId, cancellationToken);
+        return new GradingBatchLeaseClaim(batchId, normalizedWorkerId, leaseUntil, attemptCount);
     }
 
     public async Task<bool> RenewBatchLeaseAsync(
@@ -375,7 +395,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return true;
         }
 
-        return await dbContext.GradingBatches
+        var updated = await dbContext.GradingBatches
             .Where(batch => batch.Id == batchId &&
                             batch.Status == GradingBatchStatus.Processing &&
                             batch.LeaseOwner == normalizedWorkerId &&
@@ -383,6 +403,12 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(batch => batch.LeaseUntil, now.Add(leaseDuration))
                 .SetProperty(batch => batch.UpdatedAt, now), cancellationToken) == 1;
+        if (updated)
+        {
+            await RefreshTrackedBatchAsync(batchId, cancellationToken);
+        }
+
+        return updated;
     }
 
     public async Task<bool> ReleaseBatchLeaseAsync(
@@ -415,7 +441,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return true;
         }
 
-        return await dbContext.GradingBatches
+        var updated = await dbContext.GradingBatches
             .Where(batch => batch.Id == batchId && batch.LeaseOwner == normalizedWorkerId)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(batch => batch.LeaseOwner, (string?)null)
@@ -423,6 +449,12 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
                 .SetProperty(batch => batch.LastErrorCode, normalizedErrorCode)
                 .SetProperty(batch => batch.NextAttemptAt, nextAttemptAt)
                 .SetProperty(batch => batch.UpdatedAt, now), cancellationToken) == 1;
+        if (updated)
+        {
+            await RefreshTrackedBatchAsync(batchId, cancellationToken);
+        }
+
+        return updated;
     }
 
     public async Task<bool> UpdateBatchCheckpointAsync(
@@ -457,7 +489,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return true;
         }
 
-        return await dbContext.GradingBatches
+        var updated = await dbContext.GradingBatches
             .Where(batch => batch.Id == batchId &&
                             batch.Status == GradingBatchStatus.Processing &&
                             batch.LeaseOwner == normalizedWorkerId &&
@@ -465,6 +497,12 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(batch => batch.CheckpointItemId, itemId)
                 .SetProperty(batch => batch.UpdatedAt, now), cancellationToken) == 1;
+        if (updated)
+        {
+            await RefreshTrackedBatchAsync(batchId, cancellationToken);
+        }
+
+        return updated;
     }
 
     public async Task<int> RecoverExpiredBatchLeasesAsync(
@@ -563,6 +601,8 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return null;
         }
 
+        await RefreshTrackedItemAsync(batchId, itemId, cancellationToken);
+
         var claimed = await dbContext.GradingItems
             .AsNoTracking()
             .Where(item => item.Id == itemId && item.BatchId == batchId)
@@ -600,7 +640,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return true;
         }
 
-        return await dbContext.GradingItems
+        var updated = await dbContext.GradingItems
             .Where(item => item.Id == itemId &&
                            item.BatchId == batchId &&
                            item.Status == GradingItemStatus.Pending &&
@@ -609,6 +649,12 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.LeaseUntil, now.Add(leaseDuration))
                 .SetProperty(item => item.UpdatedAt, now), cancellationToken) == 1;
+        if (updated)
+        {
+            await RefreshTrackedItemAsync(batchId, itemId, cancellationToken);
+        }
+
+        return updated;
     }
 
     public async Task<bool> ReleaseItemLeaseAsync(
@@ -643,7 +689,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return true;
         }
 
-        return await dbContext.GradingItems
+        var updated = await dbContext.GradingItems
             .Where(item => item.Id == itemId &&
                            item.BatchId == batchId &&
                            item.LeaseOwner == normalizedWorkerId)
@@ -653,6 +699,12 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
                 .SetProperty(item => item.LastErrorCode, normalizedErrorCode)
                 .SetProperty(item => item.NextAttemptAt, nextAttemptAt)
                 .SetProperty(item => item.UpdatedAt, now), cancellationToken) == 1;
+        if (updated)
+        {
+            await RefreshTrackedItemAsync(batchId, itemId, cancellationToken);
+        }
+
+        return updated;
     }
 
     public async Task<int> RecoverExpiredItemLeasesAsync(
@@ -719,5 +771,27 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         }
 
         ValidateJobArguments(workerId, leaseDuration);
+    }
+
+    private async Task RefreshTrackedBatchAsync(Guid batchId, CancellationToken cancellationToken)
+    {
+        var tracked = dbContext.GradingBatches.Local.SingleOrDefault(batch => batch.Id == batchId);
+        if (tracked is not null)
+        {
+            await dbContext.Entry(tracked).ReloadAsync(cancellationToken);
+        }
+    }
+
+    private async Task RefreshTrackedItemAsync(
+        Guid batchId,
+        Guid itemId,
+        CancellationToken cancellationToken)
+    {
+        var tracked = dbContext.GradingItems.Local.SingleOrDefault(item =>
+            item.Id == itemId && item.BatchId == batchId);
+        if (tracked is not null)
+        {
+            await dbContext.Entry(tracked).ReloadAsync(cancellationToken);
+        }
     }
 }

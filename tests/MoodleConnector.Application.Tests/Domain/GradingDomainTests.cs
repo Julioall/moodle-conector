@@ -46,6 +46,22 @@ public sealed class GradingDomainTests
     }
 
     [Fact]
+    public void AssistedGradingBatch_Create_PersisteContextoDeExecucaoSemSegredos()
+    {
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            1,
+            connectorClientId: " client-1 ",
+            connectionAlias: " default ");
+
+        Assert.Equal("client-1", batch.ConnectorClientId);
+        Assert.Equal("default", batch.ConnectionAlias);
+    }
+
+    [Fact]
     public void AssistedGradingBatch_Create_RejeitaConfiguracaoInvalida()
     {
         Assert.Throws<ArgumentException>(() => AssistedGradingBatch.Create(

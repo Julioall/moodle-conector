@@ -26,6 +26,12 @@ public sealed class GradingLimitsOptions
 
     public int AiAnalysisWorkers { get; init; } = 3;
 
+    /// <summary>
+    /// Migração gradual: quando habilitado, o request cria somente o job e
+    /// referências técnicas; downloads/extração/contexto ficam para o worker.
+    /// </summary>
+    public bool DeferHeavyIngestion { get; init; }
+
     public int BatchLeaseMinutes { get; init; } = 15;
 
     public int DurableBatchPollSeconds { get; init; } = 5;

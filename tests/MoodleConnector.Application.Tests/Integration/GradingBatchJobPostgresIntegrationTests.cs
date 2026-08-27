@@ -218,4 +218,74 @@ public sealed class GradingBatchJobPostgresIntegrationTests
             Assert.Contains("C1", document.PayloadJson, StringComparison.Ordinal);
         }
     }
+
+    [Fact]
+    public async Task DeferredArtifactSource_PersistsAndCanBeMaterializedWithoutToken()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseNpgsql(connectionString)
+            .Options;
+        await using (var schemaDb = new ConnectorDbContext(options))
+        {
+            await schemaDb.ApplyVersionedSchemaAsync();
+        }
+
+        var batch = AssistedGradingBatch.Create(10, [501], $"integration-artifact-{Guid.NewGuid():N}", 321, 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var artifact = new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "submission_file",
+            "entrega.txt",
+            "text/plain",
+            Sha256: null,
+            SizeBytes: 31,
+            ExtractionStatus.Pending,
+            ExtractedTextRef: null,
+            SummaryRef: "pending_ingestion",
+            DateTimeOffset.UtcNow,
+            "https://moodle.example/pluginfile.php/entrega.txt");
+
+        await using (var seedDb = new ConnectorDbContext(options))
+        {
+            seedDb.GradingBatches.Add(batch);
+            seedDb.GradingItems.Add(item);
+            seedDb.GradingArtifacts.Add(artifact);
+            await seedDb.SaveChangesAsync();
+        }
+
+        await using (var updateDb = new ConnectorDbContext(options))
+        {
+            var store = new GradingReviewRepository(updateDb);
+            var persisted = Assert.Single(await store.ListArtifactsByItemAsync(item.Id, CancellationToken.None));
+            Assert.Equal("https://moodle.example/pluginfile.php/entrega.txt", persisted.SourceUrl);
+
+            await store.UpdateArtifactAsync(
+                persisted with
+                {
+                    ExtractionStatus = ExtractionStatus.Succeeded,
+                    ExtractedTextRef = "texto extraido",
+                    SummaryRef = null,
+                    SourceUrl = null
+                },
+                CancellationToken.None);
+            await store.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var verifyDb = new ConnectorDbContext(options))
+        {
+            var persisted = Assert.Single(await verifyDb.GradingArtifacts
+                .Where(candidate => candidate.Id == artifact.Id)
+                .ToArrayAsync());
+            Assert.Equal(ExtractionStatus.Succeeded, persisted.ExtractionStatus);
+            Assert.Equal("texto extraido", persisted.ExtractedTextRef);
+            Assert.Null(persisted.SourceUrl);
+        }
+    }
 }

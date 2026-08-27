@@ -20,7 +20,8 @@ public sealed class GradingItemProcessor(
         IGradingReviewRepository repository,
         CancellationToken cancellationToken,
         string? teacherInstructions = null,
-        GradingContextOptions? contextOptions = null)
+        GradingContextOptions? contextOptions = null,
+        Func<CancellationToken, Task>? checkpointAsync = null)
     {
         var effectiveContextOptions = contextOptions ?? new GradingContextOptions(
             IncludeRubric: true,
@@ -28,6 +29,10 @@ public sealed class GradingItemProcessor(
             IncludeCourseMaterials: true,
             TeacherInstructions: teacherInstructions);
         item.MarkProcessingStage(GradingProcessingStage.Context);
+        if (checkpointAsync is not null)
+        {
+            await checkpointAsync(cancellationToken);
+        }
         var context = await contextBuilder.BuildAsync(
             item,
             effectiveContextOptions,
@@ -58,6 +63,10 @@ public sealed class GradingItemProcessor(
         }
         item.RecordContextSnapshot(contextSnapshot);
         item.MarkProcessingStage(GradingProcessingStage.Analysis);
+        if (checkpointAsync is not null)
+        {
+            await checkpointAsync(cancellationToken);
+        }
 
         var readableText = FirstReadableText(context);
         if (string.IsNullOrWhiteSpace(readableText))

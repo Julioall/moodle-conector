@@ -11,4 +11,5 @@ public sealed record GradingArtifact(
     string ExtractionStatus,
     string? ExtractedTextRef,
     string? SummaryRef,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string? SourceUrl = null);

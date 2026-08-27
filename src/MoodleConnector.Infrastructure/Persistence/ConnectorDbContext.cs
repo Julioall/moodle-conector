@@ -462,6 +462,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
                 value => value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
                 value => value.ToArray()));
         batch.Property(x => x.CreatedBySubject).HasMaxLength(200).IsRequired();
+        batch.Property(x => x.ConnectorClientId).HasMaxLength(64);
+        batch.Property(x => x.ConnectionAlias).HasMaxLength(64);
         batch.Property(x => x.TeacherInstructions).HasMaxLength(8000);
         batch.Property(x => x.Priority).HasMaxLength(16).IsRequired();
         batch.Property(x => x.IncludeRubric).IsRequired();
@@ -510,6 +512,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         artifact.Property(x => x.MimeType).HasMaxLength(160);
         artifact.Property(x => x.Sha256).HasMaxLength(64);
         artifact.Property(x => x.ExtractionStatus).HasMaxLength(80).IsRequired();
+        artifact.Property(x => x.SourceUrl).HasMaxLength(2000);
         artifact.HasOne<AssistedGradingItem>()
             .WithMany()
             .HasForeignKey(x => x.GradingItemId)

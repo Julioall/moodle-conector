@@ -33,6 +33,7 @@ public sealed record DocumentTextChunk(
 
 public static class ExtractionStatus
 {
+    public const string Pending = "pending";
     public const string Succeeded = "succeeded";
     public const string UnsupportedFormat = "unsupported_format";
     public const string ScannedPdf = "scanned_pdf";
@@ -43,7 +44,7 @@ public static class ExtractionStatus
 
     public static bool IsKnown(string? status) => status switch
     {
-        Succeeded or UnsupportedFormat or ScannedPdf or OcrExtracted or FileTooLarge or Empty or Failed => true,
+        Pending or Succeeded or UnsupportedFormat or ScannedPdf or OcrExtracted or FileTooLarge or Empty or Failed => true,
         _ => false
     };
 

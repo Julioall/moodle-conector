@@ -37,6 +37,7 @@ public static class DependencyInjection
         services.AddSingleton<IAssignmentContextSelectionService, HeuristicAssignmentContextSelectionService>();
         services.AddSingleton<GradingBatchChannel>();
         services.AddScoped<GradingItemProcessor>();
+        services.AddScoped<IGradingArtifactIngestionService, GradingArtifactIngestionService>();
         services.AddScoped<IGradingBatchOrchestrator, BackgroundGradingBatchOrchestrator>();
         services.AddScoped<IGradingContextBuilder, GradingContextBuilder>();
         services.AddHostedService<GradingBatchWorkerService>();

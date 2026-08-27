@@ -374,4 +374,32 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (46, 'assisted grading item processing checkpoints'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task GradingBatchExecutionContextScript_DevePersistirIdentidadeNaoSecreta()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "047_grading_batch_execution_context.sql");
+        Assert.True(File.Exists(scriptPath));
+        var sql = await File.ReadAllTextAsync(scriptPath);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"ConnectorClientId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"ConnectionAlias\"", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_batch_ExecutionContext", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (47, 'durable grading batch execution context'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GradingArtifactDeferredSourceScript_DevePersistirReferenciaSemToken()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "048_grading_artifact_deferred_source.sql");
+        Assert.True(File.Exists(scriptPath));
+        var sql = await File.ReadAllTextAsync(scriptPath);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"SourceUrl\"", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (48, 'deferred grading artifact source references'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }
