@@ -27,6 +27,7 @@ public sealed class GradingItemProcessor(
             IncludeSubmissionFiles: true,
             IncludeCourseMaterials: true,
             TeacherInstructions: teacherInstructions);
+        item.MarkProcessingStage(GradingProcessingStage.Context);
         var context = await contextBuilder.BuildAsync(
             item,
             effectiveContextOptions,
@@ -56,6 +57,7 @@ public sealed class GradingItemProcessor(
             await snapshotStore.PublishAsync(contextSnapshot, cancellationToken);
         }
         item.RecordContextSnapshot(contextSnapshot);
+        item.MarkProcessingStage(GradingProcessingStage.Analysis);
 
         var readableText = FirstReadableText(context);
         if (string.IsNullOrWhiteSpace(readableText))

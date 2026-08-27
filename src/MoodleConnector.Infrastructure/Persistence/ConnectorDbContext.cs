@@ -478,6 +478,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         item.ToTable("grading_item");
         item.HasKey(x => x.Id);
         item.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
+        item.Property(x => x.ProcessingStage).HasMaxLength(32).IsRequired();
+        item.Property(x => x.ProcessingStageUpdatedAt);
         item.Property(x => x.ReviewStatus).HasConversion<string>().HasMaxLength(80).IsRequired();
         item.Property(x => x.CommitStatus).HasConversion<string>().HasMaxLength(80).IsRequired();
         item.Property(x => x.TeacherDecision).HasMaxLength(80);

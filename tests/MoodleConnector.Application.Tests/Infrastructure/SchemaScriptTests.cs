@@ -358,4 +358,20 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (45, 'versioned assisted grading AI proposals'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task GradingItemProcessingStagesScript_DeveSerAditivoEIdempotente()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "046_grading_item_processing_stages.sql");
+        Assert.True(File.Exists(scriptPath));
+        var sql = await File.ReadAllTextAsync(scriptPath);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"ProcessingStage\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ProcessingStageUpdatedAt", sql, StringComparison.Ordinal);
+        Assert.Contains("CK_grading_item_processing_stage_known", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_item_ProcessingStage", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (46, 'assisted grading item processing checkpoints'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -319,6 +319,7 @@ public sealed class GradingBatchWorkerService(
 
             try
             {
+                item.MarkProcessingStage(GradingProcessingStage.Ingestion);
                 if (jobStore is not null && !await jobStore.RenewBatchLeaseAsync(
                         batchId,
                         WorkerId,
@@ -360,6 +361,7 @@ public sealed class GradingBatchWorkerService(
                         batch.IncludeSubmissionFiles,
                         batch.IncludeCourseMaterials,
                         batch.TeacherInstructions));
+                item.MarkProcessingStage(GradingProcessingStage.Completed);
 
                 if (jobStore is not null)
                 {
@@ -388,6 +390,7 @@ public sealed class GradingBatchWorkerService(
                     item.Id,
                     batchId);
                 item.MarkAnalysisFailed($"Falha ao processar este item de correcao assistida: {ex.Message}");
+                item.MarkProcessingStage(GradingProcessingStage.Failed);
             }
         }
 

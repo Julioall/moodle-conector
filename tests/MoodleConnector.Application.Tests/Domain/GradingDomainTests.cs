@@ -109,6 +109,19 @@ public sealed class GradingDomainTests
     }
 
     [Fact]
+    public void AssistedGradingItem_MarkProcessingStage_PersisteCheckpointTecnico()
+    {
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 10, 501, 9001, 101, 0);
+        var at = DateTimeOffset.UtcNow;
+
+        item.MarkProcessingStage(GradingProcessingStage.Analysis, at);
+
+        Assert.Equal(GradingProcessingStage.Analysis, item.ProcessingStage);
+        Assert.Equal(at, item.ProcessingStageUpdatedAt);
+        Assert.Throws<ArgumentException>(() => item.MarkProcessingStage("unknown", at));
+    }
+
+    [Fact]
     public void AssistedGradingItem_RejectsGradeAboveKnownScale()
     {
         var item = AssistedGradingItem.Create(Guid.NewGuid(), 10, 501, 9001, 101, 0);

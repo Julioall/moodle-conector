@@ -22,6 +22,14 @@ public sealed class AssistedGradingItem
 
     public GradingItemStatus Status { get; private set; } = GradingItemStatus.Pending;
 
+    /// <summary>
+    /// Checkpoint da etapa interna mais recente. O campo não representa uma
+    /// decisão acadêmica; serve apenas para retomada idempotente do worker.
+    /// </summary>
+    public string ProcessingStage { get; private set; } = GradingProcessingStage.Pending;
+
+    public DateTimeOffset? ProcessingStageUpdatedAt { get; private set; }
+
     public decimal? SuggestedGrade { get; private set; }
 
     public decimal? FinalGrade { get; private set; }
@@ -276,6 +284,19 @@ public sealed class AssistedGradingItem
         ContextHash = snapshot.ContextHash;
         ContextStatus = snapshot.ContextStatus;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void MarkProcessingStage(string stage, DateTimeOffset? at = null)
+    {
+        if (!GradingProcessingStage.IsKnown(stage))
+        {
+            throw new ArgumentException("A etapa de processamento nao e reconhecida.", nameof(stage));
+        }
+
+        var timestamp = at ?? DateTimeOffset.UtcNow;
+        ProcessingStage = stage;
+        ProcessingStageUpdatedAt = timestamp;
+        UpdatedAt = timestamp;
     }
 
     public void ResolveCommitExecutionUnknown(bool applied)
