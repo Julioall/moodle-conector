@@ -8,6 +8,7 @@ using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
+using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Presentation.Tools;
 
@@ -79,6 +80,14 @@ public sealed class MoodleAssignmentSubmissionsTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<StudentSubmissionResponse>))]
+    [MoodleToolMetadata(
+        Family = "assignments",
+        Classification = "R4",
+        Kind = "specialized",
+        CanonicalOperation = "assignments.submissions.get_student",
+        ExposureReason = "Preferred canonical operation for an individual submission status lookup.",
+        Evidence = "The handler resolves the course, assignment, participants and submission snapshot/live data before returning the normalized student submission contract.",
+        RequiredMoodleCapabilities = "mod_assign_get_submissions")]
     [Description("Consulta o status de entrega de um estudante em uma tarefa, sem retornar texto integral ou anexos.")]
     public Task<CallToolResult> ConsultarEntregaAlunoAsync(
         string courseId,
@@ -201,7 +210,17 @@ public sealed class MoodleAssignmentSubmissionsTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<StudentSubmissionResponse>))]
-    [Description("Consulta o status de submissao de um estudante em uma tarefa Moodle.")]
+    [MoodleToolMetadata(
+        Family = "assignments",
+        Classification = "R4",
+        Kind = "compatibility-alias",
+        CanonicalOperation = "assignments.submissions.get_student",
+        CompatibilityAliasOf = "get_student_submission",
+        ExposureStatus = "CompatibilityAlias",
+        ExposureReason = "Compatibility alias retained for existing MCP clients; use get_student_submission for new calls.",
+        Evidence = "The method delegates to ConsultarEntregaAlunoAsync, preserving the same validation, snapshot/live path and normalized response.",
+        RequiredMoodleCapabilities = "mod_assign_get_submissions")]
+    [Description("Alias de compatibilidade de get_student_submission. Use get_student_submission em novas chamadas.")]
     public Task<CallToolResult> ConsultarStatusSubmissaoAsync(
         string courseId,
         string assignmentId,
@@ -209,7 +228,7 @@ public sealed class MoodleAssignmentSubmissionsTools(
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
-        return GetStudentSubmissionCoreAsync(courseId, assignmentId, studentId, moodleAlias, cancellationToken);
+        return ConsultarEntregaAlunoAsync(courseId, assignmentId, studentId, moodleAlias, cancellationToken);
     }
 
     private async Task<CallToolResult> ListSubmissionsCoreAsync(

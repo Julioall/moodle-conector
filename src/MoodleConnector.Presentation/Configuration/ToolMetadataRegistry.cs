@@ -96,6 +96,7 @@ public sealed class ToolMetadataRegistry
                                     case "Classification": metadata.Classification = na.TypedValue.Value as string ?? string.Empty; break;
                                     case "Kind": metadata.Kind = na.TypedValue.Value as string ?? string.Empty; break;
                                     case "CanonicalOperation": metadata.CanonicalOperation = na.TypedValue.Value as string ?? string.Empty; break;
+                                    case "CompatibilityAliasOf": metadata.CompatibilityAliasOf = na.TypedValue.Value as string ?? string.Empty; break;
                                     case "Structural": metadata.Structural = na.TypedValue.Value is bool b && b; break;
                                     case "ExposureStatus": metadata.ExposureStatus = na.TypedValue.Value as string ?? "Keep"; break;
                                     case "ExposureReason": metadata.ExposureReason = na.TypedValue.Value as string ?? string.Empty; break;

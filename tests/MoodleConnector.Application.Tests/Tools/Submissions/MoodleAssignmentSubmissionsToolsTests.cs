@@ -79,6 +79,30 @@ public class MoodleAssignmentSubmissionsToolsTests
     }
 
     [Fact]
+    public async Task Alias_de_status_de_submissao_delega_para_a_operacao_canonica()
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleAssignmentSubmissionsTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var canonical = await sut.ConsultarEntregaAlunoAsync("CURSO", "11", "101");
+        var alias = await sut.ConsultarStatusSubmissaoAsync("CURSO", "11", "101");
+
+        Assert.Equal(canonical.IsError, alias.IsError);
+        var canonicalData = Assert.IsType<JsonElement>(canonical.StructuredContent).GetProperty("data");
+        var aliasData = Assert.IsType<JsonElement>(alias.StructuredContent).GetProperty("data");
+        Assert.Equal(
+            canonicalData.GetProperty("submission").GetProperty("userId").GetString(),
+            aliasData.GetProperty("submission").GetProperty("userId").GetString());
+        Assert.Equal(
+            canonicalData.GetProperty("submission").GetProperty("status").GetString(),
+            aliasData.GetProperty("submission").GetProperty("status").GetString());
+        Assert.Equal("101", mediator.LastStudentQuery!.StudentId);
+    }
+
+    [Fact]
     public async Task Deve_rejeitar_status_invalido()
     {
         var sut = new MoodleAssignmentSubmissionsTools(

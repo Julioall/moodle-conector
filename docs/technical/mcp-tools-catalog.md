@@ -675,13 +675,15 @@ Parâmetros:
 | `incluirNaoCorrigidas` / `includeUngraded` | `bool` | Quando falso, remove itens aguardando correção de relatórios gerais. |
 | `moodleAlias` | `string?` | Alias da conexão Moodle. |
 
-## `get_student_submission` / `get_student_submission`
+## `get_student_submission`
 
 Descrição:
 
 - Consulta uma submissão individual por `courseId`, `assignmentId` e `studentId`.
 - Retorna status, atraso, necessidade de correção, tentativa, datas e presença de arquivos/texto online.
 - Não retorna o conteúdo textual integral da entrega nem baixa anexos.
+
+`get_student_submission` é a operação canônica para esta intenção.
 
 ## `list_pending_submissions` / `list_pending_submissions`
 
@@ -704,12 +706,16 @@ Descrição:
 - Lista submissões enviadas com status de avaliação ainda pendente.
 - Usa o mesmo contrato paginado de `list_assignment_submissions`.
 
-## `get_submission_status` / `get_submission_status`
+## `get_submission_status`
 
 Descrição:
 
-- Alias de consulta individual de status da submissão por estudante.
-- Usa o mesmo contrato de `get_student_submission`.
+- Alias de compatibilidade para `get_student_submission`.
+- Encaminha para a mesma implementação, usa a mesma `CanonicalOperation`
+  (`assignments.submissions.get_student`) e requer a capability
+  `mod_assign_get_submissions`.
+- O nome permanece registrado e exposto enquanto não houver telemetria
+  suficiente para ocultá-lo com segurança da superfície `Production`.
 
 ## `discover_grading_functions` / `discover_moodle_grading_functions`
 

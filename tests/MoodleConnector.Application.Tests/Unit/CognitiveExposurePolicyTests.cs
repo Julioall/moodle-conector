@@ -87,4 +87,19 @@ public class CognitiveExposurePolicyTests
         Assert.True(new CognitiveExposurePolicy(ToolExposureProfile.Full)
             .ShouldExpose("search_courses", metadata));
     }
+
+    [Fact]
+    public void Compatibility_aliases_remain_exposed_until_migration_evidence_exists()
+    {
+        var metadata = new MoodleToolMetadataAttribute
+        {
+            ExposureStatus = "CompatibilityAlias",
+            CompatibilityAliasOf = "get_student_submission"
+        };
+
+        Assert.True(new CognitiveExposurePolicy(ToolExposureProfile.Production)
+            .ShouldExpose("get_submission_status", metadata));
+        Assert.True(new CognitiveExposurePolicy(ToolExposureProfile.Full)
+            .ShouldExpose("get_submission_status", metadata));
+    }
 }

@@ -10,7 +10,7 @@ Use para descobrir tarefas e analisar submissao. Toda intencao de lancar nota ou
 ## Roteamento
 
 - Definicao, nota maxima e prazos: `list_course_assignments`, `get_assignment`, `list_activity_deadlines` e `mod_assign_get_assignments`.
-- Entregas: `list_assignment_submissions`, `get_student_submission` e `get_submission_status`.
+- Entregas: `list_assignment_submissions` e `get_student_submission`. `get_submission_status` permanece como alias de compatibilidade para clientes legados.
 - Pendentes/atrasadas/aguardando correcao: `list_pending_submissions`, `list_late_submissions`, `list_submissions_awaiting_grading` e `list_students_with_pending_submissions`.
 - Notas existentes de tarefa: `mod_assign_get_grades`; boletim agregado pertence a `moodle-grading`.
 - Identidade, matricula e grupos pertencem a `moodle-students`.

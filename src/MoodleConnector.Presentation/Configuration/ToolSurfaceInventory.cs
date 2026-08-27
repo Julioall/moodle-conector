@@ -10,6 +10,7 @@ public sealed record ToolSurfaceEntry(
     string TechnicalClassification,
     string Kind,
     string CanonicalOperation,
+    string CompatibilityAliasOf,
     bool Structural,
     string ExposureStatus,
     string ExposureReason,
@@ -31,6 +32,7 @@ public sealed class ToolSurfaceInventory
                 pair.Value.Classification,
                 pair.Value.Kind,
                 pair.Value.CanonicalOperation,
+                pair.Value.CompatibilityAliasOf,
                 pair.Value.Structural,
                 pair.Value.ExposureStatus,
                 pair.Value.ExposureReason,
@@ -52,4 +54,7 @@ public sealed class ToolSurfaceInventory
 
     public int DeprecatedCount => Entries.Count(entry =>
         string.Equals(entry.ExposureStatus, "Deprecated", StringComparison.OrdinalIgnoreCase));
+
+    public int CompatibilityAliasCount => Entries.Count(entry =>
+        !string.IsNullOrWhiteSpace(entry.CompatibilityAliasOf));
 }

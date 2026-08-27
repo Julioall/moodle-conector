@@ -97,6 +97,8 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.DoesNotContain("list_gradable_submissions", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("search", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("fetch", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("get_student_submission", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("get_submission_status", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("generate_course_grades_report", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("export_course_grades_excel", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("resolve_planner_tags", tools, StringComparer.OrdinalIgnoreCase);

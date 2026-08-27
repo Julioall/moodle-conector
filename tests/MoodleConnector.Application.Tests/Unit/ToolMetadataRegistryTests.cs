@@ -171,12 +171,22 @@ public class ToolMetadataRegistryTests
         Assert.Equal("assignments", allGradable!.Family);
         Assert.True(allGradable.Structural == false);
 
+        Assert.True(reg.TryGet("get_student_submission", out var canonicalSubmission));
+        Assert.True(reg.TryGet("get_submission_status", out var submissionAlias));
+        Assert.Equal("assignments.submissions.get_student", canonicalSubmission!.CanonicalOperation);
+        Assert.Equal(canonicalSubmission.CanonicalOperation, submissionAlias!.CanonicalOperation);
+        Assert.Equal("get_student_submission", submissionAlias.CompatibilityAliasOf);
+        Assert.Equal("CompatibilityAlias", submissionAlias.ExposureStatus);
+        Assert.Equal("mod_assign_get_submissions", canonicalSubmission.RequiredMoodleCapabilities);
+        Assert.Equal(canonicalSubmission.RequiredMoodleCapabilities, submissionAlias.RequiredMoodleCapabilities);
+
         var inventory = new ToolSurfaceInventory(reg);
         Assert.Equal(111, inventory.Total);
         Assert.Equal(11, inventory.StructuralCount);
-        Assert.Equal(54, inventory.SpecializedCount);
+        Assert.Equal(53, inventory.SpecializedCount);
         Assert.Equal(29, inventory.ControlledWriteCount);
         Assert.Equal(0, inventory.DeprecatedCount);
+        Assert.Equal(1, inventory.CompatibilityAliasCount);
     }
 
     [Fact]

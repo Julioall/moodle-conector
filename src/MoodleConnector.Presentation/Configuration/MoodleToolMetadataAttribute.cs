@@ -9,6 +9,12 @@ public sealed class MoodleToolMetadataAttribute : Attribute
     public string Classification { get; set; } = string.Empty;
     public string Kind { get; set; } = string.Empty;
     public string CanonicalOperation { get; set; } = string.Empty;
+    /// <summary>
+    /// Preferred registered tool name when this entry is a compatibility alias.
+    /// An alias remains callable; exposure policy decides whether it is shown in
+    /// a given profile after migration evidence is available.
+    /// </summary>
+    public string CompatibilityAliasOf { get; set; } = string.Empty;
     public bool Structural { get; set; }
     public string ExposureStatus { get; set; } = "Keep";
     public string ExposureReason { get; set; } = string.Empty;
