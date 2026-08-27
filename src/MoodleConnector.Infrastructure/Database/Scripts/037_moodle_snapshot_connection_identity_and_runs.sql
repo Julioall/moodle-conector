@@ -11,9 +11,9 @@ SET "ConnectionId" = c."Id"
 FROM user_accounts u
 JOIN connector_clients c
   ON c."ClientId" = u."ConnectorClientId"
- AND lower(c."MoodleAlias") = lower(s."ConnectionAlias")
  AND c."IsActive" = true
 WHERE s."OwnerId" = u."Id"
+  AND lower(c."MoodleAlias") = lower(s."ConnectionAlias")
   AND u."ConnectorClientId" IS NOT NULL
   AND s."ConnectionId" = ''
   AND (SELECT count(*)
@@ -27,9 +27,9 @@ SET "ConnectionId" = c."Id"
 FROM user_accounts u
 JOIN connector_clients c
   ON c."ClientId" = u."ConnectorClientId"
- AND lower(c."MoodleAlias") = lower(s."ConnectionAlias")
  AND c."IsActive" = true
 WHERE s."OwnerId" = u."Id"
+  AND lower(c."MoodleAlias") = lower(s."ConnectionAlias")
   AND u."ConnectorClientId" IS NOT NULL
   AND s."ConnectionId" = ''
   AND (SELECT count(*)
