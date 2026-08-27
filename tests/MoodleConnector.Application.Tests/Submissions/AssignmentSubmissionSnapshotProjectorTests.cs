@@ -82,6 +82,47 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
     }
 
     [Fact]
+    public void Build_excludes_grading_status_for_assignment_without_grade()
+    {
+        var contents = Contents(DateTimeOffset.UtcNow.AddDays(1));
+        var snapshot = AssignmentSubmissionSnapshotProjector.Build(
+            contents,
+            Participants(),
+            [new AssignmentSubmissionsBatch(
+                "assignment-1",
+                [new AssignmentSubmissionRecord(
+                    "submission-1",
+                    "student-1",
+                    "submitted",
+                    "notgraded",
+                    DateTimeOffset.UtcNow.AddHours(-1),
+                    DateTimeOffset.UtcNow.AddHours(-1),
+                    1,
+                    0,
+                    false)])],
+            new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
+            {
+                ["assignment-1"] = new("assignment-1", 0m, "Atividade sem nota", IsGradable: false),
+            });
+
+        var assignment = Assert.Single(snapshot.Assignments);
+        var page = AssignmentSubmissionSnapshotProjector.ToPage(
+            assignment,
+            "course-1",
+            AssignmentSubmissionFilter.NeedsGrading,
+            page: 1,
+            pageSize: 20,
+            since: null,
+            before: null,
+            includeLate: true,
+            includeUngraded: true);
+
+        Assert.Empty(page.Submissions);
+        Assert.Equal(0, page.Total);
+        Assert.False(Assert.Single(assignment.Submissions, row => row.UserId == "student-1").NeedsGrading);
+    }
+
+    [Fact]
     public void Build_marks_assignment_incomplete_when_gateway_batch_has_error()
     {
         var contents = Contents(DateTimeOffset.UtcNow.AddDays(1));
@@ -114,6 +155,7 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
             });
 
         Assert.Equal(100m, Assert.Single(snapshot.Assignments).MaxGrade);
+        Assert.Equal(true, Assert.Single(snapshot.Assignments).IsGradable);
     }
 
     private static CourseContentsSummary Contents(DateTimeOffset dueAt) =>

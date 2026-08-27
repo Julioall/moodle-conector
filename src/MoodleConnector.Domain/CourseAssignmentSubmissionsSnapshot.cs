@@ -18,4 +18,5 @@ public sealed record AssignmentSubmissionsSnapshotItem(
     bool IsComplete = true,
     string? ErrorCode = null,
     string? ErrorMessage = null,
-    decimal? MaxGrade = null);
+    decimal? MaxGrade = null,
+    bool? IsGradable = null);

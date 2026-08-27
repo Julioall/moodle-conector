@@ -145,6 +145,75 @@ public class ListAssignmentSubmissionsQueryHandlerTests
     }
 
     [Fact]
+    public async Task Nao_deve_listar_aguardando_correcao_quando_atividade_nao_tem_nota()
+    {
+        var sut = CreateHandler(
+            submissionsGateway: new FakeSubmissionsGateway
+            {
+                Records =
+                [
+                    Submitted("9001", "101", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded")
+                ]
+            },
+            settingsGateway: new FakeAssignmentSettingsGateway
+            {
+                Settings = new AssignmentSettingsSummary("501", 0m, "Atividade sem nota", IsGradable: false)
+            });
+
+        var result = await sut.Handle(
+            new ListAssignmentSubmissionsQuery(
+                "usuario-42",
+                "CURSO-1",
+                "11",
+                AssignmentSubmissionFilter.NeedsGrading,
+                Page: 1,
+                PageSize: 20,
+                Since: null,
+                Before: null,
+                IncludeLate: true,
+                IncludeUngraded: true),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Empty(result!.Submissions);
+        Assert.Equal(0, result.Total);
+    }
+
+    [Fact]
+    public async Task Deve_manter_aguardando_correcao_quando_atividade_usa_escala()
+    {
+        var sut = CreateHandler(
+            submissionsGateway: new FakeSubmissionsGateway
+            {
+                Records =
+                [
+                    Submitted("9001", "101", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded")
+                ]
+            },
+            settingsGateway: new FakeAssignmentSettingsGateway
+            {
+                Settings = new AssignmentSettingsSummary("501", 0m, "Atividade com escala", IsGradable: true)
+            });
+
+        var result = await sut.Handle(
+            new ListAssignmentSubmissionsQuery(
+                "usuario-42",
+                "CURSO-1",
+                "11",
+                AssignmentSubmissionFilter.NeedsGrading,
+                Page: 1,
+                PageSize: 20,
+                Since: null,
+                Before: null,
+                IncludeLate: true,
+                IncludeUngraded: true),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.True(Assert.Single(result!.Submissions).NeedsGrading);
+    }
+
+    [Fact]
     public async Task Deve_paginar_respostas_grandes()
     {
         var sut = CreateHandler();
@@ -217,13 +286,15 @@ public class ListAssignmentSubmissionsQueryHandlerTests
 
     private static ListAssignmentSubmissionsQueryHandler CreateHandler(
         FakeContentsGateway? contentsGateway = null,
-        FakeSubmissionsGateway? submissionsGateway = null)
+        FakeSubmissionsGateway? submissionsGateway = null,
+        FakeAssignmentSettingsGateway? settingsGateway = null)
     {
         return new ListAssignmentSubmissionsQueryHandler(
             new FakeCoursesGateway(),
             contentsGateway ?? new FakeContentsGateway(),
             new FakeParticipantsGateway(),
-            submissionsGateway ?? new FakeSubmissionsGateway());
+            submissionsGateway ?? new FakeSubmissionsGateway(),
+            settingsGateway);
     }
 
     private static AssignmentSubmissionRecord Submitted(
@@ -404,5 +475,16 @@ public class ListAssignmentSubmissionsQueryHandlerTests
             LastStatus = status;
             return Task.FromResult(Records);
         }
+    }
+
+    private sealed class FakeAssignmentSettingsGateway : IMoodleAssignmentSettingsGateway
+    {
+        public AssignmentSettingsSummary? Settings { get; init; }
+
+        public Task<AssignmentSettingsSummary?> GetAssignmentSettingsAsync(
+            string userExternalId,
+            string courseId,
+            string assignmentId,
+            CancellationToken cancellationToken) => Task.FromResult(Settings);
     }
 }

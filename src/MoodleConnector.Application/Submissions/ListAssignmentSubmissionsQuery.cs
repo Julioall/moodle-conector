@@ -33,7 +33,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
     IMoodleCoursesGateway coursesGateway,
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleParticipantsGateway participantsGateway,
-    IMoodleAssignmentSubmissionsGateway submissionsGateway)
+    IMoodleAssignmentSubmissionsGateway submissionsGateway,
+    IMoodleAssignmentSettingsGateway? assignmentSettingsGateway = null)
     : IRequestHandler<ListAssignmentSubmissionsQuery, AssignmentSubmissionsPage?>
 {
     private const int ParticipantFetchPageSize = 100;
@@ -108,7 +109,35 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             request.Before,
             cancellationToken);
 
-        var rows = BuildRows(participants, submissions, assignment.DueAt, request.Filter, request.IncludeLate, request.IncludeUngraded);
+        AssignmentSettingsSummary? assignmentSettings = null;
+        if (assignmentSettingsGateway is not null)
+        {
+            try
+            {
+                assignmentSettings = await assignmentSettingsGateway.GetAssignmentSettingsAsync(
+                    request.UserExternalId,
+                    course.CourseId,
+                    assignmentInstanceId,
+                    cancellationToken);
+            }
+            catch
+            {
+                // The submission status remains useful when optional grading
+                // configuration is unavailable. Do not infer no-grade here.
+            }
+        }
+
+        bool? isGradable = assignmentSettings is null
+            ? null
+            : assignmentSettings.IsGradable ?? (assignmentSettings.MaxGrade > 0 ? true : null);
+        var rows = BuildRows(
+            participants,
+            submissions,
+            assignment.DueAt,
+            request.Filter,
+            request.IncludeLate,
+            request.IncludeUngraded,
+            isGradable);
         return new AssignmentSubmissionRows(
             course.CourseId,
             assignmentInstanceId,
@@ -189,7 +218,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         DateTimeOffset? dueAt,
         AssignmentSubmissionFilter filter,
         bool includeLate,
-        bool includeUngraded)
+        bool includeUngraded,
+        bool? isGradable)
     {
         var latestSubmissionByUser = submissions
             .GroupBy(submission => submission.UserId, StringComparer.OrdinalIgnoreCase)
@@ -208,12 +238,12 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         foreach (var participant in participants)
         {
             latestSubmissionByUser.TryGetValue(participant.UserId, out var submission);
-            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt));
+            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable));
         }
 
         foreach (var submission in latestSubmissionByUser.Values.Where(submission => !participantIds.Contains(submission.UserId)))
         {
-            rows.Add(ToSummary(submission.UserId, fullName: null, submission, dueAt));
+            rows.Add(ToSummary(submission.UserId, fullName: null, submission, dueAt, isGradable));
         }
 
         return rows
@@ -228,7 +258,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         string userId,
         string? fullName,
         AssignmentSubmissionRecord? submission,
-        DateTimeOffset? dueAt)
+        DateTimeOffset? dueAt,
+        bool? isGradable)
     {
         if (submission is null)
         {
@@ -252,7 +283,7 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
         var submittedAt = submitted ? submission.ModifiedAt ?? submission.CreatedAt : null;
         var late = submittedAt is not null && dueAt is not null && submittedAt > dueAt;
-        var needsGrading = IsNeedsGrading(submission.GradingStatus, submitted);
+        var needsGrading = isGradable != false && IsNeedsGrading(submission.GradingStatus, submitted);
 
         return new AssignmentSubmissionSummary(
             userId,
@@ -311,7 +342,8 @@ public sealed class GetStudentSubmissionQueryHandler(
     IMoodleCoursesGateway coursesGateway,
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleParticipantsGateway participantsGateway,
-    IMoodleAssignmentSubmissionsGateway submissionsGateway)
+    IMoodleAssignmentSubmissionsGateway submissionsGateway,
+    IMoodleAssignmentSettingsGateway? assignmentSettingsGateway = null)
     : IRequestHandler<GetStudentSubmissionQuery, AssignmentSubmissionSummary?>
 {
     public async Task<AssignmentSubmissionSummary?> Handle(
@@ -327,7 +359,8 @@ public sealed class GetStudentSubmissionQueryHandler(
             coursesGateway,
             contentsGateway,
             participantsGateway,
-            submissionsGateway);
+            submissionsGateway,
+            assignmentSettingsGateway);
         var rowsContext = await handler.BuildRowsAsync(
             new ListAssignmentSubmissionsQuery(
                 request.UserExternalId,

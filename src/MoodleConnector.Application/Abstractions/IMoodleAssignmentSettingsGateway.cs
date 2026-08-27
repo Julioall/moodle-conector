@@ -5,7 +5,11 @@ namespace MoodleConnector.Application.Abstractions;
 public sealed record AssignmentSettingsSummary(
     string AssignmentId,
     decimal MaxGrade,
-    string? Name = null);
+    string? Name = null,
+    // Null means that Moodle did not expose enough information to classify
+    // the grading mode. A negative Moodle grade represents a scale and is
+    // therefore gradable even though MaxGrade is intentionally kept at zero.
+    bool? IsGradable = null);
 
 public interface IMoodleAssignmentSettingsGateway
 {

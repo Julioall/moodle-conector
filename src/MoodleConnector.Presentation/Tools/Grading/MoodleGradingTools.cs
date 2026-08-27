@@ -1045,7 +1045,8 @@ public sealed class MoodleGradingTools(
                     var snapshotItem = submissionsSnapshot?.Data is null
                         ? null
                         : AssignmentSubmissionSnapshotProjector.FindAssignment(submissionsSnapshot.Data, assignmentId);
-                    if (snapshotItem is not null && snapshotItem.IsComplete)
+                    if (snapshotItem is { IsComplete: true } &&
+                        (filter != AssignmentSubmissionFilter.NeedsGrading || snapshotItem.IsGradable is not null))
                     {
                         submissions = AssignmentSubmissionSnapshotProjector.ToPage(
                             snapshotItem,
@@ -1075,7 +1076,9 @@ public sealed class MoodleGradingTools(
                                 IncludeUngraded: true),
                             cancellationToken);
                         usedLive = true;
-                        if (snapshotScope is not null && (snapshotItem is null || !snapshotItem.IsComplete))
+                        if (snapshotScope is not null &&
+                            (snapshotItem is null || !snapshotItem.IsComplete ||
+                             (filter == AssignmentSubmissionFilter.NeedsGrading && snapshotItem.IsGradable is null)))
                         {
                             refreshQueued |= await snapshotContext!.QueueAsync(
                                 snapshotScope,

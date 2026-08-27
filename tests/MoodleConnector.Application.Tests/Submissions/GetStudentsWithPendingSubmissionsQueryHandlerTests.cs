@@ -62,7 +62,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
                     false)])],
             AssignmentSettings = new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
             {
-                ["assign-1"] = new("assign-1", 0, "Atividade extra"),
+                ["assign-1"] = new("assign-1", 0, "Atividade extra", IsGradable: false),
             },
         };
 

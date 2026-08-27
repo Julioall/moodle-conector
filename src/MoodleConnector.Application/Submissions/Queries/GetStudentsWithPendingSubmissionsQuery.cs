@@ -396,11 +396,11 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     {
         if (settings.TryGetValue(module.InstanceId ?? string.Empty, out var byInstance))
         {
-            return byInstance.MaxGrade <= 0;
+            return !ResolveIsGradable(byInstance);
         }
 
         return settings.TryGetValue(module.ModuleId ?? string.Empty, out var byModule) &&
-            byModule.MaxGrade <= 0;
+            !ResolveIsGradable(byModule);
     }
 
     private static IReadOnlyDictionary<string, AssignmentSettingsSummary>? GetSettingsFromSnapshot(
@@ -426,7 +426,11 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 return null;
             }
 
-            var summary = new AssignmentSettingsSummary(item.AssignmentId, maxGrade, item.AssignmentName);
+            var summary = new AssignmentSettingsSummary(
+                item.AssignmentId,
+                maxGrade,
+                item.AssignmentName,
+                item.IsGradable);
             settings[item.AssignmentId] = summary;
             if (!string.IsNullOrWhiteSpace(item.AssignmentModuleId))
             {
@@ -436,6 +440,9 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
 
         return settings;
     }
+
+    private static bool ResolveIsGradable(AssignmentSettingsSummary settings) =>
+        settings.IsGradable ?? settings.MaxGrade > 0;
 
     private sealed record AssignmentContext(CourseModuleSummary Module, DateTimeOffset? DueDate);
 }

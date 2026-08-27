@@ -40,7 +40,8 @@ public static class AssignmentSubmissionSnapshotProjector
                         IsComplete: false,
                         ErrorCode: "assignment_snapshot_missing",
                         ErrorMessage: "O Moodle não retornou dados desta tarefa durante a sincronização.",
-                        MaxGrade: FindMaxGrade(assignmentSettings, module));
+                        MaxGrade: FindMaxGrade(assignmentSettings, module),
+                        IsGradable: FindIsGradable(assignmentSettings, module));
                 }
 
                 return new AssignmentSubmissionsSnapshotItem(
@@ -48,11 +49,16 @@ public static class AssignmentSubmissionSnapshotProjector
                     module.ModuleId,
                     module.Name,
                     dueAt,
-                    BuildRows(participants.Participants, batch.Submissions, dueAt),
+                    BuildRows(
+                        participants.Participants,
+                        batch.Submissions,
+                        dueAt,
+                        FindIsGradable(assignmentSettings, module)),
                     IsComplete: string.IsNullOrWhiteSpace(batch.ErrorCode),
                     ErrorCode: batch.ErrorCode,
                     ErrorMessage: batch.ErrorMessage,
-                    MaxGrade: FindMaxGrade(assignmentSettings, module));
+                    MaxGrade: FindMaxGrade(assignmentSettings, module),
+                    IsGradable: FindIsGradable(assignmentSettings, module));
             })
             .ToArray();
 
@@ -83,7 +89,10 @@ public static class AssignmentSubmissionSnapshotProjector
     {
         if (page < 1) throw new ArgumentOutOfRangeException(nameof(page));
         var safePageSize = Math.Clamp(pageSize, 1, 100);
-        var rows = FilterRows(item.Submissions, filter, since, before, includeLate, includeUngraded);
+        var sourceRows = item.IsGradable == false
+            ? item.Submissions.Select(row => row with { NeedsGrading = false }).ToArray()
+            : item.Submissions;
+        var rows = FilterRows(sourceRows, filter, since, before, includeLate, includeUngraded);
         var pageRows = rows.Skip((page - 1) * safePageSize).Take(safePageSize + 1).ToArray();
         return new AssignmentSubmissionsPage(
             courseId,
@@ -104,9 +113,14 @@ public static class AssignmentSubmissionSnapshotProjector
 
     public static AssignmentSubmissionSummary? FindStudent(
         AssignmentSubmissionsSnapshotItem item,
-        string studentId) =>
-        item.Submissions.FirstOrDefault(submission =>
-            string.Equals(submission.UserId, studentId?.Trim(), StringComparison.OrdinalIgnoreCase));
+        string studentId)
+    {
+        var submission = item.Submissions.FirstOrDefault(itemSubmission =>
+            string.Equals(itemSubmission.UserId, studentId?.Trim(), StringComparison.OrdinalIgnoreCase));
+        return submission is not null && item.IsGradable == false
+            ? submission with { NeedsGrading = false }
+            : submission;
+    }
 
     public static AssignmentSubmissionRecord ToRecord(AssignmentSubmissionSummary summary) =>
         new(
@@ -124,7 +138,8 @@ public static class AssignmentSubmissionSnapshotProjector
     private static IReadOnlyList<AssignmentSubmissionSummary> BuildRows(
         IReadOnlyList<CourseParticipantSummary> participants,
         IReadOnlyList<AssignmentSubmissionRecord> submissions,
-        DateTimeOffset? dueAt)
+        DateTimeOffset? dueAt,
+        bool? isGradable = null)
     {
         var latestSubmissionByUser = submissions
             .GroupBy(submission => submission.UserId, StringComparer.OrdinalIgnoreCase)
@@ -143,12 +158,12 @@ public static class AssignmentSubmissionSnapshotProjector
         foreach (var participant in participants)
         {
             latestSubmissionByUser.TryGetValue(participant.UserId, out var submission);
-            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt));
+            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable));
         }
 
         foreach (var submission in latestSubmissionByUser.Values.Where(submission => !participantIds.Contains(submission.UserId)))
         {
-            rows.Add(ToSummary(submission.UserId, null, submission, dueAt));
+            rows.Add(ToSummary(submission.UserId, null, submission, dueAt, isGradable));
         }
 
         return rows
@@ -177,7 +192,8 @@ public static class AssignmentSubmissionSnapshotProjector
         string userId,
         string? fullName,
         AssignmentSubmissionRecord? submission,
-        DateTimeOffset? dueAt)
+        DateTimeOffset? dueAt,
+        bool? isGradable)
     {
         if (submission is null)
         {
@@ -201,7 +217,7 @@ public static class AssignmentSubmissionSnapshotProjector
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
         var submittedAt = submitted ? submission.ModifiedAt ?? submission.CreatedAt : null;
         var late = submittedAt is not null && dueAt is not null && submittedAt > dueAt;
-        var needsGrading = submitted && (
+        var needsGrading = isGradable != false && submitted && (
             string.Equals(submission.GradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(submission.GradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
@@ -257,4 +273,26 @@ public static class AssignmentSubmissionSnapshotProjector
             ? byModule.MaxGrade
             : null;
     }
+
+    private static bool? FindIsGradable(
+        IReadOnlyDictionary<string, AssignmentSettingsSummary>? settings,
+        CourseModuleSummary module)
+    {
+        if (settings is null)
+        {
+            return null;
+        }
+
+        if (settings.TryGetValue(module.InstanceId ?? string.Empty, out var byInstance))
+        {
+            return ResolveIsGradable(byInstance);
+        }
+
+        return settings.TryGetValue(module.ModuleId ?? string.Empty, out var byModule)
+            ? ResolveIsGradable(byModule)
+            : null;
+    }
+
+    private static bool? ResolveIsGradable(AssignmentSettingsSummary settings) =>
+        settings.IsGradable ?? (settings.MaxGrade > 0 ? true : null);
 }

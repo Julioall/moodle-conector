@@ -26,7 +26,7 @@ internal sealed class MoodleAssignmentSettingsGateway(
             // The local stub does not model the assignment grading scale. Do not
             // manufacture a numeric maximum: callers must keep numeric grading
             // blocked until a real, verifiable Moodle scale is available.
-            return new AssignmentSettingsSummary(assignmentId, 0m, Name: null);
+            return new AssignmentSettingsSummary(assignmentId, 0m, Name: null, IsGradable: null);
         }
 
         var normalizedCourseId = ParseMoodleId(courseId, nameof(courseId));
@@ -156,18 +156,18 @@ internal sealed class MoodleAssignmentSettingsGateway(
 
                     if (assignment.TryGetProperty("grade", out var gradeElement))
                     {
-                        var grade = gradeElement.ValueKind == JsonValueKind.Number ? gradeElement.GetDecimal() :
-                                    decimal.TryParse(gradeElement.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var gradeParsed) ? gradeParsed : 0m;
+                        var hasGrade = TryReadDecimal(gradeElement, out var grade);
                         
                         // Moodle retorna grade negativo para indicar que a atividade usa escala
                         // (o valor absoluto é o ID da escala). Nesse caso, MaxGrade fica 0
                         // pois não temos conversão de escala implementada.
-                        var effectiveMaxGrade = grade > 0 ? grade : 0m;
+                        var effectiveMaxGrade = hasGrade && grade > 0 ? grade : 0m;
 
                         return new AssignmentSettingsSummary(
                             currentId.ToString(CultureInfo.InvariantCulture),
                             effectiveMaxGrade,
-                            assignmentName);
+                            assignmentName,
+                            IsGradable: hasGrade ? grade != 0m : null);
                     }
 
                     // No grade property but found the assignment — return with name only
@@ -176,7 +176,8 @@ internal sealed class MoodleAssignmentSettingsGateway(
                         return new AssignmentSettingsSummary(
                             currentId.ToString(CultureInfo.InvariantCulture),
                             MaxGrade: 0m,
-                            assignmentName);
+                            assignmentName,
+                            IsGradable: null);
                     }
                 }
             }
@@ -219,11 +220,14 @@ internal sealed class MoodleAssignmentSettingsGateway(
 
                 var cmid = ReadId(assignment, "cmid");
                 var name = ReadString(assignment, "name");
-                var grade = ReadDecimal(assignment, "grade");
+                decimal grade = 0m;
+                var hasGrade = assignment.TryGetProperty("grade", out var gradeElement) &&
+                    TryReadDecimal(gradeElement, out grade);
                 var settings = new AssignmentSettingsSummary(
                     assignmentId.ToString(CultureInfo.InvariantCulture),
                     grade > 0 ? grade : 0m,
-                    name);
+                    name,
+                    IsGradable: hasGrade ? grade != 0m : null);
 
                 result[assignmentId.ToString(CultureInfo.InvariantCulture)] = settings;
                 if (cmid > 0)
@@ -252,20 +256,23 @@ internal sealed class MoodleAssignmentSettingsGateway(
         };
     }
 
-    private static decimal ReadDecimal(JsonElement element, string propertyName)
+    private static bool TryReadDecimal(JsonElement value, out decimal result)
     {
-        if (element.ValueKind != JsonValueKind.Object ||
-            !element.TryGetProperty(propertyName, out var value))
+        result = 0m;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var number))
         {
-            return 0m;
+            result = number;
+            return true;
         }
 
-        return value.ValueKind switch
+        if (value.ValueKind == JsonValueKind.String &&
+            decimal.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed))
         {
-            JsonValueKind.Number when value.TryGetDecimal(out var number) => number,
-            JsonValueKind.String when decimal.TryParse(value.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
-            _ => 0m
-        };
+            result = parsed;
+            return true;
+        }
+
+        return false;
     }
 
     private static string? ReadString(JsonElement element, string propertyName) =>

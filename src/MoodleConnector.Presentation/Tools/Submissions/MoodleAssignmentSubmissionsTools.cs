@@ -281,7 +281,12 @@ public sealed class MoodleAssignmentSubmissionsTools(
                         var item = snapshot?.Data is null
                             ? null
                             : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, assignmentId);
-                        if (item is not null && item.IsComplete)
+                        // Older persisted snapshots do not carry the grading
+                        // mode. Refresh before answering the dedicated
+                        // awaiting-grading filter so a legacy no-grade
+                        // activity cannot leak Moodle's raw notgraded flag.
+                        if (item is { IsComplete: true } &&
+                            (filter != AssignmentSubmissionFilter.NeedsGrading || item.IsGradable is not null))
                         {
                             submissionsPage = AssignmentSubmissionSnapshotProjector.ToPage(
                                 item,
