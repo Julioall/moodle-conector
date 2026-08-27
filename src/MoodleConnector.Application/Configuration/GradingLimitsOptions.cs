@@ -25,4 +25,10 @@ public sealed class GradingLimitsOptions
     public int ExtractionWorkers { get; init; } = 4;
 
     public int AiAnalysisWorkers { get; init; } = 3;
+
+    public int BatchLeaseMinutes { get; init; } = 15;
+
+    public int DurableBatchPollSeconds { get; init; } = 5;
+
+    public int DurableBatchClaimSize { get; init; } = 4;
 }

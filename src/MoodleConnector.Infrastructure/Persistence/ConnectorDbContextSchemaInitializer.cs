@@ -52,6 +52,47 @@ public static class ConnectorDbContextSchemaInitializer
         this ConnectorDbContext dbContext,
         CancellationToken cancellationToken = default)
     {
+        var usePostgresSchemaLock = dbContext.Database.ProviderName?.Contains(
+            "Npgsql",
+            StringComparison.OrdinalIgnoreCase) == true;
+        if (usePostgresSchemaLock)
+        {
+            await dbContext.Database.OpenConnectionAsync(cancellationToken);
+            try
+            {
+                await dbContext.Database.ExecuteSqlRawAsync(
+                    "SELECT pg_advisory_lock(hashtextextended('moodle-connector-schema', 0));",
+                    cancellationToken);
+                await ApplyScriptsAsync(dbContext, cancellationToken);
+            }
+            finally
+            {
+                try
+                {
+                    await dbContext.Database.ExecuteSqlRawAsync(
+                        "SELECT pg_advisory_unlock(hashtextextended('moodle-connector-schema', 0));",
+                        CancellationToken.None);
+                }
+                catch
+                {
+                    // Closing the session releases a session-level advisory lock;
+                    // never mask the schema error with an unlock failure.
+                }
+                finally
+                {
+                    await dbContext.Database.CloseConnectionAsync();
+                }
+            }
+            return;
+        }
+
+        await ApplyScriptsAsync(dbContext, cancellationToken);
+    }
+
+    private static async Task ApplyScriptsAsync(
+        ConnectorDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
         foreach (var scriptPath in SchemaScriptPaths)
         {
             var fullPath = Path.Combine(AppContext.BaseDirectory, scriptPath.RelativePath);

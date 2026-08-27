@@ -10,7 +10,7 @@ Validar no banco de produção os contratos de unicidade, JSONB, lease, confirma
 
 ## Contexto e evidência atual
 
-Produção usa Npgsql, índices únicos, JSONB, `ExecuteUpdateAsync`/`ExecuteDeleteAsync` e leases. A suíte usa principalmente EF InMemory. Inserções em fila e snapshots possuem leitura seguida de inserção, suscetível a conflito entre instâncias.
+Produção usa Npgsql, índices únicos, JSONB, `ExecuteUpdateAsync`/`ExecuteDeleteAsync` e leases. A suíte usa principalmente EF InMemory. Inserções em fila e snapshots possuem leitura seguida de inserção, suscetível a conflito entre instâncias. A aplicação do schema agora usa advisory lock de sessão no PostgreSQL, evitando que duas réplicas inicializem os mesmos objetos simultaneamente.
 
 ## Decisão e arquitetura-alvo
 
@@ -38,7 +38,7 @@ certificação de deploy/homologação.
 ## Validação e evidências
 
 ```powershell
-dotnet test tests/MoodleConnector.Application.Tests --filter FullyQualifiedName~MoodleSnapshotPostgresIntegrationTests
+dotnet test tests/MoodleConnector.Application.Tests --filter "FullyQualifiedName~MoodleSnapshotPostgresIntegrationTests|FullyQualifiedName~GradingBatchJobPostgresIntegrationTests"
 dotnet test MoodleConnector.slnx
 ```
 

@@ -1,0 +1,86 @@
+using Microsoft.EntityFrameworkCore;
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Domain.Grading;
+using MoodleConnector.Infrastructure;
+
+namespace MoodleConnector.Application.Tests.Integration;
+
+public sealed class GradingBatchJobPostgresIntegrationTests
+{
+    [Fact]
+    public async Task ConcurrentClaims_OnlyOneWorkerAcquiresLease_AndExpiredLeaseIsRecoverable()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseNpgsql(connectionString)
+            .Options;
+        await using (var schemaDb = new ConnectorDbContext(options))
+        {
+            await schemaDb.ApplyVersionedSchemaAsync();
+        }
+
+        var batch = AssistedGradingBatch.Create(
+            courseId: 10,
+            assignmentIds: [501],
+            createdBySubject: $"integration-{Guid.NewGuid():N}",
+            createdByMoodleUserId: 321,
+            totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await using (var seedDb = new ConnectorDbContext(options))
+        {
+            seedDb.GradingBatches.Add(batch);
+            seedDb.GradingItems.Add(item);
+            await seedDb.SaveChangesAsync();
+        }
+
+        var claimTime = DateTimeOffset.UtcNow;
+        async Task<GradingBatchLeaseClaim?> ClaimAsync(string workerId)
+        {
+            await using var db = new ConnectorDbContext(options);
+            var store = new GradingReviewRepository(db);
+            return await store.TryClaimBatchAsync(
+                batch.Id,
+                workerId,
+                claimTime,
+                TimeSpan.FromMinutes(10),
+                CancellationToken.None);
+        }
+
+        var claims = await Task.WhenAll(ClaimAsync("worker-a"), ClaimAsync("worker-b"));
+        var winner = Assert.Single(claims, claim => claim is not null)!;
+        Assert.Single(claims, claim => claim is null);
+        await using (var verifyDb = new ConnectorDbContext(options))
+        {
+            var persisted = await verifyDb.GradingBatches.SingleAsync(item => item.Id == batch.Id);
+            Assert.Equal(winner.WorkerId, persisted.LeaseOwner);
+            Assert.Equal(1, persisted.AttemptCount);
+        }
+
+        await using (var expiredDb = new ConnectorDbContext(options))
+        {
+            var store = new GradingReviewRepository(expiredDb);
+            var recovered = await store.RecoverExpiredBatchLeasesAsync(
+                claimTime.AddMinutes(11),
+                CancellationToken.None);
+            Assert.Equal(1, recovered);
+        }
+
+        await using (var recoveredDb = new ConnectorDbContext(options))
+        {
+            var store = new GradingReviewRepository(recoveredDb);
+            var retry = await store.TryClaimBatchAsync(
+                batch.Id,
+                "worker-c",
+                claimTime.AddMinutes(11),
+                TimeSpan.FromMinutes(10),
+                CancellationToken.None);
+            Assert.NotNull(retry);
+            Assert.Equal(2, retry!.AttemptCount);
+        }
+    }
+}

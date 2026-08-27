@@ -96,6 +96,90 @@ public sealed class GradingReviewRepositoryTests
         Assert.True(saved.TeacherReviewRequired);
     }
 
+    [Fact]
+    public async Task JobStore_ImpedeClaimConcorrenteRenovaERegistraCheckpoint()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        await dbContext.SaveChangesAsync();
+
+        var now = DateTimeOffset.UtcNow;
+        var first = await store.TryClaimBatchAsync(
+            batch.Id, "worker-a", now, TimeSpan.FromMinutes(10), CancellationToken.None);
+        var second = await store.TryClaimBatchAsync(
+            batch.Id, "worker-b", now, TimeSpan.FromMinutes(10), CancellationToken.None);
+
+        Assert.NotNull(first);
+        Assert.Null(second);
+        Assert.True(await store.RenewBatchLeaseAsync(
+            batch.Id, "worker-a", now.AddMinutes(1), TimeSpan.FromMinutes(10), CancellationToken.None));
+        Assert.True(await store.UpdateBatchCheckpointAsync(
+            batch.Id, "worker-a", item.Id, now.AddMinutes(1), CancellationToken.None));
+        Assert.True(await store.ReleaseBatchLeaseAsync(
+            batch.Id, "worker-a", now.AddMinutes(2), null, null, CancellationToken.None));
+
+        var savedBatch = await store.GetBatchAsync(batch.Id, CancellationToken.None);
+        Assert.NotNull(savedBatch);
+        Assert.Null(savedBatch!.LeaseOwner);
+        Assert.Null(savedBatch.LeaseUntil);
+        Assert.Equal(item.Id, savedBatch.CheckpointItemId);
+        Assert.Equal(1, savedBatch.AttemptCount);
+    }
+
+    [Fact]
+    public async Task JobStore_RecuperaLeaseExpiradoSomenteQuandoHaItemPendente()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        await dbContext.SaveChangesAsync();
+
+        var claimTime = DateTimeOffset.UtcNow;
+        Assert.NotNull(await store.TryClaimBatchAsync(
+            batch.Id, "worker-a", claimTime, TimeSpan.FromMinutes(1), CancellationToken.None));
+
+        var recovered = await store.RecoverExpiredBatchLeasesAsync(
+            claimTime.AddMinutes(2), CancellationToken.None);
+
+        Assert.Equal(1, recovered);
+        var savedBatch = await store.GetBatchAsync(batch.Id, CancellationToken.None);
+        Assert.Equal(GradingBatchStatus.Pending, savedBatch!.Status);
+        Assert.Null(savedBatch.LeaseOwner);
+        Assert.Equal(claimTime.AddMinutes(2), savedBatch.NextAttemptAt);
+    }
+
+    [Fact]
+    public async Task JobStore_ClaimDueRespeitaPrioridadeAntesDaOrdemDeCriacao()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var low = AssistedGradingBatch.Create(10, [501], "teacher-low", 321, 1, priority: "low");
+        var high = AssistedGradingBatch.Create(10, [501], "teacher-high", 321, 1, priority: "high");
+        var normal = AssistedGradingBatch.Create(10, [501], "teacher-normal", 321, 1, priority: "normal");
+        dbContext.GradingBatches.AddRange(low, high, normal);
+        dbContext.GradingItems.AddRange(
+            AssistedGradingItem.Create(low.Id, 10, 501, 9001, 101, 0),
+            AssistedGradingItem.Create(high.Id, 10, 501, 9002, 102, 0),
+            AssistedGradingItem.Create(normal.Id, 10, 501, 9003, 103, 0));
+        await dbContext.SaveChangesAsync();
+
+        var claims = await store.ClaimDueBatchesAsync(
+            "worker-a",
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromMinutes(10),
+            maxBatches: 3,
+            CancellationToken.None);
+
+        Assert.Equal([high.Id, normal.Id, low.Id], claims.Select(claim => claim.BatchId));
+    }
+
     private static ConnectorDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ConnectorDbContext>()

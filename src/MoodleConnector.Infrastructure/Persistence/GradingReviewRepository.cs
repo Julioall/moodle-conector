@@ -4,7 +4,7 @@ using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Infrastructure;
 
-public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGradingReviewRepository
+public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGradingReviewRepository, IGradingBatchJobStore
 {
     public async Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
     {
@@ -102,5 +102,299 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<GradingBatchLeaseClaim>> ClaimDueBatchesAsync(
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        int maxBatches,
+        CancellationToken cancellationToken)
+    {
+        ValidateJobArguments(workerId, leaseDuration);
+        var safeMaxBatches = Math.Clamp(maxBatches, 1, 100);
+        var normalizedWorkerId = workerId.Trim();
+        var leaseUntil = now.Add(leaseDuration);
+
+        var candidates = await dbContext.GradingBatches
+            .AsNoTracking()
+            .Where(batch =>
+                (batch.Status == GradingBatchStatus.Pending ||
+                 (batch.Status == GradingBatchStatus.Processing &&
+                  dbContext.GradingItems.Any(item => item.BatchId == batch.Id && item.Status == GradingItemStatus.Pending))) &&
+                (batch.NextAttemptAt == null || batch.NextAttemptAt <= now) &&
+                (batch.LeaseUntil == null || batch.LeaseUntil <= now || batch.LeaseOwner == normalizedWorkerId))
+            .OrderBy(batch => batch.Priority == "high" ? 0 : batch.Priority == "normal" ? 1 : 2)
+            .ThenBy(batch => batch.CreatedAt)
+            .ThenBy(batch => batch.Id)
+            .Select(batch => batch.Id)
+            .Take(safeMaxBatches)
+            .ToArrayAsync(cancellationToken);
+
+        var claims = new List<GradingBatchLeaseClaim>(candidates.Length);
+        foreach (var batchId in candidates)
+        {
+            var claim = await TryClaimBatchAsync(
+                batchId,
+                normalizedWorkerId,
+                now,
+                leaseDuration,
+                cancellationToken);
+            if (claim is not null)
+            {
+                claims.Add(claim);
+            }
+        }
+
+        return claims;
+    }
+
+    public async Task<GradingBatchLeaseClaim?> TryClaimBatchAsync(
+        Guid batchId,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        ValidateJobArguments(workerId, leaseDuration);
+        if (batchId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(batchId));
+        }
+
+        var normalizedWorkerId = workerId.Trim();
+        var leaseUntil = now.Add(leaseDuration);
+
+        if (IsInMemory)
+        {
+            var inMemoryBatch = await dbContext.GradingBatches
+                .SingleOrDefaultAsync(batch => batch.Id == batchId, cancellationToken);
+            if (inMemoryBatch is null ||
+                inMemoryBatch.Status == GradingBatchStatus.Processing &&
+                (!await dbContext.GradingItems.AnyAsync(item => item.BatchId == batchId && item.Status == GradingItemStatus.Pending, cancellationToken) ||
+                 inMemoryBatch.NextAttemptAt is { } inMemoryNextAttempt && inMemoryNextAttempt > now) ||
+                !inMemoryBatch.TryAcquireLease(normalizedWorkerId, now, leaseDuration))
+            {
+                return null;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return new GradingBatchLeaseClaim(
+                inMemoryBatch.Id,
+                normalizedWorkerId,
+                inMemoryBatch.LeaseUntil!.Value,
+                inMemoryBatch.AttemptCount);
+        }
+
+        var current = await dbContext.GradingBatches
+            .AsNoTracking()
+            .SingleOrDefaultAsync(batch => batch.Id == batchId, cancellationToken);
+        if (current is null ||
+            current.Status is GradingBatchStatus.Completed or GradingBatchStatus.Cancelled ||
+            (current.Status == GradingBatchStatus.Processing &&
+             !await dbContext.GradingItems.AnyAsync(item => item.BatchId == batchId && item.Status == GradingItemStatus.Pending, cancellationToken)) ||
+            current.NextAttemptAt is { } nextAttemptAt && nextAttemptAt > now)
+        {
+            return null;
+        }
+
+        var ownsActiveLease = string.Equals(current.LeaseOwner, normalizedWorkerId, StringComparison.Ordinal) &&
+            current.LeaseUntil is { } activeLeaseUntil &&
+            activeLeaseUntil > now;
+        var attemptCount = ownsActiveLease ? current.AttemptCount : current.AttemptCount + 1;
+        var updated = await dbContext.GradingBatches
+            .Where(batch => batch.Id == batchId &&
+                            (batch.Status == GradingBatchStatus.Pending || batch.Status == GradingBatchStatus.Processing) &&
+                            (batch.NextAttemptAt == null || batch.NextAttemptAt <= now) &&
+                            (batch.LeaseUntil == null || batch.LeaseUntil <= now || batch.LeaseOwner == normalizedWorkerId))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(batch => batch.Status, GradingBatchStatus.Processing)
+                .SetProperty(batch => batch.LeaseOwner, normalizedWorkerId)
+                .SetProperty(batch => batch.LeaseUntil, leaseUntil)
+                .SetProperty(batch => batch.AttemptCount, attemptCount)
+                .SetProperty(batch => batch.NextAttemptAt, (DateTimeOffset?)null)
+                .SetProperty(batch => batch.UpdatedAt, now), cancellationToken);
+
+        return updated == 1
+            ? new GradingBatchLeaseClaim(batchId, normalizedWorkerId, leaseUntil, attemptCount)
+            : null;
+    }
+
+    public async Task<bool> RenewBatchLeaseAsync(
+        Guid batchId,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        ValidateJobArguments(workerId, leaseDuration);
+        var normalizedWorkerId = workerId.Trim();
+
+        if (IsInMemory)
+        {
+            var batch = await dbContext.GradingBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken);
+            if (batch is null || !batch.RenewLease(normalizedWorkerId, now, leaseDuration))
+            {
+                return false;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        return await dbContext.GradingBatches
+            .Where(batch => batch.Id == batchId &&
+                            batch.Status == GradingBatchStatus.Processing &&
+                            batch.LeaseOwner == normalizedWorkerId &&
+                            batch.LeaseUntil != null && batch.LeaseUntil > now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(batch => batch.LeaseUntil, now.Add(leaseDuration))
+                .SetProperty(batch => batch.UpdatedAt, now), cancellationToken) == 1;
+    }
+
+    public async Task<bool> ReleaseBatchLeaseAsync(
+        Guid batchId,
+        string workerId,
+        DateTimeOffset now,
+        string? errorCode,
+        DateTimeOffset? nextAttemptAt,
+        CancellationToken cancellationToken)
+    {
+        if (batchId == Guid.Empty || string.IsNullOrWhiteSpace(workerId))
+        {
+            return false;
+        }
+
+        var normalizedWorkerId = workerId.Trim();
+        var normalizedErrorCode = string.IsNullOrWhiteSpace(errorCode)
+            ? null
+            : errorCode.Trim()[..Math.Min(120, errorCode.Trim().Length)];
+
+        if (IsInMemory)
+        {
+            var batch = await dbContext.GradingBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken);
+            if (batch is null || !batch.ReleaseLease(normalizedWorkerId, now, normalizedErrorCode, nextAttemptAt))
+            {
+                return false;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        return await dbContext.GradingBatches
+            .Where(batch => batch.Id == batchId && batch.LeaseOwner == normalizedWorkerId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(batch => batch.LeaseOwner, (string?)null)
+                .SetProperty(batch => batch.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(batch => batch.LastErrorCode, normalizedErrorCode)
+                .SetProperty(batch => batch.NextAttemptAt, nextAttemptAt)
+                .SetProperty(batch => batch.UpdatedAt, now), cancellationToken) == 1;
+    }
+
+    public async Task<bool> UpdateBatchCheckpointAsync(
+        Guid batchId,
+        string workerId,
+        Guid itemId,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (batchId == Guid.Empty || itemId == Guid.Empty || string.IsNullOrWhiteSpace(workerId))
+        {
+            return false;
+        }
+
+        var normalizedWorkerId = workerId.Trim();
+        var itemBelongsToBatch = await dbContext.GradingItems
+            .AnyAsync(item => item.Id == itemId && item.BatchId == batchId, cancellationToken);
+        if (!itemBelongsToBatch)
+        {
+            return false;
+        }
+
+        if (IsInMemory)
+        {
+            var batch = await dbContext.GradingBatches.SingleOrDefaultAsync(item => item.Id == batchId, cancellationToken);
+            if (batch is null || !batch.UpdateCheckpoint(normalizedWorkerId, itemId, now))
+            {
+                return false;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        return await dbContext.GradingBatches
+            .Where(batch => batch.Id == batchId &&
+                            batch.Status == GradingBatchStatus.Processing &&
+                            batch.LeaseOwner == normalizedWorkerId &&
+                            batch.LeaseUntil != null && batch.LeaseUntil > now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(batch => batch.CheckpointItemId, itemId)
+                .SetProperty(batch => batch.UpdatedAt, now), cancellationToken) == 1;
+    }
+
+    public async Task<int> RecoverExpiredBatchLeasesAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        if (IsInMemory)
+        {
+            var batches = await dbContext.GradingBatches
+                .Where(batch => batch.Status == GradingBatchStatus.Processing &&
+                                batch.LeaseUntil != null && batch.LeaseUntil <= now &&
+                                dbContext.GradingItems.Any(item => item.BatchId == batch.Id && item.Status == GradingItemStatus.Pending))
+                .ToArrayAsync(cancellationToken);
+            var inMemoryRecovered = batches.Count(batch => batch.RecoverExpiredLease(now));
+            if (inMemoryRecovered > 0)
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return inMemoryRecovered;
+        }
+
+        var relationalRecovered = await dbContext.GradingBatches
+            .Where(batch => batch.Status == GradingBatchStatus.Processing &&
+                            batch.LeaseUntil != null && batch.LeaseUntil <= now &&
+                            dbContext.GradingItems.Any(item => item.BatchId == batch.Id && item.Status == GradingItemStatus.Pending))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(batch => batch.Status, GradingBatchStatus.Pending)
+                .SetProperty(batch => batch.LeaseOwner, (string?)null)
+                .SetProperty(batch => batch.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(batch => batch.NextAttemptAt, now)
+                .SetProperty(batch => batch.UpdatedAt, now), cancellationToken);
+
+        // A crashed worker may have finished all pending items before losing its
+        // lease. In that case clear only the lease and preserve the Processing
+        // state so the poller does not spin on an already drained batch.
+        var releasedWithoutPending = await dbContext.GradingBatches
+            .Where(batch => batch.Status == GradingBatchStatus.Processing &&
+                            batch.LeaseUntil != null && batch.LeaseUntil <= now &&
+                            !dbContext.GradingItems.Any(item => item.BatchId == batch.Id && item.Status == GradingItemStatus.Pending))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(batch => batch.LeaseOwner, (string?)null)
+                .SetProperty(batch => batch.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(batch => batch.UpdatedAt, now), cancellationToken);
+
+        return relationalRecovered + releasedWithoutPending;
+    }
+
+    private bool IsInMemory => string.Equals(
+        dbContext.Database.ProviderName,
+        "Microsoft.EntityFrameworkCore.InMemory",
+        StringComparison.Ordinal);
+
+    private static void ValidateJobArguments(string workerId, TimeSpan leaseDuration)
+    {
+        if (string.IsNullOrWhiteSpace(workerId))
+        {
+            throw new ArgumentException("O worker do lote e obrigatorio.", nameof(workerId));
+        }
+
+        if (leaseDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration), "A duracao do lease deve ser positiva.");
+        }
     }
 }

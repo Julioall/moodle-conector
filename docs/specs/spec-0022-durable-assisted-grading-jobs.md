@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft.
+In Progress.
 
 ## Objetivo
 
@@ -25,8 +25,8 @@ acadêmico além da política aprovada.
   porém o fluxo de criação ainda concentra trabalho no request.
 - `RawFileRetentionDays` e `DraftRetentionDays` estão configurados, mas não há evidência
   de cleanup efetivo. `ExtractedTextRef` pode conter texto integral da entrega.
-- A prioridade declarada agora é persistida no lote, mas ainda não altera a ordem de
-  processamento até a fila durável da Fase 4.
+- A prioridade declarada agora é persistida e participa da ordem inicial de claim durável;
+  aging/fairness e limites de starvation ainda ficam para a Fase 4.
 - O processamento persiste estados em conjuntos grandes, ampliando a janela de perda e de
   duplicação após falha.
 
@@ -107,6 +107,17 @@ acadêmico além da política aprovada.
 5. Adicionar teste de duas réplicas e de queda entre `Pending` e enqueue.
 6. Implementar cleanup real, dry-run, métricas e alertas.
 7. Migrar gradualmente do channel como fonte primária para o job store.
+
+### Incremento inicial implementado
+
+O lote passou a ter estado durável de execução (`LeaseOwner`, `LeaseUntil`,
+`AttemptCount`, `NextAttemptAt`, `LastErrorCode` e `CheckpointItemId`). O repositório possui
+claims condicionais com ordenação por prioridade, renovação, liberação, checkpoint e
+recuperação de leases expirados em migração aditiva. O channel permanece como acelerador; o worker faz polling do job store e
+continua aceitando itens enfileirados pelo fluxo legado.
+
+Este incremento ainda não move a ingestão pesada para fora do request, não implementa leases
+por item nem cleanup de retenção; essas entregas permanecem nas etapas seguintes.
 
 ## Critérios de aceite
 

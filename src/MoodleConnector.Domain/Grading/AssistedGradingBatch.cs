@@ -38,6 +38,22 @@ public sealed class AssistedGradingBatch
 
     public bool IncludeCourseMaterials { get; private init; }
 
+    /// <summary>
+    /// Identificador efêmero do processo que possui o lease de processamento.
+    /// Nunca contém credenciais ou dados do usuário.
+    /// </summary>
+    public string? LeaseOwner { get; private set; }
+
+    public DateTimeOffset? LeaseUntil { get; private set; }
+
+    public int AttemptCount { get; private set; }
+
+    public DateTimeOffset? NextAttemptAt { get; private set; }
+
+    public string? LastErrorCode { get; private set; }
+
+    public Guid? CheckpointItemId { get; private set; }
+
     public int ProcessedItems { get; private set; }
 
     public int ReadyItems { get; private set; }
@@ -158,5 +174,115 @@ public sealed class AssistedGradingBatch
 
         Status = GradingBatchStatus.Cancelled;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Tenta adquirir ou reassumir o lease em memória. A implementação PostgreSQL
+    /// usa os mesmos predicados de forma atômica no repositório durável.
+    /// </summary>
+    public bool TryAcquireLease(string workerId, DateTimeOffset now, TimeSpan leaseDuration)
+    {
+        ValidateLeaseArguments(workerId, leaseDuration);
+        if (Status is GradingBatchStatus.Completed or GradingBatchStatus.Cancelled)
+        {
+            return false;
+        }
+
+        var activeForAnotherWorker = LeaseUntil is { } leaseUntil &&
+            leaseUntil > now &&
+            !string.Equals(LeaseOwner, workerId, StringComparison.Ordinal);
+        if (activeForAnotherWorker)
+        {
+            return false;
+        }
+
+        if (!string.Equals(LeaseOwner, workerId, StringComparison.Ordinal))
+        {
+            AttemptCount++;
+        }
+
+        LeaseOwner = workerId.Trim();
+        LeaseUntil = now.Add(leaseDuration);
+        NextAttemptAt = null;
+        Status = GradingBatchStatus.Processing;
+        UpdatedAt = now;
+        return true;
+    }
+
+    public bool RenewLease(string workerId, DateTimeOffset now, TimeSpan leaseDuration)
+    {
+        ValidateLeaseArguments(workerId, leaseDuration);
+        if (Status != GradingBatchStatus.Processing ||
+            !string.Equals(LeaseOwner, workerId, StringComparison.Ordinal) ||
+            LeaseUntil is not { } leaseUntil || leaseUntil <= now)
+        {
+            return false;
+        }
+
+        LeaseUntil = now.Add(leaseDuration);
+        UpdatedAt = now;
+        return true;
+    }
+
+    public bool ReleaseLease(string workerId, DateTimeOffset now, string? errorCode = null, DateTimeOffset? nextAttemptAt = null)
+    {
+        if (string.IsNullOrWhiteSpace(workerId) ||
+            !string.Equals(LeaseOwner, workerId.Trim(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        LeaseOwner = null;
+        LeaseUntil = null;
+        LastErrorCode = string.IsNullOrWhiteSpace(errorCode) ? null : errorCode.Trim();
+        NextAttemptAt = nextAttemptAt;
+        UpdatedAt = now;
+        return true;
+    }
+
+    public bool RecoverExpiredLease(DateTimeOffset now)
+    {
+        if (Status != GradingBatchStatus.Processing ||
+            LeaseUntil is not { } leaseUntil ||
+            leaseUntil > now)
+        {
+            return false;
+        }
+
+        LeaseOwner = null;
+        LeaseUntil = null;
+        NextAttemptAt = now;
+        Status = GradingBatchStatus.Pending;
+        UpdatedAt = now;
+        return true;
+    }
+
+    public bool UpdateCheckpoint(string workerId, Guid itemId, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(workerId) ||
+            itemId == Guid.Empty ||
+            Status != GradingBatchStatus.Processing ||
+            !string.Equals(LeaseOwner, workerId.Trim(), StringComparison.Ordinal) ||
+            LeaseUntil is not { } leaseUntil || leaseUntil <= now)
+        {
+            return false;
+        }
+
+        CheckpointItemId = itemId;
+        UpdatedAt = now;
+        return true;
+    }
+
+    private static void ValidateLeaseArguments(string workerId, TimeSpan leaseDuration)
+    {
+        if (string.IsNullOrWhiteSpace(workerId))
+        {
+            throw new ArgumentException("O worker do lote e obrigatorio.", nameof(workerId));
+        }
+
+        if (leaseDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(leaseDuration), "A duracao do lease deve ser positiva.");
+        }
     }
 }

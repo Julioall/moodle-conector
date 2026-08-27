@@ -465,9 +465,12 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         batch.Property(x => x.IncludeRubric).IsRequired();
         batch.Property(x => x.IncludeSubmissionFiles).IsRequired();
         batch.Property(x => x.IncludeCourseMaterials).IsRequired();
+        batch.Property(x => x.LeaseOwner).HasMaxLength(200);
+        batch.Property(x => x.LastErrorCode).HasMaxLength(120);
         batch.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
         batch.HasIndex(x => new { x.CreatedBySubject, x.Status });
         batch.HasIndex(x => new { x.CourseId, x.Status });
+        batch.HasIndex(x => new { x.Status, x.NextAttemptAt, x.LeaseUntil, x.Priority });
 
         var item = modelBuilder.Entity<AssistedGradingItem>();
         item.ToTable("grading_item");

@@ -96,7 +96,9 @@ public static class DependencyInjection
         services.AddSingleton<IPedagogicGuidanceSearch>(_ =>
             new MarkdownPedagogicGuidanceSearch(Path.Combine(AppContext.BaseDirectory, "public", "pedagogic")));
         services.AddScoped<IPendingMoodleActionRepository, PendingMoodleActionRepository>();
-        services.AddScoped<IGradingReviewRepository, GradingReviewRepository>();
+        services.AddScoped<GradingReviewRepository>();
+        services.AddScoped<IGradingReviewRepository>(sp => sp.GetRequiredService<GradingReviewRepository>());
+        services.AddScoped<IGradingBatchJobStore>(sp => sp.GetRequiredService<GradingReviewRepository>());
         services.AddScoped<IMoodleAuditLogRepository, MoodleAuditLogRepository>();
         services.AddScoped<IUserMemoryRepository, UserMemoryRepository>();
         services.AddScoped<IUserMemoryDocumentRepository, UserMemoryDocumentRepository>();

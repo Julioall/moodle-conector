@@ -244,4 +244,27 @@ public sealed class SchemaScriptTests
         Assert.Contains("WorkerId", worker, StringComparison.Ordinal);
         Assert.Contains("VALUES (40, 'snapshot worker instance lineage'", worker, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task AssistedGradingBatchConfigurationScript_DeveSerAditivoEConterCamposDeLease()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "041_grading_batch_configuration.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de configuracao de lote nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"TeacherInstructions\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"IncludeRubric\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"LeaseOwner\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"CheckpointItemId\"", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (41, 'assisted grading batch configuration'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

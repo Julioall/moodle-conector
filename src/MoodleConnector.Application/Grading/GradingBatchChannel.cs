@@ -31,4 +31,5 @@ public sealed class GradingBatchChannel
 
 public sealed record GradingBatchWorkItem(
     Guid BatchId,
-    DateTimeOffset EnqueuedAt);
+    DateTimeOffset EnqueuedAt,
+    string? LeaseOwner = null);
