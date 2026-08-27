@@ -40,6 +40,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<GradingArtifact> GradingArtifacts => Set<GradingArtifact>();
     public DbSet<GradingEvidence> GradingEvidence => Set<GradingEvidence>();
     public DbSet<GradingContextSnapshotDocument> GradingContextSnapshots => Set<GradingContextSnapshotDocument>();
+    public DbSet<AiGradingProposalDocument> AiGradingProposals => Set<AiGradingProposalDocument>();
     public DbSet<UserMemory> UserMemories => Set<UserMemory>();
     public DbSet<UserMemoryDocument> UserMemoryDocuments => Set<UserMemoryDocument>();
     public DbSet<OpenIddictEntityFrameworkCoreApplication> OAuthApplications => Set<OpenIddictEntityFrameworkCoreApplication>();
@@ -537,6 +538,24 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
             .OnDelete(DeleteBehavior.Cascade);
         contextSnapshot.HasIndex(x => new { x.GradingItemId, x.Version }).IsUnique();
         contextSnapshot.HasIndex(x => new { x.GradingItemId, x.ContextHash }).IsUnique();
+
+        var proposal = modelBuilder.Entity<AiGradingProposalDocument>();
+        proposal.ToTable("grading_ai_proposal");
+        proposal.HasKey(x => x.Id);
+        proposal.Property(x => x.SchemaVersion).HasMaxLength(32).IsRequired();
+        proposal.Property(x => x.ContextHash).HasMaxLength(64);
+        proposal.Property(x => x.ProposalHash).HasMaxLength(64).IsRequired();
+        proposal.Property(x => x.Status).HasMaxLength(80).IsRequired();
+        proposal.Property(x => x.Confidence).HasPrecision(5, 4).IsRequired();
+        proposal.Property(x => x.ReviewRequired).IsRequired();
+        proposal.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
+        proposal.Property(x => x.CreatedAt).IsRequired();
+        proposal.HasOne<AssistedGradingItem>()
+            .WithMany()
+            .HasForeignKey(x => x.GradingItemId)
+            .OnDelete(DeleteBehavior.Cascade);
+        proposal.HasIndex(x => new { x.GradingItemId, x.Version }).IsUnique();
+        proposal.HasIndex(x => new { x.GradingItemId, x.ProposalHash }).IsUnique();
     }
 }
 

@@ -268,6 +268,72 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task SaveAiBatch_PublicaPropostaVersionadaVinculadaAoContexto()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        var context = GradingContext.Build(
+            item.Id,
+            batch.Id,
+            "10",
+            "501",
+            "9001",
+            "101",
+            "Enunciado",
+            "Criterio",
+            null,
+            10m,
+            null,
+            "Texto",
+            [],
+            null,
+            null);
+        var snapshot = GradingContextSnapshotFactory.Create(item, context, new GradingContextOptions());
+        item.RecordContextSnapshot(snapshot);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var proposalStore = new CapturingProposalStore();
+        var sut = new SaveAiGradingBatchCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunMoodleUserResolver(),
+            new RunAuditLogRepository(),
+            new RunAssignmentSettingsGateway(maxGrade: 10m),
+            proposalStore);
+
+        var result = await sut.Handle(
+            new SaveAiGradingBatchCommand(
+                batch.Id,
+                [new AiGradingItemInput(
+                    item.Id,
+                    null,
+                    null,
+                    "Feedback estruturado",
+                    new AiGradingProposalInput(
+                        1,
+                        item.ContextHash,
+                        8m,
+                        "Feedback estruturado",
+                        [new AiGradingCriterionInput("C1", "Criterio", 10m, 8m, AiGradingCriterionSource.FormalRubric, "Evidencia", null, false, false, [])],
+                        [],
+                        [],
+                        .9m,
+                        new GradingExtractionSummary("succeeded", 1, false, 5, 5, null),
+                        new GradingEvidenceCoverage(1, 1, 1, 1, 5, 5, false)))]),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.SavedItems);
+        var proposal = Assert.Single(proposalStore.Proposals);
+        Assert.Equal(item.ContextHash, proposal.ContextHash);
+        Assert.Equal(8m, proposal.SuggestedGrade);
+        Assert.True(proposal.ReviewRequired);
+        Assert.Equal(GradingItemStatus.DraftReady, item.Status);
+        Assert.Equal(.9m, item.Confidence);
+    }
+
+    [Fact]
     public async Task PrepareAiBatch_ExcluiItensBloqueadosDoPacoteDeCorrecao()
     {
         var repository = new RunRepository();
@@ -594,5 +660,19 @@ public sealed class PendingGradingRunCommandHandlerTests
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(string createdBySubject, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<AssistedGradingBatch>>([]);
         public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class CapturingProposalStore : IGradingProposalStore
+    {
+        public List<AiGradingProposal> Proposals { get; } = [];
+
+        public Task<int> GetNextVersionAsync(Guid gradingItemId, CancellationToken cancellationToken) =>
+            Task.FromResult(Proposals.Count(proposal => proposal.ItemId == gradingItemId) + 1);
+
+        public Task PublishAsync(AiGradingProposal proposal, CancellationToken cancellationToken)
+        {
+            Proposals.Add(proposal);
+            return Task.CompletedTask;
+        }
     }
 }

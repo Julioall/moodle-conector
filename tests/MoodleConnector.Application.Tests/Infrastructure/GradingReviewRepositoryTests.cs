@@ -142,6 +142,96 @@ public sealed class GradingReviewRepositoryTests
     }
 
     [Fact]
+    public async Task ProposalStore_PublicaVersoesAppendOnlyEDeFormaIdempotente()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        await dbContext.SaveChangesAsync();
+
+        var context = GradingContext.Build(
+            item.Id,
+            batch.Id,
+            "10",
+            "501",
+            "9001",
+            "101",
+            "Enunciado",
+            "Criterio",
+            null,
+            10m,
+            null,
+            "Texto de entrega",
+            [],
+            null,
+            null);
+        var snapshot = GradingContextSnapshotFactory.Create(item, context, new GradingContextOptions());
+        item.RecordContextSnapshot(snapshot);
+        var proposal = AiGradingProposal.Create(
+            item.Id,
+            batch.Id,
+            await repository.GetNextVersionAsync(item.Id, CancellationToken.None),
+            item.ContextHash,
+            8m,
+            "Feedback",
+            [new AiGradingCriterionProposal("C1", "Criterio", 10m, 8m, AiGradingCriterionSource.FormalRubric, "evidencia", null, false, false, [])],
+            [],
+            [],
+            new GradingScaleSnapshot(10m, "points", "Moodle"),
+            new GradingExtractionSummary("succeeded", 1, false, 20, 20, null),
+            new GradingEvidenceCoverage(1, 1, 1, 1, 20, 20, false),
+            new AiGradingConfidenceResult(.9m, [], false),
+            reviewRequired: false,
+            createdAt: DateTimeOffset.UtcNow);
+
+        IGradingProposalStore store = repository;
+        await store.PublishAsync(proposal, CancellationToken.None);
+        await store.PublishAsync(proposal, CancellationToken.None);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
+        var persisted = Assert.Single(dbContext.AiGradingProposals);
+        Assert.Equal(proposal.ProposalHash, persisted.ProposalHash);
+        Assert.Contains("C1", persisted.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Texto de entrega", persisted.PayloadJson, StringComparison.Ordinal);
+        Assert.Equal(2, await store.GetNextVersionAsync(item.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RetentionStore_RedigeTextoExpiradoPreservaHashEEstado()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var expired = new GradingArtifact(
+            Guid.NewGuid(), item.Id, "submission_file", "answer.txt", "text/plain", "abc123", 10,
+            ExtractionStatus.Succeeded, "texto confidencial", null, DateTimeOffset.UtcNow.AddDays(-10));
+        var recent = expired with { Id = Guid.NewGuid(), ExtractedTextRef = "texto recente", CreatedAt = DateTimeOffset.UtcNow };
+        var context = expired with { Id = Guid.NewGuid(), ArtifactType = "assignment_context", ExtractedTextRef = "enunciado", CreatedAt = DateTimeOffset.UtcNow.AddDays(-10) };
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        dbContext.GradingArtifacts.AddRange(expired, recent, context);
+        await dbContext.SaveChangesAsync();
+
+        IGradingRetentionStore store = repository;
+        var redacted = await store.RedactExpiredArtifactTextAsync(
+            DateTimeOffset.UtcNow.AddDays(-7),
+            CancellationToken.None);
+
+        Assert.Equal(1, redacted);
+        var savedExpired = await dbContext.GradingArtifacts.SingleAsync(artifact => artifact.Id == expired.Id);
+        Assert.Null(savedExpired.ExtractedTextRef);
+        Assert.Equal("retention_redacted", savedExpired.SummaryRef);
+        Assert.Equal(expired.Sha256, savedExpired.Sha256);
+        Assert.Equal(expired.ExtractionStatus, savedExpired.ExtractionStatus);
+        Assert.Equal("texto recente", (await dbContext.GradingArtifacts.SingleAsync(artifact => artifact.Id == recent.Id)).ExtractedTextRef);
+        Assert.Equal("enunciado", (await dbContext.GradingArtifacts.SingleAsync(artifact => artifact.Id == context.Id)).ExtractedTextRef);
+    }
+
+    [Fact]
     public async Task JobStore_ImpedeClaimConcorrenteRenovaERegistraCheckpoint()
     {
         await using var dbContext = CreateDbContext();
@@ -223,6 +313,30 @@ public sealed class GradingReviewRepositoryTests
             CancellationToken.None);
 
         Assert.Equal([high.Id, normal.Id, low.Id], claims.Select(claim => claim.BatchId));
+    }
+
+    [Fact]
+    public async Task JobStore_ClaimDuePromoveLoteAntigoParaEvitarStarvation()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var agedLow = AssistedGradingBatch.Create(10, [501], "teacher-aged", 321, 1, priority: "low");
+        var freshHigh = AssistedGradingBatch.Create(10, [501], "teacher-fresh", 321, 1, priority: "high");
+        dbContext.GradingBatches.AddRange(agedLow, freshHigh);
+        dbContext.GradingItems.AddRange(
+            AssistedGradingItem.Create(agedLow.Id, 10, 501, 9001, 101, 0),
+            AssistedGradingItem.Create(freshHigh.Id, 10, 501, 9002, 102, 0));
+        dbContext.Entry(agedLow).Property(batch => batch.CreatedAt).CurrentValue = DateTimeOffset.UtcNow.AddMinutes(-31);
+        await dbContext.SaveChangesAsync();
+
+        var claims = await store.ClaimDueBatchesAsync(
+            "worker-a",
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromMinutes(10),
+            maxBatches: 2,
+            CancellationToken.None);
+
+        Assert.Equal([agedLow.Id, freshHigh.Id], claims.Select(claim => claim.BatchId));
     }
 
     [Fact]

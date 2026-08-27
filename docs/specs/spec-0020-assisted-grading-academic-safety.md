@@ -142,6 +142,22 @@ atribui confiança `0`, ignora o campo nominal legado e rejeita notas negativas 
 escala confirmada. A proposta ainda exige revisão humana e não é promovida a uma proposta IA
 versionada até a implementação completa da Fase 3.
 
+### Incremento de proposta versionada
+
+Foi introduzido um contrato estruturado opcional (`proposal`) no salvamento do lote. A
+proposta é normalizada e validada no backend, recebe hash determinístico e é persistida de
+forma append-only em `grading_ai_proposal`. O hash do contexto do item é obrigatório para
+propostas estruturadas; uma divergência impede o salvamento. A escala usada para validar
+qualquer nota continua vindo do Moodle, nunca do payload do modelo.
+
+A confiança não é aceita como verdade do modelo: o backend recalcula o valor a partir da
+confiança declarada como fator limitado, cobertura, estado de extração, escala confirmada e
+proveniência dos critérios. Propostas com cobertura incompleta, escala desconhecida,
+critérios ausentes ou baixa confiança permanecem com `ReviewRequired=true`. Critérios
+`GeneratedSupport` só podem distribuir pontos quando `TeacherApproved=true`. O adaptador
+legado também é registrado como proposta versionada sem nota/confiança promovidas, mantendo
+revisão humana obrigatória e sem armazenar a submissão bruta no payload.
+
 ## Critérios de aceite
 
 - [ ] Escala não resolvida nunca produz `SuggestedGrade=100` nem permite lançamento

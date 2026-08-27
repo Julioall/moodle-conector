@@ -4,8 +4,10 @@ using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Infrastructure;
 
-public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGradingReviewRepository, IGradingBatchJobStore, IGradingContextSnapshotStore
+public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGradingReviewRepository, IGradingBatchJobStore, IGradingContextSnapshotStore, IGradingProposalStore, IGradingRetentionStore
 {
+    private static readonly TimeSpan FairnessAgingThreshold = TimeSpan.FromMinutes(30);
+
     public async Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
     {
         await dbContext.GradingBatches.AddAsync(batch, cancellationToken);
@@ -59,6 +61,104 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         await dbContext.GradingContextSnapshots.AddAsync(
             GradingContextSnapshotDocument.FromSnapshot(snapshot),
             cancellationToken);
+    }
+
+    public async Task<int> GetNextVersionAsync(
+        Guid gradingItemId,
+        CancellationToken cancellationToken)
+    {
+        if (gradingItemId == Guid.Empty)
+        {
+            throw new ArgumentException("O item e obrigatorio.", nameof(gradingItemId));
+        }
+
+        var persistedCurrent = await dbContext.AiGradingProposals
+            .Where(proposal => proposal.GradingItemId == gradingItemId)
+            .Select(proposal => (int?)proposal.Version)
+            .MaxAsync(cancellationToken);
+        var localCurrent = dbContext.AiGradingProposals.Local
+            .Where(proposal => proposal.GradingItemId == gradingItemId)
+            .Select(proposal => (int?)proposal.Version)
+            .Max() ?? 0;
+        return Math.Max(persistedCurrent ?? 0, localCurrent) + 1;
+    }
+
+    public async Task PublishAsync(
+        AiGradingProposal proposal,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+
+        var existsInUnitOfWork = dbContext.AiGradingProposals.Local.Any(document =>
+            document.GradingItemId == proposal.ItemId &&
+            document.Version == proposal.Version &&
+            document.ProposalHash == proposal.ProposalHash);
+        if (existsInUnitOfWork)
+        {
+            return;
+        }
+
+        var exists = await dbContext.AiGradingProposals.AnyAsync(document =>
+            document.GradingItemId == proposal.ItemId &&
+            document.Version == proposal.Version &&
+            document.ProposalHash == proposal.ProposalHash,
+            cancellationToken);
+        if (exists)
+        {
+            return;
+        }
+
+        await dbContext.AiGradingProposals.AddAsync(
+            AiGradingProposalDocument.FromProposal(proposal),
+            cancellationToken);
+    }
+
+    public async Task<int> RedactExpiredArtifactTextAsync(
+        DateTimeOffset cutoff,
+        CancellationToken cancellationToken)
+    {
+        if (cutoff <= DateTimeOffset.MinValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(cutoff));
+        }
+
+        if (IsInMemory)
+        {
+            var expired = await dbContext.GradingArtifacts
+                .Where(artifact => artifact.CreatedAt < cutoff &&
+                                   artifact.ArtifactType == "submission_file" &&
+                                   artifact.ExtractedTextRef != null)
+                .ToArrayAsync(cancellationToken);
+            if (expired.Length == 0)
+            {
+                return 0;
+            }
+
+            dbContext.GradingArtifacts.RemoveRange(expired);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            foreach (var artifact in expired)
+            {
+                await dbContext.GradingArtifacts.AddAsync(
+                    artifact with
+                    {
+                        ExtractedTextRef = null,
+                        SummaryRef = "retention_redacted"
+                    },
+                    cancellationToken);
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return expired.Length;
+        }
+
+        return await dbContext.GradingArtifacts
+            .Where(artifact => artifact.CreatedAt < cutoff &&
+                               artifact.ArtifactType == "submission_file" &&
+                               artifact.ExtractedTextRef != null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(artifact => artifact.ExtractedTextRef, (string?)null)
+                .SetProperty(artifact => artifact.SummaryRef, "retention_redacted"),
+                cancellationToken);
     }
 
     public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken)
@@ -144,7 +244,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         ValidateJobArguments(workerId, leaseDuration);
         var safeMaxBatches = Math.Clamp(maxBatches, 1, 100);
         var normalizedWorkerId = workerId.Trim();
-        var leaseUntil = now.Add(leaseDuration);
+        var agingCutoff = now.Subtract(FairnessAgingThreshold);
 
         var candidates = await dbContext.GradingBatches
             .AsNoTracking()
@@ -154,7 +254,10 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
                   dbContext.GradingItems.Any(item => item.BatchId == batch.Id && item.Status == GradingItemStatus.Pending))) &&
                 (batch.NextAttemptAt == null || batch.NextAttemptAt <= now) &&
                 (batch.LeaseUntil == null || batch.LeaseUntil <= now || batch.LeaseOwner == normalizedWorkerId))
-            .OrderBy(batch => batch.Priority == "high" ? 0 : batch.Priority == "normal" ? 1 : 2)
+            // Aged jobs are promoted before priority so a low-priority queue
+            // cannot starve indefinitely under sustained high-priority load.
+            .OrderBy(batch => batch.CreatedAt <= agingCutoff ? 0 : 1)
+            .ThenBy(batch => batch.Priority == "high" ? 0 : batch.Priority == "normal" ? 1 : 2)
             .ThenBy(batch => batch.CreatedAt)
             .ThenBy(batch => batch.Id)
             .Select(batch => batch.Id)

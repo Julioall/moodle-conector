@@ -140,6 +140,20 @@ Este incremento ainda não move a ingestão pesada para fora do request nem impl
 fairness/aging ou checkpoints por etapa do item; essas entregas permanecem nas etapas
 seguintes.
 
+### Incremento de retenção redacional
+
+Foi adicionado um worker agendado de retenção que aplica `RawFileRetentionDays` aos
+artifacts de submissão. Após o cutoff, o texto extraído é removido, mas o registro do
+artifact, hash, estado de extração, tamanho, timestamps e referências de cobertura são
+preservados. Auditoria, snapshots de contexto, evidências e ações pendentes não são tocados.
+O store PostgreSQL usa atualização set-based; o adaptador InMemory cobre o mesmo contrato
+para testes. Falhas são registradas como warning e não são convertidas em sucesso silencioso.
+
+Ainda permanecem pendentes a criação leve (download/extraction fora do request), checkpoints
+por etapa. A ordenação durável já promove lotes com mais de 30 minutos antes da prioridade,
+evitando starvation sob carga contínua; a política ainda deve receber métricas de idade no
+rollout.
+
 ## Critérios de aceite
 
 - [ ] Criar um lote de 400 itens não executa download/extraction no request e retorna um

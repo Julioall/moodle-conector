@@ -121,6 +121,17 @@ O adaptador legado de salvamento também foi endurecido: notas negativas ou acim
 confirmada são rejeitadas, o campo nominal legado é ignorado e a confiança fica em `0` até
 que o contrato versionado de proposta com evidências e cobertura seja integrado.
 
+### Incremento de proposta IA versionada
+
+O salvamento do lote agora aceita, de forma aditiva, uma entrada `proposal` estruturada.
+Ela é vinculada ao `ContextHash` do item, validada contra a escala autoritativa do Moodle e
+persistida em `grading_ai_proposal` com versão, hash determinístico, cobertura, extração,
+proveniência de critérios, evidências mínimas, lacunas e `ReviewRequired`. O cálculo de
+confiança é determinístico e conservador; o valor fornecido pelo modelo é apenas um fator
+limitado. O contrato legado também gera uma proposta marcada como
+`legacy_review_required`, sem promover nota ou confiança no artefato IA. A publicação é
+idempotente para a mesma versão/hash e não duplica texto bruto da submissão.
+
 ### Fase 4 — job durável e processamento em escala
 
 **Spec:** 0022.
@@ -136,8 +147,16 @@ aprovado.
 **Incremento entregue:** além do claim/lease por lote, itens `Pending` possuem claim,
 renovação, liberação, recuperação de expiração e contador atômico de tentativas. O worker
 reclama o item antes de processá-lo e libera o lease após persistir o resultado; a fundação
-continua compatível com o canal local como acelerador. Ingestão leve, fairness, cleanup e
-checkpoints por etapa permanecem pendentes.
+continua compatível com o canal local como acelerador.
+
+Também foi adicionado o `GradingRetentionWorkerService`, que executa cleanup periódico
+conforme `RawFileRetentionDays`, redigindo apenas `ExtractedTextRef` de artifacts
+`submission_file` expirados e mantendo hash, estado, cobertura e identidade técnica. A
+operação é observável, idempotente e não remove auditoria ou snapshots.
+
+Ingestão leve e checkpoints por etapa permanecem pendentes. A ordenação da fila durável já
+promove lotes envelhecidos (30 minutos) antes da prioridade para evitar starvation; métricas
+de idade e calibração do limite ficam para o rollout.
 
 ### Fase 5 — rollout e certificação
 

@@ -337,4 +337,25 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (44, 'assisted grading item leases'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task GradingAiProposalScript_DevePersistirVersaoHashEConfidenceComLimites()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "045_grading_ai_proposals.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de proposta IA nao encontrado em {scriptPath}.");
+        var sql = await File.ReadAllTextAsync(scriptPath);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS grading_ai_proposal", sql, StringComparison.Ordinal);
+        Assert.Contains("\"ProposalHash\" character varying(64) NOT NULL", sql, StringComparison.Ordinal);
+        Assert.Contains("\"Confidence\" >= 0 AND \"Confidence\" <= 1", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_ai_proposal_Item_Version", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (45, 'versioned assisted grading AI proposals'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

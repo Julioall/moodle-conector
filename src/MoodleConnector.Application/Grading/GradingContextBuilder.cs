@@ -105,7 +105,7 @@ public sealed partial class GradingContextBuilder(
                     ? Truncate(artifact.ExtractedTextRef, maxChars)
                     : null;
 
-                var isSupported = artifact.ExtractionStatus is "succeeded" or "ocr_extracted";
+                var isSupported = ExtractionStatus.IsReadable(artifact.ExtractionStatus);
 
                 attachedFiles.Add(new GradingFileInfo(
                     artifact.Filename ?? "unknown",
@@ -139,7 +139,7 @@ public sealed partial class GradingContextBuilder(
             var rubricArtifacts = artifacts
                 .Where(artifact =>
                     artifact.ArtifactType == "rubric" &&
-                    artifact.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                    ExtractionStatus.IsReadable(artifact.ExtractionStatus) &&
                     !string.IsNullOrWhiteSpace(artifact.ExtractedTextRef))
                 .ToArray();
 
@@ -170,7 +170,7 @@ public sealed partial class GradingContextBuilder(
             var contextArtifacts = artifacts
                 .Where(artifact =>
                     artifact.ArtifactType == "assignment_context" &&
-                    artifact.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                    ExtractionStatus.IsReadable(artifact.ExtractionStatus) &&
                     !string.IsNullOrWhiteSpace(artifact.ExtractedTextRef))
                 .ToArray();
 

@@ -1725,7 +1725,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         // Texto da entrega do aluno
         var submissionArtifact = artifacts
             .Where(a => a.ArtifactType == "submission_file" &&
-                        a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                        ExtractionStatus.IsReadable(a.ExtractionStatus) &&
                         !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
             .FirstOrDefault();
         var studentSubmission = submissionArtifact?.ExtractedTextRef;
@@ -1737,7 +1737,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         // Texto do enunciado da atividade
         var contextArtifact = artifacts
             .Where(a => a.ArtifactType == "assignment_context" &&
-                        a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                        ExtractionStatus.IsReadable(a.ExtractionStatus) &&
                         !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
             .OrderByDescending(a => a.ExtractedTextRef?.Length ?? 0)
             .FirstOrDefault();
@@ -1897,7 +1897,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             // Texto da submissão (combina múltiplos arquivos se houver)
             var allSubmissionTexts = artifacts
                 .Where(a => a.ArtifactType == "submission_file" &&
-                            a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                            ExtractionStatus.IsReadable(a.ExtractionStatus) &&
                             !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
                 .Select(a => a.ExtractedTextRef!)
                 .ToArray();
@@ -1925,7 +1925,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             // Falhas de extração como warnings
             foreach (var failedArtifact in artifacts.Where(a =>
                 a.ArtifactType == "submission_file" &&
-                a.ExtractionStatus is "failed" or "unsupported"))
+                ExtractionStatus.IsFailure(a.ExtractionStatus)))
             {
                 itemWarnings.Add($"Arquivo {failedArtifact.Filename ?? "desconhecido"}: extracao falhou ({failedArtifact.SummaryRef ?? "sem detalhe"}).");
             }
@@ -1933,7 +1933,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             // Contexto da atividade
             var contextArtifact = artifacts
                 .Where(a => a.ArtifactType == "assignment_context" &&
-                            a.ExtractionStatus is "succeeded" or "ocr_extracted" &&
+                            ExtractionStatus.IsReadable(a.ExtractionStatus) &&
                             !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
                 .OrderByDescending(a => a.ExtractedTextRef?.Length ?? 0)
                 .FirstOrDefault();
@@ -2056,7 +2056,8 @@ public sealed record AiGradingItemInput(
     // fonte de identidade nem é persistido: o item usa somente MoodleUserId.
     [property: JsonPropertyName("nome")] string? Nome,
     [property: JsonPropertyName("nota")] decimal? Nota,
-    [property: JsonPropertyName("feedback")] string Feedback);
+    [property: JsonPropertyName("feedback")] string Feedback,
+    [property: JsonPropertyName("proposal")] AiGradingProposalInput? Proposal = null);
 
 public sealed record SaveAiGradingBatchResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -2072,7 +2073,8 @@ public sealed class SaveAiGradingBatchCommandHandler(
     ICurrentUserContext currentUser,
     IMoodleUserResolver moodleUserResolver,
     IMoodleAuditLogRepository auditLogs,
-    IMoodleAssignmentSettingsGateway settingsGateway)
+    IMoodleAssignmentSettingsGateway settingsGateway,
+    IGradingProposalStore? proposalStore = null)
     : IRequestHandler<SaveAiGradingBatchCommand, SaveAiGradingBatchResult>
 {
     // O contrato atual de salvar_correcoes_ia_lote é legado: não transporta
@@ -2118,14 +2120,14 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     continue;
                 }
 
-                if (string.IsNullOrWhiteSpace(input.Feedback))
+                if (input.Proposal is null && string.IsNullOrWhiteSpace(input.Feedback))
                 {
                     warnings.Add($"Item {input.GradingItemId} ignorado: feedback vazio.");
                     skippedCount++;
                     continue;
                 }
 
-                if (input.Nota is < 0)
+                if (input.Nota is < 0 || input.Proposal?.SuggestedGrade is < 0)
                 {
                     warnings.Add($"Item {input.GradingItemId} ignorado: nota negativa nao e permitida.");
                     skippedCount++;
@@ -2171,8 +2173,19 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     continue;
                 }
 
+                if (input.Proposal is not null &&
+                    string.IsNullOrWhiteSpace(input.Proposal.Feedback) &&
+                    string.IsNullOrWhiteSpace(input.Feedback) &&
+                    string.IsNullOrWhiteSpace(item.DraftFeedback))
+                {
+                    warnings.Add($"Item {input.GradingItemId} ignorado: feedback da proposta vazio.");
+                    skippedCount++;
+                    continue;
+                }
+
+                var requestedGrade = input.Proposal?.SuggestedGrade ?? input.Nota;
                 decimal? maxGrade = null;
-                if (input.Nota is not null)
+                if (requestedGrade is not null)
                 {
                     if (!settingsCache.TryGetValue(item.AssignmentId, out var settings))
                     {
@@ -2200,7 +2213,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         continue;
                     }
 
-                    if (input.Nota > maxGrade)
+                    if (requestedGrade > maxGrade)
                     {
                         warnings.Add($"Item {input.GradingItemId} ignorado: nota excede a escala maxima confirmada.");
                         skippedCount++;
@@ -2208,13 +2221,60 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     }
                 }
 
+                AiGradingProposal? proposal = null;
+                if (input.Proposal is not null)
+                {
+                    if (input.Proposal.Version <= 0)
+                    {
+                        warnings.Add($"Item {input.GradingItemId} ignorado: versao da proposta invalida.");
+                        skippedCount++;
+                        continue;
+                    }
+
+                    if (input.Nota is not null && input.Nota != input.Proposal.SuggestedGrade)
+                    {
+                        warnings.Add($"Item {input.GradingItemId} ignorado: nota legada diverge da proposta versionada.");
+                        skippedCount++;
+                        continue;
+                    }
+
+                    var proposalVersion = proposalStore is null
+                        ? input.Proposal.Version
+                        : await proposalStore.GetNextVersionAsync(item.Id, cancellationToken);
+                    proposal = AiGradingProposalFactory.Create(
+                        item,
+                        input.Proposal,
+                        maxGrade,
+                        proposalVersion,
+                        input.Feedback);
+                    if (proposalStore is not null)
+                    {
+                        await proposalStore.PublishAsync(proposal, cancellationToken);
+                    }
+                }
+                else if (proposalStore is not null)
+                {
+                    var legacyVersion = await proposalStore.GetNextVersionAsync(item.Id, cancellationToken);
+                    await proposalStore.PublishAsync(AiGradingProposal.FromLegacy(
+                        item.Id,
+                        item.BatchId,
+                        legacyVersion,
+                        item.ContextHash,
+                        input.Nota,
+                        input.Feedback), cancellationToken);
+                }
+
                 item.SetDraft(
-                    suggestedGrade: input.Nota,
-                    confidence: LegacyAiProposalConfidence,
-                    draftFeedback: input.Feedback,
-                    privateNotesToTeacher: input.Nota is null
+                    suggestedGrade: proposal?.SuggestedGrade ?? input.Nota,
+                    confidence: proposal?.Confidence ?? LegacyAiProposalConfidence,
+                    draftFeedback: proposal?.Feedback ?? input.Feedback,
+                    privateNotesToTeacher: proposal is null && input.Nota is null
                         ? "Proposta IA legada sem evidencias ou confianca calculada; escala numerica nao confirmada. Revisao humana e confirmacao da escala obrigatorias."
-                        : "Proposta IA legada sem evidencias ou confianca calculada. Revisao humana obrigatoria antes do lancamento.",
+                        : proposal is null
+                            ? "Proposta IA legada sem evidencias ou confianca calculada. Revisao humana obrigatoria antes do lancamento."
+                            : proposal.ReviewRequired
+                                ? $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao humana: {string.Join(", ", proposal.UncertaintyReasons)}."
+                                : $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao humana antes do lancamento.",
                     maxGrade: maxGrade);
 
                 savedCount++;

@@ -651,7 +651,7 @@ public sealed class MoodleGradingTools(
     public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
         [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
         Guid batchJobId,
-        [Description("Array de correcoes. Cada item deve conter gradingItemId, nota e feedback.")]
+        [Description("Array de correcoes. O formato legado usa gradingItemId, nota e feedback. Quando disponivel, proposal deve conter a versao/hash do contexto, criterios, evidencias, cobertura e feedback estruturado; a escala numerica continua sendo validada pelo Moodle.")]
         AiGradingItemInput[] items,
         CancellationToken cancellationToken = default)
     {

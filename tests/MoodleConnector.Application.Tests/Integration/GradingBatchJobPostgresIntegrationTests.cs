@@ -157,4 +157,65 @@ public sealed class GradingBatchJobPostgresIntegrationTests
             Assert.Equal(2, retry!.AttemptCount);
         }
     }
+
+    [Fact]
+    public async Task VersionedProposal_PersistsJsonbAndIsIdempotent()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION");
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return;
+        }
+
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseNpgsql(connectionString)
+            .Options;
+        await using (var schemaDb = new ConnectorDbContext(options))
+        {
+            await schemaDb.ApplyVersionedSchemaAsync();
+        }
+
+        var batch = AssistedGradingBatch.Create(10, [501], $"integration-proposal-{Guid.NewGuid():N}", 321, 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await using (var seedDb = new ConnectorDbContext(options))
+        {
+            seedDb.GradingBatches.Add(batch);
+            seedDb.GradingItems.Add(item);
+            await seedDb.SaveChangesAsync();
+        }
+
+        await using (var proposalDb = new ConnectorDbContext(options))
+        {
+            var store = new GradingReviewRepository(proposalDb);
+            var proposal = AiGradingProposal.Create(
+                item.Id,
+                batch.Id,
+                await store.GetNextVersionAsync(item.Id, CancellationToken.None),
+                null,
+                8m,
+                "Feedback",
+                [new AiGradingCriterionProposal("C1", "Criterio", 10m, 8m, AiGradingCriterionSource.FormalRubric, "evidencia", null, false, false, [])],
+                [],
+                [],
+                new GradingScaleSnapshot(10m, "points", "Moodle"),
+                new GradingExtractionSummary("succeeded", 1, false, 10, 10, null),
+                new GradingEvidenceCoverage(1, 1, 1, 1, 10, 10, false),
+                new AiGradingConfidenceResult(.9m, [], false),
+                reviewRequired: true);
+            await store.PublishAsync(proposal, CancellationToken.None);
+            await store.PublishAsync(proposal, CancellationToken.None);
+            await store.SaveChangesAsync(CancellationToken.None);
+        }
+
+        await using (var verifyDb = new ConnectorDbContext(options))
+        {
+            var documents = await verifyDb.AiGradingProposals
+                .Where(proposal => proposal.GradingItemId == item.Id)
+                .ToArrayAsync();
+            var document = Assert.Single(documents);
+            Assert.Equal("1", document.SchemaVersion);
+            Assert.Matches("^[0-9a-f]{64}$", document.ProposalHash);
+            Assert.Contains("C1", document.PayloadJson, StringComparison.Ordinal);
+        }
+    }
 }
