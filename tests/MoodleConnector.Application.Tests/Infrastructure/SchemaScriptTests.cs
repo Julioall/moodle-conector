@@ -267,4 +267,26 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (41, 'assisted grading batch configuration'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task GradingContextIdentityScript_DeveSerAditivoEIdempotente()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "042_grading_context_identity.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de identidade de contexto nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"ContextVersion\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"ContextHash\"", sql, StringComparison.Ordinal);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS \"ContextStatus\"", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (42, 'canonical grading context identity'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }

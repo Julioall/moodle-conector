@@ -52,6 +52,17 @@ public sealed class AssistedGradingItem
 
     public string? IdempotencyKey { get; private set; }
 
+    /// <summary>
+    /// Identidade do contexto canônico usado na última pré-validação deste item.
+    /// O payload do contexto permanece nos artifacts; estes campos permitem
+    /// detectar divergência entre worker, revisão e lançamento sem duplicar texto.
+    /// </summary>
+    public int? ContextVersion { get; private set; }
+
+    public string? ContextHash { get; private set; }
+
+    public string? ContextStatus { get; private set; }
+
     public DateTimeOffset CreatedAt { get; private init; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedAt { get; private set; } = DateTimeOffset.UtcNow;
@@ -229,6 +240,26 @@ public sealed class AssistedGradingItem
         CommitError = string.IsNullOrWhiteSpace(error)
             ? "O Moodle pode ter aplicado a escrita; reconcilie o item antes de tentar novamente."
             : error.Trim();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void RecordContextSnapshot(GradingContextSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.ItemId != Id || snapshot.BatchId != BatchId)
+        {
+            throw new InvalidOperationException("O snapshot de contexto nao pertence ao item de correcao informado.");
+        }
+
+        var computedHash = GradingContextSnapshot.ComputeHash(snapshot);
+        if (!string.Equals(computedHash, snapshot.ContextHash, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("A integridade do snapshot de contexto nao pode ser confirmada.");
+        }
+
+        ContextVersion = snapshot.Version;
+        ContextHash = snapshot.ContextHash;
+        ContextStatus = snapshot.ContextStatus;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

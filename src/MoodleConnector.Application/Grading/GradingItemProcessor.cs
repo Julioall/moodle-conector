@@ -21,14 +21,24 @@ public sealed class GradingItemProcessor(
         string? teacherInstructions = null,
         GradingContextOptions? contextOptions = null)
     {
+        var effectiveContextOptions = contextOptions ?? new GradingContextOptions(
+            IncludeRubric: true,
+            IncludeSubmissionFiles: true,
+            IncludeCourseMaterials: true,
+            TeacherInstructions: teacherInstructions);
         var context = await contextBuilder.BuildAsync(
             item,
-            contextOptions ?? new GradingContextOptions(
-                IncludeRubric: true,
-                IncludeSubmissionFiles: true,
-                IncludeCourseMaterials: true,
-                TeacherInstructions: teacherInstructions),
+            effectiveContextOptions,
             cancellationToken);
+
+        // Registra a identidade canônica junto ao item antes de qualquer resultado
+        // de análise. Assim, inclusive contextos bloqueados deixam uma evidência
+        // verificável do material que foi considerado pelo worker.
+        var contextSnapshot = GradingContextSnapshotFactory.Create(
+            item,
+            context,
+            effectiveContextOptions);
+        item.RecordContextSnapshot(contextSnapshot);
 
         var readableText = FirstReadableText(context);
         if (string.IsNullOrWhiteSpace(readableText))
@@ -57,7 +67,8 @@ public sealed class GradingItemProcessor(
                     .Select(file => file.Sha256)
                     .Where(hash => !string.IsNullOrWhiteSpace(hash))
                     .Select(hash => hash!)
-                    .ToArray()),
+                    .ToArray(),
+                ContextHash: contextSnapshot.ContextHash),
             cancellationToken);
 
         // --- Fluxo IA-first: o serviço de análise nunca gera nota/feedback heurístico ---

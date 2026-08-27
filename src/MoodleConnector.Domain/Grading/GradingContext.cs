@@ -36,6 +36,12 @@ public sealed class GradingContext
 
     public IReadOnlyList<GradingFileInfo> AttachedFiles { get; private init; } = [];
 
+    /// <summary>
+    /// Referências dos artifacts considerados na montagem, sem duplicar seu texto.
+    /// Inclui submissão, rubrica e contexto selecionado conforme as flags do lote.
+    /// </summary>
+    public IReadOnlyList<GradingArtifactReferenceSnapshot> ArtifactReferences { get; private init; } = [];
+
     public string? CourseMaterials { get; private init; }
 
     public string? TeacherInstructions { get; private init; }
@@ -68,7 +74,8 @@ public sealed class GradingContext
         IReadOnlyList<GradingFileInfo>? attachedFiles,
         string? courseMaterials,
         string? teacherInstructions,
-        string? criteriaGenerationNotes = null)
+        string? criteriaGenerationNotes = null,
+        IReadOnlyList<GradingArtifactReferenceSnapshot>? artifactReferences = null)
     {
         var blockers = new List<string>();
 
@@ -118,6 +125,7 @@ public sealed class GradingContext
             GradeScale = gradeScale,
             SubmissionText = submissionText,
             AttachedFiles = attachedFiles ?? [],
+            ArtifactReferences = artifactReferences ?? [],
             CourseMaterials = courseMaterials,
             TeacherInstructions = teacherInstructions,
             CriteriaGenerationNotes = criteriaGenerationNotes,
@@ -132,4 +140,10 @@ public sealed record GradingFileInfo(
     long? FileSizeBytes,
     string? Sha256,
     string? ExtractedText,
-    bool IsSupported);
+    bool IsSupported,
+    Guid? ArtifactId = null,
+    string? ArtifactType = null,
+    string? ExtractionStatus = null,
+    int? SourceCharacterCount = null,
+    bool IsTruncated = false,
+    GradingSourceMetadata? Source = null);

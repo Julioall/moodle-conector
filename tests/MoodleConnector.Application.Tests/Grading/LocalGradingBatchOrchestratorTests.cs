@@ -100,6 +100,9 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Null(item.SuggestedGrade);
         Assert.Null(item.DraftFeedback);
         Assert.Contains("Pre-validacao concluida", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches("^[a-f0-9]{64}$", item.ContextHash);
+        Assert.Equal(1, item.ContextVersion);
+        Assert.Equal("complete", item.ContextStatus);
         Assert.Equal(GradingBatchStatus.Processing, batch.Status);
         Assert.Equal(0, batch.ProcessedItems);
         Assert.Equal(0, batch.ReadyItems);  // AwaitingAiAnalysis is not "ready" yet

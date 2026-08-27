@@ -124,6 +124,25 @@ Além disso, a opção `includeCourseMaterials=false` agora impede a coleta e o 
 módulos vizinhos; a descrição da própria atividade continua disponível quando a rubrica foi
 solicitada.
 
+### Incremento de fundação implementado
+
+Foi adicionado o contrato de `GradingContextSnapshot` como modelo de domínio imutável,
+aditivo e independente do snapshot operacional da SPEC-0015. O contrato já representa
+identificadores Moodle tipados (`assignmentId`, `cmid`, submissão e estudante), critérios
+com proveniência, rubrica, escala, evidências, referências de artifacts, estado de extração,
+cobertura, flags de coleta, warnings e bloqueadores. A publicação calcula um `ContextHash`
+SHA-256 determinístico sobre o payload canônico; o timestamp operacional fica fora do hash e
+as coleções são copiadas defensivamente.
+
+Este incremento ainda não persiste snapshots nem troca os três consumidores legados para o
+novo contrato. Essa integração será feita em etapa separada, com dual-read/dual-write e
+validação de equivalência, para não introduzir divergência ou bloquear lotes antigos.
+
+O worker e o orquestrador local agora adaptam o contexto montado para essa identidade e
+persistem no item somente `ContextVersion`, `ContextHash` e `ContextStatus`. O texto da
+submissão não é duplicado nessa coluna; continua nos artifacts sujeitos à retenção. Isso
+permite detectar qual contexto foi usado sem antecipar a migração completa dos consumidores.
+
 ## Critérios de aceite
 
 - [ ] Para um mesmo item, pré-validação, pacote IA, UI, preview e auditoria referenciam o

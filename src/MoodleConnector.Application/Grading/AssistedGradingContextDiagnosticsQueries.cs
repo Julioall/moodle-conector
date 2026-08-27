@@ -33,7 +33,8 @@ public sealed record AssistedGradingContextDiagnosticsResult(
     [property: JsonPropertyName("extractedContextChars")] int ExtractedContextChars,
     [property: JsonPropertyName("extractedContextWords")] int ExtractedContextWords,
     [property: JsonPropertyName("artifacts")] IReadOnlyList<AssignmentContextArtifactDiagnosticResult> Artifacts,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
 
 public sealed record AssignmentContextArtifactDiagnosticResult(
     [property: JsonPropertyName("artifactId")] Guid ArtifactId,
@@ -177,7 +178,8 @@ public sealed partial class GetAssistedGradingContextDiagnosticsQueryHandler(
             ExtractedContextChars: selectedContextChars,
             ExtractedContextWords: selectedContextWords,
             Artifacts: diagnostics,
-            Warnings: selection?.Warnings ?? []);
+            Warnings: selection?.Warnings ?? [],
+            ContextHash: item.ContextHash);
     }
 
     private static string Truncate(string text, int maxChars)

@@ -18,7 +18,8 @@ public sealed record GradingAnalysisRequest(
     string? RubricOrCriteria,
     string? TeacherInstructions,
     string SubmissionText,
-    IReadOnlyList<string> FileHashes);
+    IReadOnlyList<string> FileHashes,
+    string? ContextHash = null);
 
 public sealed record GradingAnalysisResult(
     decimal? SuggestedGrade,

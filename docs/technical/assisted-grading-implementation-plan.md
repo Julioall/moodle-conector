@@ -86,6 +86,13 @@ separada; chunks/truncamento/coverage; `ContextHash` em worker, UI, IA, preview 
 efeito independente; contexto legado exige nova preparação; nenhuma nota é gerada com
 truncamento não declarado.
 
+**Incremento entregue:** o contrato imutável `GradingContextSnapshot` foi criado com
+identificadores Moodle tipados, proveniência, cobertura, estado de extração e hash
+determinístico. A persistência e a migração dos consumidores continuam pendentes e serão
+ativadas somente após os testes de equivalência da fase. O worker e o orquestrador local já
+registram no item a identidade (`ContextVersion`, `ContextHash`, `ContextStatus`) do contexto
+usado, sem duplicar o texto bruto da submissão.
+
 ### Fase 3 — proposta IA auditável e resistente a conteúdo hostil
 
 **Spec:** 0020.

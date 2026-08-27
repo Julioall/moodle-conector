@@ -63,6 +63,9 @@ public sealed class GradingContextBuilderTests
         Assert.Equal("Texto extrai", file.ExtractedText);
         Assert.Equal(file.ExtractedText, context.SubmissionText);
         Assert.True(file.IsSupported);
+        Assert.Equal(2, context.ArtifactReferences.Count);
+        Assert.Contains(context.ArtifactReferences, artifact => artifact.ArtifactId == file.ArtifactId);
+        Assert.Contains(context.ArtifactReferences, artifact => artifact.ExtractionStatus == "failed");
         Assert.Equal("Priorize clareza.", context.TeacherInstructions);
         Assert.Equal(1, repository.ListArtifactsCalls);
     }
@@ -247,6 +250,110 @@ public sealed class GradingContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_IncludeRubricFalse_NaoIncluiRubricaMesmoComMateriaisDeCurso()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.AddRange(
+        [
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "rubric",
+                "Rubrica.pdf",
+                "application/pdf",
+                "sha-rubric",
+                SizeBytes: 200,
+                ExtractionStatus: "succeeded",
+                ExtractedTextRef: "Rubrica formal: clareza e coerencia.",
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow),
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                "Enunciado.pdf",
+                "application/pdf",
+                "sha-context",
+                SizeBytes: 300,
+                ExtractionStatus: "succeeded",
+                ExtractedTextRef: "Enunciado da atividade com orientacoes suficientes para analise.",
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow)
+        ]);
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(
+                IncludeRubric: false,
+                IncludeSubmissionFiles: false,
+                IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.Null(context.RubricDescription);
+        Assert.NotNull(context.AssignmentStatement);
+        Assert.Contains("Enunciado da atividade", context.AssignmentStatement, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BuildAsync_SomenteRubrica_MantemEnunciadoSemTratarComoMaterialDeCurso()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 29972, 101112, 1178546, 356968, 0);
+        repository.Artifacts.AddRange(
+        [
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "rubric",
+                "Rubrica.pdf",
+                "application/pdf",
+                "sha-rubric",
+                SizeBytes: 200,
+                ExtractionStatus: "succeeded",
+                ExtractedTextRef: "Rubrica formal: clareza e coerencia.",
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow),
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                "Enunciado.pdf",
+                "application/pdf",
+                "sha-context",
+                SizeBytes: 300,
+                ExtractionStatus: "succeeded",
+                ExtractedTextRef: "Enunciado da atividade com orientacoes suficientes para analise.",
+                SummaryRef: null,
+                CreatedAt: DateTimeOffset.UtcNow)
+        ]);
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(
+                IncludeRubric: true,
+                IncludeSubmissionFiles: false,
+                IncludeCourseMaterials: false),
+            CancellationToken.None);
+
+        Assert.NotNull(context.RubricDescription);
+        Assert.NotNull(context.AssignmentStatement);
+        Assert.Null(context.CourseMaterials);
+    }
+
+    [Fact]
     public async Task BuildAsync_QuandoCriteriosNaoEstruturados_UsaEnunciadoComoFallbackDeCriterios()
     {
         var repository = new FakeGradingReviewRepository();
@@ -304,7 +411,7 @@ public sealed class GradingContextBuilderTests
 
         var context = await sut.BuildAsync(
             item,
-            new GradingContextOptions(IncludeSubmissionFiles: false),
+            new GradingContextOptions(IncludeRubric: false, IncludeSubmissionFiles: false),
             CancellationToken.None);
 
         Assert.Empty(context.AttachedFiles);

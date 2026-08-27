@@ -39,6 +39,7 @@ public sealed partial class GradingContextBuilder(
         string? criteriaGenerationNotes = null;
         var attachedFiles = new List<GradingFileInfo>();
         IReadOnlyList<GradingArtifact> artifacts = [];
+        var artifactReferences = new List<GradingArtifactReferenceSnapshot>();
 
         // ============================================================
         // PASSO 1: Buscar MaxGrade PRIMEIRO via API Moodle.
@@ -84,7 +85,7 @@ public sealed partial class GradingContextBuilder(
             }
         }
 
-        if (options.IncludeSubmissionFiles || options.IncludeCourseMaterials)
+        if (options.IncludeSubmissionFiles || options.IncludeRubric || options.IncludeCourseMaterials)
         {
             artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
         }
@@ -98,6 +99,8 @@ public sealed partial class GradingContextBuilder(
 
             foreach (var artifact in fileArtifacts)
             {
+                var sourceCharacterCount = artifact.ExtractedTextRef?.Length;
+                var isTruncated = sourceCharacterCount is > 0 && sourceCharacterCount > maxChars;
                 var extracted = !string.IsNullOrWhiteSpace(artifact.ExtractedTextRef)
                     ? Truncate(artifact.ExtractedTextRef, maxChars)
                     : null;
@@ -110,7 +113,13 @@ public sealed partial class GradingContextBuilder(
                     artifact.SizeBytes,
                     artifact.Sha256,
                     extracted,
-                    isSupported));
+                    isSupported,
+                    ArtifactId: artifact.Id,
+                    ArtifactType: artifact.ArtifactType,
+                    ExtractionStatus: artifact.ExtractionStatus,
+                    SourceCharacterCount: sourceCharacterCount,
+                    IsTruncated: isTruncated,
+                    Source: BuildSourceMetadata(artifact)));
 
                 if (extracted != null && submissionText == null)
                 {
@@ -119,7 +128,12 @@ public sealed partial class GradingContextBuilder(
             }
         }
 
-        if (options.IncludeCourseMaterials)
+        // Rubrica formal e materiais de apoio são coletores independentes.
+        // A descrição da própria atividade é persistida junto com a rubrica,
+        // portanto deve continuar disponível quando somente IncludeRubric foi
+        // solicitado. Nunca deixe IncludeCourseMaterials habilitar a leitura
+        // de uma rubrica por efeito colateral.
+        if (options.IncludeRubric)
         {
             // 1. Tentar rubrica formal (artefatos do tipo 'rubric').
             var rubricArtifacts = artifacts
@@ -144,7 +158,14 @@ public sealed partial class GradingContextBuilder(
                     }
                 }
             }
+        }
 
+        artifactReferences.AddRange(artifacts
+            .Where(artifact => IsArtifactIncluded(artifact, options))
+            .Select(artifact => BuildArtifactReference(artifact, maxChars)));
+
+        if (options.IncludeRubric || options.IncludeCourseMaterials)
+        {
             // 2. Selecionar o melhor artefato de contexto como enunciado da atividade.
             var contextArtifacts = artifacts
                 .Where(artifact =>
@@ -179,7 +200,9 @@ public sealed partial class GradingContextBuilder(
                 {
                     assignmentStatement = selected.ExtractedText;
                     criteria = ExtractCriteria(selected.ExtractedText);
-                    courseMaterials = $"{selected.Title}\n{selected.ExtractedText}";
+                    courseMaterials = options.IncludeCourseMaterials
+                        ? $"{selected.Title}\n{selected.ExtractedText}"
+                        : null;
 
                     // NÃO usar texto bruto do enunciado como critério direto.
                     // Quando ExtractCriteria retorna null e não há rubrica, o campo criteria
@@ -226,7 +249,7 @@ public sealed partial class GradingContextBuilder(
                     new CriteriaGenerationRequest(
                         AssignmentName: $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
                         AssignmentDescription: assignmentStatement,
-                        ContextText: courseMaterials,
+                        ContextText: assignmentStatement ?? courseMaterials,
                         SupportingMaterials: null,
                         MaxGrade: maxGrade ?? 0m),
                     cancellationToken);
@@ -265,12 +288,95 @@ public sealed partial class GradingContextBuilder(
             attachedFiles: attachedFiles,
             courseMaterials: courseMaterials,
             teacherInstructions: teacherInstructions,
-            criteriaGenerationNotes: criteriaGenerationNotes);
+            criteriaGenerationNotes: criteriaGenerationNotes,
+            artifactReferences: artifactReferences);
     }
 
     private static string Truncate(string text, int maxChars)
     {
         return text.Length <= maxChars ? text : text[..maxChars];
+    }
+
+    private static GradingSourceMetadata BuildSourceMetadata(GradingArtifact artifact)
+    {
+        return new GradingSourceMetadata(
+            ModuleType: artifact.ArtifactType,
+            ModuleId: ParseMetadataLong(artifact.SummaryRef, "moduleId"),
+            SectionNumber: ParseMetadataInt(artifact.SummaryRef, "section"),
+            Title: artifact.Filename,
+            DistanceFromAssignment: ParseMetadataInt(artifact.SummaryRef, "distance"));
+    }
+
+    private static bool IsArtifactIncluded(
+        GradingArtifact artifact,
+        GradingContextOptions options) =>
+        artifact.ArtifactType switch
+        {
+            "submission_file" => options.IncludeSubmissionFiles,
+            "rubric" => options.IncludeRubric,
+            "assignment_context" => options.IncludeRubric || options.IncludeCourseMaterials,
+            _ => false
+        };
+
+    private static GradingArtifactReferenceSnapshot BuildArtifactReference(
+        GradingArtifact artifact,
+        int maxChars)
+    {
+        var sourceCharacterCount = artifact.ExtractedTextRef?.Length ?? 0;
+        var includedCharacterCount = Math.Min(sourceCharacterCount, maxChars);
+        var isTruncated = sourceCharacterCount > maxChars;
+        var chunkCount = sourceCharacterCount == 0
+            ? 0
+            : (int)Math.Ceiling(sourceCharacterCount / (double)Math.Max(1, maxChars));
+
+        return new GradingArtifactReferenceSnapshot(
+            artifact.Id,
+            artifact.ArtifactType,
+            artifact.Filename,
+            artifact.MimeType,
+            artifact.Sha256,
+            artifact.SizeBytes,
+            artifact.ExtractionStatus,
+            chunkCount,
+            isTruncated,
+            sourceCharacterCount,
+            includedCharacterCount,
+            BuildSourceMetadata(artifact));
+    }
+
+    private static int? ParseMetadataInt(string? metadata, string key)
+    {
+        var value = ParseMetadataValue(metadata, key);
+        return int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static long? ParseMetadataLong(string? metadata, string key)
+    {
+        var value = ParseMetadataValue(metadata, key);
+        return long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    private static string? ParseMetadataValue(string? metadata, string key)
+    {
+        if (string.IsNullOrWhiteSpace(metadata))
+        {
+            return null;
+        }
+
+        foreach (var segment in metadata.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = segment.Split(':', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length == 2 && string.Equals(parts[0], key, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.IsNullOrWhiteSpace(parts[1]) ? null : parts[1];
+            }
+        }
+
+        return null;
     }
 
     private static decimal? ExtractMaxGrade(string? text)

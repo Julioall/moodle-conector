@@ -10,7 +10,7 @@ Validar no banco de produção os contratos de unicidade, JSONB, lease, confirma
 
 ## Contexto e evidência atual
 
-Produção usa Npgsql, índices únicos, JSONB, `ExecuteUpdateAsync`/`ExecuteDeleteAsync` e leases. A suíte usa principalmente EF InMemory. Inserções em fila e snapshots possuem leitura seguida de inserção, suscetível a conflito entre instâncias. A aplicação do schema agora usa advisory lock de sessão no PostgreSQL, evitando que duas réplicas inicializem os mesmos objetos simultaneamente.
+Produção usa Npgsql, índices únicos, JSONB, `ExecuteUpdateAsync`/`ExecuteDeleteAsync` e leases. A suíte usa principalmente EF InMemory. Inserções em fila e snapshots possuem leitura seguida de inserção, suscetível a conflito entre instâncias. A aplicação do schema agora usa advisory lock de sessão no PostgreSQL, evitando que duas réplicas inicializem os mesmos objetos simultaneamente. A migração `042_grading_context_identity.sql` é aditiva e idempotente; itens antigos permanecem com identidade nula até serem processados novamente.
 
 ## Decisão e arquitetura-alvo
 

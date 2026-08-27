@@ -1690,7 +1690,8 @@ public sealed record GradingContextForChatResult(
     [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
     [property: JsonPropertyName("confidence")] decimal? Confidence,
     [property: JsonPropertyName("instructions")] string Instructions,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
 
 public sealed class PrepareGradingContextForChatQueryHandler(
     IGradingReviewRepository repository,
@@ -1809,7 +1810,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             item.SuggestedGrade,
             item.Confidence,
             instructions,
-            warnings);
+            warnings,
+            item.ContextHash);
     }
 }
 
@@ -1841,7 +1843,8 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("extractedCriteria")] string? ExtractedCriteria,
     [property: JsonPropertyName("extractedText")] string? ExtractedText,
     [property: JsonPropertyName("textTruncated")] bool TextTruncated,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
 
 public sealed class PrepareAiGradingBatchQueryHandler(
     IGradingReviewRepository repository,
@@ -1981,7 +1984,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 extractedCriteria,
                 combinedSubmission,
                 textTruncated,
-                itemWarnings));
+                itemWarnings,
+                item.ContextHash));
         }
 
         if (packageItems.Count == 0)
