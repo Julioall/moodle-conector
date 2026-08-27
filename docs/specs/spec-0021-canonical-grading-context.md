@@ -115,8 +115,9 @@ artifact até a proposta final.
 
 ### Incremento inicial implementado
 
-O lote agora persiste `TeacherInstructions` (e a prioridade declarada) em migração aditiva
-e o worker/orquestrador local repassa a instrução persistida ao `GradingContextBuilder`.
+O lote agora persiste `TeacherInstructions`, prioridade e as flags de inclusão de contexto
+em migração aditiva; o worker/orquestrador local repassa essa configuração ao
+`GradingContextBuilder`.
 Isso fecha a perda de contexto entre criação e processamento sem antecipar o snapshot
 canônico, a fila durável ou a coleta assíncrona previstos nas próximas etapas.
 Além disso, a opção `includeCourseMaterials=false` agora impede a coleta e o download de

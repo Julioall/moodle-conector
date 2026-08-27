@@ -18,11 +18,12 @@ public sealed class GradingItemProcessor(
         AssistedGradingItem item,
         IGradingReviewRepository repository,
         CancellationToken cancellationToken,
-        string? teacherInstructions = null)
+        string? teacherInstructions = null,
+        GradingContextOptions? contextOptions = null)
     {
         var context = await contextBuilder.BuildAsync(
             item,
-            new GradingContextOptions(
+            contextOptions ?? new GradingContextOptions(
                 IncludeRubric: true,
                 IncludeSubmissionFiles: true,
                 IncludeCourseMaterials: true,

@@ -57,6 +57,9 @@ public sealed class LocalGradingBatchOrchestratorTests
         await sut.EnqueueAsync(batch.Id, CancellationToken.None);
 
         Assert.Equal("Use linguagem acolhedora.", contextBuilder.LastTeacherInstructions);
+        Assert.True(contextBuilder.LastIncludeRubric);
+        Assert.True(contextBuilder.LastIncludeSubmissionFiles);
+        Assert.False(contextBuilder.LastIncludeCourseMaterials);
     }
 
     [Fact]
@@ -564,6 +567,9 @@ public sealed class LocalGradingBatchOrchestratorTests
     private sealed class CapturingContextBuilder : IGradingContextBuilder
     {
         public string? LastTeacherInstructions { get; private set; }
+        public bool? LastIncludeRubric { get; private set; }
+        public bool? LastIncludeSubmissionFiles { get; private set; }
+        public bool? LastIncludeCourseMaterials { get; private set; }
 
         public Task<GradingContext> BuildAsync(
             AssistedGradingItem item,
@@ -571,6 +577,9 @@ public sealed class LocalGradingBatchOrchestratorTests
             CancellationToken cancellationToken)
         {
             LastTeacherInstructions = options.TeacherInstructions;
+            LastIncludeRubric = options.IncludeRubric;
+            LastIncludeSubmissionFiles = options.IncludeSubmissionFiles;
+            LastIncludeCourseMaterials = options.IncludeCourseMaterials;
             return Task.FromResult(GradingContext.Build(
                 item.Id,
                 item.BatchId,

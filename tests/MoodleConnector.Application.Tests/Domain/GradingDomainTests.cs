@@ -40,6 +40,9 @@ public sealed class GradingDomainTests
 
         Assert.Equal("Valorize clareza e evidencias.", batch.TeacherInstructions);
         Assert.Equal("high", batch.Priority);
+        Assert.True(batch.IncludeRubric);
+        Assert.True(batch.IncludeSubmissionFiles);
+        Assert.False(batch.IncludeCourseMaterials);
     }
 
     [Fact]

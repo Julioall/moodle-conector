@@ -355,8 +355,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             currentUser.Subject,
             moodleUserId,
             selectedItems.Count,
-            request.TeacherInstructions,
-            request.Priority);
+            teacherInstructions: request.TeacherInstructions,
+            priority: request.Priority,
+            includeRubric: request.IncludeRubric,
+            includeSubmissionFiles: request.IncludeSubmissionFiles,
+            includeCourseMaterials: request.IncludeCourseMaterials);
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
@@ -392,6 +395,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     request.UserExternalId,
                     item,
                     assignmentContextCache,
+                    request.IncludeRubric,
                     request.IncludeCourseMaterials,
                     warnings,
                     cancellationToken);
@@ -574,16 +578,22 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         string userExternalId,
         AssistedGradingItem item,
         Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>> assignmentContextCache,
+        bool includeRubric,
         bool includeCourseMaterials,
         List<string> warnings,
         CancellationToken cancellationToken)
     {
-        var cacheKey = new AssignmentContextCacheKey(item.CourseId, item.AssignmentId);
+        var cacheKey = new AssignmentContextCacheKey(
+            item.CourseId,
+            item.AssignmentId,
+            includeRubric,
+            includeCourseMaterials);
         if (!assignmentContextCache.TryGetValue(cacheKey, out var templates))
         {
             templates = await BuildAssignmentContextTemplatesAsync(
                 userExternalId,
                 item,
+                includeRubric,
                 includeCourseMaterials,
                 warnings,
                 cancellationToken);
@@ -599,6 +609,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     private async Task<IReadOnlyList<ContextArtifactTemplate>> BuildAssignmentContextTemplatesAsync(
         string userExternalId,
         AssistedGradingItem item,
+        bool includeRubric,
         bool includeCourseMaterials,
         List<string> warnings,
         CancellationToken cancellationToken)
@@ -634,7 +645,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         }
 
         var templates = new List<ContextArtifactTemplate>();
-        if (!string.IsNullOrWhiteSpace(assignmentModule.Description))
+        if (includeRubric && !string.IsNullOrWhiteSpace(assignmentModule.Description))
         {
             templates.Add(new ContextArtifactTemplate(
                 "assignment_context",
@@ -776,7 +787,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         int? AttemptNumber,
         IReadOnlyList<AssignmentSubmissionFile> Files);
 
-    private sealed record AssignmentContextCacheKey(long CourseId, long AssignmentId);
+    private sealed record AssignmentContextCacheKey(
+        long CourseId,
+        long AssignmentId,
+        bool IncludeRubric,
+        bool IncludeCourseMaterials);
 
     private sealed record ContextArtifactTemplate(
         string ArtifactType,

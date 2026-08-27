@@ -32,6 +32,12 @@ public sealed class AssistedGradingBatch
     /// </summary>
     public string Priority { get; private init; } = "normal";
 
+    public bool IncludeRubric { get; private init; } = true;
+
+    public bool IncludeSubmissionFiles { get; private init; } = true;
+
+    public bool IncludeCourseMaterials { get; private init; }
+
     public int ProcessedItems { get; private set; }
 
     public int ReadyItems { get; private set; }
@@ -51,7 +57,10 @@ public sealed class AssistedGradingBatch
         long? createdByMoodleUserId,
         int totalItems,
         string? teacherInstructions = null,
-        string priority = "normal")
+        string priority = "normal",
+        bool includeRubric = true,
+        bool includeSubmissionFiles = true,
+        bool includeCourseMaterials = false)
     {
         if (courseId <= 0)
         {
@@ -101,7 +110,10 @@ public sealed class AssistedGradingBatch
             CreatedByMoodleUserId = createdByMoodleUserId,
             TotalItems = totalItems,
             TeacherInstructions = normalizedTeacherInstructions,
-            Priority = normalizedPriority
+            Priority = normalizedPriority,
+            IncludeRubric = includeRubric,
+            IncludeSubmissionFiles = includeSubmissionFiles,
+            IncludeCourseMaterials = includeCourseMaterials
         };
     }
 

@@ -65,7 +65,12 @@ public sealed class LocalGradingBatchOrchestrator(
                     item,
                     repository,
                     cancellationToken,
-                    batch.TeacherInstructions);
+                    batch.TeacherInstructions,
+                    new GradingContextOptions(
+                        batch.IncludeRubric,
+                        batch.IncludeSubmissionFiles,
+                        batch.IncludeCourseMaterials,
+                        batch.TeacherInstructions));
             }
             catch (OperationCanceledException)
             {
