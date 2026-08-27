@@ -109,7 +109,9 @@ incerteza/evidência; contrato legado vira revisão obrigatória.
 fluxos de contexto para chat e pacote em lote. A fronteira entre instruções confiáveis e
 evidência Moodle não confiável agora é explícita, e a saudação nominal não é exigida quando
 o pacote contém apenas `studentId`. Isso reduz risco de prompt injection, mas não substitui
-a validação/normalização backend da proposta IA, ainda necessária para fechar o gate.
+a validação/normalização backend da proposta IA, ainda necessária para fechar o gate. O
+gateway de configurações também deixou de retornar `100` no perfil stub sem escala
+modelada; nesse caso a resposta é `MaxGrade=0` e a sugestão numérica permanece bloqueada.
 
 ### Fase 4 — job durável e processamento em escala
 

@@ -23,7 +23,10 @@ internal sealed class MoodleAssignmentSettingsGateway(
     {
         if (_options.UseStubData)
         {
-            return new AssignmentSettingsSummary(assignmentId, 100m, Name: null);
+            // The local stub does not model the assignment grading scale. Do not
+            // manufacture a numeric maximum: callers must keep numeric grading
+            // blocked until a real, verifiable Moodle scale is available.
+            return new AssignmentSettingsSummary(assignmentId, 0m, Name: null);
         }
 
         var normalizedCourseId = ParseMoodleId(courseId, nameof(courseId));

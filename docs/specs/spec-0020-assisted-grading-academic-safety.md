@@ -133,6 +133,9 @@ Esta é uma barreira de contrato/prompt. A validação de uma proposta retornada
 com critérios, evidências, cobertura e confiança recalculada no backend, continua pendente
 da Fase 3 completa.
 
+Também foi removido o `100` implícito do gateway de configurações quando o perfil local usa
+stub: sem escala modelada, o stub retorna `MaxGrade=0`, mantendo a nota numérica bloqueada.
+
 ## Critérios de aceite
 
 - [ ] Escala não resolvida nunca produz `SuggestedGrade=100` nem permite lançamento
