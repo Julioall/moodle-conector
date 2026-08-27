@@ -26,10 +26,14 @@ Produção usa Npgsql, índices únicos, JSONB, `ExecuteUpdateAsync`/`ExecuteDel
 
 ## Critérios de aceite
 
-- [ ] Em duas instâncias, apenas uma conquista um lease ou confirma ação.
-- [ ] Inserções simultâneas convergem sem duplicação ou erro não tratado.
-- [ ] Testes PostgreSQL executam localmente quando `MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION` é definido e no CI com serviço efêmero, com evidência de falha útil.
+- [x] Em duas instâncias, apenas uma conquista um lease ou confirma ação.
+- [x] Inserções simultâneas convergem sem duplicação ou erro não tratado, incluindo recuperação por savepoint em transação.
+- [x] Testes PostgreSQL executam localmente quando `MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION` é definido e no CI com serviço efêmero.
 - [ ] Merge em `main` requer CI aprovado, conforme configuração administrativa documentada.
+
+O último item é deliberadamente externo ao repositório: falta aplicar/verificar a regra de
+branch protection no GitHub. Também permanecem gates manuais de MCP Inspector, Moodle real e
+certificação de deploy/homologação.
 
 ## Validação e evidências
 

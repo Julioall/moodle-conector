@@ -34,5 +34,10 @@ public enum GradingCommitStatus
     NotReady = 0,
     Pending = 1,
     Succeeded = 2,
-    Failed = 3
+    Failed = 3,
+    /// <summary>
+    /// Moodle may have applied the write even though transport failed. The
+    /// item must be reconciled before any new submission is allowed.
+    /// </summary>
+    ExecutionUnknown = 4
 }

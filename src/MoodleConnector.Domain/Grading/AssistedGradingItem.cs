@@ -207,4 +207,33 @@ public sealed class AssistedGradingItem
         CommitError = string.IsNullOrWhiteSpace(error) ? "Falha desconhecida no commit." : error.Trim();
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    public void MarkCommitExecutionUnknown(string error)
+    {
+        Status = GradingItemStatus.Failed;
+        CommitStatus = GradingCommitStatus.ExecutionUnknown;
+        CommitError = string.IsNullOrWhiteSpace(error)
+            ? "O Moodle pode ter aplicado a escrita; reconcilie o item antes de tentar novamente."
+            : error.Trim();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void ResolveCommitExecutionUnknown(bool applied)
+    {
+        if (CommitStatus != GradingCommitStatus.ExecutionUnknown)
+        {
+            throw new InvalidOperationException($"O item não está em execução desconhecida: {CommitStatus}.");
+        }
+
+        if (applied)
+        {
+            MarkCommitSucceeded();
+            return;
+        }
+
+        Status = GradingItemStatus.ReadyToCommit;
+        CommitStatus = GradingCommitStatus.Pending;
+        CommitError = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
 }

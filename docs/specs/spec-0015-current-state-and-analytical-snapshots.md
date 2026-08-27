@@ -74,13 +74,18 @@ Publicação é atômica por recurso: a sincronização valida e grava o payload
 
 ## Critérios de aceite
 
-- [ ] Renomear ou reutilizar alias não torna snapshot, sync state ou lease inacessível nem o associa à conexão errada.
-- [ ] Cada tentativa gera run/item técnico auditável, sem gravar payload histórico ou métricas.
-- [ ] Leitores nunca retornam head parcialmente escrito ou pertencente a run falho.
-- [ ] Duas instâncias convergem para um único head e estado de fila, sem duplicação ou erro não tratado.
-- [ ] Payload inalterado não causa escrita completa redundante; freshness e run são atualizados.
-- [ ] Limites globais e por conexão impedem fan-out ilimitado e são observáveis.
-- [ ] Migração não avança para contract enquanto existirem aliases ambíguos ou registros órfãos.
+- [x] Renomear ou reutilizar alias não torna snapshot, sync state ou lease inacessível nem o associa à conexão errada.
+- [x] Cada tentativa gera run/item técnico auditável, sem gravar payload histórico ou métricas de negócio.
+- [x] Leitores nunca retornam head parcialmente escrito ou pertencente a run falho.
+- [x] Duas instâncias convergem para um único head e estado de fila, sem duplicação ou erro não tratado.
+- [x] Payload inalterado não causa escrita completa redundante; freshness e run são atualizados.
+- [x] Limites globais e por conexão impedem fan-out ilimitado e são observáveis.
+- [x] Migração não avança para contract enquanto existirem aliases ambíguos ou registros órfãos.
+
+Implementado nesta onda: lineage `LastRunId`, diário de runs/itens, publicação transacional,
+leases com recuperação somente após expiração, deduplicação por SHA-256, orçamento de payload,
+paginação/chunking configuráveis, retenção e métricas exclusivamente operacionais. Nenhuma
+métrica de desempenho/carga de tutores ou monitores foi adicionada.
 
 ## Validação e evidências
 

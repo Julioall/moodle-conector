@@ -46,7 +46,7 @@ public sealed class MoodleUniversalWriteServiceTests
             new Dictionary<string, object?> { ["messages"] = document.RootElement.Clone() },
             CancellationToken.None);
 
-        Assert.Equal("Enviar mensagens instantaneas aos destinatarios informados.", preview.SemanticSummary);
+        Assert.Equal("Enviar 2 mensagem(ns) Moodle aos destinatários informados.", preview.SemanticSummary);
         Assert.Equal(2, preview.EstimatedAffectedRecords);
         Assert.Contains("message", preview.AffectedResources!);
         var change = Assert.Single(preview.Changes!, item => item.Name == "messages");
@@ -97,8 +97,9 @@ public sealed class MoodleUniversalWriteServiceTests
             CancellationToken.None);
         pendingActions.Action!.Confirm("user", DateTimeOffset.UtcNow);
 
-        await Assert.ThrowsAsync<HttpRequestException>(() => sut.ConfirmAsync(preview.PendingActionId, preview.ConfirmationText, CancellationToken.None));
+        var result = await sut.ConfirmAsync(preview.PendingActionId, preview.ConfirmationText, CancellationToken.None);
 
+        Assert.Equal("execution_unknown", result.Status);
         Assert.Equal(PendingActionStatus.ExecutionUnknown, pendingActions.Action!.Status);
         Assert.Contains(auditLogs.Logs, log => log.Status == "write_execution_unknown");
         Assert.DoesNotContain(auditLogs.Logs, log => log.Status == "write_failed");
@@ -114,6 +115,18 @@ public sealed class MoodleUniversalWriteServiceTests
             "core_course_delete_courses", new Dictionary<string, object?>(), CancellationToken.None));
 
         Assert.Equal("destructive_function_blocked", error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_RecusaEscritaSemSchemaSemanticoAprovado()
+    {
+        var profile = Profile(new MoodleFunctionDescriptor("mod_assign_set_user_flags", MoodleFunctionRisk.ControlledWrite, true));
+        var sut = CreateService(new FakeRestClient(), new FakePendingActions(), enabled: true, profile: profile);
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+            "mod_assign_set_user_flags", new Dictionary<string, object?>(), CancellationToken.None));
+
+        Assert.Equal("write_preview_schema_missing", error.ErrorCode);
     }
 
     [Fact]

@@ -96,6 +96,7 @@ public sealed record AssistedGradingCoordinationReportResult(
     [property: JsonPropertyName("readyItems")] int ReadyItems,
     [property: JsonPropertyName("blockedItems")] int BlockedItems,
     [property: JsonPropertyName("failedItems")] int FailedItems,
+    [property: JsonPropertyName("executionUnknownItems")] int ExecutionUnknownItems,
     [property: JsonPropertyName("reviewedItems")] int ReviewedItems,
     [property: JsonPropertyName("pendingReviewItems")] int PendingReviewItems,
     [property: JsonPropertyName("committedItems")] int CommittedItems,
@@ -1200,6 +1201,7 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         var committedItems = items.Count(item =>
             item.Status == GradingItemStatus.Committed ||
             item.CommitStatus == GradingCommitStatus.Succeeded);
+        var executionUnknownItems = items.Count(item => item.CommitStatus == GradingCommitStatus.ExecutionUnknown);
         var blockedPermissionItems = items.Count(item =>
             item.CommitStatus == GradingCommitStatus.Failed &&
             (item.CommitError?.Contains("moodle.write", StringComparison.OrdinalIgnoreCase) == true ||
@@ -1222,6 +1224,7 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
             batch.ReadyItems,
             batch.BlockedItems,
             batch.FailedItems,
+            executionUnknownItems,
             reviewedItems,
             pendingReviewItems,
             committedItems,
@@ -1277,7 +1280,12 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
             ? itemEvidence
             : [];
 
-        if (item.CommitStatus == GradingCommitStatus.Failed)
+        if (item.CommitStatus == GradingCommitStatus.ExecutionUnknown)
+        {
+            reasons.Add("Resultado da escrita Moodle desconhecido; reconcilie antes de tentar novamente.");
+            priority = Math.Min(priority, 0);
+        }
+        else if (item.CommitStatus == GradingCommitStatus.Failed)
         {
             var commitError = item.CommitError ?? item.DraftFeedback;
             if (commitError?.Contains("moodle.write", StringComparison.OrdinalIgnoreCase) == true ||

@@ -22,7 +22,8 @@ internal sealed class MoodleUniversalWriteService(
     IPendingMoodleActionRepository pendingActionRepository,
     IMoodleAuditLogRepository auditLogs,
     IOptions<MoodleUniversalApiFeatureOptions> features,
-    ICurrentUserContext? currentUser = null) : IMoodleUniversalWriteService
+    ICurrentUserContext? currentUser = null,
+    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null) : IMoodleUniversalWriteService
 {
     private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(15);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -50,10 +51,22 @@ internal sealed class MoodleUniversalWriteService(
             {
                 throw new MoodleApiException("write_not_allowed", "A conexao Moodle selecionada nao permite escrita.");
             }
+            if (!HasSemanticPreviewBuilder(descriptor.Name))
+            {
+                throw new MoodleApiException(
+                    "write_preview_schema_missing",
+                    "A função Moodle está classificada como escrita, mas ainda não possui schema/prévia semântica aprovada.");
+            }
 
             var parameterHash = CreateParameterHash(parameters);
             var confirmationText = $"CONFIRMAR ESCRITA MOODLE {descriptor.Name.ToUpperInvariant()} {parameterHash[..12].ToUpperInvariant()}";
-            var semanticPreview = BuildSemanticPreview(descriptor.Name, connection.Alias, parameters, parameterNames);
+            var semanticPreview = await BuildSemanticPreviewAsync(
+                descriptor.Name,
+                connection,
+                parameters,
+                parameterNames,
+                gradeReadGateway,
+                cancellationToken);
             var preview = new
             {
                 function = descriptor.Name,
@@ -162,7 +175,7 @@ internal sealed class MoodleUniversalWriteService(
         }
 
         await ResolveControlledWriteAsync(payload.Function, cancellationToken);
-        var requiredScope = GetRequiredWriteScope(payload.Function);
+        var requiredScope = MoodleWriteScopePolicy.ForFunction(payload.Function);
         var values = payload.Parameters.ToDictionary(
             pair => pair.Key,
             pair => (object?)pair.Value.Clone(),
@@ -200,7 +213,7 @@ internal sealed class MoodleUniversalWriteService(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var errorCode = ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name;
-            var executionUnknown = IsExecutionUnknown(ex);
+            var executionUnknown = MoodleWriteExecutionClassifier.IsUnknown(ex);
             if (executionUnknown)
             {
                 action.MarkExecutionUnknown();
@@ -218,6 +231,15 @@ internal sealed class MoodleUniversalWriteService(
                 errorCode,
                 cancellationToken);
             await auditLogs.SaveChangesAsync(cancellationToken);
+            if (executionUnknown)
+            {
+                return new MoodleWriteResult(
+                    "execution_unknown",
+                    action.Id,
+                    payload.Function,
+                    confirmation.AuditId,
+                    0);
+            }
             throw;
         }
     }
@@ -255,7 +277,7 @@ internal sealed class MoodleUniversalWriteService(
             return;
         }
 
-        var requiredScope = GetRequiredWriteScope(functionName);
+        var requiredScope = MoodleWriteScopePolicy.ForFunction(functionName);
         if (!currentUser.HasScope(requiredScope))
         {
             throw new MoodleApiException(
@@ -263,15 +285,6 @@ internal sealed class MoodleUniversalWriteService(
                 $"O escopo '{requiredScope}' e obrigatorio para esta familia de escrita.");
         }
     }
-
-    private string GetRequiredWriteScope(string functionName) => functionName.Trim().ToLowerInvariant() switch
-    {
-        "core_message_send_instant_messages" => "moodle.write.messages",
-        "mod_forum_add_discussion" or "mod_forum_add_discussion_post" => "moodle.write.forums",
-        "core_calendar_create_calendar_events" => "moodle.write.course_content",
-        "mod_assign_save_grade" or "mod_assign_save_grades" => "moodle.write.assignments.grade",
-        _ => "moodle.write"
-    };
 
     private Task RecordExecutionAsync(
         PendingMoodleAction action,
@@ -355,72 +368,215 @@ internal sealed class MoodleUniversalWriteService(
         }
     }
 
-    private static bool IsExecutionUnknown(Exception exception)
-    {
-        if (exception is HttpRequestException)
-        {
-            return true;
-        }
-
-        return exception is MoodleApiException moodleException &&
-            MoodleErrorContract.NormalizeCode(moodleException.ErrorCode) is
-                MoodleErrorContract.NetworkError or MoodleErrorContract.RequestTimeout;
-    }
-
-    private static SemanticWritePreview BuildSemanticPreview(
+    private static async Task<SemanticWritePreview> BuildSemanticPreviewAsync(
         string functionName,
-        string connectionAlias,
+        MoodleConnectorCredentials connection,
         IReadOnlyDictionary<string, object?> parameters,
-        IReadOnlyList<string> parameterNames)
+        IReadOnlyList<string> parameterNames,
+        IMoodleAssignmentGradeReadGateway? gradeReadGateway,
+        CancellationToken cancellationToken)
     {
-        var changes = parameterNames
-            .Select(name => new MoodleWritePreviewChange(
-                name,
-                PreviousValue: null,
-                NewValue: FormatPreviewValue(parameters[name])))
-            .ToArray();
-
         var normalized = functionName.Trim().ToLowerInvariant();
+        var warnings = new List<string>();
         var summary = normalized switch
         {
-            "mod_assign_save_grade" => "Atualizar a nota de uma entrega Moodle.",
-            "mod_assign_save_grades" => "Atualizar notas de varias entregas Moodle.",
-            "core_message_send_instant_messages" => "Enviar mensagens instantaneas aos destinatarios informados.",
-            "core_calendar_create_calendar_events" => "Criar eventos no calendario Moodle.",
+            "mod_assign_save_grade" => BuildGradeSummary(parameters, warnings),
+            "mod_assign_save_grades" => BuildBatchGradeSummary(parameters, warnings),
+            "core_message_send_instant_messages" or "core_message_send_messages_to_conversation" => BuildMessageSummary(parameters, warnings),
+            "core_calendar_create_calendar_events" => BuildCalendarSummary(parameters, warnings),
             _ => $"Executar a escrita Moodle '{functionName.Trim()}'."
         };
 
         var affectedResources = normalized switch
         {
-            "mod_assign_save_grade" or "mod_assign_save_grades" => ["assignment", "submission", "grade"],
-            "core_message_send_instant_messages" => ["message", "recipient"],
-            "core_calendar_create_calendar_events" => ["calendar_event"],
+            "mod_assign_save_grade" => BuildGradeResources(parameters),
+            "mod_assign_save_grades" => BuildBatchGradeResources(parameters),
+            "core_message_send_instant_messages" or "core_message_send_messages_to_conversation" => BuildMessageResources(parameters),
+            "core_calendar_create_calendar_events" => BuildCalendarResources(parameters),
             _ => Array.Empty<string>()
         };
 
         var estimatedRecords = TryEstimateAffectedRecords(normalized, parameters);
-        var warnings = new List<string>
-        {
-            "Valores anteriores nao foram consultados por esta previa universal; revise o contexto antes de confirmar."
-        };
         if (estimatedRecords is null)
         {
-            warnings.Add("A quantidade de registros afetados nao foi determinada.");
+            warnings.Add("A quantidade de registros afetados não foi determinada.");
         }
-        if (string.IsNullOrWhiteSpace(connectionAlias))
+        if (string.IsNullOrWhiteSpace(connection.Alias))
         {
-            warnings.Add("A conexao Moodle nao possui alias de exibicao.");
+            warnings.Add("A conexão Moodle não possui alias de exibição.");
         }
 
+        var previousValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (normalized == "mod_assign_save_grade" &&
+            gradeReadGateway is not null &&
+            TryGetParameter(parameters, ["assignmentid", "assignmentId"], out var assignmentId) &&
+            TryGetParameter(parameters, ["studentid", "studentId", "userid", "userId"], out var studentId))
+        {
+            try
+            {
+                var existing = await gradeReadGateway.GetExistingGradeAsync(
+                    connection.Username,
+                    assignmentId,
+                    studentId,
+                    cancellationToken);
+                if (existing is not null)
+                {
+                    previousValues["grade"] = existing.HasGrade && existing.Grade is not null
+                        ? existing.Grade.Value.ToString(CultureInfo.InvariantCulture)
+                        : null;
+                    previousValues["gradevalue"] = previousValues["grade"];
+                    previousValues["feedback"] = existing.Feedback;
+                }
+                else
+                {
+                    warnings.Add("A nota anterior não foi encontrada; confirme o estudante e a atividade antes de executar.");
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                warnings.Add($"Não foi possível consultar o valor anterior da nota ({exception.GetType().Name}); a prévia mostra somente o novo valor.");
+            }
+        }
+        else if (normalized == "mod_assign_save_grade")
+        {
+            warnings.Add("A prévia não conseguiu consultar a nota anterior porque assignmentid/studentid não foram resolvidos.");
+        }
+        else if (normalized is "mod_assign_save_grades" or "core_message_send_instant_messages" or "core_message_send_messages_to_conversation")
+        {
+            warnings.Add("Valores anteriores não se aplicam ou não foram consultados para esta operação em lote/comunicação.");
+        }
+
+        var changes = parameterNames
+            .Select(name => new MoodleWritePreviewChange(
+                name,
+                previousValues.TryGetValue(name, out var previous) ? previous : null,
+                NewValue: FormatPreviewValue(parameters[name])))
+            .ToArray();
+
         return new SemanticWritePreview(summary, changes, affectedResources, estimatedRecords, warnings);
+    }
+
+    private static bool HasSemanticPreviewBuilder(string functionName) => functionName.Trim().ToLowerInvariant() switch
+    {
+        "mod_assign_save_grade" or
+        "mod_assign_save_grades" or
+        "core_message_send_instant_messages" or
+        "core_message_send_messages_to_conversation" or
+        "core_calendar_create_calendar_events" => true,
+        _ => false,
+    };
+
+    private static string BuildGradeSummary(IReadOnlyDictionary<string, object?> parameters, List<string> warnings)
+    {
+        var assignment = TryGetParameter(parameters, ["assignmentid", "assignmentId"], out var assignmentId) ? assignmentId : "atividade não identificada";
+        var student = TryGetParameter(parameters, ["studentid", "studentId", "userid", "userId"], out var studentId) ? studentId : "estudante não identificado";
+        if (!TryGetParameter(parameters, ["grade", "gradevalue"], out _))
+        {
+            warnings.Add("A nova nota não foi identificada nos parâmetros da função.");
+        }
+        return $"Atualizar a nota do estudante {student} na atividade {assignment}.";
+    }
+
+    private static string BuildBatchGradeSummary(IReadOnlyDictionary<string, object?> parameters, List<string> warnings)
+    {
+        var count = TryGetArrayCount(parameters, ["grades", "items", "gradeitems"]);
+        if (count is null)
+        {
+            warnings.Add("Informe uma lista explícita de notas para que o impacto do lote seja calculado.");
+            return "Atualizar notas em lote; a quantidade exata não foi identificada.";
+        }
+        return $"Atualizar {count.Value} notas de atividades Moodle conforme a lista informada.";
+    }
+
+    private static string BuildMessageSummary(IReadOnlyDictionary<string, object?> parameters, List<string> warnings)
+    {
+        var count = TryGetArrayCount(parameters, ["messages"]);
+        if (count is null)
+        {
+            warnings.Add("A lista de destinatários/mensagens não foi identificada; o impacto pode ser maior que o previsto.");
+            return "Enviar mensagens Moodle aos destinatários informados.";
+        }
+        return $"Enviar {count.Value} mensagem(ns) Moodle aos destinatários informados.";
+    }
+
+    private static string BuildCalendarSummary(IReadOnlyDictionary<string, object?> parameters, List<string> warnings)
+    {
+        var count = TryGetArrayCount(parameters, ["events"]);
+        return count is null
+            ? "Criar evento(s) no calendário Moodle conforme os parâmetros informados."
+            : $"Criar {count.Value} evento(s) no calendário Moodle.";
+    }
+
+    private static IReadOnlyList<string> BuildGradeResources(IReadOnlyDictionary<string, object?> parameters)
+    {
+        var resources = new List<string> { "assignment", "submission", "grade" };
+        if (TryGetParameter(parameters, ["assignmentid", "assignmentId"], out var assignmentId))
+            resources.Add($"assignment:{assignmentId}");
+        if (TryGetParameter(parameters, ["studentid", "studentId", "userid", "userId"], out var studentId))
+            resources.Add($"student:{studentId}");
+        return resources;
+    }
+
+    private static IReadOnlyList<string> BuildBatchGradeResources(IReadOnlyDictionary<string, object?> parameters)
+    {
+        var resources = new List<string> { "assignment", "submission", "grade", "bulk-selection" };
+        AppendArrayResourceIds(resources, parameters, ["grades", "items", "gradeitems"], ["assignmentid", "assignmentId"], "assignment");
+        AppendArrayResourceIds(resources, parameters, ["grades", "items", "gradeitems"], ["studentid", "studentId", "userid", "userId"], "student");
+        return resources;
+    }
+
+    private static IReadOnlyList<string> BuildMessageResources(IReadOnlyDictionary<string, object?> parameters)
+    {
+        var resources = new List<string> { "message", "recipient" };
+        AppendArrayResourceIds(resources, parameters, ["messages"], ["touserid", "toUserId", "userid", "userId"], "recipient");
+        return resources;
+    }
+
+    private static IReadOnlyList<string> BuildCalendarResources(IReadOnlyDictionary<string, object?> parameters)
+    {
+        var resources = new List<string> { "calendar_event", "course" };
+        AppendArrayResourceIds(resources, parameters, ["events"], ["courseid", "courseId"], "course");
+        return resources;
+    }
+
+    private static void AppendArrayResourceIds(
+        ICollection<string> resources,
+        IReadOnlyDictionary<string, object?> parameters,
+        IReadOnlyList<string> arrayNames,
+        IReadOnlyList<string> idNames,
+        string prefix)
+    {
+        if (!TryGetParameterObject(parameters, arrayNames, out var raw) || raw is not JsonElement element ||
+            element.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        foreach (var item in element.EnumerateArray().Take(20))
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+                continue;
+            foreach (var idName in idNames)
+            {
+                if (item.TryGetProperty(idName, out var id) && id.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+                {
+                    var value = id.ValueKind == JsonValueKind.String ? id.GetString() : id.GetRawText();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        resources.Add($"{prefix}:{value}");
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     private static int? TryEstimateAffectedRecords(
         string functionName,
         IReadOnlyDictionary<string, object?> parameters)
     {
-        if (functionName == "core_message_send_instant_messages" &&
-            parameters.TryGetValue("messages", out var messages))
+        if ((functionName == "core_message_send_instant_messages" || functionName == "core_message_send_messages_to_conversation") &&
+            TryGetParameterObject(parameters, ["messages"], out var messages))
         {
             if (messages is JsonElement element && element.ValueKind == JsonValueKind.Array)
             {
@@ -433,7 +589,54 @@ internal sealed class MoodleUniversalWriteService(
             }
         }
 
-        return functionName == "mod_assign_save_grades" ? 1 : null;
+        return functionName == "mod_assign_save_grades"
+            ? TryGetArrayCount(parameters, ["grades", "items", "gradeitems"]) ?? 1
+            : functionName == "core_calendar_create_calendar_events"
+                ? TryGetArrayCount(parameters, ["events"]) ?? 1
+                : null;
+    }
+
+    private static bool TryGetParameter(
+        IReadOnlyDictionary<string, object?> parameters,
+        IReadOnlyList<string> names,
+        out string value)
+    {
+        if (TryGetParameterObject(parameters, names, out var raw) && raw is not null)
+        {
+            value = raw is JsonElement element && element.ValueKind == JsonValueKind.String
+                ? element.GetString() ?? string.Empty
+                : raw is JsonElement json ? json.GetRawText() : Convert.ToString(raw, CultureInfo.InvariantCulture) ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(value);
+        }
+        value = string.Empty;
+        return false;
+    }
+
+    private static bool TryGetParameterObject(
+        IReadOnlyDictionary<string, object?> parameters,
+        IReadOnlyList<string> names,
+        out object? value)
+    {
+        foreach (var name in names)
+        {
+            var pair = parameters.FirstOrDefault(item => string.Equals(item.Key, name, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(pair.Key))
+            {
+                value = pair.Value;
+                return true;
+            }
+        }
+        value = null;
+        return false;
+    }
+
+    private static int? TryGetArrayCount(IReadOnlyDictionary<string, object?> parameters, IReadOnlyList<string> names)
+    {
+        if (!TryGetParameterObject(parameters, names, out var value) || value is null)
+            return null;
+        if (value is JsonElement element && element.ValueKind == JsonValueKind.Array)
+            return element.GetArrayLength();
+        return value is System.Collections.ICollection collection ? collection.Count : null;
     }
 
     private static string? FormatPreviewValue(object? value)

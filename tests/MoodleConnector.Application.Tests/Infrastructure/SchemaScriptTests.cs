@@ -219,4 +219,29 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (37, 'stable snapshot connection identity and technical synchronization runs'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task SnapshotLineageAndMigrationAuditScripts_DevemConterHeadEOrfaos()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+
+        var lineage = await File.ReadAllTextAsync(Path.Combine(
+            assemblyDirectory, "Database", "Scripts", "038_moodle_snapshot_run_lineage.sql"));
+        Assert.Contains("LastRunId", lineage, StringComparison.Ordinal);
+        Assert.Contains("VALUES (38, 'snapshot head lineage to technical run'", lineage, StringComparison.Ordinal);
+
+        var audit = await File.ReadAllTextAsync(Path.Combine(
+            assemblyDirectory, "Database", "Scripts", "039_moodle_snapshot_identity_migration_audit.sql"));
+        Assert.Contains("moodle_snapshot_identity_migration_issues", audit, StringComparison.Ordinal);
+        Assert.Contains("ambiguous_active_alias", audit, StringComparison.Ordinal);
+        Assert.Contains("snapshot_orphan_connection", audit, StringComparison.Ordinal);
+        Assert.Contains("sync_state_orphan_connection", audit, StringComparison.Ordinal);
+        Assert.Contains("VALUES (39, 'snapshot identity migration audit view'", audit, StringComparison.Ordinal);
+
+        var worker = await File.ReadAllTextAsync(Path.Combine(
+            assemblyDirectory, "Database", "Scripts", "040_moodle_snapshot_worker_id.sql"));
+        Assert.Contains("WorkerId", worker, StringComparison.Ordinal);
+        Assert.Contains("VALUES (40, 'snapshot worker instance lineage'", worker, StringComparison.Ordinal);
+    }
 }

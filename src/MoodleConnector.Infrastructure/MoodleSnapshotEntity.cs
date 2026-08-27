@@ -9,6 +9,7 @@ public sealed class MoodleSnapshotEntity
     public string SnapshotType { get; set; } = string.Empty;
     public string CourseId { get; set; } = string.Empty;
     public string PayloadJson { get; set; } = string.Empty;
+    public Guid? LastRunId { get; set; }
     public string Tier { get; set; } = "hot";
     public bool IsFrozen { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -57,6 +58,7 @@ public sealed class MoodleSnapshotRunEntity
     public string ConnectionAlias { get; set; } = string.Empty;
     public string Status { get; set; } = "running";
     public string Trigger { get; set; } = "scheduled";
+    public string WorkerId { get; set; } = string.Empty;
     public string SynchronizerVersion { get; set; } = string.Empty;
     public int SchemaVersion { get; set; } = 1;
     public DateTimeOffset StartedAt { get; set; }

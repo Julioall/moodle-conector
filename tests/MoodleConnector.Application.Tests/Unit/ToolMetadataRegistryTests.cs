@@ -130,11 +130,24 @@ public class ToolMetadataRegistryTests
     }
 
     [Fact]
+    public void Moodle_wrappers_declare_the_remote_capabilities_they_need()
+    {
+        var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
+
+        Assert.True(reg.TryGet("list_course_contents", out var contents));
+        Assert.Equal("core_course_get_contents", contents!.RequiredMoodleCapabilities);
+        Assert.True(reg.TryGet("list_assignment_submissions", out var submissions));
+        Assert.Equal("mod_assign_get_submissions", submissions!.RequiredMoodleCapabilities);
+        Assert.True(reg.TryGet("confirm_forum_post", out var forumWrite));
+        Assert.Equal("mod_forum_add_discussion", forumWrite!.RequiredMoodleCapabilities);
+    }
+
+    [Fact]
     public void Registry_covers_the_complete_registered_mcp_surface()
     {
         var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
 
-        Assert.Equal(110, reg.Entries.Count);
+        Assert.Equal(111, reg.Entries.Count);
         Assert.All(reg.Entries, entry =>
         {
             Assert.False(string.IsNullOrWhiteSpace(entry.Key));
@@ -159,10 +172,10 @@ public class ToolMetadataRegistryTests
         Assert.True(allGradable.Structural == false);
 
         var inventory = new ToolSurfaceInventory(reg);
-        Assert.Equal(110, inventory.Total);
+        Assert.Equal(111, inventory.Total);
         Assert.Equal(11, inventory.StructuralCount);
         Assert.Equal(54, inventory.SpecializedCount);
-        Assert.Equal(28, inventory.ControlledWriteCount);
+        Assert.Equal(29, inventory.ControlledWriteCount);
         Assert.Equal(0, inventory.DeprecatedCount);
     }
 
@@ -192,5 +205,7 @@ public class ToolMetadataRegistryTests
         Assert.False(RegisteredMcpToolContainers.IsToolEnabled("prepare_welcome_message", features, assignment));
         Assert.False(RegisteredMcpToolContainers.IsToolEnabled("prepare_individual_grade_launch", features, assignment));
         Assert.True(RegisteredMcpToolContainers.IsToolEnabled("moodle_execute_read", features, assignment));
+        Assert.True(RegisteredMcpToolContainers.IsToolEnabled("moodle_reconcile_write", features, assignment));
+        Assert.Contains(typeof(MoodleWriteReconciliationTools), RegisteredMcpToolContainers.AlwaysOn);
     }
 }

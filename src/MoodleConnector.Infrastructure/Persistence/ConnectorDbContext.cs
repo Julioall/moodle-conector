@@ -269,6 +269,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleSnapshot.Property(x => x.SnapshotType).HasMaxLength(32).IsRequired();
         moodleSnapshot.Property(x => x.CourseId).HasMaxLength(64).IsRequired();
         moodleSnapshot.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
+        moodleSnapshot.Property(x => x.LastRunId);
         moodleSnapshot.Property(x => x.Tier).HasMaxLength(16).IsRequired();
         moodleSnapshot.Property(x => x.UpdatedAt).IsRequired();
         moodleSnapshot.Property(x => x.LastError).HasMaxLength(4000);
@@ -304,6 +305,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleSnapshotRun.Property(x => x.ConnectionAlias).HasMaxLength(64).IsRequired();
         moodleSnapshotRun.Property(x => x.Status).HasMaxLength(32).IsRequired();
         moodleSnapshotRun.Property(x => x.Trigger).HasMaxLength(32).IsRequired();
+        moodleSnapshotRun.Property(x => x.WorkerId).HasMaxLength(128).IsRequired();
         moodleSnapshotRun.Property(x => x.SynchronizerVersion).HasMaxLength(128).IsRequired();
         moodleSnapshotRun.Property(x => x.Error).HasMaxLength(4000);
         moodleSnapshotRun.HasIndex(x => new { x.OwnerId, x.ConnectionId, x.StartedAt });

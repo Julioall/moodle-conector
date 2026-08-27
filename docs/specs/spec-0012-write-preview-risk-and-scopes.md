@@ -31,10 +31,14 @@ O preview universal contém função, nomes de parâmetros, hash e risco genéri
 
 ## Critérios de aceite
 
-- [ ] Nota individual mostra estudante, atividade e valor anterior/novo quando disponível.
-- [ ] Ação em lote mostra quantidade, critérios de inclusão e alerta de impacto.
-- [ ] Função sem schema/builder não cria escrita universal.
-- [ ] Token sem scope de domínio não prepara nem confirma a escrita.
+- [x] Nota individual mostra estudante, atividade e valor anterior/novo quando disponível.
+- [x] Ação em lote mostra quantidade, critérios de inclusão e alerta de impacto.
+- [x] Função sem schema/builder não cria escrita universal.
+- [x] Token sem scope de domínio não prepara nem confirma a escrita.
+
+Implementado nesta onda: prévias semânticas por família para notas, lotes, mensagens e
+calendário; estimativa de afetados, recursos identificados, diff anterior→novo quando
+disponível e bloqueio explícito de funções ainda sem builder aprovado.
 
 ## Validação e evidências
 

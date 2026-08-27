@@ -28,6 +28,7 @@ public static class RegisteredMcpToolContainers
     [
         typeof(MoodleCoursesTools),
         typeof(MoodleUniversalTools),
+        typeof(MoodleWriteReconciliationTools),
         typeof(MoodleParticipantsTools),
         typeof(MoodleCourseContentsTools),
         typeof(MoodleCourseActivitiesTools),

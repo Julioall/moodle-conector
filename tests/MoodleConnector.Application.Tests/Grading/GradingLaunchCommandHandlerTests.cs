@@ -182,7 +182,7 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("501", fixture.Mediator.SavedGrades[0].AssignmentId);
         Assert.Equal("101", fixture.Mediator.SavedGrades[0].StudentId);
         Assert.Equal(GradingCommitStatus.Succeeded, item.CommitStatus);
-        Assert.Equal("moodle.write", fixture.Confirmations.LastRequiredScope);
+        Assert.Equal("moodle.write.assignments.grade", fixture.Confirmations.LastRequiredScope);
         var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_succeeded");
         Assert.Equal("confirmar_lancamento_lote_moodle", auditLog.ToolName);
         Assert.Equal("mod_assign_save_grade", auditLog.MoodleFunction);

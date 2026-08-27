@@ -625,7 +625,9 @@ public sealed class GetPendingGradingRunReportQueryHandler(
 
     private static PendingGradingRunItemOutcome ToOutcome(AssistedGradingBatch batch, AssistedGradingItem item)
     {
-        var reason = item.CommitStatus == GradingCommitStatus.Failed
+        var reason = item.CommitStatus == GradingCommitStatus.ExecutionUnknown
+            ? "Resultado da escrita no Moodle desconhecido; reconcilie a ação antes de tentar novamente."
+            : item.CommitStatus == GradingCommitStatus.Failed
             ? "Falha ao lancar no Moodle: " + Describe(item.CommitError)
             : item.Status == GradingItemStatus.Blocked
                 ? "Bloqueado: " + Describe(item.DraftFeedback)

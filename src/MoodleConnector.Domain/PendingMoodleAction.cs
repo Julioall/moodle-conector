@@ -60,4 +60,19 @@ public sealed class PendingMoodleAction
             Status = PendingActionStatus.ExecutionUnknown;
         }
     }
+
+    public void ResolveExecutionUnknown(PendingActionStatus resolvedStatus)
+    {
+        if (Status != PendingActionStatus.ExecutionUnknown)
+        {
+            throw new InvalidOperationException($"A ação não está em execução desconhecida: {Status}.");
+        }
+
+        if (resolvedStatus is not (PendingActionStatus.Executed or PendingActionStatus.Failed))
+        {
+            throw new ArgumentOutOfRangeException(nameof(resolvedStatus), "A reconciliação deve resolver para Executed ou Failed.");
+        }
+
+        Status = resolvedStatus;
+    }
 }

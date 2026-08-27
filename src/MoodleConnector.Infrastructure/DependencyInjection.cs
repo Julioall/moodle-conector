@@ -37,6 +37,10 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(MoodleApiOptions.SectionName));
 
         services
+            .AddOptions<MoodleSnapshotOptions>()
+            .Bind(configuration.GetSection(MoodleSnapshotOptions.SectionName));
+
+        services
             .AddOptions<AssignmentWriteFeatureOptions>()
             .Bind(configuration.GetSection(AssignmentWriteFeatureOptions.SectionName));
 
@@ -105,6 +109,7 @@ public static class DependencyInjection
         services.AddScoped<IMoodleFunctionCatalog, MoodleFunctionCatalog>();
         services.AddScoped<IMoodleFunctionExecutor, MoodleFunctionExecutor>();
         services.AddScoped<IMoodleUniversalWriteService, MoodleUniversalWriteService>();
+        services.AddScoped<IMoodleWriteReconciliationService, MoodleWriteReconciliationService>();
         services.AddSingleton<IMoodleResourceResolver, MoodleResourceResolver>();
         if (moodleApiOptions.UseStubData)
         {

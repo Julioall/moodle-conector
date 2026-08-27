@@ -82,10 +82,13 @@ public sealed class McpToolMetadataTests
             }
             else if (toolName is "confirm_welcome_message" or "confirm_access_reminder" or "confirm_activity_reminder" or
                      "confirm_recovery_message" or "confirm_closing_message" or "confirm_followup_message" or
-                     "moodle_prepare_write" or "moodle_confirm_write")
+                     "moodle_prepare_write" or "moodle_confirm_write" or "moodle_reconcile_write")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} altera estado e deve declarar ReadOnly=false.");
-                Assert.False(attribute.Idempotent, $"{toolName} nao declara semantica retry-safe.");
+                if (toolName != "moodle_reconcile_write")
+                {
+                    Assert.False(attribute.Idempotent, $"{toolName} nao declara semantica retry-safe.");
+                }
             }
             else
             {

@@ -5,9 +5,11 @@ using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
+using MoodleConnector.Infrastructure.Configuration;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -15,7 +17,8 @@ internal sealed class MoodleSnapshotStore(
     ConnectorDbContext dbContext,
     IMemoryCache memoryCache,
     MoodleSnapshotMetrics metrics,
-    ILogger<MoodleSnapshotStore> logger) : IMoodleSnapshotStore
+    ILogger<MoodleSnapshotStore> logger,
+    IOptions<MoodleSnapshotOptions>? snapshotOptions = null) : IMoodleSnapshotStore
 {
     private static readonly TimeSpan HotTtl = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan WarmTtl = TimeSpan.FromHours(2);
@@ -25,6 +28,7 @@ internal sealed class MoodleSnapshotStore(
     {
         PropertyNameCaseInsensitive = true,
     };
+    private readonly MoodleSnapshotOptions options = (snapshotOptions?.Value ?? new MoodleSnapshotOptions()).Normalize();
 
     public Task<MoodleSnapshotEnvelope<IReadOnlyList<CourseSummary>>?> GetCoursesAsync(Guid ownerId, string connectionAlias, CancellationToken cancellationToken = default) =>
         ReadAsync<IReadOnlyList<CourseSummary>>(ownerId, connectionAlias, "courses", string.Empty, cancellationToken);
@@ -52,7 +56,8 @@ internal sealed class MoodleSnapshotStore(
         bool complete,
         int recordCount,
         DateTimeOffset now,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken,
+        Guid? snapshotRunId)
     {
         var normalizedDataset = Normalize(dataset);
         var normalizedCourseId = courseId?.Trim() ?? string.Empty;
@@ -67,6 +72,14 @@ internal sealed class MoodleSnapshotStore(
         var freshUntil = now.Add(GetFreshTtl(normalizedDataset, tier, frozen));
         var staleUntil = freshUntil.Add(GetStaleWindow(normalizedDataset, frozen));
         var payloadJson = JsonSerializer.Serialize(payload, JsonOptions);
+        var payloadSize = Encoding.UTF8.GetByteCount(payloadJson);
+        metrics.RecordPayloadBytes(normalizedDataset, payloadSize);
+        if (payloadSize > options.MaxPayloadBytes)
+        {
+            throw new InvalidOperationException(
+                $"O payload do snapshot excede o limite configurado de {options.MaxPayloadBytes} bytes.");
+        }
+        var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payloadJson))).ToLowerInvariant();
 
         if (entity is null)
         {
@@ -84,13 +97,24 @@ internal sealed class MoodleSnapshotStore(
 
         entity.ConnectionId = connectionId;
         entity.ConnectionAlias = connectionAlias;
-        ApplySnapshot(entity, connectionId, connectionAlias, payloadJson, tier, frozen, complete, recordCount, now, freshUntil, staleUntil);
+        ApplySnapshot(entity, connectionId, connectionAlias, payloadJson, payloadHash, tier, frozen, complete, recordCount, now, freshUntil, staleUntil, snapshotRunId);
+        const string savepointName = "moodle_snapshot_upsert";
+        var transaction = dbContext.Database.CurrentTransaction;
+        if (transaction is not null)
+        {
+            await transaction.CreateSavepointAsync(savepointName, cancellationToken);
+        }
+
         try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException exception) when (IsUniqueViolation(exception) && entity.Id != Guid.Empty)
         {
+            if (transaction is not null)
+            {
+                await transaction.RollbackToSavepointAsync(savepointName, CancellationToken.None);
+            }
             // Another worker may have inserted the same head between our read
             // and insert. Detach the failed insert and converge on its head.
             dbContext.Entry(entity).State = EntityState.Detached;
@@ -98,12 +122,26 @@ internal sealed class MoodleSnapshotStore(
                 item => item.OwnerId == ownerId && item.ConnectionId == connectionId && item.SnapshotType == normalizedDataset && item.CourseId == normalizedCourseId,
                 cancellationToken)
                 ?? throw new InvalidOperationException("O head do snapshot desapareceu durante o upsert concorrente.");
-            ApplySnapshot(entity, connectionId, connectionAlias, payloadJson, tier, frozen, complete, recordCount, now, freshUntil, staleUntil);
+            ApplySnapshot(entity, connectionId, connectionAlias, payloadJson, payloadHash, tier, frozen, complete, recordCount, now, freshUntil, staleUntil, snapshotRunId);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         Invalidate(ownerId, connectionAlias, normalizedDataset, normalizedCourseId);
         metrics.RecordRefresh(normalizedDataset);
     }
+
+    public Task SaveAsync<T>(
+        Guid ownerId,
+        string connectionAlias,
+        string dataset,
+        string courseId,
+        T payload,
+        string tier,
+        bool frozen,
+        bool complete,
+        int recordCount,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default) =>
+        SaveAsync(ownerId, connectionAlias, dataset, courseId, payload, tier, frozen, complete, recordCount, now, cancellationToken, null);
 
     public void Invalidate(Guid ownerId, string connectionAlias, string dataset, string courseId = "")
     {
@@ -159,7 +197,8 @@ internal sealed class MoodleSnapshotStore(
                 entity.LastAttemptAt,
                 entity.LastError,
                 entity.IsComplete,
-                entity.RecordCount);
+                entity.RecordCount,
+                entity.LastRunId);
             memoryCache.Set(key, envelope, L1Duration);
             metrics.RecordL2Hit(type, entity.UpdatedAt);
             return envelope;
@@ -187,26 +226,36 @@ internal sealed class MoodleSnapshotStore(
         string connectionId,
         string connectionAlias,
         string payloadJson,
+        string payloadHash,
         string tier,
         bool frozen,
         bool complete,
         int recordCount,
         DateTimeOffset now,
         DateTimeOffset freshUntil,
-        DateTimeOffset staleUntil)
+        DateTimeOffset staleUntil,
+        Guid? snapshotRunId)
     {
         entity.ConnectionId = connectionId;
         entity.ConnectionAlias = connectionAlias;
-        entity.PayloadJson = payloadJson;
+        if (!string.Equals(entity.PayloadHash, payloadHash, StringComparison.OrdinalIgnoreCase))
+        {
+            entity.PayloadJson = payloadJson;
+        }
         entity.Tier = tier;
         entity.IsFrozen = frozen;
         entity.UpdatedAt = now;
         entity.FreshUntil = freshUntil;
         entity.StaleUntil = staleUntil;
+        entity.LastAttemptAt = now;
         entity.LastError = null;
-        entity.PayloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payloadJson))).ToLowerInvariant();
+        entity.PayloadHash = payloadHash;
         entity.IsComplete = complete;
         entity.RecordCount = recordCount;
+        if (snapshotRunId is not null)
+        {
+            entity.LastRunId = snapshotRunId;
+        }
     }
 
     private static bool IsUniqueViolation(DbUpdateException exception) =>

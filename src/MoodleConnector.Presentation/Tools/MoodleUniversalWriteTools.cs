@@ -5,6 +5,7 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Presentation.Tools;
 
@@ -58,10 +59,12 @@ public sealed class MoodleUniversalWriteTools(
         try
         {
             var data = await writeService.ConfirmAsync(pendingActionId, confirmationText, cancellationToken);
-            var isError = data.Status == "write_failed";
+            var isError = data.Status is "write_failed" or "execution_unknown";
             return Result(data, data.Status == "executed"
                 ? $"Escrita '{data.Function}' executada uma única vez."
-                : "A escrita já havia sido confirmada anteriormente e não foi repetida.", isError);
+                : data.Status == "execution_unknown"
+                    ? "A execução ficou desconhecida após a confirmação. Não repita a chamada; reconcilie a ação antes de qualquer nova prévia."
+                    : "A escrita já havia sido confirmada anteriormente e não foi repetida.", isError);
         }
         catch (OperationCanceledException) { throw; }
         catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleWriteResult>(ex); }

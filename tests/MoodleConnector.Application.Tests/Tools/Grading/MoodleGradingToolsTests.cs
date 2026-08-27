@@ -1041,6 +1041,7 @@ public sealed class MoodleGradingToolsTests
                 ReadyItems: 2,
                 BlockedItems: 0,
                 FailedItems: 0,
+                ExecutionUnknownItems: 0,
                 ReviewedItems: 1,
                 PendingReviewItems: 1,
                 CommittedItems: 0,

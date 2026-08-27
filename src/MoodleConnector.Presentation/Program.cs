@@ -474,6 +474,52 @@ var mcpServerBuilder = builder.Services
                 }
             }
 
+            // A tool can be authorized by OAuth and still be unusable by the
+            // selected Moodle connection. Resolve the cached remote function
+            // profile once per tools/list request and fail closed only for
+            // tools that declare concrete Moodle capabilities.
+            var usingStubMoodle = string.Equals(
+                request.Services.GetService<IConfiguration>()?["MoodleApi:UseStubData"],
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+            if (HasLinkedMoodleConnection(httpContext?.User) && !usingStubMoodle)
+            {
+                var functionCatalog = request.Services.GetService<IMoodleFunctionCatalog>();
+                MoodleFunctionProfile? profile = null;
+                if (functionCatalog is not null)
+                {
+                    try
+                    {
+                        profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        request.Services.GetService<ILoggerFactory>()?
+                            .CreateLogger("MoodleConnector.McpToolExposure")
+                            .LogWarning(exception, "Não foi possível descobrir capabilities Moodle para tools/list; tools dependentes serão ocultadas.");
+                    }
+                }
+
+                var availableCapabilities = profile?.Functions
+                    .Where(function => function.IsAvailable)
+                    .Select(function => function.Name)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                for (var i = result.Tools.Count - 1; i >= 0; i--)
+                {
+                    var tool = result.Tools[i];
+                    if (tool is null || registry is null || !registry.TryGet(tool.Name ?? string.Empty, out var metadata) || metadata is null)
+                        continue;
+
+                    var requiredCapabilities = metadata.RequiredMoodleCapabilities
+                        .Split([' ', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (requiredCapabilities.Length > 0 &&
+                        (availableCapabilities is null || !requiredCapabilities.All(availableCapabilities.Contains)))
+                    {
+                        result.Tools.RemoveAt(i);
+                    }
+                }
+            }
+
             // Post-process remaining tools for metadata and security schemes
             foreach (var tool in result.Tools)
             {

@@ -311,12 +311,18 @@ public sealed class ConfirmIndividualGradeCommandHandler(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await RecordAuditAsync(action, payload, "grade_failed",
+            var executionUnknown = MoodleWriteExecutionClassifier.IsUnknown(ex);
+            if (executionUnknown)
+            {
+                action.MarkExecutionUnknown();
+                await pendingActions.SaveChangesAsync(cancellationToken);
+            }
+            await RecordAuditAsync(action, payload, executionUnknown ? "grade_execution_unknown" : "grade_failed",
                 new { error = ex.GetType().Name }, ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name, ex.Message, cancellationToken);
             await auditLogs.SaveChangesAsync(cancellationToken);
 
             return new IndividualGradeSendResult(
-                Status: "failed",
+                Status: executionUnknown ? "execution_unknown" : "failed",
                 PendingActionId: request.PendingActionId,
                 AssignmentId: payload.AssignmentId,
                 StudentId: payload.StudentId,

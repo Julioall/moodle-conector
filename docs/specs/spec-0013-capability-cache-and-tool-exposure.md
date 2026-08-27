@@ -27,10 +27,14 @@ Remover segredos e semântica incorreta do cache de capabilities, e impedir que 
 
 ## Critérios de aceite
 
-- [ ] Token não aparece em snapshot, chave, log ou exceção.
-- [ ] Rotação invalida/recalcula capabilities sem persistir segredo.
-- [ ] Tool de escrita desabilitada não aparece em `tools/list`.
-- [ ] Tool indisponível na conexão não é exposta.
+- [x] Token não aparece em snapshot, chave, log ou exceção.
+- [x] Rotação invalida/recalcula capabilities sem persistir segredo.
+- [x] Tool de escrita desabilitada não aparece em `tools/list`.
+- [x] Tool indisponível na conexão não é exposta quando o perfil de capabilities está disponível; em falha de descoberta, a exposição dependente falha fechada.
+
+Implementado nesta onda: cache por conexão e fingerprint de credencial, expiração absoluta,
+metadados de capabilities para wrappers Moodle e filtro dinâmico de `tools/list`. A validação
+contra Moodle real ainda deve ser executada no ambiente de homologação.
 
 ## Validação e evidências
 

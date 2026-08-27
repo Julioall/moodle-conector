@@ -121,6 +121,7 @@ public sealed class ToolMetadataRegistry
                                     Destructive: GetBooleanNamedArgument(mcptoolAttrData, "Destructive"));
                                 inferred.RequiredPlatformPermission = PlatformToolPermissionMapping.For(toolName, inferred);
                                 inferred.RequiredOAuthScopes = string.Join(' ', ToolAuthorizationMapping.OAuthScopesFor(toolName, inferred));
+                                Complete(inferred, toolContainerType, toolName);
                                 _map[toolName] = inferred;
                             }
                         }
@@ -155,7 +156,24 @@ public sealed class ToolMetadataRegistry
         {
             metadata.RequiredOAuthScopes = string.Join(' ', ToolAuthorizationMapping.OAuthScopesFor(toolName, metadata));
         }
+        if (string.IsNullOrWhiteSpace(metadata.RequiredMoodleCapabilities) &&
+            IsConcreteMoodleFunction(metadata.CanonicalOperation))
+        {
+            metadata.RequiredMoodleCapabilities = metadata.CanonicalOperation.Trim();
+        }
+        if (string.IsNullOrWhiteSpace(metadata.RequiredMoodleCapabilities))
+        {
+            metadata.RequiredMoodleCapabilities = MoodleToolCapabilityMapping.For(toolName);
+        }
     }
+
+    private static bool IsConcreteMoodleFunction(string operation) =>
+        operation.StartsWith("core_", StringComparison.OrdinalIgnoreCase) ||
+        operation.StartsWith("mod_", StringComparison.OrdinalIgnoreCase) ||
+        operation.StartsWith("enrol_", StringComparison.OrdinalIgnoreCase) ||
+        operation.StartsWith("gradereport_", StringComparison.OrdinalIgnoreCase) ||
+        operation.StartsWith("report_", StringComparison.OrdinalIgnoreCase) ||
+        operation.StartsWith("tool_", StringComparison.OrdinalIgnoreCase);
 
     private static bool? GetBooleanNamedArgument(CustomAttributeData attribute, string name)
     {

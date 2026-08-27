@@ -37,7 +37,8 @@ public sealed record MoodleSnapshotEnvelope<T>(
     DateTimeOffset? LastAttemptAt = null,
     string? LastError = null,
     bool IsComplete = true,
-    int RecordCount = 0);
+    int RecordCount = 0,
+    Guid? SnapshotRunId = null);
 
 public interface IMoodleSnapshotStore
 {
@@ -83,6 +84,21 @@ public interface IMoodleSnapshotStore
         int recordCount,
         DateTimeOffset now,
         CancellationToken cancellationToken = default);
+
+    Task SaveAsync<T>(
+        Guid ownerId,
+        string connectionAlias,
+        string dataset,
+        string courseId,
+        T payload,
+        string tier,
+        bool frozen,
+        bool complete,
+        int recordCount,
+        DateTimeOffset now,
+        CancellationToken cancellationToken,
+        Guid? snapshotRunId) =>
+        SaveAsync(ownerId, connectionAlias, dataset, courseId, payload, tier, frozen, complete, recordCount, now, cancellationToken);
 
     void Invalidate(Guid ownerId, string connectionAlias, string dataset, string courseId = "");
 }

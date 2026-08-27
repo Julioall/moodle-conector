@@ -285,7 +285,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         var confirmation = await confirmations.ConfirmAsync(
             request.PendingActionId,
             request.ConfirmationText,
-            requiredScope: "moodle.write",
+            requiredScope: "moodle.write.assignments.grade",
             cancellationToken);
         var payload = JsonSerializer.Deserialize<GradingLaunchPayload>(action.PayloadJson, JsonOptions)
             ?? throw new InvalidOperationException("Payload de lancamento invalido.");
@@ -300,6 +300,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 confirmation.AuditId);
         }
         var sent = 0;
+        var executionUnknown = false;
         var failures = new List<GradingLaunchFailure>();
         var userExternalId = action.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture) ??
             action.CreatedBySubject;
@@ -500,25 +501,43 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                item.MarkCommitFailed(ex.Message);
+                var itemExecutionUnknown = MoodleWriteExecutionClassifier.IsUnknown(ex);
+                if (itemExecutionUnknown)
+                {
+                    executionUnknown = true;
+                    action.MarkExecutionUnknown();
+                    item.MarkCommitExecutionUnknown(ex.Message);
+                }
+                else
+                {
+                    item.MarkCommitFailed(ex.Message);
+                }
                 failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, ex.Message));
                 await RecordCommitAuditAsync(
                     action,
                     payload.BatchJobId,
                     payloadItem,
-                    "commit_failed",
+                    itemExecutionUnknown ? "commit_execution_unknown" : "commit_failed",
                     responseSummary: new { item.CommitStatus, exceptionType = ex.GetType().Name },
                     errorCode: ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name,
                     errorMessage: ex.Message,
                     cancellationToken);
+                if (itemExecutionUnknown)
+                {
+                    // Once transport leaves the remote result unknown, stop
+                    // the batch. Continuing would create additional writes
+                    // that cannot be reconciled as one operator decision.
+                    break;
+                }
             }
         }
 
         await repository.SaveChangesAsync(cancellationToken);
+        await pendingActions.SaveChangesAsync(cancellationToken);
         await auditLogs.SaveChangesAsync(cancellationToken);
 
         return new ConfirmMoodleBatchLaunchResult(
-            confirmation.Status,
+            executionUnknown ? "execution_unknown" : confirmation.Status,
             request.PendingActionId,
             sent,
             failures.Count,

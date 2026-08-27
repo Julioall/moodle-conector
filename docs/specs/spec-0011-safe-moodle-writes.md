@@ -43,10 +43,16 @@ Impedir repetição automática de escritas Moodle e tornar explícito quando um
 
 ## Critérios de aceite
 
-- [ ] Falha transitória após aplicação simulada da escrita produz exatamente uma requisição.
-- [ ] Timeout, circuit breaker e telemetria continuam ativos para escrita.
-- [ ] Confirmação duplicada é bloqueada e resultado ambíguo não aparece como sucesso.
-- [ ] Nenhuma escrita usa o retry de leitura.
+- [x] Falha transitória após aplicação simulada da escrita produz exatamente uma requisição.
+- [x] Timeout, circuit breaker e telemetria continuam ativos para escrita.
+- [x] Confirmação duplicada é bloqueada e resultado ambíguo não aparece como sucesso.
+- [x] Nenhuma escrita usa o retry de leitura; a requisição de escrita desabilita retry automático.
+
+Implementado nesta onda: classificação centralizada de escopos e falhas ambíguas,
+estado `ExecutionUnknown`, retorno estruturado, auditoria sanitizada e a tool
+`moodle_reconcile_write`, que resolve a ação sem reenviar o POST. Alertas operacionais
+para ações desconhecidas vencidas e o ensaio pós-escrita em Moodle real continuam como
+gate de homologação.
 
 ## Validação e evidências
 
