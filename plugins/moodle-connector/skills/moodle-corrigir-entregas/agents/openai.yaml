@@ -1,4 +1,0 @@
-interface:
-  display_name: "Corrigir entregas Moodle"
-  short_description: "Preparar correção assistida com revisão"
-  default_prompt: "Use $moodle-corrigir-entregas para analisar entregas, gerar notas e feedbacks em prévia, sem lançar alterações sem minha confirmação."
