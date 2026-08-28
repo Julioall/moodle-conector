@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -222,6 +223,117 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("mod_assign_save_grade", auditLog.MoodleFunction);
         Assert.Equal("audit-1", auditLog.CorrelationId);
         Assert.Contains(item.Id.ToString(), auditLog.RequestSanitizedJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_RetryaLeituraDeStatusDaSubmissaoQuandoAFalhaENetworkTransitória()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        fixture.SubmissionStatuses.Errors.Enqueue(new HttpRequestException("connection reset"));
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = CreateConfirmHandler(fixture);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal("confirmed", result.Status);
+        Assert.Equal(1, result.SentItems);
+        Assert.Equal(0, result.FailedItems);
+        Assert.Equal(2, fixture.SubmissionStatuses.CallCount);
+        Assert.Single(fixture.Mediator.SavedGrades);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_ReconciliaRespostaDeEscritaPerdidaQuandoNotaEFeedbackForamAplicados()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        fixture.Mediator.OnSaveGrade = command => fixture.ExistingGrades.ExistingGrades.Add(
+            new AssignmentExistingGrade(
+                command.AssignmentId,
+                command.StudentId,
+                command.Grade,
+                HasGrade: true,
+                command.FeedbackText));
+        fixture.Mediator.Error = new MoodleApiException(
+            MoodleErrorContract.NetworkError,
+            "resposta perdida");
+        var sut = CreateConfirmHandler(fixture);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal("confirmed", result.Status);
+        Assert.Equal(1, result.SentItems);
+        Assert.Equal(0, result.FailedItems);
+        Assert.Equal(GradingCommitStatus.Succeeded, item.CommitStatus);
+        Assert.Contains(fixture.AuditLogs.Logs, log => log.Status == "commit_reconciled_succeeded");
+        Assert.Single(fixture.Mediator.SavedGrades);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_MarcaComoNaoAplicadaQuandoLeituraPosteriorNaoEncontraNotaNemFeedback()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        fixture.Mediator.Error = new MoodleApiException(
+            MoodleErrorContract.NetworkError,
+            "resposta perdida");
+        var sut = CreateConfirmHandler(fixture);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal("confirmed", result.Status);
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Equal(GradingCommitStatus.Failed, item.CommitStatus);
+        Assert.Contains(fixture.AuditLogs.Logs, log => log.Status == "commit_reconciled_not_applied");
+        Assert.Single(fixture.Mediator.SavedGrades);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_MantemExecucaoDesconhecidaQuandoLeituraPosteriorDivergeDoLancamento()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        fixture.Mediator.OnSaveGrade = command => fixture.ExistingGrades.ExistingGrades.Add(
+            new AssignmentExistingGrade(
+                command.AssignmentId,
+                command.StudentId,
+                command.Grade - 1,
+                HasGrade: true,
+                "Feedback diferente."));
+        fixture.Mediator.Error = new MoodleApiException(
+            MoodleErrorContract.NetworkError,
+            "resposta perdida");
+        var sut = CreateConfirmHandler(fixture);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal("execution_unknown", result.Status);
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Equal(GradingCommitStatus.ExecutionUnknown, item.CommitStatus);
+        Assert.Contains(fixture.AuditLogs.Logs, log => log.Status == "commit_execution_unknown");
+        Assert.Single(fixture.Mediator.SavedGrades);
     }
 
     [Fact]
@@ -712,6 +824,18 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("moodle_existing_feedback", auditLog.ErrorCode);
     }
 
+    private static ConfirmMoodleBatchLaunchCommandHandler CreateConfirmHandler(Fixture fixture) =>
+        new(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator);
+
     private sealed class Fixture(string currentUserSubject = "teacher-1", IReadOnlyCollection<string>? scopes = null)
     {
         public FakeGradingReviewRepository GradingRepository { get; } = new();
@@ -1031,6 +1155,8 @@ public sealed class GradingLaunchCommandHandlerTests
     {
         public List<AssignmentExistingGrade> ExistingGrades { get; } = [];
         public Exception? Error { get; set; }
+        public Queue<Exception> Errors { get; } = [];
+        public int CallCount { get; private set; }
 
         public Task<AssignmentExistingGrade?> GetExistingGradeAsync(
             string userExternalId,
@@ -1038,6 +1164,12 @@ public sealed class GradingLaunchCommandHandlerTests
             string studentId,
             CancellationToken cancellationToken)
         {
+            CallCount++;
+            if (Errors.TryDequeue(out var transientError))
+            {
+                throw transientError;
+            }
+
             if (Error is not null)
             {
                 throw Error;
@@ -1052,6 +1184,8 @@ public sealed class GradingLaunchCommandHandlerTests
     private sealed class FakeMoodleAssignmentSubmissionStatusGateway : IMoodleAssignmentSubmissionStatusGateway
     {
         public List<AssignmentSubmissionAttemptStatus> Statuses { get; } = [];
+        public Queue<Exception> Errors { get; } = [];
+        public int CallCount { get; private set; }
 
         public Task<AssignmentSubmissionAttemptStatus?> GetSubmissionStatusAsync(
             string userExternalId,
@@ -1059,6 +1193,12 @@ public sealed class GradingLaunchCommandHandlerTests
             string studentId,
             CancellationToken cancellationToken)
         {
+            CallCount++;
+            if (Errors.TryDequeue(out var transientError))
+            {
+                throw transientError;
+            }
+
             return Task.FromResult(Statuses.LastOrDefault(status =>
                 status.AssignmentId == assignmentId &&
                 status.StudentId == studentId));
@@ -1129,6 +1269,8 @@ public sealed class GradingLaunchCommandHandlerTests
     private sealed class FakeMediator : IMediator
     {
         public List<SaveAssignmentGradeCommand> SavedGrades { get; } = [];
+        public Exception? Error { get; set; }
+        public Action<SaveAssignmentGradeCommand>? OnSaveGrade { get; set; }
 
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
@@ -1146,6 +1288,12 @@ public sealed class GradingLaunchCommandHandlerTests
             if (request is SaveAssignmentGradeCommand save)
             {
                 SavedGrades.Add(save);
+                OnSaveGrade?.Invoke(save);
+                if (Error is not null)
+                {
+                    throw Error;
+                }
+
                 return Task.FromResult((TResponse)(object)new AssignmentGradeWriteResult(
                     true,
                     "mod_assign_save_grade",
@@ -1160,6 +1308,12 @@ public sealed class GradingLaunchCommandHandlerTests
             if (request is SaveAssignmentGradeCommand save)
             {
                 SavedGrades.Add(save);
+                OnSaveGrade?.Invoke(save);
+                if (Error is not null)
+                {
+                    throw Error;
+                }
+
                 return Task.FromResult<object?>(new AssignmentGradeWriteResult(
                     true,
                     "mod_assign_save_grade",

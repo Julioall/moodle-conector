@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
@@ -335,6 +337,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     private const string CommitToolName = "confirmar_lancamento_lote_moodle";
     private const string IndividualGradeWriteFunction = "mod_assign_save_grade";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Regex HtmlTagRegex = new("<[^>]*>", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     public async Task<ConfirmMoodleBatchLaunchResult> Handle(
         ConfirmMoodleBatchLaunchCommand request,
@@ -605,15 +608,55 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 var itemExecutionUnknown = MoodleWriteExecutionClassifier.IsUnknown(ex);
                 if (itemExecutionUnknown)
                 {
+                    var reconciliation = await ReconcileUnknownWriteAsync(
+                        userExternalId,
+                        payloadItem,
+                        cancellationToken);
+
+                    if (reconciliation.Status == UnknownWriteReconciliationStatus.Applied)
+                    {
+                        item.MarkCommitSucceeded();
+                        sent++;
+                        await RecordCommitAuditAsync(
+                            action,
+                            payload.BatchJobId,
+                            payloadItem,
+                            "commit_reconciled_succeeded",
+                            responseSummary: new { item.CommitStatus, reconciliation.Message },
+                            errorCode: "moodle_write_reconciled_applied",
+                            errorMessage: null,
+                            cancellationToken);
+                        continue;
+                    }
+
+                    if (reconciliation.Status == UnknownWriteReconciliationStatus.NotApplied)
+                    {
+                        item.MarkCommitFailed(reconciliation.Message);
+                        failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, reconciliation.Message));
+                        await RecordCommitAuditAsync(
+                            action,
+                            payload.BatchJobId,
+                            payloadItem,
+                            "commit_reconciled_not_applied",
+                            responseSummary: new { item.CommitStatus, reconciliation.Message },
+                            errorCode: "moodle_write_reconciled_not_applied",
+                            errorMessage: reconciliation.Message,
+                            cancellationToken);
+                        continue;
+                    }
+
                     executionUnknown = true;
                     action.MarkExecutionUnknown();
-                    item.MarkCommitExecutionUnknown(ex.Message);
+                    item.MarkCommitExecutionUnknown(reconciliation.Message);
                 }
                 else
                 {
                     item.MarkCommitFailed(ex.Message);
                 }
-                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, ex.Message));
+                var failureMessage = itemExecutionUnknown
+                    ? item.CommitError ?? ex.Message
+                    : ex.Message;
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, failureMessage));
                 await RecordCommitAuditAsync(
                     action,
                     payload.BatchJobId,
@@ -621,7 +664,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     itemExecutionUnknown ? "commit_execution_unknown" : "commit_failed",
                     responseSummary: new { item.CommitStatus, exceptionType = ex.GetType().Name },
                     errorCode: ex is MoodleApiException moodleError ? moodleError.ErrorCode : ex.GetType().Name,
-                    errorMessage: ex.Message,
+                    errorMessage: failureMessage,
                     cancellationToken);
                 if (itemExecutionUnknown)
                 {
@@ -662,7 +705,12 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     {
         try
         {
-            var catalog = await capabilities.GetFunctionCatalogAsync(userExternalId, cancellationToken);
+            var catalog = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => capabilities.GetFunctionCatalogAsync(
+                    userExternalId,
+                    retryCancellationToken),
+                onRetry: null,
+                cancellationToken);
             return catalog.Functions.Contains(IndividualGradeWriteFunction, StringComparer.OrdinalIgnoreCase)
                 ? null
                 : new CapabilityValidationFailure(
@@ -692,10 +740,13 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     {
         try
         {
-            var existingGrade = await gradeReadGateway.GetExistingGradeAsync(
-                userExternalId,
-                assignmentId,
-                studentId,
+            var existingGrade = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => gradeReadGateway.GetExistingGradeAsync(
+                    userExternalId,
+                    assignmentId,
+                    studentId,
+                    retryCancellationToken),
+                onRetry: null,
                 cancellationToken);
             return new ExistingGradeValidationResult(existingGrade, Failure: null);
         }
@@ -721,10 +772,13 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
 
         try
         {
-            var currentStatus = await submissionStatusGateway.GetSubmissionStatusAsync(
-                userExternalId,
-                payloadItem.AssignmentId,
-                payloadItem.StudentId,
+            var currentStatus = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => submissionStatusGateway.GetSubmissionStatusAsync(
+                    userExternalId,
+                    payloadItem.AssignmentId,
+                    payloadItem.StudentId,
+                    retryCancellationToken),
+                onRetry: null,
                 cancellationToken);
             if (currentStatus?.AttemptNumber is not null &&
                 currentStatus.AttemptNumber != payloadItem.AttemptNumber)
@@ -766,16 +820,11 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     {
         try
         {
-            var page = await participantsGateway.GetCourseParticipantsAsync(
+            var page = await GetCourseParticipantsWithRetryAsync(
                 userExternalId,
                 courseId,
-                ParticipantStatusFilter.All,
                 page: 1,
-                pageSize: 500,
-                studentsOnly: false,
-                includeEmail: false,
-                groupId: null,
-                cancellationToken);
+                cancellationToken: cancellationToken);
 
             var found = page.Participants.Any(p =>
                 string.Equals(p.UserId, studentId, StringComparison.OrdinalIgnoreCase));
@@ -786,15 +835,10 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 var currentPage = 2;
                 while (!found)
                 {
-                    var nextPage = await participantsGateway.GetCourseParticipantsAsync(
+                    var nextPage = await GetCourseParticipantsWithRetryAsync(
                         userExternalId,
                         courseId,
-                        ParticipantStatusFilter.All,
-                        page: currentPage,
-                        pageSize: 500,
-                        studentsOnly: false,
-                        includeEmail: false,
-                        groupId: null,
+                        currentPage,
                         cancellationToken);
 
                     found = nextPage.Participants.Any(p =>
@@ -821,6 +865,90 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 $"Nao foi possivel validar se o estudante {studentId} esta inscrito no curso {courseId} antes do lancamento: {ex.Message}",
                 "moodle_enrollment_validation_failed");
         }
+    }
+
+    private Task<CourseParticipantsPage> GetCourseParticipantsWithRetryAsync(
+        string userExternalId,
+        string courseId,
+        int page,
+        CancellationToken cancellationToken)
+    {
+        return GradingMoodleReadRetry.ExecuteAsync(
+            retryCancellationToken => participantsGateway.GetCourseParticipantsAsync(
+                userExternalId,
+                courseId,
+                ParticipantStatusFilter.All,
+                page,
+                pageSize: 500,
+                studentsOnly: false,
+                includeEmail: false,
+                groupId: null,
+                retryCancellationToken),
+            onRetry: null,
+            cancellationToken);
+    }
+
+    private async Task<UnknownWriteReconciliationResult> ReconcileUnknownWriteAsync(
+        string userExternalId,
+        GradingLaunchPayloadItem payloadItem,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var existingGrade = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => gradeReadGateway.GetExistingGradeAsync(
+                    userExternalId,
+                    payloadItem.AssignmentId,
+                    payloadItem.StudentId,
+                    retryCancellationToken),
+                onRetry: null,
+                cancellationToken);
+
+            if (existingGrade is null ||
+                (!existingGrade.HasGrade && string.IsNullOrWhiteSpace(existingGrade.Feedback)))
+            {
+                return new UnknownWriteReconciliationResult(
+                    UnknownWriteReconciliationStatus.NotApplied,
+                    "A resposta da escrita foi perdida, mas a leitura posterior confirmou que a nota e o feedback nao foram aplicados. Nenhuma nova escrita foi enviada; gere uma nova previa antes de tentar novamente.");
+            }
+
+            if (existingGrade.HasGrade &&
+                existingGrade.Grade == payloadItem.Grade &&
+                FeedbackMatches(existingGrade.Feedback, payloadItem.FeedbackText))
+            {
+                return new UnknownWriteReconciliationResult(
+                    UnknownWriteReconciliationStatus.Applied,
+                    "A resposta da escrita foi perdida, mas a leitura posterior confirmou a nota e o feedback no Moodle.");
+            }
+
+            return new UnknownWriteReconciliationResult(
+                UnknownWriteReconciliationStatus.Inconclusive,
+                "A resposta da escrita foi perdida e a leitura posterior encontrou dados diferentes do lancamento aprovado. Reconcilie manualmente antes de qualquer nova tentativa.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new UnknownWriteReconciliationResult(
+                UnknownWriteReconciliationStatus.Inconclusive,
+                $"A resposta da escrita foi perdida e nao foi possivel reconciliar o resultado no Moodle: {ex.Message}");
+        }
+    }
+
+    private static bool FeedbackMatches(string? persistedFeedback, string expectedFeedback)
+    {
+        return string.Equals(
+            NormalizeFeedback(persistedFeedback),
+            NormalizeFeedback(expectedFeedback),
+            StringComparison.Ordinal);
+    }
+
+    private static string NormalizeFeedback(string? value)
+    {
+        var decoded = WebUtility.HtmlDecode(value ?? string.Empty)
+            .Replace('\u00A0', ' ');
+        var withoutMarkup = HtmlTagRegex.Replace(decoded, " ");
+        return string.Join(
+            " ",
+            withoutMarkup.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
     }
 
     private async Task MarkPendingItemsFailedAsync(
@@ -906,6 +1034,17 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     private sealed record ExistingGradeValidationResult(
         AssignmentExistingGrade? ExistingGrade,
         CapabilityValidationFailure? Failure);
+
+    private enum UnknownWriteReconciliationStatus
+    {
+        Applied,
+        NotApplied,
+        Inconclusive
+    }
+
+    private sealed record UnknownWriteReconciliationResult(
+        UnknownWriteReconciliationStatus Status,
+        string Message);
 
     private sealed record SubmissionAttemptValidationResult(
         AssignmentSubmissionAttemptStatus? CurrentStatus,
