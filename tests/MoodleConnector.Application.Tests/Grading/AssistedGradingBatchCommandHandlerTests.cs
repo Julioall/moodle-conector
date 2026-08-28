@@ -65,6 +65,42 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreateBatch_RetentaFalhaTransitóriaAoListarEntregas()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator { FailuresBeforeSuccess = 2 };
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            orchestrator,
+            new FakeCourseContentsGateway(),
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway());
+
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: [],
+                MaxItems: 1,
+                OnlyAwaitingGrading: true,
+                IncludeRubric: false,
+                IncludeSubmissionFiles: false,
+                IncludeCourseMaterials: false),
+            CancellationToken.None);
+
+        Assert.Equal(3, mediator.ListQueryCallCount);
+        Assert.Equal(1, result.AcceptedItems);
+        Assert.Contains(result.Warnings, warning => warning.Contains("nova tentativa", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task CreateBatch_ComArquivosDeSubmissao_BaixaExtraiEPersisteArtefato()
     {
         var repository = new FakeGradingReviewRepository();
@@ -1211,6 +1247,10 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     {
         public ListAssignmentSubmissionsQuery? LastListQuery { get; private set; }
 
+        public int ListQueryCallCount { get; private set; }
+
+        public int FailuresBeforeSuccess { get; init; }
+
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -1227,6 +1267,13 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             if (request is ListAssignmentSubmissionsQuery list)
             {
                 LastListQuery = list;
+                ListQueryCallCount++;
+                if (ListQueryCallCount <= FailuresBeforeSuccess)
+                {
+                    throw new MoodleApiException(
+                        MoodleErrorContract.NetworkError,
+                        "falha de rede simulada");
+                }
                 return Task.FromResult((TResponse)(object)CreatePage(list));
             }
 

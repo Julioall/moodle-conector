@@ -270,18 +270,21 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     AssignmentSubmissionsPage? submissionsPage;
                     try
                     {
-                        submissionsPage = await mediator.Send(
-                            new ListAssignmentSubmissionsQuery(
-                                request.UserExternalId,
-                                request.CourseId,
-                                assignmentId,
-                                request.OnlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : AssignmentSubmissionFilter.All,
-                                page,
-                                Math.Min(remaining, 100),
-                                Since: null,
-                                Before: null,
-                                IncludeLate: true,
-                                IncludeUngraded: true),
+                        var submissionsQuery = new ListAssignmentSubmissionsQuery(
+                            request.UserExternalId,
+                            request.CourseId,
+                            assignmentId,
+                            request.OnlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : AssignmentSubmissionFilter.All,
+                            page,
+                            Math.Min(remaining, 100),
+                            Since: null,
+                            Before: null,
+                            IncludeLate: true,
+                            IncludeUngraded: true);
+                        submissionsPage = await GradingMoodleReadRetry.ExecuteAsync(
+                            retryCancellationToken => mediator.Send(submissionsQuery, retryCancellationToken),
+                            (_, attempt) => warnings.Add(
+                                $"Falha transitória ao listar as entregas da tarefa {assignmentId}; nova tentativa {attempt}."),
                             cancellationToken);
                     }
                     catch (OperationCanceledException)
