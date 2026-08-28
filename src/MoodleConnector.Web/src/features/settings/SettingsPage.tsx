@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MailPlus, Plug, ShieldCheck, UserRound } from 'lucide-react';
+import { KeyRound, MailPlus, Plug, ShieldAlert, ShieldCheck, UserRound } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 
 import { Badge } from '../../components/ui/badge';
@@ -10,12 +10,13 @@ import { MessagePreferencesCard } from './MessagePreferencesCard';
 import { ThemeCard } from './ThemeCard';
 import { APP_PERMISSIONS } from '../../lib/access-control';
 import { ConnectionsPage } from '../connections/ConnectionsPage';
+import { AdminPasswordResetCard, ChangePasswordCard } from './PasswordCards';
 
 export function SettingsPage() {
   const { user, isAdmin, can } = useSession();
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(requestedTab === 'mensagens' || requestedTab === 'conexoes' ? requestedTab : 'geral');
+  const [activeTab, setActiveTab] = useState(['mensagens', 'conexoes', 'senha', 'administracao'].includes(requestedTab ?? '') ? requestedTab! : 'geral');
   const initials = user?.name?.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'CL';
   const canManageConnections = can(APP_PERMISSIONS.SERVICES_VIEW);
 
@@ -26,8 +27,10 @@ export function SettingsPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto">
           <TabsTrigger value="geral" className="gap-2"><UserRound className="h-4 w-4" />Geral</TabsTrigger>
+          <TabsTrigger value="senha" className="gap-2"><KeyRound className="h-4 w-4" />Senha</TabsTrigger>
           <TabsTrigger value="mensagens" className="gap-2"><MailPlus className="h-4 w-4" />Mensagens</TabsTrigger>
           {canManageConnections && <TabsTrigger value="conexoes" className="gap-2"><Plug className="h-4 w-4" />Conexões Moodle</TabsTrigger>}
+          {isAdmin && <TabsTrigger value="administracao" className="gap-2"><ShieldAlert className="h-4 w-4" />Administração</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="geral" className="mt-0 space-y-6">
@@ -39,9 +42,13 @@ export function SettingsPage() {
           <Card><CardHeader><CardTitle className="text-lg">Como as configurações funcionam</CardTitle><CardDescription>As regras são aplicadas no servidor e refletidas nesta interface.</CardDescription></CardHeader><CardContent className="grid gap-4 text-sm text-muted-foreground md:grid-cols-3"><div className="rounded-lg border bg-muted/20 p-4"><p className="font-medium text-foreground">Moodle conectado</p><p className="mt-1">Cursos e estudantes continuam vindo das conexões configuradas no portal.</p></div><div className="rounded-lg border bg-muted/20 p-4"><p className="font-medium text-foreground">Acesso pela conexão</p><p className="mt-1">As tools Moodle respeitam o vínculo da conexão, os escopos do token e as capabilities disponíveis.</p></div><div className="rounded-lg border bg-muted/20 p-4"><p className="font-medium text-foreground">Ações auditáveis</p><p className="mt-1">Envios e alterações sensíveis exigem confirmação e ficam registrados.</p></div></CardContent></Card>
         </TabsContent>
 
+        <TabsContent value="senha" className="mt-0"><ChangePasswordCard /></TabsContent>
+
         <TabsContent value="mensagens" className="mt-0 space-y-6"><MessagePreferencesCard /></TabsContent>
 
         {canManageConnections && <TabsContent value="conexoes" className="mt-0"><ConnectionsPage embedded /></TabsContent>}
+
+        {isAdmin && <TabsContent value="administracao" className="mt-0"><AdminPasswordResetCard /></TabsContent>}
 
       </Tabs>
     </main>

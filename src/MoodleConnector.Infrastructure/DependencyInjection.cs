@@ -33,6 +33,10 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(ConnectorSecretsOptions.SectionName));
 
         services
+            .AddOptions<PasswordRecoveryOptions>()
+            .Bind(configuration.GetSection(PasswordRecoveryOptions.SectionName));
+
+        services
             .AddOptions<MoodleApiOptions>()
             .Bind(configuration.GetSection(MoodleApiOptions.SectionName));
 

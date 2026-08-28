@@ -59,8 +59,8 @@ export function AuthPage() {
       }
 
       if (mode === 'register') {
-        if (password.length < 12) {
-          setError('A senha deve ter pelo menos 12 caracteres.');
+        if (password.length < 8) {
+          setError('A senha deve ter pelo menos 8 caracteres.');
           return;
         }
         if (password !== passwordConfirmation) {
@@ -88,6 +88,13 @@ export function AuthPage() {
   const isLogin = mode === 'login';
   const isRegister = mode === 'register';
   const isMoodle = mode === 'moodle';
+  const passwordStrength = (() => {
+    if (password.length < 8) return { label: 'Muito fraca', color: 'bg-destructive', width: 'w-1/4' };
+    const criteria = [/[a-z]/.test(password), /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)].filter(Boolean).length;
+    if (criteria <= 2) return { label: 'Fraca', color: 'bg-orange-500', width: 'w-2/4' };
+    if (criteria === 3 || password.length < 12) return { label: 'Média', color: 'bg-amber-500', width: 'w-3/4' };
+    return { label: 'Forte', color: 'bg-status-success', width: 'w-full' };
+  })();
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4">
@@ -109,8 +116,8 @@ export function AuthPage() {
               {!isMoodle && isRegister && <div className="space-y-2"><Label htmlFor="name">Nome</Label><Input id="name" required value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" /></div>}
               {!isMoodle && <>
                 <div className="space-y-2"><Label htmlFor="email">E-mail</Label><Input id="email" required type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" /></div>
-                <div className="space-y-2"><Label htmlFor="password">Senha</Label><div className="relative"><Input id="password" required minLength={isRegister ? 12 : undefined} type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} className="pr-10" /><Button type="button" variant="ghost" size="icon" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} className="absolute right-0 top-0 h-full" onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button></div></div>
-                {isRegister && <div className="space-y-2"><Label htmlFor="password-confirmation">Confirmar senha</Label><Input id="password-confirmation" required minLength={12} type="password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" /></div>}
+                <div className="space-y-2"><Label htmlFor="password">Senha</Label><div className="relative"><Input id="password" required minLength={isRegister ? 8 : undefined} type={showPassword ? 'text' : 'password'} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={isRegister ? 'new-password' : 'current-password'} className="pr-10" /><Button type="button" variant="ghost" size="icon" aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'} className="absolute right-0 top-0 h-full" onClick={() => setShowPassword((value) => !value)}>{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</Button></div>{isRegister && <div className="space-y-1 pt-1"><div className="h-1.5 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full transition-all ${passwordStrength.color} ${passwordStrength.width}`} /></div><p className="text-xs text-muted-foreground">Força da senha: <span className={passwordStrength.label === 'Fraca' || passwordStrength.label === 'Muito fraca' ? 'font-medium text-destructive' : 'font-medium'}>{passwordStrength.label}</span>. Use pelo menos 8 caracteres; letras, números e símbolos deixam a senha mais segura.</p></div>}</div>
+                {isRegister && <div className="space-y-2"><Label htmlFor="password-confirmation">Confirmar senha</Label><Input id="password-confirmation" required minLength={8} type="password" value={passwordConfirmation} onChange={(event) => setPasswordConfirmation(event.target.value)} autoComplete="new-password" /></div>}
               </>}
               {isMoodle && <>
                 <div className="rounded-md border border-primary/20 bg-primary/[0.03] p-3 text-sm text-muted-foreground">Depois de conectar, as tools usam os escopos do token e as capabilities disponíveis no Moodle. Operações de escrita continuam seguindo confirmação e auditoria.</div>
