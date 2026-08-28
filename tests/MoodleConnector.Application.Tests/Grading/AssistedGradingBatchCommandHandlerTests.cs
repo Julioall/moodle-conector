@@ -2,6 +2,7 @@ using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 using MoodleConnector.Domain.Grading;
@@ -226,6 +227,72 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task IngestionService_RetentaLeituraDeContextoTransitóriaAntesDeCriarArtifacts()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var contentsGateway = new FakeCourseContentsGateway { FailuresBeforeSuccess = 2 };
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            includeRubric: false,
+            includeSubmissionFiles: false,
+            includeCourseMaterials: true);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+
+        var sut = new GradingArtifactIngestionService(
+            repository,
+            new FakeAssignmentSubmissionsGateway(),
+            contentsGateway,
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            Options.Create(new GradingLimitsOptions()),
+            NullLogger<GradingArtifactIngestionService>.Instance);
+
+        await sut.IngestPendingAsync(batch, item, CancellationToken.None);
+
+        Assert.Equal(3, contentsGateway.CallCount);
+        Assert.Contains(repository.Artifacts, artifact => artifact.ArtifactType == "assignment_context");
+        Assert.DoesNotContain(repository.Artifacts, artifact => artifact.SummaryRef == "context_fetch_failed");
+    }
+
+    [Fact]
+    public async Task IngestionService_PersisteDiagnosticoQuandoContextoNaoPodeSerLido()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var contentsGateway = new FakeCourseContentsGateway { FailuresBeforeSuccess = 3 };
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            includeRubric: false,
+            includeSubmissionFiles: false,
+            includeCourseMaterials: true);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+
+        var sut = new GradingArtifactIngestionService(
+            repository,
+            new FakeAssignmentSubmissionsGateway(),
+            contentsGateway,
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            Options.Create(new GradingLimitsOptions()),
+            NullLogger<GradingArtifactIngestionService>.Instance);
+
+        await sut.IngestPendingAsync(batch, item, CancellationToken.None);
+
+        var diagnostic = Assert.Single(repository.Artifacts, artifact => artifact.ArtifactType == "assignment_context");
+        Assert.Equal("context_fetch_failed", diagnostic.SummaryRef);
+        Assert.Equal(ExtractionStatus.Failed, diagnostic.ExtractionStatus);
+    }
+
+    [Fact]
     public async Task CreateBatch_ComMateriaisDoCurso_SalvaArtefatoDeContextoDaTarefa()
     {
         var repository = new FakeGradingReviewRepository();
@@ -267,6 +334,42 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             artifact.Filename == "Tarefa 1" &&
             artifact.ExtractedTextRef!.Contains("Descricao da tarefa SAP 01", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(fileGateway.DownloadedFileUrls, url => url == "https://moodle.example/pluginfile.php/orientacoes.pdf");
+    }
+
+    [Fact]
+    public async Task CreateBatch_QuandoContextoFalha_PersisteDiagnosticoParaWorkerTentarNovamente()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var contentsGateway = new FakeCourseContentsGateway { FailuresBeforeSuccess = 3 };
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            new FakeMediator(),
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeGradingBatchOrchestrator(),
+            contentsGateway,
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway());
+
+        await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: ["9001"],
+                MaxItems: 1,
+                OnlyAwaitingGrading: true,
+                IncludeRubric: false,
+                IncludeSubmissionFiles: false,
+                IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.Equal(3, contentsGateway.CallCount);
+        var diagnostic = Assert.Single(repository.Artifacts, artifact => artifact.ArtifactType == "assignment_context");
+        Assert.Equal(ExtractionStatus.Failed, diagnostic.ExtractionStatus);
+        Assert.Equal("context_fetch_failed", diagnostic.SummaryRef);
     }
 
     [Fact]
@@ -1233,6 +1336,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     {
         public int CallCount { get; private set; }
 
+        public int FailuresBeforeSuccess { get; init; }
+
         public Task<CourseContentsSummary> GetCourseContentsAsync(
             string userExternalId,
             string courseId,
@@ -1242,6 +1347,13 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             CancellationToken cancellationToken)
         {
             CallCount++;
+            if (CallCount <= FailuresBeforeSuccess)
+            {
+                throw new MoodleApiException(
+                    MoodleErrorContract.NetworkError,
+                    "falha de rede simulada");
+            }
+
             return Task.FromResult(new CourseContentsSummary(
                 courseId,
                 moduleTypes.ToArray(),

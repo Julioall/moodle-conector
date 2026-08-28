@@ -75,13 +75,19 @@ public sealed class GradingContext
         string? courseMaterials,
         string? teacherInstructions,
         string? criteriaGenerationNotes = null,
-        IReadOnlyList<GradingArtifactReferenceSnapshot>? artifactReferences = null)
+        IReadOnlyList<GradingArtifactReferenceSnapshot>? artifactReferences = null,
+        IReadOnlyList<string>? additionalBlockers = null)
     {
-        var blockers = new List<string>();
+        var blockers = additionalBlockers?
+            .Where(blocker => !string.IsNullOrWhiteSpace(blocker))
+            .Select(blocker => blocker.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
 
         if (string.IsNullOrWhiteSpace(criteria) &&
             string.IsNullOrWhiteSpace(rubricDescription) &&
-            string.IsNullOrWhiteSpace(assignmentStatement))
+            string.IsNullOrWhiteSpace(assignmentStatement) &&
+            blockers.Count == 0)
         {
             blockers.Add("Critérios, rubrica ou enunciado não informados. Análise baseada apenas no conteúdo da submissão.");
         }

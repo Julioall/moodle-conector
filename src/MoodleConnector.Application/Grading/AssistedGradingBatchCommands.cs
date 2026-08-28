@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 using MoodleConnector.Domain.Grading;
@@ -555,11 +556,15 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         {
             try
             {
-                var download = await fileGateway.DownloadFileAsync(
-                    userExternalId,
-                    file.FileUrl,
-                    file.Filename,
-                    maxBytes,
+                var download = await GradingMoodleReadRetry.ExecuteAsync(
+                    retryCancellationToken => fileGateway.DownloadFileAsync(
+                        userExternalId,
+                        file.FileUrl,
+                        file.Filename,
+                        maxBytes,
+                        retryCancellationToken),
+                    (_, attempt) => warnings.Add(
+                        $"Falha transitória ao baixar o arquivo {file.Filename}; nova tentativa {attempt}."),
                     cancellationToken);
                 var extraction = await extractionService.ExtractAsync(
                     download.Filename,
@@ -650,12 +655,16 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         CourseContentsSummary contents;
         try
         {
-            contents = await contentsGateway.GetCourseContentsAsync(
-                userExternalId,
-                item.CourseId.ToString(CultureInfo.InvariantCulture),
-                moduleTypes: [],
-                includeHidden: true,
-                onlyWithFiles: false,
+            contents = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => contentsGateway.GetCourseContentsAsync(
+                    userExternalId,
+                    item.CourseId.ToString(CultureInfo.InvariantCulture),
+                    moduleTypes: [],
+                    includeHidden: true,
+                    onlyWithFiles: false,
+                    retryCancellationToken),
+                (_, attempt) => warnings.Add(
+                    $"Falha transitória ao escanear materiais da tarefa {item.AssignmentId}; nova tentativa {attempt}."),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -664,8 +673,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         }
         catch (Exception ex)
         {
-            warnings.Add($"Nao foi possivel escanear materiais do curso para contexto da tarefa {item.AssignmentId}: {ex.Message}");
-            return [];
+            var error = MoodleErrorContract.Describe(ex);
+            warnings.Add($"Nao foi possivel escanear materiais do curso para contexto da tarefa {item.AssignmentId}: {error.ErrorCode}.");
+            return [ContextDiagnosticTemplate(item, "context_fetch_failed")];
         }
 
         var assignmentId = item.AssignmentId.ToString(CultureInfo.InvariantCulture);
@@ -674,7 +684,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         var assignmentModule = section?.Modules.FirstOrDefault(module => IsAssignmentModule(module, assignmentId));
         if (section is null || assignmentModule is null)
         {
-            return [];
+            warnings.Add($"A tarefa {item.AssignmentId} nao foi encontrada no conteudo do curso para recuperar contexto (context_assignment_not_found).");
+            return [ContextDiagnosticTemplate(item, "context_assignment_not_found")];
         }
 
         var templates = new List<ContextArtifactTemplate>();
@@ -754,11 +765,15 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
 
         try
         {
-            var download = await fileGateway.DownloadFileAsync(
-                userExternalId,
-                file.FileUrl!,
-                filename,
-                maxBytes,
+            var download = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => fileGateway.DownloadFileAsync(
+                    userExternalId,
+                    file.FileUrl!,
+                    filename,
+                    maxBytes,
+                    retryCancellationToken),
+                (_, attempt) => warnings.Add(
+                    $"Falha transitória ao baixar o material de contexto {filename}; nova tentativa {attempt}."),
                 cancellationToken);
             var extraction = await extractionService.ExtractAsync(
                 download.Filename,
@@ -782,10 +797,32 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         }
         catch (Exception ex)
         {
-            warnings.Add($"Material de contexto {filename} nao foi extraido: {ex.Message}");
-            return null;
+            var error = MoodleErrorContract.Describe(ex);
+            warnings.Add($"Material de contexto {filename} nao foi extraido: {error.ErrorCode}.");
+            return new ContextArtifactTemplate(
+                "assignment_context",
+                filename,
+                file.MimeType,
+                Sha256: null,
+                SizeBytes: file.FileSize,
+                ExtractionStatus.Failed,
+                ExtractedTextRef: null,
+                SummaryRef: "context_materialization_failed");
         }
     }
+
+    private static ContextArtifactTemplate ContextDiagnosticTemplate(
+        AssistedGradingItem item,
+        string reason) =>
+        new(
+            "assignment_context",
+            $"assignment-{item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
+            MimeType: null,
+            Sha256: null,
+            SizeBytes: null,
+            ExtractionStatus.Failed,
+            ExtractedTextRef: null,
+            SummaryRef: reason);
 
     private static bool IsAssignmentModule(CourseModuleSummary module, string assignmentId)
     {

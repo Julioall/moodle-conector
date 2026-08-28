@@ -184,4 +184,29 @@ public sealed class GradingDomainTests
         Assert.NotEmpty(context.Blockers);
         Assert.False(context.HasMinimumContext);
     }
+
+    [Fact]
+    public void GradingContext_PreservaBloqueadorDeFalhaDeContextoSemMensagemGenericaDuplicada()
+    {
+        var context = GradingContext.Build(
+            gradingItemId: Guid.NewGuid(),
+            batchId: Guid.NewGuid(),
+            courseId: "10",
+            assignmentId: "501",
+            submissionId: "9001",
+            studentId: "101",
+            assignmentStatement: null,
+            criteria: null,
+            rubricDescription: null,
+            maxGrade: null,
+            gradeScale: null,
+            submissionText: "Resposta da submissao.",
+            attachedFiles: [],
+            courseMaterials: null,
+            teacherInstructions: null,
+            additionalBlockers: ["O contexto da atividade nao pode ser recuperado (context_fetch_failed)."]);
+
+        Assert.Single(context.Blockers);
+        Assert.Contains("context_fetch_failed", context.Blockers[0]);
+    }
 }

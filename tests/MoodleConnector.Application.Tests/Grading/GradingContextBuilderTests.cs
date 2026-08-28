@@ -71,6 +71,54 @@ public sealed class GradingContextBuilderTests
     }
 
     [Fact]
+    public async Task BuildAsync_IgnoraDiagnosticoAntigoQuandoContextoFoiRecuperado()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var item = AssistedGradingItem.Create(Guid.NewGuid(), 10, 501, 9001, 101, 0);
+        repository.Artifacts.AddRange(
+        [
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                "assignment-9001",
+                null,
+                null,
+                null,
+                ExtractionStatus.Failed,
+                null,
+                "context_fetch_failed",
+                DateTimeOffset.UtcNow),
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                "orientacoes.pdf",
+                "application/pdf",
+                "hash-context",
+                100,
+                ExtractionStatus.Succeeded,
+                "Enunciado recuperado com orientacoes suficientes.",
+                "section:1;distance:1",
+                DateTimeOffset.UtcNow)
+        ]);
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeCourseMaterials: true),
+            CancellationToken.None);
+
+        Assert.DoesNotContain(context.Blockers, blocker => blocker.Contains("context_fetch_failed", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Enunciado recuperado", context.AssignmentStatement);
+    }
+
+    [Fact]
     public async Task BuildAsync_SelecionaMelhorArtefatoDeContextoComoEnunciado()
     {
         var repository = new FakeGradingReviewRepository();

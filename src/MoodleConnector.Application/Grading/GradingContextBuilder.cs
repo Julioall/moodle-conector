@@ -272,6 +272,26 @@ public sealed partial class GradingContextBuilder(
         // não contaminar a resolução de critérios no StructuredGradingAnalysisService.
         var teacherInstructions = options.TeacherInstructions;
 
+        // Um diagnóstico de uma tentativa anterior não pode continuar bloqueando
+        // o item depois que uma nova tentativa materializou contexto legível.
+        // Mantemos o artifact de diagnóstico para auditoria, mas ele deixa de ser
+        // impeditivo quando há pelo menos um artifact de contexto utilizável.
+        var hasReadableContext = artifacts.Any(artifact =>
+            string.Equals(artifact.ArtifactType, "assignment_context", StringComparison.OrdinalIgnoreCase) &&
+            ExtractionStatus.IsReadable(artifact.ExtractionStatus) &&
+            !string.IsNullOrWhiteSpace(artifact.ExtractedTextRef));
+        IReadOnlyList<string> contextBlockers = hasReadableContext
+            ? Array.Empty<string>()
+            : artifacts
+                .Where(artifact =>
+                    string.Equals(artifact.ArtifactType, "assignment_context", StringComparison.OrdinalIgnoreCase) &&
+                    ExtractionStatus.IsFailure(artifact.ExtractionStatus))
+                .Select(artifact => DescribeContextFailure(artifact.SummaryRef))
+                .Where(reason => reason is not null)
+                .Select(reason => reason!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
         return GradingContext.Build(
             gradingItemId: item.Id,
             batchId: item.BatchId,
@@ -289,7 +309,20 @@ public sealed partial class GradingContextBuilder(
             courseMaterials: courseMaterials,
             teacherInstructions: teacherInstructions,
             criteriaGenerationNotes: criteriaGenerationNotes,
-            artifactReferences: artifactReferences);
+            artifactReferences: artifactReferences,
+            additionalBlockers: contextBlockers);
+    }
+
+    private static string? DescribeContextFailure(string? summaryRef)
+    {
+        var reason = summaryRef?.Split(':', 2)[0].Trim().ToLowerInvariant();
+        return reason switch
+        {
+            "context_fetch_failed" => "O contexto da atividade não pôde ser recuperado do Moodle (context_fetch_failed).",
+            "context_assignment_not_found" => "A atividade não foi encontrada no conteúdo do curso para recuperar seu contexto (context_assignment_not_found).",
+            "context_materialization_failed" => "Um material de contexto da atividade não pôde ser baixado ou extraído (context_materialization_failed).",
+            _ => null
+        };
     }
 
     private static string Truncate(string text, int maxChars)

@@ -144,7 +144,9 @@ public sealed class GradingArtifactIngestionService(
         CancellationToken cancellationToken)
     {
         var existing = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
-        if (existing.Any(artifact => artifact.ArtifactType == "assignment_context"))
+        if (existing.Any(artifact =>
+                artifact.ArtifactType == "assignment_context" &&
+                !ExtractionStatus.IsFailure(artifact.ExtractionStatus)))
         {
             return false;
         }
@@ -152,12 +154,19 @@ public sealed class GradingArtifactIngestionService(
         CourseContentsSummary contents;
         try
         {
-            contents = await contentsGateway.GetCourseContentsAsync(
-                userExternalId,
-                item.CourseId.ToString(CultureInfo.InvariantCulture),
-                moduleTypes: [],
-                includeHidden: true,
-                onlyWithFiles: false,
+            contents = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => contentsGateway.GetCourseContentsAsync(
+                    userExternalId,
+                    item.CourseId.ToString(CultureInfo.InvariantCulture),
+                    moduleTypes: [],
+                    includeHidden: true,
+                    onlyWithFiles: false,
+                    retryCancellationToken),
+                (exception, attempt) => logger.LogWarning(
+                    exception,
+                    "Falha transitória ao recuperar contexto da tarefa {AssignmentId}; nova tentativa {Attempt}.",
+                    item.AssignmentId,
+                    attempt),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -170,6 +179,11 @@ public sealed class GradingArtifactIngestionService(
                 ex,
                 "Nao foi possivel recuperar contexto da tarefa {AssignmentId}.",
                 item.AssignmentId);
+            await UpsertContextDiagnosticAsync(
+                existing,
+                item,
+                "context_fetch_failed",
+                cancellationToken);
             return false;
         }
 
@@ -179,6 +193,11 @@ public sealed class GradingArtifactIngestionService(
         var assignmentModule = section?.Modules.FirstOrDefault(module => IsAssignmentModule(module, assignmentId));
         if (section is null || assignmentModule is null)
         {
+            await UpsertContextDiagnosticAsync(
+                existing,
+                item,
+                "context_assignment_not_found",
+                cancellationToken);
             return false;
         }
 
@@ -267,6 +286,38 @@ public sealed class GradingArtifactIngestionService(
         return added;
     }
 
+    private async Task UpsertContextDiagnosticAsync(
+        IReadOnlyList<GradingArtifact> existing,
+        AssistedGradingItem item,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var diagnostic = existing.FirstOrDefault(artifact =>
+            artifact.ArtifactType == "assignment_context" &&
+            string.Equals(artifact.SummaryRef, reason, StringComparison.OrdinalIgnoreCase));
+        var updated = new GradingArtifact(
+            diagnostic?.Id ?? Guid.NewGuid(),
+            item.Id,
+            "assignment_context",
+            $"assignment-{item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
+            null,
+            null,
+            null,
+            ExtractionStatus.Failed,
+            null,
+            reason,
+            diagnostic?.CreatedAt ?? DateTimeOffset.UtcNow);
+
+        if (diagnostic is null)
+        {
+            await repository.AddArtifactAsync(updated, cancellationToken);
+        }
+        else
+        {
+            await repository.UpdateArtifactAsync(updated, cancellationToken);
+        }
+    }
+
     private async Task MaterializeAsync(
         GradingArtifact artifact,
         string userExternalId,
@@ -281,11 +332,18 @@ public sealed class GradingArtifactIngestionService(
         var maxBytes = Math.Max(1, limits.Value.MaxFileSizeMb) * 1024L * 1024L;
         try
         {
-            var download = await fileGateway.DownloadFileAsync(
-                userExternalId,
-                sourceUrl,
-                artifact.Filename ?? "arquivo",
-                maxBytes,
+            var download = await GradingMoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => fileGateway.DownloadFileAsync(
+                    userExternalId,
+                    sourceUrl,
+                    artifact.Filename ?? "arquivo",
+                    maxBytes,
+                    retryCancellationToken),
+                (exception, attempt) => logger.LogWarning(
+                    exception,
+                    "Falha transitória ao baixar artifact {ArtifactId}; nova tentativa {Attempt}.",
+                    artifact.Id,
+                    attempt),
                 cancellationToken);
             var extraction = await extractionService.ExtractAsync(
                 download.Filename,
@@ -324,7 +382,9 @@ public sealed class GradingArtifactIngestionService(
                 {
                     ExtractionStatus = ExtractionStatus.Failed,
                     ExtractedTextRef = null,
-                    SummaryRef = "ingestion_failed",
+                    SummaryRef = artifact.ArtifactType == "assignment_context"
+                        ? "context_materialization_failed"
+                        : "ingestion_failed",
                     SourceUrl = null
                 },
                 cancellationToken);
