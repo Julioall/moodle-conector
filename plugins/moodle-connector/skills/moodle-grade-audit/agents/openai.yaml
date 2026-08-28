@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auditar notas Moodle"
+  short_description: "Encontrar inconsistências e pendências"
+  default_prompt: "Use $moodle-grade-audit para auditar notas, entregas e recuperação sem alterar o Moodle."
