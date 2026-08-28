@@ -235,6 +235,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             .Select(id => id.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var selectedItems = new List<AssistedGradingItemSeed>();
+        var selectedSubmissionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string? resolvedCourseId = null;
         var warnings = new List<string>();
 
@@ -245,6 +246,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 if (selectedItems.Count >= safeMaxItems ||
                     (selectedSubmissionIds.Count > 0 &&
                      (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId))))
+                {
+                    continue;
+                }
+
+                if (!selectedSubmissionKeys.Add(BuildSubmissionSelectionKey(assignmentIds[0], submission)))
                 {
                     continue;
                 }
@@ -264,9 +270,12 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             foreach (var assignmentId in assignmentIds)
             {
                 var page = 1;
+                // O tamanho precisa permanecer constante durante toda a
+                // paginação. Reduzi-lo com o saldo restante altera o offset
+                // calculado pelo Moodle e pode repetir a mesma submissão.
+                var pageSize = Math.Min(safeMaxItems, 100);
                 while (selectedItems.Count < safeMaxItems)
                 {
-                    var remaining = safeMaxItems - selectedItems.Count;
                     AssignmentSubmissionsPage? submissionsPage;
                     try
                     {
@@ -283,7 +292,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                             assignmentId,
                             submissionFilter,
                             page,
-                            Math.Min(remaining, 100),
+                            pageSize,
                             Since: null,
                             Before: null,
                             IncludeLate: true,
@@ -325,6 +334,13 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                             continue;
                         }
 
+                        if (!selectedSubmissionKeys.Add(BuildSubmissionSelectionKey(
+                                submissionsPage.AssignmentId,
+                                submission)))
+                        {
+                            continue;
+                        }
+
                         selectedItems.Add(new AssistedGradingItemSeed(
                             submissionsPage.CourseId,
                             submissionsPage.AssignmentId,
@@ -360,6 +376,23 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 BlockedItems: 0,
                 Status: "NoPendingSubmissions",
                 Warnings: warnings);
+        }
+
+        if (selectedSubmissionIds.Count > 0)
+        {
+            var selectedIds = selectedItems
+                .Select(item => item.SubmissionId)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var missingIds = selectedSubmissionIds
+                .Where(id => !selectedIds.Contains(id))
+                .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (missingIds.Length > 0 && selectedItems.Count < safeMaxItems)
+            {
+                warnings.Add($"As submissões solicitadas não foram encontradas como elegíveis: {string.Join(", ", missingIds)}.");
+            }
         }
 
         var courseId = ParsePositiveLong(resolvedCourseId ?? request.CourseId, "courseId");
@@ -824,6 +857,19 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 ExtractedTextRef: null,
                 SummaryRef: "context_materialization_failed");
         }
+    }
+
+    private static string BuildSubmissionSelectionKey(
+        string assignmentId,
+        AssignmentSubmissionSummary submission)
+    {
+        var normalizedAssignmentId = assignmentId.Trim();
+        if (!string.IsNullOrWhiteSpace(submission.SubmissionId))
+        {
+            return $"submission:{normalizedAssignmentId}:{submission.SubmissionId.Trim()}";
+        }
+
+        return $"student:{normalizedAssignmentId}:{submission.UserId.Trim()}:{submission.AttemptNumber?.ToString(CultureInfo.InvariantCulture) ?? "-"}";
     }
 
     private static ContextArtifactTemplate ContextDiagnosticTemplate(

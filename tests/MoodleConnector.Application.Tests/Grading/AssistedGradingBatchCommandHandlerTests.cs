@@ -566,6 +566,40 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreateBatch_MantemPaginaEstavelEAceitaCadaSubmissaoUmaVez()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator { UsePagedRows = true };
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            orchestrator,
+            new FakeCourseContentsGateway(),
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway());
+
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: ["9005", "9008"],
+                MaxItems: 2,
+                OnlyAwaitingGrading: true),
+            CancellationToken.None);
+
+        Assert.Equal(2, result.AcceptedItems);
+        Assert.Equal([9005L, 9008L], repository.Items.Select(item => item.SubmissionId).ToArray());
+        Assert.Equal(4, mediator.ListQueryCallCount);
+        Assert.Equal(2, mediator.LastListQuery!.PageSize);
+    }
+
+    [Fact]
     public async Task CancelBatch_ChamaOrquestradorERetornaStatusCancelado()
     {
         var repository = new FakeGradingReviewRepository();
@@ -1252,6 +1286,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         public int FailuresBeforeSuccess { get; init; }
 
+        public bool UsePagedRows { get; init; }
+
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -1275,7 +1311,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                         MoodleErrorContract.NetworkError,
                         "falha de rede simulada");
                 }
-                return Task.FromResult((TResponse)(object)CreatePage(list));
+                return Task.FromResult((TResponse)(object)CreatePage(list, UsePagedRows));
             }
 
             throw new NotSupportedException($"Request nao suportado no fake mediator: {request.GetType().Name}");
@@ -1286,7 +1322,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             if (request is ListAssignmentSubmissionsQuery list)
             {
                 LastListQuery = list;
-                return Task.FromResult<object?>(CreatePage(list));
+                return Task.FromResult<object?>(CreatePage(list, UsePagedRows));
             }
 
             throw new NotSupportedException($"Request nao suportado no fake mediator: {request.GetType().Name}");
@@ -1298,8 +1334,50 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public IAsyncEnumerable<object?> CreateStream(object request, CancellationToken cancellationToken = default)
             => AsyncEnumerable.Empty<object?>();
 
-        private static AssignmentSubmissionsPage CreatePage(ListAssignmentSubmissionsQuery query)
+        private static AssignmentSubmissionsPage CreatePage(
+            ListAssignmentSubmissionsQuery query,
+            bool usePagedRows = false)
         {
+            if (usePagedRows)
+            {
+                var allRows = Enumerable.Range(1, 8)
+                    .Select(index => new AssignmentSubmissionSummary(
+                        (100 + index).ToString(),
+                        $"Aluno {index}",
+                        (9000 + index).ToString(),
+                        "submitted",
+                        "notgraded",
+                        Submitted: true,
+                        Late: false,
+                        NeedsGrading: true,
+                        SubmittedAt: new DateTimeOffset(2026, 6, 10, index, 0, 0, TimeSpan.Zero),
+                        ModifiedAt: new DateTimeOffset(2026, 6, 10, index, 0, 0, TimeSpan.Zero),
+                        AttemptNumber: 0,
+                        FileCount: 0,
+                        HasOnlineText: true))
+                    .ToArray();
+                var pageRows = allRows
+                    .Skip((query.Page - 1) * query.PageSize)
+                    .Take(query.PageSize + 1)
+                    .ToArray();
+
+                return new AssignmentSubmissionsPage(
+                    "10",
+                    query.AssignmentId,
+                    "42",
+                    "Tarefa 1",
+                    query.Page,
+                    query.PageSize,
+                    query.Filter,
+                    query.IncludeLate,
+                    query.IncludeUngraded,
+                    query.Since,
+                    query.Before,
+                    Total: allRows.Length,
+                    HasMore: pageRows.Length > query.PageSize,
+                    pageRows.Take(query.PageSize).ToArray());
+            }
+
             return new AssignmentSubmissionsPage(
                 "10",
                 query.AssignmentId,
