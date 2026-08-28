@@ -165,7 +165,7 @@ public sealed class MoodleGradingTools(
     public Task<CallToolResult> CriarLoteCorrecaoAssistidaAsync(
         [Description("Identificador do curso. Deve ser numerico nesta versao inicial.")]
         string courseId,
-        [Description("Identificadores das tarefas Moodle. Devem ser numericos nesta versao inicial.")]
+        [Description("Identificadores numéricos das tarefas Moodle. Aceita tanto o ID do módulo (cmid) quanto o ID interno da tarefa (assignment instance ID).")]
         string[] assignmentIds,
         [Description("Submission IDs especificas a incluir. Quando vazio, inclui entregas retornadas pelo filtro.")]
         string[]? submissionIds = null,
@@ -1256,7 +1256,14 @@ public sealed class MoodleGradingTools(
                 submissionsSnapshot.IsComplete,
                 submissionsSnapshot.RecordCount)
             : snapshotScope is not null
-                ? new ToolFreshness("live", null, null, false, refreshQueued, false, 0)
+                ? new ToolFreshness(
+                    "live",
+                    null,
+                    null,
+                    false,
+                    refreshQueued,
+                    failedAssignmentCount == 0,
+                    orderedItems.Length)
                 : null;
 
         var response = new ToolResponse<ListarEntregasCorrigiveisResponse>(

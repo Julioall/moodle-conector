@@ -338,6 +338,77 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             var batchesByAssignment = submissionBatches
                 .GroupBy(batch => batch.AssignmentId, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+            var effectiveAssignmentIds = assignmentIds.ToDictionary(
+                assignmentId => assignmentId,
+                assignmentId => assignmentId,
+                StringComparer.OrdinalIgnoreCase);
+
+            // mod_assign_get_submissions only accepts the assignment instance
+            // ID, while Moodle users commonly copy the course-module ID (cmid).
+            // Resolve only the IDs explicitly rejected as unknown, preserving
+            // the fast direct path for the instance IDs returned by listings.
+            var moduleIdsToResolve = assignmentIds
+                .Where(assignmentId =>
+                    batchesByAssignment.TryGetValue(assignmentId, out var batch) &&
+                    string.Equals(batch.ErrorCode, "assignment_not_found", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (moduleIdsToResolve.Length > 0)
+            {
+                try
+                {
+                    var contents = await contentsGateway.GetCourseContentsAsync(
+                        request.UserExternalId,
+                        request.CourseId,
+                        CourseActivityModuleTypes.Assignments,
+                        includeHidden: true,
+                        onlyWithFiles: false,
+                        cancellationToken);
+                    var instanceByModuleId = contents.Sections
+                        .SelectMany(section => section.Modules)
+                        .Where(module =>
+                            string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(module.ModuleId) &&
+                            !string.IsNullOrWhiteSpace(module.InstanceId))
+                        .GroupBy(module => module.ModuleId!, StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(group => group.Key, group => group.First().InstanceId!, StringComparer.OrdinalIgnoreCase);
+                    var resolvedPairs = moduleIdsToResolve
+                        .Where(moduleId => instanceByModuleId.TryGetValue(moduleId, out var instanceId) &&
+                                           !string.Equals(moduleId, instanceId, StringComparison.OrdinalIgnoreCase))
+                        .Select(moduleId => new KeyValuePair<string, string>(moduleId, instanceByModuleId[moduleId]))
+                        .ToArray();
+                    if (resolvedPairs.Length > 0)
+                    {
+                        var resolvedBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+                            request.UserExternalId,
+                            resolvedPairs.Select(pair => pair.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                            request.OnlyAwaitingGrading ? "submitted" : null,
+                            since: null,
+                            before: null,
+                            cancellationToken);
+                        var resolvedByInstance = resolvedBatches
+                            .GroupBy(batch => batch.AssignmentId, StringComparer.OrdinalIgnoreCase)
+                            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+                        foreach (var pair in resolvedPairs)
+                        {
+                            if (resolvedByInstance.TryGetValue(pair.Value, out var resolvedBatch))
+                            {
+                                batchesByAssignment[pair.Key] = resolvedBatch;
+                                effectiveAssignmentIds[pair.Key] = pair.Value;
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Keep the original structured not-found result. A module
+                    // lookup is a compatibility fallback and must not mask
+                    // unrelated Moodle failures from the direct read.
+                }
+            }
             foreach (var assignmentId in assignmentIds)
             {
                 if (!batchesByAssignment.TryGetValue(assignmentId, out var submissionBatch))
@@ -362,6 +433,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     continue;
                 }
 
+                var effectiveAssignmentId = effectiveAssignmentIds[assignmentId];
                 resolvedCourseId ??= request.CourseId;
                 foreach (var submission in submissionBatch.Submissions)
                 {
@@ -372,14 +444,14 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                         continue;
                     }
 
-                    if (!selectedSubmissionKeys.Add(BuildSubmissionSelectionKey(assignmentId, submission)))
+                    if (!selectedSubmissionKeys.Add(BuildSubmissionSelectionKey(effectiveAssignmentId, submission)))
                     {
                         continue;
                     }
 
                     selectedItems.Add(new AssistedGradingItemSeed(
                         request.CourseId,
-                        assignmentId,
+                        effectiveAssignmentId,
                         submission.SubmissionId,
                         submission.UserId,
                         submission.AttemptNumber,
@@ -1184,9 +1256,10 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         decimal? maxGrade = null;
         if (request.FinalGrade is not null)
         {
+            AssignmentSettingsSummary? settings = null;
             try
             {
-                var settings = await settingsGateway.GetAssignmentSettingsAsync(
+                settings = await settingsGateway.GetAssignmentSettingsAsync(
                     batch.CreatedBySubject,
                     item.CourseId.ToString(CultureInfo.InvariantCulture),
                     item.AssignmentId.ToString(CultureInfo.InvariantCulture),
@@ -1200,6 +1273,10 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
 
             if (maxGrade is null)
             {
+                if (settings?.IsGradable == false)
+                {
+                    throw new InvalidOperationException("Esta atividade nao possui avaliacao numerica no Moodle. Envie somente feedback e deixe finalGrade vazio.");
+                }
                 throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; nota numerica bloqueada.");
             }
         }
@@ -1437,7 +1514,6 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
         var canLaunch = items.Any(item =>
                 item.Status == GradingItemStatus.ReadyToCommit &&
                 item.CommitStatus == GradingCommitStatus.Pending &&
-                item.FinalGrade is not null &&
                 !string.IsNullOrWhiteSpace(item.FinalFeedback)) &&
             batch.Status is GradingBatchStatus.ReadyForReview or GradingBatchStatus.Processing;
 
@@ -1897,6 +1973,7 @@ public sealed record GradingContextForChatResult(
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
     // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("isGradable")] bool? IsGradable,
     [property: JsonPropertyName("submissionId")] string? SubmissionId,
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
@@ -1965,6 +2042,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
 
         // MaxGrade + assignment name via API Moodle
         decimal? maxGrade = null;
+        bool? isGradable = null;
         try
         {
             var settings = await settingsGateway.GetAssignmentSettingsAsync(
@@ -1972,9 +2050,14 @@ public sealed class PrepareGradingContextForChatQueryHandler(
                 item.CourseId.ToString(CultureInfo.InvariantCulture),
                 item.AssignmentId.ToString(CultureInfo.InvariantCulture),
                 cancellationToken);
+            isGradable = settings?.IsGradable;
             if (settings != null && settings.MaxGrade > 0)
             {
                 maxGrade = settings.MaxGrade;
+            }
+            else if (settings?.IsGradable == false)
+            {
+                warnings.Add("Esta atividade nao possui avaliacao numerica no Moodle. Envie somente feedback, sem nota.");
             }
             else
             {
@@ -1985,6 +2068,10 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             if (!string.IsNullOrWhiteSpace(settings?.Name))
             {
                 assignmentName = settings.Name;
+            }
+            if (string.IsNullOrWhiteSpace(assignmentStatement) && !string.IsNullOrWhiteSpace(settings?.Description))
+            {
+                assignmentStatement = settings.Description;
             }
         }
         catch
@@ -2000,6 +2087,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
 
         var gradeInstruction = maxGrade is decimal knownMax
             ? $"A nota maxima desta atividade e {knownMax} pontos. Sugira uma nota de 0 a {knownMax}."
+            : isGradable == false
+                ? "Esta atividade nao possui avaliacao numerica no Moodle. Produza somente feedback qualitativo e nao sugira nota."
             : "A escala de notas desta atividade nao foi confirmada. Nao sugira nem calcule nota numerica; produza somente feedback qualitativo e sinalize a necessidade de confirmacao manual.";
         var instructions = AiGradingPromptPolicy.AppendUntrustedEvidenceRules(
             $"Voce e um tutor educacional. Analise a entrega do aluno comparando com o enunciado da atividade. " +
@@ -2019,6 +2108,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             assignmentName,
             maxGrade ?? 0m,
+            isGradable,
             item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             assignmentStatement,
@@ -2058,6 +2148,7 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
     // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("isGradable")] bool? IsGradable,
     [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
     [property: JsonPropertyName("extractedCriteria")] string? ExtractedCriteria,
     [property: JsonPropertyName("extractedText")] string? ExtractedText,
@@ -2182,10 +2273,24 @@ public sealed class PrepareAiGradingBatchQueryHandler(
 
                 settingsCache[item.AssignmentId] = settings;
             }
+            var isGradable = settings?.IsGradable;
+
+            if (string.IsNullOrWhiteSpace(assignmentStatement) && !string.IsNullOrWhiteSpace(settings?.Description))
+            {
+                assignmentStatement = settings.Description;
+            }
+            if (!string.IsNullOrWhiteSpace(settings?.Name))
+            {
+                assignmentName = settings.Name;
+            }
 
             if (settings is not null && settings.MaxGrade > 0)
             {
                 maxGrade = settings.MaxGrade;
+            }
+            else if (settings?.IsGradable == false)
+            {
+                itemWarnings.Add("Atividade sem avaliacao numerica no Moodle. Gere somente feedback, sem nota.");
             }
             else
             {
@@ -2199,6 +2304,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
                 assignmentName,
                 maxGrade ?? 0m,
+                isGradable,
                 assignmentStatement,
                 extractedCriteria,
                 combinedSubmission,

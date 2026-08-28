@@ -77,6 +77,33 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreview_PermiteLancamentoSomenteFeedback()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(null, 0.8m, "Rascunho de feedback.");
+        item.ApplyTeacherReview(null, "Feedback final sem nota.", "teacher-1", 321, "approved", "atividade nao avaliativa");
+        AttachVersionedContext(item, batch);
+        await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
+        await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: true),
+            CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result.PendingActionId);
+        Assert.Equal(1, result.ReadyItems);
+        Assert.Contains("SOMENTE_FEEDBACK", result.ConfirmationText, StringComparison.Ordinal);
+        Assert.Null(Assert.Single(fixture.PendingActions.LastPayload!.Items).Grade);
+    }
+
+    [Fact]
     public async Task CreatePreview_BloqueiaNotaFinalAcimaDaNotaMaximaDasEvidencias()
     {
         var fixture = new Fixture();

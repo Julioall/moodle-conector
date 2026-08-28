@@ -153,6 +153,7 @@ internal sealed class MoodleAssignmentSettingsGateway(
                     {
                         assignmentName = nameElement.GetString();
                     }
+                    var assignmentDescription = ReadString(assignment, "intro");
 
                     if (assignment.TryGetProperty("grade", out var gradeElement))
                     {
@@ -167,7 +168,8 @@ internal sealed class MoodleAssignmentSettingsGateway(
                             currentId.ToString(CultureInfo.InvariantCulture),
                             effectiveMaxGrade,
                             assignmentName,
-                            IsGradable: hasGrade ? grade != 0m : null);
+                            IsGradable: hasGrade ? grade != 0m : null,
+                            Description: assignmentDescription);
                     }
 
                     // No grade property but found the assignment — return with name only
@@ -177,7 +179,8 @@ internal sealed class MoodleAssignmentSettingsGateway(
                             currentId.ToString(CultureInfo.InvariantCulture),
                             MaxGrade: 0m,
                             assignmentName,
-                            IsGradable: null);
+                            IsGradable: null,
+                            Description: assignmentDescription);
                     }
                 }
             }
@@ -220,6 +223,7 @@ internal sealed class MoodleAssignmentSettingsGateway(
 
                 var cmid = ReadId(assignment, "cmid");
                 var name = ReadString(assignment, "name");
+                var description = ReadString(assignment, "intro");
                 decimal grade = 0m;
                 var hasGrade = assignment.TryGetProperty("grade", out var gradeElement) &&
                     TryReadDecimal(gradeElement, out grade);
@@ -227,7 +231,8 @@ internal sealed class MoodleAssignmentSettingsGateway(
                     assignmentId.ToString(CultureInfo.InvariantCulture),
                     grade > 0 ? grade : 0m,
                     name,
-                    IsGradable: hasGrade ? grade != 0m : null);
+                    IsGradable: hasGrade ? grade != 0m : null,
+                    Description: description);
 
                 result[assignmentId.ToString(CultureInfo.InvariantCulture)] = settings;
                 if (cmid > 0)

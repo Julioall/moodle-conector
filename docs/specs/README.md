@@ -40,6 +40,7 @@ evidências.
 | [SPEC-0021](spec-0021-canonical-grading-context.md) | Implementing | SPEC-0012, SPEC-0015, SPEC-0020 | Contexto canônico e evidência versionada |
 | [SPEC-0022](spec-0022-durable-assisted-grading-jobs.md) | Implementing | SPEC-0017, SPEC-0019, SPEC-0020, SPEC-0021 | Jobs duráveis, ingestão assíncrona e retenção |
 | [SPEC-0023](spec-0023-professional-tasks.md) | Draft | SPEC-0017, SPEC-0018 | Tasks profissionais para acompanhamento operacional |
+| [SPEC-0024](spec-0024-assisted-grading-fast-path.md) | Draft | SPEC-0011, SPEC-0012, SPEC-0014, SPEC-0015, SPEC-0019–0022 | Caminho direto e read model local da correção assistida |
 
 ## Regra de rastreabilidade
 

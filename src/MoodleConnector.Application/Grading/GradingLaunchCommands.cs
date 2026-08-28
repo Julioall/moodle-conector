@@ -35,7 +35,7 @@ public sealed record GradingLaunchPreviewItem(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
     [property: JsonPropertyName("studentId")] string StudentId,
-    [property: JsonPropertyName("grade")] decimal Grade,
+    [property: JsonPropertyName("grade")] decimal? Grade,
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
     [property: JsonPropertyName("contextHash")] string? ContextHash = null);
 
@@ -65,7 +65,7 @@ public sealed record GradingLaunchPayloadItem(
     [property: JsonPropertyName("courseId")] string CourseId,
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
     [property: JsonPropertyName("studentId")] string StudentId,
-    [property: JsonPropertyName("grade")] decimal Grade,
+    [property: JsonPropertyName("grade")] decimal? Grade,
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
     [property: JsonPropertyName("attemptNumber")] int? AttemptNumber,
     [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
@@ -124,19 +124,22 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 continue;
             }
 
-            var maxGrade = await GetKnownMaxGradeAsync(batch, item, settingsCache, cancellationToken);
-            if (maxGrade is null)
+            if (item.FinalGrade is not null)
             {
-                scaleWarnings.Add(
-                    $"Item {item.Id}: nota maxima da atividade nao foi confirmada; lancamento numerico bloqueado.");
-                continue;
-            }
+                var maxGrade = await GetKnownMaxGradeAsync(batch, item, settingsCache, cancellationToken);
+                if (maxGrade is null)
+                {
+                    scaleWarnings.Add(
+                        $"Item {item.Id}: nota maxima da atividade nao foi confirmada; lancamento numerico bloqueado.");
+                    continue;
+                }
 
-            if (item.FinalGrade > maxGrade)
-            {
-                scaleWarnings.Add(
-                    $"Item {item.Id}: nota final {FormatGrade(item.FinalGrade!.Value)} excede nota maxima {FormatGrade(maxGrade.Value)} identificada pelos criterios.");
-                continue;
+                if (item.FinalGrade > maxGrade)
+                {
+                    scaleWarnings.Add(
+                        $"Item {item.Id}: nota final {FormatGrade(item.FinalGrade!.Value)} excede nota maxima {FormatGrade(maxGrade.Value)} identificada pelos criterios.");
+                    continue;
+                }
             }
 
             ready.Add(item);
@@ -176,7 +179,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             ? " E AUTORIZO SOBRESCREVER NOTAS E FEEDBACKS EXISTENTES"
             : string.Empty;
         var confirmationText =
-            $"CONFIRMO O LANCAMENTO DE {ready.Count} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO NOTA_E_FEEDBACK{overwriteScope}";
+            $"CONFIRMO O LANCAMENTO DE {ready.Count} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO {(ready.All(item => item.FinalGrade is null) ? "SOMENTE_FEEDBACK" : "NOTA_E_FEEDBACK")}{overwriteScope}";
         var pending = await pendingActions.CreatePendingActionAsync(
             ToolName,
             ToolRiskLevel.CriticalHumanConfirmedWrite,
@@ -262,7 +265,6 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         return (!onlyReviewed || item.ReviewStatus == GradingReviewStatus.Reviewed) &&
             item.Status == GradingItemStatus.ReadyToCommit &&
             item.CommitStatus == GradingCommitStatus.Pending &&
-            item.FinalGrade is not null &&
             !string.IsNullOrWhiteSpace(item.FinalFeedback);
     }
 
@@ -296,7 +298,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.CourseId.ToString(CultureInfo.InvariantCulture),
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
-            item.FinalGrade ?? 0,
+            item.FinalGrade,
             item.FinalFeedback ?? string.Empty,
             item.AttemptNumber,
             GradingDraftVersionHash.Compute(item),
@@ -309,7 +311,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.Id,
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
-            item.FinalGrade ?? 0,
+            item.FinalGrade,
             item.FinalFeedback ?? string.Empty,
             item.ContextHash);
     }
@@ -468,46 +470,49 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 continue;
             }
 
-            var existingGradeResult = await GetExistingGradeValidationAsync(
-                userExternalId,
-                payloadItem.AssignmentId,
-                payloadItem.StudentId,
-                cancellationToken);
-            if (existingGradeResult.Failure is not null)
+            if (payloadItem.Grade is not null)
             {
-                item.MarkCommitFailed(existingGradeResult.Failure.Message);
-                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, existingGradeResult.Failure.Message));
-                await RecordCommitAuditAsync(
-                    action,
-                    payload.BatchJobId,
-                    payloadItem,
-                    "commit_blocked",
-                    responseSummary: new { item.CommitStatus },
-                    errorCode: existingGradeResult.Failure.ErrorCode,
-                    errorMessage: existingGradeResult.Failure.Message,
+                var existingGradeResult = await GetExistingGradeValidationAsync(
+                    userExternalId,
+                    payloadItem.AssignmentId,
+                    payloadItem.StudentId,
                     cancellationToken);
-                continue;
-            }
+                if (existingGradeResult.Failure is not null)
+                {
+                    item.MarkCommitFailed(existingGradeResult.Failure.Message);
+                    failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, existingGradeResult.Failure.Message));
+                    await RecordCommitAuditAsync(
+                        action,
+                        payload.BatchJobId,
+                        payloadItem,
+                        "commit_blocked",
+                        responseSummary: new { item.CommitStatus },
+                        errorCode: existingGradeResult.Failure.ErrorCode,
+                        errorMessage: existingGradeResult.Failure.Message,
+                        cancellationToken);
+                    continue;
+                }
 
-            if (existingGradeResult.ExistingGrade?.HasGrade == true && !payload.AllowOverwriteExisting)
-            {
-                var message = $"O Moodle ja possui nota existente para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma confirmacao especifica de sobrescrita antes de lancar.";
-                item.MarkCommitFailed(message);
-                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
-                await RecordCommitAuditAsync(
-                    action,
-                    payload.BatchJobId,
-                    payloadItem,
-                    "commit_blocked",
-                    responseSummary: new
-                    {
-                        item.CommitStatus,
-                        existingGrade = existingGradeResult.ExistingGrade.Grade
-                    },
-                    errorCode: "moodle_existing_grade",
-                    errorMessage: message,
-                    cancellationToken);
-                continue;
+                if (existingGradeResult.ExistingGrade?.HasGrade == true && !payload.AllowOverwriteExisting)
+                {
+                    var message = $"O Moodle ja possui nota existente para o estudante {payloadItem.StudentId} na atividade {payloadItem.AssignmentId}. Gere uma confirmacao especifica de sobrescrita antes de lancar.";
+                    item.MarkCommitFailed(message);
+                    failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
+                    await RecordCommitAuditAsync(
+                        action,
+                        payload.BatchJobId,
+                        payloadItem,
+                        "commit_blocked",
+                        responseSummary: new
+                        {
+                            item.CommitStatus,
+                            existingGrade = existingGradeResult.ExistingGrade.Grade
+                        },
+                        errorCode: "moodle_existing_grade",
+                        errorMessage: message,
+                        cancellationToken);
+                    continue;
+                }
             }
 
             var submissionAttemptResult = await GetSubmissionAttemptValidationAsync(
@@ -912,13 +917,15 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     "A resposta da escrita foi perdida, mas a leitura posterior confirmou que a nota e o feedback nao foram aplicados. Nenhuma nova escrita foi enviada; gere uma nova previa antes de tentar novamente.");
             }
 
-            if (existingGrade.HasGrade &&
-                existingGrade.Grade == payloadItem.Grade &&
+            if ((payloadItem.Grade is null ||
+                 (existingGrade.HasGrade && existingGrade.Grade == payloadItem.Grade)) &&
                 FeedbackMatches(existingGrade.Feedback, payloadItem.FeedbackText))
             {
                 return new UnknownWriteReconciliationResult(
                     UnknownWriteReconciliationStatus.Applied,
-                    "A resposta da escrita foi perdida, mas a leitura posterior confirmou a nota e o feedback no Moodle.");
+                    payloadItem.Grade is null
+                        ? "A resposta da escrita foi perdida, mas a leitura posterior confirmou o feedback no Moodle."
+                        : "A resposta da escrita foi perdida, mas a leitura posterior confirmou a nota e o feedback no Moodle.");
             }
 
             return new UnknownWriteReconciliationResult(

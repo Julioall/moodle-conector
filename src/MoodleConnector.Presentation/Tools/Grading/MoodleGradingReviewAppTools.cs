@@ -172,12 +172,16 @@ public sealed class MoodleGradingReviewAppTools(
             var suggestedGrade = detail?.SuggestedGrade ?? context?.SuggestedGrade;
             var draftFeedback = detail?.DraftFeedback ?? context?.DraftFeedback;
             var maxGrade = context?.MaxGrade ?? 0m;
+            var isGradable = context?.IsGradable;
             var assignmentName = context?.AssignmentName;
             var confidence = detail?.Confidence ?? context?.Confidence;
             var workflowState = ResolveWorkflowState(item.Status, item.ReviewStatus, item.CommitStatus);
             var capabilities = ResolveCapabilities(workflowState);
             var statusReason = detail?.PendingIssues.FirstOrDefault()
-                ?? detail?.PrivateNotesToTeacher;
+                ?? detail?.PrivateNotesToTeacher
+                ?? (isGradable == false
+                    ? "Atividade sem avaliacao numerica no Moodle. Salve e envie somente o feedback; nenhuma nota sera publicada."
+                    : null);
 
             studentNameMap.TryGetValue(item.StudentId, out var studentName);
 
@@ -217,6 +221,7 @@ public sealed class MoodleGradingReviewAppTools(
                 suggestedGrade,
                 draftFeedback,
                 maxGrade,
+                isGradable,
                 assignmentName,
                 confidence));
         }
@@ -584,5 +589,6 @@ public sealed record GradingReviewItem(
     [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
     [property: JsonPropertyName("draftFeedback")] string? DraftFeedback,
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("isGradable")] bool? IsGradable,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
     [property: JsonPropertyName("confidence")] decimal? Confidence);

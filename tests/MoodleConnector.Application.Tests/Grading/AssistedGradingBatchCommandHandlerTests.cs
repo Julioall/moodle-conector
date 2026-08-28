@@ -101,6 +101,38 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreateBatch_AceitaIdDoModuloEResolveParaInstanciaDaTarefa()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var submissions = new FakeAssignmentSubmissionsGateway
+        {
+            NotFoundAssignmentIds = new HashSet<string>(["42"], StringComparer.Ordinal)
+        };
+        var contents = new FakeCourseContentsGateway();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            new FakeMediator(),
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeGradingBatchOrchestrator(),
+            contents,
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            submissions);
+
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                "321", "10", ["42"], [], 1, OnlyAwaitingGrading: true,
+                IncludeRubric: false, IncludeSubmissionFiles: false),
+            CancellationToken.None);
+
+        Assert.Equal(["501"], result.AssignmentIds);
+        Assert.Equal(1, contents.CallCount);
+        Assert.Equal(2, submissions.CallCount);
+    }
+
+    [Fact]
     public async Task CreateBatch_NaoConverteFalhaDeDescobertaEmNoPendingSubmissions()
     {
         var repository = new FakeGradingReviewRepository();
@@ -1032,6 +1064,38 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task UpdateDraft_PermiteFeedbackSemNota()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(null, 0.8m, "Rascunho de feedback.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new UpdateAssistedGradingDraftCommandHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeMoodleAssignmentSettingsGateway());
+
+        var result = await sut.Handle(
+            new UpdateAssistedGradingDraftCommand(
+                GradingItemId: item.Id,
+                FinalGrade: null,
+                FinalFeedback: "Feedback final sem nota.",
+                TeacherDecision: "approved",
+                ReviewNotes: null,
+                ExpectedReviewStatus: "NotReviewed"),
+            CancellationToken.None);
+
+        Assert.Null(result.FinalGrade);
+        Assert.Equal("Feedback final sem nota.", result.FinalFeedback);
+        Assert.Equal("Reviewed", result.ReviewStatus);
+        Assert.Equal("Pending", result.CommitStatus);
+    }
+
+    [Fact]
     public async Task UpdateDraft_RepetidoComMesmoPayload_RetornaResultadoSemDuplicarAlteracao()
     {
         var repository = new FakeGradingReviewRepository();
@@ -1723,6 +1787,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         public ISet<string> FailAssignmentIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
 
+        public ISet<string> NotFoundAssignmentIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
         public Task<IReadOnlyList<AssignmentSubmissionsBatch>> GetAssignmentSubmissionsBatchAsync(
             string userExternalId,
             IReadOnlyCollection<string> assignmentIds,
@@ -1740,6 +1806,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             return Task.FromResult<IReadOnlyList<AssignmentSubmissionsBatch>>(assignmentIds
                 .Select(assignmentId => FailAssignmentIds.Contains(assignmentId)
                     ? new AssignmentSubmissionsBatch(assignmentId, [], MoodleErrorContract.NetworkError, "falha de rede simulada")
+                    : NotFoundAssignmentIds.Contains(assignmentId)
+                        ? new AssignmentSubmissionsBatch(assignmentId, [], "assignment_not_found", "tarefa nao encontrada")
                     : new AssignmentSubmissionsBatch(assignmentId, CreateSubmissions()))
                 .ToArray());
         }
