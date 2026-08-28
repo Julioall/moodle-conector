@@ -209,4 +209,39 @@ public sealed class GradingDomainTests
         Assert.Single(context.Blockers);
         Assert.Contains("context_fetch_failed", context.Blockers[0]);
     }
+
+    [Fact]
+    public void GradingContext_DistingueFalhaDeDownloadDeFormatoNaoSuportado()
+    {
+        var context = GradingContext.Build(
+            gradingItemId: Guid.NewGuid(),
+            batchId: Guid.NewGuid(),
+            courseId: "10",
+            assignmentId: "501",
+            submissionId: "9001",
+            studentId: "101",
+            assignmentStatement: "Enunciado.",
+            criteria: "Critérios.",
+            rubricDescription: null,
+            maxGrade: 10m,
+            gradeScale: null,
+            submissionText: null,
+            attachedFiles:
+            [
+                new GradingFileInfo(
+                    "EXTRA 03.docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    100,
+                    null,
+                    null,
+                    IsSupported: false,
+                    ExtractionStatus: "failed")
+            ],
+            courseMaterials: null,
+            teacherInstructions: null);
+
+        var blocker = Assert.Single(context.Blockers);
+        Assert.Contains("download ou a extração", blocker, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("formatos não suportados", blocker, StringComparison.OrdinalIgnoreCase);
+    }
 }
