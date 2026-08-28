@@ -14,6 +14,7 @@ export const APP_PERMISSIONS = {
   CLARIS_VIEW: 'claris.view',
   REPORTS_VIEW: 'reports.view',
   SETTINGS_VIEW: 'settings.view',
+  ADMIN_VIEW: 'admin.view',
 } as const;
 
 export type AppPermissionKey = typeof APP_PERMISSIONS[keyof typeof APP_PERMISSIONS];

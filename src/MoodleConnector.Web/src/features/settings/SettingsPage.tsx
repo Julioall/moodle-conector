@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { KeyRound, MailPlus, Plug, ShieldAlert, ShieldCheck, UserRound } from 'lucide-react';
+import { KeyRound, MailPlus, Plug, ShieldCheck, UserRound } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 
 import { Badge } from '../../components/ui/badge';
@@ -10,13 +10,13 @@ import { MessagePreferencesCard } from './MessagePreferencesCard';
 import { ThemeCard } from './ThemeCard';
 import { APP_PERMISSIONS } from '../../lib/access-control';
 import { ConnectionsPage } from '../connections/ConnectionsPage';
-import { AdminMetricsCard, AdminPasswordResetCard, ChangePasswordCard } from './PasswordCards';
+import { ChangePasswordCard } from './PasswordCards';
 
 export function SettingsPage() {
   const { user, isAdmin, can } = useSession();
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(['mensagens', 'conexoes', 'senha', 'administracao'].includes(requestedTab ?? '') ? requestedTab! : 'geral');
+  const [activeTab, setActiveTab] = useState(['mensagens', 'conexoes', 'senha'].includes(requestedTab ?? '') ? requestedTab! : 'geral');
   const initials = user?.name?.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'CL';
   const canManageConnections = can(APP_PERMISSIONS.SERVICES_VIEW);
 
@@ -30,7 +30,6 @@ export function SettingsPage() {
           <TabsTrigger value="senha" className="gap-2"><KeyRound className="h-4 w-4" />Senha</TabsTrigger>
           <TabsTrigger value="mensagens" className="gap-2"><MailPlus className="h-4 w-4" />Mensagens</TabsTrigger>
           {canManageConnections && <TabsTrigger value="conexoes" className="gap-2"><Plug className="h-4 w-4" />Conexões Moodle</TabsTrigger>}
-          {isAdmin && <TabsTrigger value="administracao" className="gap-2"><ShieldAlert className="h-4 w-4" />Administração</TabsTrigger>}
         </TabsList>
 
         <TabsContent value="geral" className="mt-0 space-y-6">
@@ -47,8 +46,6 @@ export function SettingsPage() {
         <TabsContent value="mensagens" className="mt-0 space-y-6"><MessagePreferencesCard /></TabsContent>
 
         {canManageConnections && <TabsContent value="conexoes" className="mt-0"><ConnectionsPage embedded /></TabsContent>}
-
-        {isAdmin && <TabsContent value="administracao" className="mt-0 space-y-6"><AdminMetricsCard /><AdminPasswordResetCard /></TabsContent>}
 
       </Tabs>
     </main>

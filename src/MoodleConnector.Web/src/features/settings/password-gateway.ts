@@ -6,6 +6,7 @@ export type AdminMetrics = {
   endpoints: { endpoint: string; method: string; requests: number; errors: number; averageDurationMs: number }[];
   tools: { toolName: string; invocations: number; errors: number; averageDurationMs: number }[];
   errors: { occurredAt: string; source: string; operation: string; code: string; statusCode?: number; durationMs: number }[];
+  warnings?: string[];
 };
 
 export const passwordGateway = {

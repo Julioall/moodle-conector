@@ -8,6 +8,7 @@ import {
   LogOut,
   MessageSquare,
   Settings,
+  ShieldAlert,
   type LucideIcon,
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
@@ -50,6 +51,7 @@ const mainNavItems: SidebarNavItem[] = [
 
 const settingsItems: SidebarNavItem[] = [
   { title: 'Configurações', url: '/configuracoes', icon: Settings, permission: APP_PERMISSIONS.SETTINGS_VIEW },
+  { title: 'Administração', url: '/administracao', icon: ShieldAlert, permission: APP_PERMISSIONS.ADMIN_VIEW },
 ];
 
 export function AppSidebar() {
@@ -58,7 +60,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const isCollapsed = state === 'collapsed';
   const scopedUrl = (url: string) => {
-    if (!connectionRef || url === '/configuracoes') return url;
+    if (!connectionRef || url === '/configuracoes' || url === '/administracao') return url;
     return `${url}${url.includes('?') ? '&' : '?'}connectionRef=${encodeURIComponent(connectionRef)}`;
   };
 
