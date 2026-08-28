@@ -561,6 +561,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var item = Assert.Single(repository.Items);
         Assert.Equal(9002, item.SubmissionId);
         Assert.Equal(102, item.MoodleUserId);
+        Assert.Equal(AssignmentSubmissionFilter.All, mediator.LastListQuery!.Filter);
         Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
     }
 

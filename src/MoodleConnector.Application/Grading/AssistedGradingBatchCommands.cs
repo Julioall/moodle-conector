@@ -270,11 +270,18 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     AssignmentSubmissionsPage? submissionsPage;
                     try
                     {
+                        // Quando o cliente fornece IDs de submissao, consulte a pagina
+                        // completa e filtre localmente. Alguns Moodle retornam
+                        // `notgraded` no payload, mas nao aceitam a mesma semantica no
+                        // filtro server-side `NeedsGrading`.
+                        var submissionFilter = request.OnlyAwaitingGrading && selectedSubmissionIds.Count == 0
+                            ? AssignmentSubmissionFilter.NeedsGrading
+                            : AssignmentSubmissionFilter.All;
                         var submissionsQuery = new ListAssignmentSubmissionsQuery(
                             request.UserExternalId,
                             request.CourseId,
                             assignmentId,
-                            request.OnlyAwaitingGrading ? AssignmentSubmissionFilter.NeedsGrading : AssignmentSubmissionFilter.All,
+                            submissionFilter,
                             page,
                             Math.Min(remaining, 100),
                             Since: null,
@@ -309,6 +316,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     {
                         if (selectedSubmissionIds.Count > 0 &&
                             (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId)))
+                        {
+                            continue;
+                        }
+
+                        if (request.OnlyAwaitingGrading && !submission.NeedsGrading)
                         {
                             continue;
                         }
