@@ -146,7 +146,7 @@ public class ListAssignmentSubmissionsQueryHandlerTests
     }
 
     [Fact]
-    public async Task Deve_usar_grade_vazia_para_distinguir_entregas_que_ainda_precisam_de_avaliacao()
+    public async Task Deve_manter_marcador_menos_um_do_Moodle_como_aguardando_correcao()
     {
         var sut = CreateHandler(
             submissionsGateway: new FakeSubmissionsGateway
@@ -168,7 +168,7 @@ public class ListAssignmentSubmissionsQueryHandlerTests
                 {
                     ["101"] = new("501", "101", Grade: null, HasGrade: false),
                     ["102"] = new("501", "102", Grade: -1m, HasGrade: false),
-                    ["103"] = new("501", "103", Grade: null, HasGrade: false)
+                    ["103"] = new("501", "103", Grade: 20m, HasGrade: true)
                 }
             });
 
@@ -188,7 +188,7 @@ public class ListAssignmentSubmissionsQueryHandlerTests
 
         Assert.NotNull(result);
         Assert.Equal(2, result!.Total);
-        Assert.Equal(["101", "103"], result.Submissions.Select(submission => submission.UserId));
+        Assert.Equal(["101", "102"], result.Submissions.Select(submission => submission.UserId));
         Assert.All(result.Submissions, submission => Assert.True(submission.NeedsGrading));
     }
 

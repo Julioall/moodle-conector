@@ -312,7 +312,10 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         {
             existingGrades.TryGetValue(userId, out existingGrade);
         }
-        var hasMoodleGradeValue = existingGrade?.Grade is not null;
+        // Moodle represents an ungraded submission with the numeric sentinel
+        // -1. Preserve that value for diagnostics, but do not treat it as a
+        // grade already entered by the teacher.
+        var hasMoodleGradeValue = existingGrade?.HasGrade == true;
         var needsGrading = IsNeedsGrading(submission.GradingStatus, submitted) &&
             (existingGrades is null ? isGradable != false : !hasMoodleGradeValue);
 
