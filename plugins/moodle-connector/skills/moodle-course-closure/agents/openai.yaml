@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fechar unidade curricular"
+  short_description: "Auditar UC antes do fechamento"
+  default_prompt: "Use $moodle-course-closure para auditar notas, pendências e recuperação antes de fechar uma UC."
