@@ -11,6 +11,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
+      # Write capabilities are controlled by explicit deployment environment
+      # variables, rather than by the versioned application defaults.
+      Features__MessagesWriteEnabled: ${FEATURES_MESSAGES_WRITE_ENABLED:-false}
+      Features__AssignmentFeedbackWriteEnabled: ${FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED:-false}
+      Features__AssignmentGradeWriteEnabled: ${FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED:-false}
     ports:
       # The reverse proxy is the only public entry point. Keep direct ASP.NET
       # access on loopback for host health checks and local diagnostics.

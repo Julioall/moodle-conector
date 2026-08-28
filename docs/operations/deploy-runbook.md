@@ -33,11 +33,18 @@ O alvo é uma VPS com Docker Compose, PostgreSQL, aplicação e Caddy opcional p
 | `CADDYFILE` | `./Caddyfile` |
 | `MCP_REQUIRE_JWT` | `true` |
 | `MCP_REQUIRE_API_KEY` | `false` |
+| `FEATURES_MESSAGES_WRITE_ENABLED` | `true` |
+| `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED` | `true` |
+| `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED` | `true` |
 | `OAUTH_CLIENT_ID` | `moodle` |
 | `OAUTH_SCOPE_NAME` | `moodle-mcp-audience` |
 | `OAUTH_REQUIRE_HTTPS_METADATA` | `true` |
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` |
 | `RATE_LIMIT_MCP_PERMIT_LIMIT` | `120` |
+
+As tres flags de escrita acima sao repassadas pelo Compose como variaveis
+`Features__*` da aplicacao. Defina uma delas como `false` nas variaveis do
+ambiente GitHub para desabilitar especificamente essa capacidade em um deploy.
 
 ## Secrets Obrigatórios
 

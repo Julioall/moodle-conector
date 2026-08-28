@@ -204,7 +204,7 @@ As escritas controladas já estão disponíveis para fluxos específicos e devem
 3. o sistema pede uma confirmação explícita;
 4. somente depois disso a ação pode ser executada.
 
-Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write`, conexão `CanWrite` e `MessagesWriteEnabled=true`. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`. No `appsettings.json` versionado atual essas flags estão habilitadas; operadores devem revisá-las e podem sobrescrevê-las por ambiente conforme sua política de menor privilégio.
+Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write`, conexão `CanWrite` e `MessagesWriteEnabled=true`. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`. Em deploy, essas capacidades são configuradas pelas variáveis `FEATURES_MESSAGES_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED` e `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED`; os operadores podem defini-las como `false` conforme sua política de menor privilégio.
 
 ## Arquitetura
 
