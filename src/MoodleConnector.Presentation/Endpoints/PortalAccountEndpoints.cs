@@ -31,8 +31,8 @@ internal static class PortalAccountEndpoints
                 string.IsNullOrWhiteSpace(input.Password))
                 return Results.BadRequest(new { ok = false, error = "Preencha todos os campos obrigatórios." });
 
-            if (input.Password.Length < 12)
-                return Results.BadRequest(new { ok = false, error = "A senha deve ter pelo menos 12 caracteres." });
+            if (input.Password.Length < 8)
+                return Results.BadRequest(new { ok = false, error = "A senha deve ter pelo menos 8 caracteres." });
 
             try
             {
@@ -55,6 +55,58 @@ internal static class PortalAccountEndpoints
             {
                 return Results.BadRequest(new { ok = false, error = ex.Message });
             }
+        }).RequireRateLimiting(rateLimitPolicy);
+
+        app.MapPost("/api/account/password", async (
+            ChangePasswordInput input,
+            HttpContext context,
+            ConnectorDbContext dbContext,
+            IAccountService accountService,
+            IAntiforgery antiforgery,
+            CancellationToken cancellationToken) =>
+        {
+            var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+            if (identity is null) return Results.Unauthorized();
+            await antiforgery.ValidateRequestAsync(context);
+            try
+            {
+                await accountService.ChangePasswordAsync(
+                    new ChangePasswordRequest(identity.Id, input.CurrentPassword, input.NewPassword), cancellationToken);
+                return Results.Ok(new { ok = true, message = "Senha alterada com sucesso." });
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+        }).RequireRateLimiting(rateLimitPolicy);
+
+        app.MapGet("/api/admin/accounts", async (
+            HttpContext context,
+            ConnectorDbContext dbContext,
+            IAccountService accountService,
+            CancellationToken cancellationToken) =>
+        {
+            if (await ResolveAppIdentityAsync(context, dbContext, cancellationToken) is null) return Results.Unauthorized();
+            if (!PortalEndpointAuthorization.HasAppPermission(context, AppPermissionCatalog.AdminView)) return Results.Forbid();
+            return Results.Ok(new { ok = true, accounts = await accountService.ListAccountsAsync(cancellationToken) });
+        }).RequireRateLimiting(rateLimitPolicy);
+
+        app.MapPost("/api/admin/accounts/{userId:guid}/reset-password", async (
+            Guid userId,
+            HttpContext context,
+            ConnectorDbContext dbContext,
+            IAccountService accountService,
+            IAntiforgery antiforgery,
+            CancellationToken cancellationToken) =>
+        {
+            if (await ResolveAppIdentityAsync(context, dbContext, cancellationToken) is null) return Results.Unauthorized();
+            if (!PortalEndpointAuthorization.HasAppPermission(context, AppPermissionCatalog.AdminView)) return Results.Forbid();
+            await antiforgery.ValidateRequestAsync(context);
+            try
+            {
+                await accountService.ResetPasswordToDefaultAsync(userId, cancellationToken);
+                return Results.Ok(new { ok = true, message = "Senha redefinida para a senha padrão configurada." });
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+            catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
         }).RequireRateLimiting(rateLimitPolicy);
 
         app.MapPost("/api/account/login", async (
@@ -470,3 +522,5 @@ internal static class PortalAccountEndpoints
         CancellationToken cancellationToken) =>
         PortalEndpointAuthorization.ResolveAppIdentityAsync(context, dbContext, cancellationToken);
 }
+
+public sealed record ChangePasswordInput(string CurrentPassword, string NewPassword);

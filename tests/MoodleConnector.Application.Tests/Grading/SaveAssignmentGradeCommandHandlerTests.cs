@@ -115,6 +115,36 @@ public sealed class SaveAssignmentGradeCommandHandlerTests
     }
 
     [Fact]
+    public async Task Handle_PermiteSomenteFeedbackEmAtividadeSemNotaNumerica()
+    {
+        var gateway = new FakeMoodleAssignmentGradingGateway();
+        var sut = CreateHandler(
+            gateway,
+            assignmentGradeWriteEnabled: false,
+            assignmentFeedbackWriteEnabled: true,
+            maxGrade: 0m);
+
+        var result = await sut.Handle(
+            new SaveAssignmentGradeCommand(
+                UserExternalId: "321",
+                AssignmentId: "501",
+                StudentId: "101",
+                Grade: null,
+                FeedbackText: "Feedback sem nota.",
+                AttemptNumber: -1,
+                AddAttempt: false,
+                ApplyToAll: false,
+                WorkflowState: "graded",
+                CourseId: "10"),
+            CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.NotNull(gateway.LastRequest);
+        Assert.Null(gateway.LastRequest!.Grade);
+        Assert.Equal("Feedback sem nota.", gateway.LastRequest.FeedbackText);
+    }
+
+    [Fact]
     public async Task Handle_RejeitaNotaAcimaDaEscalaConfirmada()
     {
         var gateway = new FakeMoodleAssignmentGradingGateway();

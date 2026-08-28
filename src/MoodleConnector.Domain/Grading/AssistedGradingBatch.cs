@@ -24,6 +24,12 @@ public sealed class AssistedGradingBatch
 
     public string? ConnectionAlias { get; private init; }
 
+    /// <summary>
+    /// Chave fornecida pelo chamador para tornar segura uma nova tentativa
+    /// depois de uma resposta perdida entre o conector e o cliente.
+    /// </summary>
+    public string? IdempotencyKey { get; private init; }
+
     public GradingBatchStatus Status { get; private set; } = GradingBatchStatus.Pending;
 
     public int TotalItems { get; private init; }
@@ -86,7 +92,8 @@ public sealed class AssistedGradingBatch
         bool includeSubmissionFiles = true,
         bool includeCourseMaterials = false,
         string? connectorClientId = null,
-        string? connectionAlias = null)
+        string? connectionAlias = null,
+        string? idempotencyKey = null)
     {
         if (courseId <= 0)
         {
@@ -128,6 +135,16 @@ public sealed class AssistedGradingBatch
                 nameof(teacherInstructions));
         }
 
+        var normalizedIdempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey)
+            ? null
+            : idempotencyKey.Trim();
+        if (normalizedIdempotencyKey is not null && normalizedIdempotencyKey.Length > 128)
+        {
+            throw new ArgumentException(
+                "A chave de idempotencia excede o limite de 128 caracteres.",
+                nameof(idempotencyKey));
+        }
+
         return new AssistedGradingBatch
         {
             CourseId = courseId,
@@ -136,6 +153,7 @@ public sealed class AssistedGradingBatch
             CreatedByMoodleUserId = createdByMoodleUserId,
             ConnectorClientId = string.IsNullOrWhiteSpace(connectorClientId) ? null : connectorClientId.Trim(),
             ConnectionAlias = string.IsNullOrWhiteSpace(connectionAlias) ? null : connectionAlias.Trim(),
+            IdempotencyKey = normalizedIdempotencyKey,
             TotalItems = totalItems,
             TeacherInstructions = normalizedTeacherInstructions,
             Priority = normalizedPriority,

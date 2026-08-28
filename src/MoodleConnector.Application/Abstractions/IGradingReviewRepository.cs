@@ -8,6 +8,12 @@ public interface IGradingReviewRepository
 
     Task<AssistedGradingBatch?> GetBatchAsync(Guid id, CancellationToken cancellationToken);
 
+    Task<AssistedGradingBatch?> GetBatchByIdempotencyKeyAsync(
+        string createdBySubject,
+        string idempotencyKey,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<AssistedGradingBatch?>(null);
+
     Task AddItemAsync(AssistedGradingItem item, CancellationToken cancellationToken);
 
     Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken);

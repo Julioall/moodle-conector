@@ -25,7 +25,15 @@ public sealed record CreateAssistedGradingBatchCommand(
     bool IncludeCourseMaterials = false,
     string? TeacherInstructions = null,
     string Priority = "normal",
-    IReadOnlyList<AssignmentSubmissionSummary>? PrefetchedSubmissions = null) : IRequest<CreateAssistedGradingBatchResult>;
+    IReadOnlyList<AssignmentSubmissionSummary>? PrefetchedSubmissions = null,
+    string? IdempotencyKey = null) : IRequest<CreateAssistedGradingBatchResult>;
+
+public sealed record AssistedGradingBatchDiscoveryFailure(
+    [property: JsonPropertyName("assignmentId")] string AssignmentId,
+    [property: JsonPropertyName("errorCode")] string ErrorCode,
+    [property: JsonPropertyName("auditId")] string AuditId,
+    [property: JsonPropertyName("moodleFunction")] string? MoodleFunction,
+    [property: JsonPropertyName("durationMs")] long? DurationMs);
 
 public sealed record CreateAssistedGradingBatchResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -35,7 +43,8 @@ public sealed record CreateAssistedGradingBatchResult(
     [property: JsonPropertyName("acceptedItems")] int AcceptedItems,
     [property: JsonPropertyName("blockedItems")] int BlockedItems,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("discoveryFailures")] IReadOnlyList<AssistedGradingBatchDiscoveryFailure>? DiscoveryFailures = null);
 
 public sealed record GetAssistedGradingBatchStatusQuery(
     Guid BatchJobId,
@@ -203,6 +212,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         CreateAssistedGradingBatchCommand request,
         CancellationToken cancellationToken)
     {
+        _ = mediator; // Mantém compatibilidade de injeção durante a transição do agregador para a leitura direta.
         if (string.IsNullOrWhiteSpace(request.UserExternalId))
         {
             throw new ArgumentException("O usuario Moodle e obrigatorio.", nameof(request.UserExternalId));
@@ -230,6 +240,29 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 nameof(request.AssignmentIds));
         }
 
+        var normalizedIdempotencyKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
+            ? null
+            : request.IdempotencyKey.Trim();
+        if (normalizedIdempotencyKey is not null)
+        {
+            var existingBatch = await repository.GetBatchByIdempotencyKeyAsync(
+                currentUser.Subject,
+                normalizedIdempotencyKey,
+                cancellationToken);
+            if (existingBatch is not null)
+            {
+                return new CreateAssistedGradingBatchResult(
+                    existingBatch.Id,
+                    existingBatch.CourseId.ToString(CultureInfo.InvariantCulture),
+                    existingBatch.AssignmentIds.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToArray(),
+                    existingBatch.TotalItems,
+                    existingBatch.TotalItems,
+                    BlockedItems: existingBatch.BlockedItems,
+                    Status: "IdempotentReplay",
+                    Warnings: ["Uma solicitacao anterior com a mesma chave ja criou este lote."]);
+            }
+        }
+
         var safeMaxItems = Math.Clamp(request.MaxItems, 1, 400);
         var selectedSubmissionIds = request.SubmissionIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -239,6 +272,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         var selectedSubmissionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string? resolvedCourseId = null;
         var warnings = new List<string>();
+        var discoveryFailures = new List<AssistedGradingBatchDiscoveryFailure>();
+        Exception? firstDiscoveryFailure = null;
 
         if (request.PrefetchedSubmissions is not null)
         {
@@ -268,116 +303,173 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         }
         else
         {
+            IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches;
+            try
+            {
+                // A criação só precisa da seleção de submissões. Consultar o
+                // agregador de telas aqui refazia curso, conteúdo, alunos,
+                // settings e notas antes de chegar a mod_assign_get_submissions.
+                // O gateway usa exatamente a função Moodle necessária e mantém
+                // uma falha por atividade sem converter-a em lote vazio.
+                submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+                    request.UserExternalId,
+                    assignmentIds,
+                    request.OnlyAwaitingGrading ? "submitted" : null,
+                    since: null,
+                    before: null,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                var failure = MoodleErrorContract.Describe(ex);
+                foreach (var assignmentId in assignmentIds)
+                {
+                    AddDiscoveryFailure(assignmentId, ex, failure, discoveryFailures, warnings);
+                }
+
+                firstDiscoveryFailure = ex;
+                submissionBatches = [];
+            }
+
+            var batchesByAssignment = submissionBatches
+                .GroupBy(batch => batch.AssignmentId, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+            var effectiveAssignmentIds = assignmentIds.ToDictionary(
+                assignmentId => assignmentId,
+                assignmentId => assignmentId,
+                StringComparer.OrdinalIgnoreCase);
+
+            // mod_assign_get_submissions only accepts the assignment instance
+            // ID, while Moodle users commonly copy the course-module ID (cmid).
+            // Resolve only the IDs explicitly rejected as unknown, preserving
+            // the fast direct path for the instance IDs returned by listings.
+            var moduleIdsToResolve = assignmentIds
+                .Where(assignmentId =>
+                    batchesByAssignment.TryGetValue(assignmentId, out var batch) &&
+                    string.Equals(batch.ErrorCode, "assignment_not_found", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (moduleIdsToResolve.Length > 0)
+            {
+                try
+                {
+                    var contents = await contentsGateway.GetCourseContentsAsync(
+                        request.UserExternalId,
+                        request.CourseId,
+                        CourseActivityModuleTypes.Assignments,
+                        includeHidden: true,
+                        onlyWithFiles: false,
+                        cancellationToken);
+                    var instanceByModuleId = contents.Sections
+                        .SelectMany(section => section.Modules)
+                        .Where(module =>
+                            string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(module.ModuleId) &&
+                            !string.IsNullOrWhiteSpace(module.InstanceId))
+                        .GroupBy(module => module.ModuleId!, StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(group => group.Key, group => group.First().InstanceId!, StringComparer.OrdinalIgnoreCase);
+                    var resolvedPairs = moduleIdsToResolve
+                        .Where(moduleId => instanceByModuleId.TryGetValue(moduleId, out var instanceId) &&
+                                           !string.Equals(moduleId, instanceId, StringComparison.OrdinalIgnoreCase))
+                        .Select(moduleId => new KeyValuePair<string, string>(moduleId, instanceByModuleId[moduleId]))
+                        .ToArray();
+                    if (resolvedPairs.Length > 0)
+                    {
+                        var resolvedBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+                            request.UserExternalId,
+                            resolvedPairs.Select(pair => pair.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                            request.OnlyAwaitingGrading ? "submitted" : null,
+                            since: null,
+                            before: null,
+                            cancellationToken);
+                        var resolvedByInstance = resolvedBatches
+                            .GroupBy(batch => batch.AssignmentId, StringComparer.OrdinalIgnoreCase)
+                            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+                        foreach (var pair in resolvedPairs)
+                        {
+                            if (resolvedByInstance.TryGetValue(pair.Value, out var resolvedBatch))
+                            {
+                                batchesByAssignment[pair.Key] = resolvedBatch;
+                                effectiveAssignmentIds[pair.Key] = pair.Value;
+                            }
+                        }
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Keep the original structured not-found result. A module
+                    // lookup is a compatibility fallback and must not mask
+                    // unrelated Moodle failures from the direct read.
+                }
+            }
             foreach (var assignmentId in assignmentIds)
             {
-                var page = 1;
-                // O tamanho precisa permanecer constante durante toda a
-                // paginação. Reduzi-lo com o saldo restante altera o offset
-                // calculado pelo Moodle e pode repetir a mesma submissão.
-                //
-                // Quando o chamador seleciona IDs de submissão, a consulta
-                // precisa usar o filtro "all" para manter compatibilidade
-                // com versões Moodle que não aceitam NeedsGrading nessa rota.
-                // Não use MaxItems como page size nesse caso: um lote de um
-                // item passaria a reconstruir curso, participantes e
-                // submissões uma página de cada vez até encontrar o ID.
-                // Uma página estável de até 100 registros mantém o offset
-                // correto e evita esse custo multiplicado.
-                var pageSize = selectedSubmissionIds.Count > 0
-                    ? 100
-                    : Math.Min(safeMaxItems, 100);
-                while (selectedItems.Count < safeMaxItems)
+                if (!batchesByAssignment.TryGetValue(assignmentId, out var submissionBatch))
                 {
-                    AssignmentSubmissionsPage? submissionsPage;
-                    try
+                    var missing = new MoodleApiException(
+                        MoodleErrorContract.ApiError,
+                        "Moodle did not return this assignment in the submissions response.",
+                        functionName: "mod_assign_get_submissions");
+                    AddDiscoveryFailure(assignmentId, missing, MoodleErrorContract.Describe(missing), discoveryFailures, warnings);
+                    firstDiscoveryFailure ??= missing;
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(submissionBatch.ErrorCode))
+                {
+                    var failed = new MoodleApiException(
+                        submissionBatch.ErrorCode,
+                        submissionBatch.ErrorMessage ?? MoodleErrorContract.SafeMessage(submissionBatch.ErrorCode),
+                        functionName: "mod_assign_get_submissions");
+                    AddDiscoveryFailure(assignmentId, failed, MoodleErrorContract.Describe(failed), discoveryFailures, warnings);
+                    firstDiscoveryFailure ??= failed;
+                    continue;
+                }
+
+                var effectiveAssignmentId = effectiveAssignmentIds[assignmentId];
+                resolvedCourseId ??= request.CourseId;
+                foreach (var submission in submissionBatch.Submissions)
+                {
+                    if (selectedItems.Count >= safeMaxItems ||
+                        (selectedSubmissionIds.Count > 0 && !selectedSubmissionIds.Contains(submission.SubmissionId)) ||
+                        (request.OnlyAwaitingGrading && !NeedsGrading(submission)))
                     {
-                        // Quando o cliente fornece IDs de submissao, consulte a pagina
-                        // completa e filtre localmente. Alguns Moodle retornam
-                        // `notgraded` no payload, mas nao aceitam a mesma semantica no
-                        // filtro server-side `NeedsGrading`.
-                        var submissionFilter = request.OnlyAwaitingGrading && selectedSubmissionIds.Count == 0
-                            ? AssignmentSubmissionFilter.NeedsGrading
-                            : AssignmentSubmissionFilter.All;
-                        var submissionsQuery = new ListAssignmentSubmissionsQuery(
-                            request.UserExternalId,
-                            request.CourseId,
-                            assignmentId,
-                            submissionFilter,
-                            page,
-                            pageSize,
-                            Since: null,
-                            Before: null,
-                            IncludeLate: true,
-                            IncludeUngraded: true);
-                        submissionsPage = await GradingMoodleReadRetry.ExecuteAsync(
-                            retryCancellationToken => mediator.Send(submissionsQuery, retryCancellationToken),
-                            (_, attempt) => warnings.Add(
-                                $"Falha transitória ao listar as entregas da tarefa {assignmentId}; nova tentativa {attempt}."),
-                            cancellationToken);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        // Uma tarefa indisponivel nao impede a preparacao das demais do curso.
-                        warnings.Add($"Nao foi possivel listar as entregas da tarefa {assignmentId}: {ex.Message}");
-                        break;
+                        continue;
                     }
 
-                    if (submissionsPage is null)
+                    if (!selectedSubmissionKeys.Add(BuildSubmissionSelectionKey(effectiveAssignmentId, submission)))
                     {
-                        warnings.Add($"Tarefa {assignmentId} nao encontrada para o usuario atual.");
-                        break;
+                        continue;
                     }
 
-                    resolvedCourseId ??= submissionsPage.CourseId;
-                    foreach (var submission in submissionsPage.Submissions)
-                    {
-                        if (selectedSubmissionIds.Count > 0 &&
-                            (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId)))
-                        {
-                            continue;
-                        }
-
-                        if (request.OnlyAwaitingGrading && !submission.NeedsGrading)
-                        {
-                            continue;
-                        }
-
-                        if (!selectedSubmissionKeys.Add(BuildSubmissionSelectionKey(
-                                submissionsPage.AssignmentId,
-                                submission)))
-                        {
-                            continue;
-                        }
-
-                        selectedItems.Add(new AssistedGradingItemSeed(
-                            submissionsPage.CourseId,
-                            submissionsPage.AssignmentId,
-                            submission.SubmissionId,
-                            submission.UserId,
-                            submission.AttemptNumber,
-                            submission.Files ?? []));
-                        if (selectedItems.Count >= safeMaxItems)
-                        {
-                            break;
-                        }
-                    }
-
-                    if (!submissionsPage.HasMore)
-                    {
-                        break;
-                    }
-
-                    page++;
+                    selectedItems.Add(new AssistedGradingItemSeed(
+                        request.CourseId,
+                        effectiveAssignmentId,
+                        submission.SubmissionId,
+                        submission.UserId,
+                        submission.AttemptNumber,
+                        submission.Files ?? []));
                 }
             }
         }
 
         if (selectedItems.Count == 0)
         {
+            if (discoveryFailures.Count > 0)
+            {
+                // Preserva o MoodleApiException (e consequentemente auditId,
+                // funcao e duracao) para que a camada MCP responda `error`,
+                // em vez de afirmar que nao ha pendencias.
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(firstDiscoveryFailure!).Throw();
+            }
+
             warnings.Add("Nenhuma entrega elegivel para correcao foi encontrada nas tarefas informadas.");
             return new CreateAssistedGradingBatchResult(
                 Guid.Empty,
@@ -387,7 +479,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 AcceptedItems: 0,
                 BlockedItems: 0,
                 Status: "NoPendingSubmissions",
-                Warnings: warnings);
+                Warnings: warnings,
+                DiscoveryFailures: []);
         }
 
         if (selectedSubmissionIds.Count > 0)
@@ -438,7 +531,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             includeSubmissionFiles: request.IncludeSubmissionFiles,
             includeCourseMaterials: request.IncludeCourseMaterials,
             connectorClientId: connectorClientId,
-            connectionAlias: connectionAlias);
+            connectionAlias: connectionAlias,
+            idempotencyKey: normalizedIdempotencyKey);
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
@@ -495,8 +589,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             batch.TotalItems,
             selectedItems.Count,
             BlockedItems: 0,
-            batch.Status.ToString(),
-            warnings);
+            discoveryFailures.Count == 0 ? batch.Status.ToString() : "PartialFailure",
+            warnings,
+            discoveryFailures);
 
         await auditLogs.AddAsync(new MoodleAuditLog
         {
@@ -885,9 +980,46 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         }
     }
 
+    private static void AddDiscoveryFailure(
+        string assignmentId,
+        Exception exception,
+        MoodleErrorDescriptor failure,
+        ICollection<AssistedGradingBatchDiscoveryFailure> discoveryFailures,
+        ICollection<string> warnings)
+    {
+        discoveryFailures.Add(new AssistedGradingBatchDiscoveryFailure(
+            assignmentId,
+            failure.ErrorCode,
+            failure.AuditId,
+            exception is MoodleApiException moodle ? moodle.FunctionName : null,
+            exception is MoodleApiException api ? api.DurationMs : null));
+        warnings.Add($"Nao foi possivel listar as entregas da tarefa {assignmentId} (codigo: {failure.ErrorCode}; auditId: {failure.AuditId}).");
+    }
+
+    private static bool NeedsGrading(AssignmentSubmissionRecord submission)
+    {
+        return string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase) &&
+               (string.Equals(submission.GradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(submission.GradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string BuildSubmissionSelectionKey(
         string assignmentId,
         AssignmentSubmissionSummary submission)
+    {
+        var normalizedAssignmentId = assignmentId.Trim();
+        if (!string.IsNullOrWhiteSpace(submission.SubmissionId))
+        {
+            return $"submission:{normalizedAssignmentId}:{submission.SubmissionId.Trim()}";
+        }
+
+        return $"student:{normalizedAssignmentId}:{submission.UserId.Trim()}:{submission.AttemptNumber?.ToString(CultureInfo.InvariantCulture) ?? "-"}";
+    }
+
+    private static string BuildSubmissionSelectionKey(
+        string assignmentId,
+        AssignmentSubmissionRecord submission)
     {
         var normalizedAssignmentId = assignmentId.Trim();
         if (!string.IsNullOrWhiteSpace(submission.SubmissionId))
@@ -1124,9 +1256,10 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
         decimal? maxGrade = null;
         if (request.FinalGrade is not null)
         {
+            AssignmentSettingsSummary? settings = null;
             try
             {
-                var settings = await settingsGateway.GetAssignmentSettingsAsync(
+                settings = await settingsGateway.GetAssignmentSettingsAsync(
                     batch.CreatedBySubject,
                     item.CourseId.ToString(CultureInfo.InvariantCulture),
                     item.AssignmentId.ToString(CultureInfo.InvariantCulture),
@@ -1140,6 +1273,10 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
 
             if (maxGrade is null)
             {
+                if (settings?.IsGradable == false)
+                {
+                    throw new InvalidOperationException("Esta atividade nao possui avaliacao numerica no Moodle. Envie somente feedback e deixe finalGrade vazio.");
+                }
                 throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; nota numerica bloqueada.");
             }
         }
@@ -1377,7 +1514,6 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
         var canLaunch = items.Any(item =>
                 item.Status == GradingItemStatus.ReadyToCommit &&
                 item.CommitStatus == GradingCommitStatus.Pending &&
-                item.FinalGrade is not null &&
                 !string.IsNullOrWhiteSpace(item.FinalFeedback)) &&
             batch.Status is GradingBatchStatus.ReadyForReview or GradingBatchStatus.Processing;
 
@@ -1837,6 +1973,7 @@ public sealed record GradingContextForChatResult(
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
     // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("isGradable")] bool? IsGradable,
     [property: JsonPropertyName("submissionId")] string? SubmissionId,
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
@@ -1905,6 +2042,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
 
         // MaxGrade + assignment name via API Moodle
         decimal? maxGrade = null;
+        bool? isGradable = null;
         try
         {
             var settings = await settingsGateway.GetAssignmentSettingsAsync(
@@ -1912,9 +2050,14 @@ public sealed class PrepareGradingContextForChatQueryHandler(
                 item.CourseId.ToString(CultureInfo.InvariantCulture),
                 item.AssignmentId.ToString(CultureInfo.InvariantCulture),
                 cancellationToken);
+            isGradable = settings?.IsGradable;
             if (settings != null && settings.MaxGrade > 0)
             {
                 maxGrade = settings.MaxGrade;
+            }
+            else if (settings?.IsGradable == false)
+            {
+                warnings.Add("Esta atividade nao possui avaliacao numerica no Moodle. Envie somente feedback, sem nota.");
             }
             else
             {
@@ -1925,6 +2068,10 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             if (!string.IsNullOrWhiteSpace(settings?.Name))
             {
                 assignmentName = settings.Name;
+            }
+            if (string.IsNullOrWhiteSpace(assignmentStatement) && !string.IsNullOrWhiteSpace(settings?.Description))
+            {
+                assignmentStatement = settings.Description;
             }
         }
         catch
@@ -1940,6 +2087,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
 
         var gradeInstruction = maxGrade is decimal knownMax
             ? $"A nota maxima desta atividade e {knownMax} pontos. Sugira uma nota de 0 a {knownMax}."
+            : isGradable == false
+                ? "Esta atividade nao possui avaliacao numerica no Moodle. Produza somente feedback qualitativo e nao sugira nota."
             : "A escala de notas desta atividade nao foi confirmada. Nao sugira nem calcule nota numerica; produza somente feedback qualitativo e sinalize a necessidade de confirmacao manual.";
         var instructions = AiGradingPromptPolicy.AppendUntrustedEvidenceRules(
             $"Voce e um tutor educacional. Analise a entrega do aluno comparando com o enunciado da atividade. " +
@@ -1959,6 +2108,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             assignmentName,
             maxGrade ?? 0m,
+            isGradable,
             item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             assignmentStatement,
@@ -1998,6 +2148,7 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
     // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("isGradable")] bool? IsGradable,
     [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
     [property: JsonPropertyName("extractedCriteria")] string? ExtractedCriteria,
     [property: JsonPropertyName("extractedText")] string? ExtractedText,
@@ -2122,10 +2273,24 @@ public sealed class PrepareAiGradingBatchQueryHandler(
 
                 settingsCache[item.AssignmentId] = settings;
             }
+            var isGradable = settings?.IsGradable;
+
+            if (string.IsNullOrWhiteSpace(assignmentStatement) && !string.IsNullOrWhiteSpace(settings?.Description))
+            {
+                assignmentStatement = settings.Description;
+            }
+            if (!string.IsNullOrWhiteSpace(settings?.Name))
+            {
+                assignmentName = settings.Name;
+            }
 
             if (settings is not null && settings.MaxGrade > 0)
             {
                 maxGrade = settings.MaxGrade;
+            }
+            else if (settings?.IsGradable == false)
+            {
+                itemWarnings.Add("Atividade sem avaliacao numerica no Moodle. Gere somente feedback, sem nota.");
             }
             else
             {
@@ -2139,6 +2304,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
                 assignmentName,
                 maxGrade ?? 0m,
+                isGradable,
                 assignmentStatement,
                 extractedCriteria,
                 combinedSubmission,

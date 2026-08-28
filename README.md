@@ -326,7 +326,9 @@ OAuth__KeyStoragePath=/app/data/oauth
 
 Quando `OAuth__Issuer` e `OAuth__Audience` ficam vazios, a aplicação deriva os valores de `APP_DOMAIN`.
 
-O app local usa cookie HttpOnly/SameSite, senha mínima de 12 caracteres e rate limit nos endpoints de cadastro/login. O `/mcp` também aplica rate limit por usuário/conector. Em produção, `OAuth__RequireHttpsMetadata=true` força issuer, audience e callback HTTPS.
+O app local usa cookie HttpOnly/SameSite, senha mínima de 8 caracteres, indicador visual de força e rate limit nos endpoints de cadastro/login. O `/mcp` também aplica rate limit por usuário/conector. Em produção, `OAuth__RequireHttpsMetadata=true` força issuer, audience e callback HTTPS.
+
+Administradores podem redefinir senhas na aba **Administração** de Configurações. Defina a senha temporária no ambiente com `PasswordRecovery__DefaultPassword` (mínimo de 8 caracteres); ela não é enviada ao navegador e deve ser comunicada ao usuário por um canal seguro.
 
 ## Variaveis De Ambiente
 

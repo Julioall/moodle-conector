@@ -14,6 +14,7 @@ const TasksPage = lazy(() => import('../features/tasks/TasksPage').then(({ Tasks
 const AgendaPage = lazy(() => import('../features/agenda/AgendaPage').then(({ AgendaPage }) => ({ default: AgendaPage })));
 const MessagesPage = lazy(() => import('../features/messages/MessagesPage').then(({ MessagesPage }) => ({ default: MessagesPage })));
 const SettingsPage = lazy(() => import('../features/settings/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })));
+const AdministrationPage = lazy(() => import('../features/settings/AdministrationPage').then(({ AdministrationPage }) => ({ default: AdministrationPage })));
 const SchoolsPage = lazy(() => import('../features/schools/SchoolsPage').then(({ SchoolsPage }) => ({ default: SchoolsPage })));
 const ReportHistoryPage = lazy(() => import('../features/reports/ReportHistoryPage').then(({ ReportHistoryPage }) => ({ default: ReportHistoryPage })));
 
@@ -44,6 +45,7 @@ export function App() {
               {/* Reports are generated from course and school selections; this page tracks their progress and files. */}
               <Route path="/relatorios" element={<ReportHistoryPage />} />
               <Route path="/configuracoes" element={<SettingsPage />} />
+              <Route path="/administracao" element={<AdministrationPage />} />
               <Route path="*" element={<NotFound />} />
             </Route>
           </Routes>

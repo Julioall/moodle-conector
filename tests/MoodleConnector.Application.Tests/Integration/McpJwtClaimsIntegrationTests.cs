@@ -798,7 +798,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
             HandleCookies = true
         });
         var email = $"professor-{Guid.NewGuid():N}@example.com";
-        var password = "senha-local-12345";
+        var password = "senha123";
         await RefreshCsrfTokenAsync(client);
 
         var weakPasswordResponse = await client.PostAsJsonAsync("/api/account/register", new

@@ -9,7 +9,11 @@ public sealed record AssignmentSettingsSummary(
     // Null means that Moodle did not expose enough information to classify
     // the grading mode. A negative Moodle grade represents a scale and is
     // therefore gradable even though MaxGrade is intentionally kept at zero.
-    bool? IsGradable = null);
+    bool? IsGradable = null,
+    // Intro is the authoritative assignment statement returned by
+    // mod_assign_get_assignments. It is optional because some Moodle
+    // installations do not expose it to the current role.
+    string? Description = null);
 
 public interface IMoodleAssignmentSettingsGateway
 {

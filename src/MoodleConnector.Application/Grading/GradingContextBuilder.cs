@@ -32,6 +32,7 @@ public sealed partial class GradingContextBuilder(
 
         string? submissionText = null;
         string? assignmentStatement = null;
+        string? assignmentDescriptionFromSettings = null;
         string? criteria = null;
         string? rubricDescription = null;
         decimal? maxGrade = null;
@@ -59,6 +60,8 @@ public sealed partial class GradingContextBuilder(
                         item.CourseId.ToString(CultureInfo.InvariantCulture),
                         item.AssignmentId.ToString(CultureInfo.InvariantCulture),
                         cancellationToken);
+
+                    assignmentDescriptionFromSettings = settings?.Description;
 
                     if (settings != null && settings.MaxGrade > 0)
                     {
@@ -211,6 +214,16 @@ public sealed partial class GradingContextBuilder(
                     // assignmentStatement como contexto pedagógico (não como critérios).
                 }
             }
+        }
+
+        // Algumas instalações Moodle não expõem a descrição no endpoint de
+        // conteúdo do curso, mas a retornam como `intro` em
+        // mod_assign_get_assignments. Use essa fonte oficial como fallback.
+        if (string.IsNullOrWhiteSpace(assignmentStatement) &&
+            !string.IsNullOrWhiteSpace(assignmentDescriptionFromSettings))
+        {
+            assignmentStatement = Truncate(assignmentDescriptionFromSettings, maxChars);
+            criteria ??= ExtractCriteria(assignmentStatement);
         }
 
         // Fallback regex: tentar extrair nota máxima do texto do enunciado

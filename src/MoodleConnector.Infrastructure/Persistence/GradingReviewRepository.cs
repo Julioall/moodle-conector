@@ -18,6 +18,17 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         return dbContext.GradingBatches.SingleOrDefaultAsync(batch => batch.Id == id, cancellationToken);
     }
 
+    public Task<AssistedGradingBatch?> GetBatchByIdempotencyKeyAsync(
+        string createdBySubject,
+        string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        return dbContext.GradingBatches.SingleOrDefaultAsync(batch =>
+            batch.CreatedBySubject == createdBySubject &&
+            batch.IdempotencyKey == idempotencyKey,
+            cancellationToken);
+    }
+
     public async Task AddItemAsync(AssistedGradingItem item, CancellationToken cancellationToken)
     {
         await dbContext.GradingItems.AddAsync(item, cancellationToken);

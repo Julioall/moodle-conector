@@ -10,7 +10,7 @@ public sealed record SaveAssignmentGradeCommand(
     string UserExternalId,
     string AssignmentId,
     string StudentId,
-    decimal Grade,
+    decimal? Grade,
     string FeedbackText,
     int AttemptNumber,
     bool AddAttempt,
@@ -21,7 +21,7 @@ public sealed record SaveAssignmentGradeCommand(
 public sealed record AssignmentGradeWriteRequest(
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
     [property: JsonPropertyName("studentId")] string StudentId,
-    [property: JsonPropertyName("grade")] decimal Grade,
+    [property: JsonPropertyName("grade")] decimal? Grade,
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
     [property: JsonPropertyName("attemptNumber")] int AttemptNumber,
     [property: JsonPropertyName("addAttempt")] bool AddAttempt,
@@ -63,7 +63,7 @@ public sealed class SaveAssignmentGradeCommandHandler(
             throw new ArgumentOutOfRangeException("grade", "A nota nao pode ser negativa.");
         }
 
-        if (!features.Value.AssignmentGradeWriteEnabled)
+        if (request.Grade is not null && !features.Value.AssignmentGradeWriteEnabled)
         {
             throw new InvalidOperationException("A escrita de notas em tarefas esta desabilitada por feature flag.");
         }
@@ -74,35 +74,38 @@ public sealed class SaveAssignmentGradeCommandHandler(
             throw new InvalidOperationException("A escrita de feedback em tarefas esta desabilitada por feature flag.");
         }
 
-        AssignmentSettingsSummary? settings;
-        if (string.IsNullOrWhiteSpace(request.CourseId))
+        if (request.Grade is not null)
         {
-            throw new InvalidOperationException("O curso da tarefa nao foi informado; escala maxima nao pode ser confirmada.");
-        }
+            if (string.IsNullOrWhiteSpace(request.CourseId))
+            {
+                throw new InvalidOperationException("O curso da tarefa nao foi informado; escala maxima nao pode ser confirmada.");
+            }
 
-        try
-        {
-            settings = await settingsGateway.GetAssignmentSettingsAsync(
-                request.UserExternalId.Trim(),
-                request.CourseId.Trim(),
-                request.AssignmentId.Trim(),
-                cancellationToken);
-        }
-        catch
-        {
-            throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; lancamento bloqueado.");
-        }
+            AssignmentSettingsSummary? settings;
+            try
+            {
+                settings = await settingsGateway.GetAssignmentSettingsAsync(
+                    request.UserExternalId.Trim(),
+                    request.CourseId.Trim(),
+                    request.AssignmentId.Trim(),
+                    cancellationToken);
+            }
+            catch
+            {
+                throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; lancamento bloqueado.");
+            }
 
-        if (settings?.MaxGrade is not > 0)
-        {
-            throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; lancamento bloqueado.");
-        }
+            if (settings?.MaxGrade is not > 0)
+            {
+                throw new InvalidOperationException("A escala maxima da tarefa nao pode ser confirmada; lancamento bloqueado.");
+            }
 
-        if (request.Grade > settings.MaxGrade)
-        {
-            throw new ArgumentOutOfRangeException(
-                "grade",
-                $"A nota deve estar entre 0 e {settings.MaxGrade.ToString(System.Globalization.CultureInfo.InvariantCulture)}.");
+            if (request.Grade > settings.MaxGrade)
+            {
+                throw new ArgumentOutOfRangeException(
+                    "grade",
+                    $"A nota deve estar entre 0 e {settings.MaxGrade.ToString(System.Globalization.CultureInfo.InvariantCulture)}.");
+            }
         }
 
         var writeRequest = new AssignmentGradeWriteRequest(

@@ -1,7 +1,9 @@
 using System.Net.Mail;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Infrastructure.Configuration;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -11,9 +13,10 @@ internal sealed class AccountService(
     IConnectorClientRegistrationService registrationService,
     IMoodleCredentialValidator moodleValidator,
     ITeamAccessService? teamAccessService = null,
-    IPlatformPermissionService? platformPermissionService = null) : IAccountService
+    IPlatformPermissionService? platformPermissionService = null,
+    IOptions<PasswordRecoveryOptions>? passwordRecoveryOptions = null) : IAccountService
 {
-    private const int MinimumPasswordLength = 12;
+    private const int MinimumPasswordLength = 8;
     private const int MaximumPasswordLength = 256;
 
     public async Task<AccountDto> RegisterAsync(RegisterAccountRequest request, CancellationToken cancellationToken)
@@ -69,6 +72,40 @@ internal sealed class AccountService(
         if (!PasswordHasher.Verify(request.Password, entity.PasswordHash)) return null;
 
         return ToDto(entity);
+    }
+
+    public async Task ChangePasswordAsync(ChangePasswordRequest request, CancellationToken cancellationToken)
+    {
+        var account = await dbContext.UserAccounts.FindAsync([request.UserId], cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+        if (string.IsNullOrWhiteSpace(request.CurrentPassword) || !PasswordHasher.Verify(request.CurrentPassword, account.PasswordHash))
+            throw new InvalidOperationException("Senha atual inválida.");
+
+        ValidatePassword(request.NewPassword);
+        account.PasswordHash = PasswordHasher.Hash(request.NewPassword);
+        account.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<PortalAccountListItemDto>> ListAccountsAsync(CancellationToken cancellationToken)
+        => await dbContext.UserAccounts.AsNoTracking()
+            .OrderBy(account => account.Name)
+            .ThenBy(account => account.Email)
+            .Select(account => new PortalAccountListItemDto(account.Id, account.Name, account.Email, account.CreatedAtUtc))
+            .ToArrayAsync(cancellationToken);
+
+    public async Task ResetPasswordToDefaultAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var defaultPassword = passwordRecoveryOptions?.Value.DefaultPassword;
+        if (string.IsNullOrWhiteSpace(defaultPassword))
+            throw new InvalidOperationException("Configure PasswordRecovery:DefaultPassword para habilitar a redefinição administrativa de senha.");
+        ValidatePassword(defaultPassword);
+
+        var account = await dbContext.UserAccounts.FindAsync([userId], cancellationToken)
+            ?? throw new InvalidOperationException("Usuário não encontrado.");
+        account.PasswordHash = PasswordHasher.Hash(defaultPassword);
+        account.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<AccountProfileDto?> GetProfileAsync(Guid userId, CancellationToken cancellationToken)

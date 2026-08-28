@@ -60,15 +60,16 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.True(repository.Batches.Single().IncludeCourseMaterials);
         Assert.Equal(2, repository.Items.Count);
         Assert.All(repository.Items, item => Assert.Equal(GradingItemStatus.Pending, item.Status));
-        Assert.Equal(AssignmentSubmissionFilter.NeedsGrading, mediator.LastListQuery!.Filter);
+        Assert.Null(mediator.LastListQuery);
         Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
     }
 
     [Fact]
-    public async Task CreateBatch_RetentaFalhaTransitóriaAoListarEntregas()
+    public async Task CreateBatch_NaoRepeteFluxoCompostoQuandoAListagemFalha()
     {
         var repository = new FakeGradingReviewRepository();
-        var mediator = new FakeMediator { FailuresBeforeSuccess = 2 };
+        var mediator = new FakeMediator();
+        var submissionsGateway = new FakeAssignmentSubmissionsGateway { ThrowOnRead = true };
         var orchestrator = new FakeGradingBatchOrchestrator();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
@@ -80,9 +81,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeCourseContentsGateway(),
             new FakeSubmissionFileGateway(),
             new FakeDocumentExtractionService(),
-            new FakeAssignmentSubmissionsGateway());
+            submissionsGateway);
 
-        var result = await sut.Handle(
+        await Assert.ThrowsAsync<MoodleApiException>(() => sut.Handle(
             new CreateAssistedGradingBatchCommand(
                 UserExternalId: "321",
                 CourseId: "10",
@@ -93,11 +94,101 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 IncludeRubric: false,
                 IncludeSubmissionFiles: false,
                 IncludeCourseMaterials: false),
+            CancellationToken.None));
+
+        Assert.Equal(1, submissionsGateway.CallCount);
+        Assert.Empty(repository.Batches);
+    }
+
+    [Fact]
+    public async Task CreateBatch_AceitaIdDoModuloEResolveParaInstanciaDaTarefa()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var submissions = new FakeAssignmentSubmissionsGateway
+        {
+            NotFoundAssignmentIds = new HashSet<string>(["42"], StringComparer.Ordinal)
+        };
+        var contents = new FakeCourseContentsGateway();
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            new FakeMediator(),
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeGradingBatchOrchestrator(),
+            contents,
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            submissions);
+
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                "321", "10", ["42"], [], 1, OnlyAwaitingGrading: true,
+                IncludeRubric: false, IncludeSubmissionFiles: false),
             CancellationToken.None);
 
-        Assert.Equal(3, mediator.ListQueryCallCount);
-        Assert.Equal(1, result.AcceptedItems);
-        Assert.Contains(result.Warnings, warning => warning.Contains("nova tentativa", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(["501"], result.AssignmentIds);
+        Assert.Equal(1, contents.CallCount);
+        Assert.Equal(2, submissions.CallCount);
+    }
+
+    [Fact]
+    public async Task CreateBatch_NaoConverteFalhaDeDescobertaEmNoPendingSubmissions()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var sut = CreateHandler(repository, mediator, new FakeAssignmentSubmissionsGateway
+        {
+            FailAssignmentIds = new HashSet<string>(["501"], StringComparer.Ordinal)
+        });
+
+        await Assert.ThrowsAsync<MoodleApiException>(() => sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                "321", "10", ["501"], [], 25, OnlyAwaitingGrading: true),
+            CancellationToken.None));
+
+        Assert.Empty(repository.Batches);
+    }
+
+    [Fact]
+    public async Task CreateBatch_RetornaPartialFailureQuandoOutraAtividadeFalha()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var sut = CreateHandler(repository, mediator, new FakeAssignmentSubmissionsGateway
+        {
+            FailAssignmentIds = new HashSet<string>(["502"], StringComparer.Ordinal)
+        });
+
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                "321", "10", ["501", "502"], [], 25, OnlyAwaitingGrading: true),
+            CancellationToken.None);
+
+        Assert.Equal("PartialFailure", result.Status);
+        var failure = Assert.Single(result.DiscoveryFailures!);
+        Assert.Equal("502", failure.AssignmentId);
+        Assert.Equal(MoodleErrorContract.NetworkError, failure.ErrorCode);
+        Assert.NotEqual(Guid.Empty, result.BatchJobId);
+    }
+
+    [Fact]
+    public async Task CreateBatch_ReutilizaLoteQuandoRequestIdERepetido()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var sut = CreateHandler(repository, mediator);
+        var request = new CreateAssistedGradingBatchCommand(
+            "321", "10", ["501"], [], 25, OnlyAwaitingGrading: true,
+            IdempotencyKey: "mcp-request-504-1");
+
+        var first = await sut.Handle(request, CancellationToken.None);
+        var replay = await sut.Handle(request, CancellationToken.None);
+
+        Assert.Equal(first.BatchJobId, replay.BatchJobId);
+        Assert.Equal("IdempotentReplay", replay.Status);
+        Assert.Single(repository.Batches);
+        Assert.Equal(0, mediator.ListQueryCallCount);
     }
 
     [Fact]
@@ -606,15 +697,15 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var item = Assert.Single(repository.Items);
         Assert.Equal(9002, item.SubmissionId);
         Assert.Equal(102, item.MoodleUserId);
-        Assert.Equal(AssignmentSubmissionFilter.All, mediator.LastListQuery!.Filter);
+        Assert.Null(mediator.LastListQuery);
         Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
     }
 
     [Fact]
-    public async Task CreateBatch_ComSubmissionIds_UsaPaginaAmplaEstavelParaEvitarVarreduraUnitária()
+    public async Task CreateBatch_SelecionaSubmissoesSemRefazerPaginacaoDoAgregador()
     {
         var repository = new FakeGradingReviewRepository();
-        var mediator = new FakeMediator { UsePagedRows = true };
+        var mediator = new FakeMediator();
         var orchestrator = new FakeGradingBatchOrchestrator();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
@@ -633,15 +724,14 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 UserExternalId: "321",
                 CourseId: "10",
                 AssignmentIds: ["501"],
-                SubmissionIds: ["9005", "9008"],
+                SubmissionIds: ["9001", "9002"],
                 MaxItems: 2,
                 OnlyAwaitingGrading: true),
             CancellationToken.None);
 
         Assert.Equal(2, result.AcceptedItems);
-        Assert.Equal([9005L, 9008L], repository.Items.Select(item => item.SubmissionId).ToArray());
-        Assert.Equal(1, mediator.ListQueryCallCount);
-        Assert.Equal(100, mediator.LastListQuery!.PageSize);
+        Assert.Equal([9001L, 9002L], repository.Items.Select(item => item.SubmissionId).ToArray());
+        Assert.Equal(0, mediator.ListQueryCallCount);
     }
 
     [Fact]
@@ -974,6 +1064,38 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task UpdateDraft_PermiteFeedbackSemNota()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(null, 0.8m, "Rascunho de feedback.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new UpdateAssistedGradingDraftCommandHandler(
+            repository,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeMoodleAssignmentSettingsGateway());
+
+        var result = await sut.Handle(
+            new UpdateAssistedGradingDraftCommand(
+                GradingItemId: item.Id,
+                FinalGrade: null,
+                FinalFeedback: "Feedback final sem nota.",
+                TeacherDecision: "approved",
+                ReviewNotes: null,
+                ExpectedReviewStatus: "NotReviewed"),
+            CancellationToken.None);
+
+        Assert.Null(result.FinalGrade);
+        Assert.Equal("Feedback final sem nota.", result.FinalFeedback);
+        Assert.Equal("Reviewed", result.ReviewStatus);
+        Assert.Equal("Pending", result.CommitStatus);
+    }
+
+    [Fact]
     public async Task UpdateDraft_RepetidoComMesmoPayload_RetornaResultadoSemDuplicarAlteracao()
     {
         var repository = new FakeGradingReviewRepository();
@@ -1117,6 +1239,22 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(0, repository.SaveChangesCount);
     }
 
+    private static CreateAssistedGradingBatchCommandHandler CreateHandler(
+        FakeGradingReviewRepository repository,
+        FakeMediator mediator,
+        FakeAssignmentSubmissionsGateway? submissionsGateway = null) =>
+        new(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeGradingBatchOrchestrator(),
+            new FakeCourseContentsGateway(),
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            submissionsGateway ?? new FakeAssignmentSubmissionsGateway());
+
     private sealed class FakeGradingReviewRepository : IGradingReviewRepository
     {
         public List<AssistedGradingBatch> Batches { get; } = [];
@@ -1139,6 +1277,14 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         {
             return Task.FromResult(Batches.SingleOrDefault(batch => batch.Id == id));
         }
+
+        public Task<AssistedGradingBatch?> GetBatchByIdempotencyKeyAsync(
+            string createdBySubject,
+            string idempotencyKey,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Batches.SingleOrDefault(batch =>
+                batch.CreatedBySubject == createdBySubject &&
+                batch.IdempotencyKey == idempotencyKey));
 
         public Task AddItemAsync(AssistedGradingItem item, CancellationToken cancellationToken)
         {
@@ -1343,6 +1489,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         public int FailuresBeforeSuccess { get; init; }
 
+        public ISet<string> FailAssignmentIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
         public bool UsePagedRows { get; init; }
 
         public Task Publish(object notification, CancellationToken cancellationToken = default)
@@ -1362,7 +1510,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             {
                 LastListQuery = list;
                 ListQueryCallCount++;
-                if (ListQueryCallCount <= FailuresBeforeSuccess)
+                if (FailAssignmentIds.Contains(list.AssignmentId) || ListQueryCallCount <= FailuresBeforeSuccess)
                 {
                     throw new MoodleApiException(
                         MoodleErrorContract.NetworkError,
@@ -1633,6 +1781,37 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
     private sealed class FakeAssignmentSubmissionsGateway : IMoodleAssignmentSubmissionsGateway
     {
+        public int CallCount { get; private set; }
+
+        public bool ThrowOnRead { get; init; }
+
+        public ISet<string> FailAssignmentIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+        public ISet<string> NotFoundAssignmentIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
+
+        public Task<IReadOnlyList<AssignmentSubmissionsBatch>> GetAssignmentSubmissionsBatchAsync(
+            string userExternalId,
+            IReadOnlyCollection<string> assignmentIds,
+            string? status,
+            DateTimeOffset? since,
+            DateTimeOffset? before,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (ThrowOnRead)
+            {
+                throw new MoodleApiException(MoodleErrorContract.NetworkError, "falha de rede simulada", functionName: "mod_assign_get_submissions");
+            }
+
+            return Task.FromResult<IReadOnlyList<AssignmentSubmissionsBatch>>(assignmentIds
+                .Select(assignmentId => FailAssignmentIds.Contains(assignmentId)
+                    ? new AssignmentSubmissionsBatch(assignmentId, [], MoodleErrorContract.NetworkError, "falha de rede simulada")
+                    : NotFoundAssignmentIds.Contains(assignmentId)
+                        ? new AssignmentSubmissionsBatch(assignmentId, [], "assignment_not_found", "tarefa nao encontrada")
+                    : new AssignmentSubmissionsBatch(assignmentId, CreateSubmissions()))
+                .ToArray());
+        }
+
         public Task<IReadOnlyList<AssignmentSubmissionRecord>> GetAssignmentSubmissionsAsync(
             string userExternalId,
             string assignmentId,
@@ -1641,7 +1820,16 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             DateTimeOffset? before,
             CancellationToken cancellationToken)
         {
-            return Task.FromResult<IReadOnlyList<AssignmentSubmissionRecord>>([]);
+            return Task.FromResult<IReadOnlyList<AssignmentSubmissionRecord>>(CreateSubmissions());
         }
+
+        private static IReadOnlyList<AssignmentSubmissionRecord> CreateSubmissions() =>
+        [
+            new AssignmentSubmissionRecord(
+                "9001", "101", "submitted", "notgraded", null, null, 0, 1, true,
+                [new AssignmentSubmissionFile("entrega.txt", "text/plain", 31, "https://moodle.example/pluginfile.php/entrega.txt")]),
+            new AssignmentSubmissionRecord(
+                "9002", "102", "submitted", "notgraded", null, null, 0, 0, true)
+        ];
     }
 }

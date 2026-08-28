@@ -9,17 +9,13 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
-using MoodleConnector.Application.Participants;
 using MoodleConnector.Application.Tools;
-using MoodleConnector.Domain;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
 [McpServerToolType]
 public sealed class MoodleGradingReviewAppTools(
-    IMediator mediator,
-    IMoodleCoursesGateway coursesGateway,
-    ICurrentUserContext currentUser)
+    IMediator mediator)
 {
     [McpServerTool(
         Name = "review_batch_feedbacks",
@@ -45,11 +41,11 @@ public sealed class MoodleGradingReviewAppTools(
             return Error("Informe um identificador de lote válido.");
         }
 
-        AssistedGradingBatchStatusResult batchStatus;
+        GradingReviewPageReadModel page;
         try
         {
-            batchStatus = await mediator.Send(
-                new GetAssistedGradingBatchStatusQuery(batchJobId, pagina, tamanhoPagina),
+            page = await mediator.Send(
+                new GetGradingReviewPageQuery(batchJobId, pagina, tamanhoPagina),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -61,179 +57,36 @@ public sealed class MoodleGradingReviewAppTools(
             return Error("Não foi possível consultar o lote de correção assistida neste momento.");
         }
 
-        var studentNameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        string? resolvedCourseName = null;
-        var detailCache = new Dictionary<Guid, AssistedGradingItemDetailResult>();
-
-        if (batchStatus.Items.Count > 0)
+        var enrichedItems = page.Items.Select(item =>
         {
-            var firstItem = batchStatus.Items[0];
-            AssistedGradingItemDetailResult? firstDetail = null;
-            try
-            {
-                firstDetail = await mediator.Send(
-                    new GetAssistedGradingItemQuery(firstItem.GradingItemId, batchJobId),
-                    cancellationToken);
-                detailCache[firstItem.GradingItemId] = firstDetail;
-            }
-            catch
-            {
-                // Dados complementares não devem impedir a abertura do painel.
-            }
-
-            var courseId = firstDetail?.CourseId;
-            if (!string.IsNullOrWhiteSpace(courseId))
-            {
-                try
-                {
-                    var course = await coursesGateway.GetMyCourseAsync(
-                        currentUser.Subject,
-                        courseId,
-                        cancellationToken);
-                    resolvedCourseName = course?.FullName ?? course?.DisplayName;
-                }
-                catch
-                {
-                    // O nome do curso é enriquecimento opcional.
-                }
-
-                try
-                {
-                    var page = 1;
-                    const int pageSize = 50;
-                    const int maxPages = 20;
-                    bool hasMore;
-                    do
-                    {
-                        var participantsPage = await mediator.Send(
-                            new ListCourseParticipantsQuery(
-                                currentUser.Subject,
-                                courseId,
-                                ParticipantStatusFilter.All,
-                                Page: page,
-                                PageSize: pageSize,
-                                StudentsOnly: true,
-                                IncludeEmail: false),
-                            cancellationToken);
-                        if (participantsPage is null)
-                        {
-                            break;
-                        }
-
-                        foreach (var participant in participantsPage.Participants)
-                        {
-                            studentNameMap[participant.UserId] = participant.FullName;
-                        }
-
-                        hasMore = participantsPage.HasMore;
-                        page++;
-                    } while (hasMore && page <= maxPages);
-                }
-                catch
-                {
-                    // A interface usa o identificador do aluno como fallback.
-                }
-            }
-        }
-
-        var enrichedItems = new List<GradingReviewItem>(batchStatus.Items.Count);
-        foreach (var item in batchStatus.Items)
-        {
-            if (!detailCache.TryGetValue(item.GradingItemId, out var detail))
-            {
-                try
-                {
-                    detail = await mediator.Send(
-                        new GetAssistedGradingItemQuery(item.GradingItemId, batchJobId),
-                        cancellationToken);
-                }
-                catch
-                {
-                    // O status resumido do lote ainda permite renderizar o item.
-                }
-            }
-
-            GradingContextForChatResult? context = null;
-            try
-            {
-                context = await mediator.Send(
-                    new PrepareGradingContextForChatQuery(item.GradingItemId, batchJobId),
-                    cancellationToken);
-            }
-            catch
-            {
-                // Contexto de atividade, nota máxima e feedback são enriquecimentos opcionais.
-            }
-
-            var finalGrade = detail?.FinalGrade;
-            var finalFeedback = !string.IsNullOrWhiteSpace(detail?.FinalFeedback)
-                ? detail!.FinalFeedback
-                : null;
-            var suggestedGrade = detail?.SuggestedGrade ?? context?.SuggestedGrade;
-            var draftFeedback = detail?.DraftFeedback ?? context?.DraftFeedback;
-            var maxGrade = context?.MaxGrade ?? 0m;
-            var assignmentName = context?.AssignmentName;
-            var confidence = detail?.Confidence ?? context?.Confidence;
             var workflowState = ResolveWorkflowState(item.Status, item.ReviewStatus, item.CommitStatus);
             var capabilities = ResolveCapabilities(workflowState);
-            var statusReason = detail?.PendingIssues.FirstOrDefault()
-                ?? detail?.PrivateNotesToTeacher;
-
-            studentNameMap.TryGetValue(item.StudentId, out var studentName);
-
-            if (resolvedCourseName is null && context is not null)
-            {
-                try
-                {
-                    var course = await coursesGateway.GetMyCourseAsync(
-                        currentUser.Subject,
-                        context.CourseId,
-                        cancellationToken);
-                    resolvedCourseName = course?.FullName ?? course?.DisplayName;
-                }
-                catch
-                {
-                    // O nome do curso é enriquecimento opcional.
-                }
-            }
-
-            enrichedItems.Add(new GradingReviewItem(
-                item.GradingItemId,
-                item.AssignmentId,
-                item.SubmissionId,
-                item.StudentId,
-                StudentName: studentName,
-                item.Status,
-                item.ReviewStatus,
-                item.CommitStatus,
-                workflowState,
-                capabilities.CanEdit,
-                capabilities.CanSelect,
-                capabilities.CanSend,
-                statusReason,
-                detail?.DraftVersionHash,
-                finalGrade,
-                finalFeedback,
-                suggestedGrade,
-                draftFeedback,
-                maxGrade,
-                assignmentName,
-                confidence));
-        }
+            return new GradingReviewItem(
+                item.GradingItemId, item.AssignmentId, item.SubmissionId, item.StudentId,
+                StudentName: null, item.Status, item.ReviewStatus, item.CommitStatus,
+                workflowState, capabilities.CanEdit, capabilities.CanSelect, capabilities.CanSend,
+                item.StatusReason, item.DraftVersionHash, item.FinalGrade, item.FinalFeedback,
+                item.SuggestedGrade, item.DraftFeedback, item.MaxGrade ?? 0m,
+                item.GradingMode == "numeric", item.AssignmentName, item.Confidence,
+                item.ContextHash, item.GradingMode, item.Warnings);
+        }).ToArray();
 
         var appData = new GradingReviewAppData(
             batchJobId,
-            batchStatus.Status,
-            batchStatus.TotalItems,
-            batchStatus.ReadyItems,
-            batchStatus.BlockedItems,
-            batchStatus.FailedItems,
-            batchStatus.ProcessingMetrics.ProgressPercent,
-            batchStatus.Page,
-            batchStatus.PageSize,
-            batchStatus.HasMore,
+            page.Status,
+            page.TotalItems,
+            page.ReadyItems,
+            page.BlockedItems,
+            page.FailedItems,
+            page.ProgressPercent,
+            page.Page,
+            page.PageSize,
+            page.HasMore,
             enrichedItems,
-            resolvedCourseName);
+            CourseName: null,
+            DataSource: page.DataSource,
+            ReadModelVersion: page.ReadModelVersion,
+            QueryCount: page.QueryCount);
 
         var response = new ToolResponse<GradingReviewAppData>(
             "ok",
@@ -562,7 +415,10 @@ public sealed record GradingReviewAppData(
     [property: JsonPropertyName("pageSize")] int PageSize,
     [property: JsonPropertyName("hasMore")] bool HasMore,
     [property: JsonPropertyName("items")] IReadOnlyList<GradingReviewItem> Items,
-    [property: JsonPropertyName("courseName")] string? CourseName = null);
+    [property: JsonPropertyName("courseName")] string? CourseName = null,
+    [property: JsonPropertyName("dataSource")] string DataSource = "local_read_model",
+    [property: JsonPropertyName("readModelVersion")] string ReadModelVersion = "1",
+    [property: JsonPropertyName("queryCount")] int? QueryCount = null);
 
 public sealed record GradingReviewItem(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -584,5 +440,9 @@ public sealed record GradingReviewItem(
     [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
     [property: JsonPropertyName("draftFeedback")] string? DraftFeedback,
     [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("isGradable")] bool? IsGradable,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
-    [property: JsonPropertyName("confidence")] decimal? Confidence);
+    [property: JsonPropertyName("confidence")] decimal? Confidence,
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null,
+    [property: JsonPropertyName("gradingMode")] string GradingMode = "unknown",
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string>? Warnings = null);

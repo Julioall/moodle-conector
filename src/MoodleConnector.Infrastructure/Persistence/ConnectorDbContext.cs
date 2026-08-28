@@ -34,6 +34,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
+    public DbSet<PlatformRequestMetricEntity> PlatformRequestMetrics => Set<PlatformRequestMetricEntity>();
     public DbSet<MoodleUserLink> MoodleUserLinks => Set<MoodleUserLink>();
     public DbSet<AssistedGradingBatch> GradingBatches => Set<AssistedGradingBatch>();
     public DbSet<AssistedGradingItem> GradingItems => Set<AssistedGradingItem>();
@@ -393,6 +394,18 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         auditLog.HasIndex(x => new { x.ActorSubject, x.CreatedAt });
         auditLog.HasIndex(x => new { x.MoodleConnectionId, x.CreatedAt });
 
+        var platformRequestMetric = modelBuilder.Entity<PlatformRequestMetricEntity>();
+        platformRequestMetric.ToTable("platform_request_metrics");
+        platformRequestMetric.HasKey(x => x.Id);
+        platformRequestMetric.Property(x => x.RecordedAtUtc).IsRequired();
+        platformRequestMetric.Property(x => x.Method).HasMaxLength(12).IsRequired();
+        platformRequestMetric.Property(x => x.Endpoint).HasMaxLength(180).IsRequired();
+        platformRequestMetric.Property(x => x.StatusCode).IsRequired();
+        platformRequestMetric.Property(x => x.DurationMs).IsRequired();
+        platformRequestMetric.Property(x => x.FailureKind).HasMaxLength(120);
+        platformRequestMetric.HasIndex(x => x.RecordedAtUtc);
+        platformRequestMetric.HasIndex(x => new { x.Endpoint, x.RecordedAtUtc });
+
         var moodleUserLink = modelBuilder.Entity<MoodleUserLink>();
         moodleUserLink.ToTable("moodle_user_links");
         moodleUserLink.HasKey(x => x.Id);
@@ -464,6 +477,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         batch.Property(x => x.CreatedBySubject).HasMaxLength(200).IsRequired();
         batch.Property(x => x.ConnectorClientId).HasMaxLength(64);
         batch.Property(x => x.ConnectionAlias).HasMaxLength(64);
+        batch.Property(x => x.IdempotencyKey).HasMaxLength(128);
         batch.Property(x => x.TeacherInstructions).HasMaxLength(8000);
         batch.Property(x => x.Priority).HasMaxLength(16).IsRequired();
         batch.Property(x => x.IncludeRubric).IsRequired();
@@ -473,6 +487,9 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         batch.Property(x => x.LastErrorCode).HasMaxLength(120);
         batch.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
         batch.HasIndex(x => new { x.CreatedBySubject, x.Status });
+        batch.HasIndex(x => new { x.CreatedBySubject, x.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("\"IdempotencyKey\" IS NOT NULL");
         batch.HasIndex(x => new { x.CourseId, x.Status });
         batch.HasIndex(x => new { x.Status, x.NextAttemptAt, x.LeaseUntil, x.Priority });
 
