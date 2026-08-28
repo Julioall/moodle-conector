@@ -1,7 +1,7 @@
 {
   "name": "moodle-connector",
-  "version": "0.1.0+codex.20260826035623",
-  "description": "Fluxos seguros para cursos, atividades e acompanhamento no Moodle.",
+  "version": "0.2.0+codex.20260828",
+  "description": "Fluxos seguros para cursos, avaliações e acompanhamento no Moodle.",
   "author": {
     "name": "Moodle Connector contributors",
     "url": "https://github.com/Julioall/moodle-conector"
@@ -17,8 +17,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Moodle Connector",
-    "shortDescription": "Fluxos seguros para cursos e atividades Moodle.",
-    "longDescription": "Orienta fluxos pedag\u00f3gicos e conecta um servidor MCP remoto para consultar ambientes Moodle com autoriza\u00e7\u00e3o, pr\u00e9vias e confirma\u00e7\u00e3o humana em escritas.",
+    "shortDescription": "Fluxos seguros para cursos, avaliações e atividades Moodle.",
+    "longDescription": "Orienta workflows pedagógicos e conecta um servidor MCP remoto para consultar ambientes Moodle com autorização, prévias e confirmação humana em escritas.",
     "developerName": "Moodle Connector contributors",
     "category": "Productivity",
     "capabilities": [
@@ -26,9 +26,9 @@
       "MCP"
     ],
     "defaultPrompt": [
-      "Ajude-me a acompanhar uma turma Moodle com seguran\u00e7a.",
-      "Liste minhas atividades Moodle pendentes e priorize o que exige aten\u00e7\u00e3o.",
-      "Prepare uma revis\u00e3o de entregas Moodle sem publicar altera\u00e7\u00f5es sem confirma\u00e7\u00e3o."
+      "Ajude-me a acompanhar uma turma Moodle com segurança.",
+      "Liste minhas atividades Moodle pendentes e priorize o que exige atenção.",
+      "Prepare uma revisão de entregas Moodle sem publicar alterações sem confirmação."
     ]
   },
   "apps": "./.app.json"
