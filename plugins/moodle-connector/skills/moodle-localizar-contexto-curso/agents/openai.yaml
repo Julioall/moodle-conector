@@ -1,0 +1,4 @@
+interface:
+  display_name: "Resolver contexto Moodle"
+  short_description: "Resolver curso e identificadores Moodle"
+  default_prompt: "Use $moodle-localizar-contexto-curso antes de analisar ou alterar qualquer curso, atividade ou turma Moodle."
