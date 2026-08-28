@@ -34,6 +34,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
+    public DbSet<PlatformRequestMetricEntity> PlatformRequestMetrics => Set<PlatformRequestMetricEntity>();
     public DbSet<MoodleUserLink> MoodleUserLinks => Set<MoodleUserLink>();
     public DbSet<AssistedGradingBatch> GradingBatches => Set<AssistedGradingBatch>();
     public DbSet<AssistedGradingItem> GradingItems => Set<AssistedGradingItem>();
@@ -392,6 +393,18 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         auditLog.HasIndex(x => new { x.BatchJobId, x.CreatedAt });
         auditLog.HasIndex(x => new { x.ActorSubject, x.CreatedAt });
         auditLog.HasIndex(x => new { x.MoodleConnectionId, x.CreatedAt });
+
+        var platformRequestMetric = modelBuilder.Entity<PlatformRequestMetricEntity>();
+        platformRequestMetric.ToTable("platform_request_metrics");
+        platformRequestMetric.HasKey(x => x.Id);
+        platformRequestMetric.Property(x => x.RecordedAtUtc).IsRequired();
+        platformRequestMetric.Property(x => x.Method).HasMaxLength(12).IsRequired();
+        platformRequestMetric.Property(x => x.Endpoint).HasMaxLength(180).IsRequired();
+        platformRequestMetric.Property(x => x.StatusCode).IsRequired();
+        platformRequestMetric.Property(x => x.DurationMs).IsRequired();
+        platformRequestMetric.Property(x => x.FailureKind).HasMaxLength(120);
+        platformRequestMetric.HasIndex(x => x.RecordedAtUtc);
+        platformRequestMetric.HasIndex(x => new { x.Endpoint, x.RecordedAtUtc });
 
         var moodleUserLink = modelBuilder.Entity<MoodleUserLink>();
         moodleUserLink.ToTable("moodle_user_links");

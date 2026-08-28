@@ -146,6 +146,7 @@ builder.Services.AddScoped<McpPrincipalEnricher>();
 builder.Services.AddTransient<AuthenticatedPrincipalEnrichmentMiddleware>();
 builder.Services.AddTransient<PortalApiAuthorizationMiddleware>();
 builder.Services.AddTransient<AdminApiKeyAuthorizationMiddleware>();
+builder.Services.AddTransient<PlatformRequestMetricsMiddleware>();
 builder.Services.AddTransient<McpRequestSecurityMiddleware>();
 
 // Register exposure policy via factory so configuration set by test hosts (WithWebHostBuilder)
@@ -648,6 +649,7 @@ app.Use(async (context, next) =>
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRouting();
+app.UseMiddleware<PlatformRequestMetricsMiddleware>();
 
 using (var scope = app.Services.CreateScope())
 {
@@ -2682,6 +2684,7 @@ app.MapGet("/api/reports/student-course", async (
 }).RequireRateLimiting(AdminApiRateLimitPolicy);
 
 PortalAccountEndpoints.MapAccountsAndAccessControl(app, AppAuthRateLimitPolicy);
+AdminMetricsEndpoints.Map(app, AppAuthRateLimitPolicy);
 PortalAuthenticationEndpoints.MapLoginAndLogout(app, AppAuthRateLimitPolicy);
 
 PortalGradingEndpoints.MapGrading(app, AppAuthRateLimitPolicy);

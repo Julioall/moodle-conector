@@ -10,7 +10,7 @@ import { MessagePreferencesCard } from './MessagePreferencesCard';
 import { ThemeCard } from './ThemeCard';
 import { APP_PERMISSIONS } from '../../lib/access-control';
 import { ConnectionsPage } from '../connections/ConnectionsPage';
-import { AdminPasswordResetCard, ChangePasswordCard } from './PasswordCards';
+import { AdminMetricsCard, AdminPasswordResetCard, ChangePasswordCard } from './PasswordCards';
 
 export function SettingsPage() {
   const { user, isAdmin, can } = useSession();
@@ -48,7 +48,7 @@ export function SettingsPage() {
 
         {canManageConnections && <TabsContent value="conexoes" className="mt-0"><ConnectionsPage embedded /></TabsContent>}
 
-        {isAdmin && <TabsContent value="administracao" className="mt-0"><AdminPasswordResetCard /></TabsContent>}
+        {isAdmin && <TabsContent value="administracao" className="mt-0 space-y-6"><AdminMetricsCard /><AdminPasswordResetCard /></TabsContent>}
 
       </Tabs>
     </main>
