@@ -611,7 +611,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
-    public async Task CreateBatch_MantemPaginaEstavelEAceitaCadaSubmissaoUmaVez()
+    public async Task CreateBatch_ComSubmissionIds_UsaPaginaAmplaEstavelParaEvitarVarreduraUnitária()
     {
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator { UsePagedRows = true };
@@ -640,8 +640,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         Assert.Equal(2, result.AcceptedItems);
         Assert.Equal([9005L, 9008L], repository.Items.Select(item => item.SubmissionId).ToArray());
-        Assert.Equal(4, mediator.ListQueryCallCount);
-        Assert.Equal(2, mediator.LastListQuery!.PageSize);
+        Assert.Equal(1, mediator.ListQueryCallCount);
+        Assert.Equal(100, mediator.LastListQuery!.PageSize);
     }
 
     [Fact]

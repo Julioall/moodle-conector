@@ -274,7 +274,18 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 // O tamanho precisa permanecer constante durante toda a
                 // paginação. Reduzi-lo com o saldo restante altera o offset
                 // calculado pelo Moodle e pode repetir a mesma submissão.
-                var pageSize = Math.Min(safeMaxItems, 100);
+                //
+                // Quando o chamador seleciona IDs de submissão, a consulta
+                // precisa usar o filtro "all" para manter compatibilidade
+                // com versões Moodle que não aceitam NeedsGrading nessa rota.
+                // Não use MaxItems como page size nesse caso: um lote de um
+                // item passaria a reconstruir curso, participantes e
+                // submissões uma página de cada vez até encontrar o ID.
+                // Uma página estável de até 100 registros mantém o offset
+                // correto e evita esse custo multiplicado.
+                var pageSize = selectedSubmissionIds.Count > 0
+                    ? 100
+                    : Math.Min(safeMaxItems, 100);
                 while (selectedItems.Count < safeMaxItems)
                 {
                     AssignmentSubmissionsPage? submissionsPage;
