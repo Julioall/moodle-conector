@@ -1,0 +1,4 @@
+interface:
+  display_name: "Criar recuperação original"
+  short_description: "Criar recuperação equivalente e nova"
+  default_prompt: "Use $moodle-recovery-design para criar uma recuperação alinhada às capacidades, mas diferente da atividade original."
