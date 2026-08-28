@@ -1,0 +1,4 @@
+interface:
+  display_name: "Publicar questionário Moodle"
+  short_description: "Preparar publicação com confirmação"
+  default_prompt: "Use $moodle-publicar-questionario para validar um GIFT e preparar sua publicação, confirmando antes de alterar o Moodle."
