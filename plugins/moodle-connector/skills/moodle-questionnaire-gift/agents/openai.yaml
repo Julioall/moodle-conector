@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gerar questionário GIFT"
+  short_description: "Gerar e validar questões Moodle"
+  default_prompt: "Use $moodle-questionnaire-gift para criar um questionário alinhado à UC e entregar GIFT revisado para o Moodle."
