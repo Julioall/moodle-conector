@@ -55,7 +55,11 @@ public sealed class PendingMoodleAction
 
     public void MarkExecutionUnknown()
     {
-        if (Status == PendingActionStatus.Confirmed)
+        // A confirmação é persistida com uma atualização atômica. O agregado
+        // que iniciou o fluxo pode continuar com o snapshot
+        // PendingConfirmation no mesmo DbContext; neste ponto, contudo, a
+        // confirmação já foi validada antes de qualquer escrita remota.
+        if (Status is PendingActionStatus.Confirmed or PendingActionStatus.PendingConfirmation)
         {
             Status = PendingActionStatus.ExecutionUnknown;
         }

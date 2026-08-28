@@ -332,6 +332,7 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(0, result.SentItems);
         Assert.Equal(1, result.FailedItems);
         Assert.Equal(GradingCommitStatus.ExecutionUnknown, item.CommitStatus);
+        Assert.Equal(PendingActionStatus.ExecutionUnknown, pendingAction.Status);
         Assert.Contains(fixture.AuditLogs.Logs, log => log.Status == "commit_execution_unknown");
         Assert.Single(fixture.Mediator.SavedGrades);
     }
