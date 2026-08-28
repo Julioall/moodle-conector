@@ -101,6 +101,51 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreateBatch_PreservaConexaoResolvidaParaWorkerAssincrono()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var mediator = new FakeMediator();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var credentialsProvider = new FakeCredentialsProvider(
+            new MoodleConnectorCredentials(
+                "client-fieg",
+                "connection-fieg",
+                "fieg",
+                "https://ead.fieg.com.br",
+                "user",
+                "password",
+                "fieg",
+                CanWrite: true));
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            mediator,
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            orchestrator,
+            new FakeCourseContentsGateway(),
+            new FakeSubmissionFileGateway(),
+            new FakeDocumentExtractionService(),
+            new FakeAssignmentSubmissionsGateway(),
+            credentialsProvider: credentialsProvider);
+
+        await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: [],
+                MaxItems: 1,
+                OnlyAwaitingGrading: true),
+            CancellationToken.None);
+
+        var batch = Assert.Single(repository.Batches);
+        Assert.Equal("client-fieg", batch.ConnectorClientId);
+        Assert.Equal("fieg", batch.ConnectionAlias);
+        Assert.Equal(1, credentialsProvider.CallCount);
+    }
+
+    [Fact]
     public async Task CreateBatch_ComArquivosDeSubmissao_BaixaExtraiEPersisteArtefato()
     {
         var repository = new FakeGradingReviewRepository();
@@ -1204,6 +1249,18 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public Task<long?> ResolveMoodleUserIdAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult(moodleUserId);
+        }
+    }
+
+    private sealed class FakeCredentialsProvider(MoodleConnectorCredentials credentials)
+        : IMoodleConnectorCredentialsProvider
+    {
+        public int CallCount { get; private set; }
+
+        public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(credentials);
         }
     }
 

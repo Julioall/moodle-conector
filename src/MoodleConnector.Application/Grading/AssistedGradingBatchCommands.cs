@@ -193,7 +193,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IOptions<GradingLimitsOptions>? limits = null,
     IConnectorExecutionContext? executionContext = null,
-    IMoodleConnectionSelection? connectionSelection = null)
+    IMoodleConnectionSelection? connectionSelection = null,
+    IMoodleConnectorCredentialsProvider? credentialsProvider = null)
     : IRequestHandler<CreateAssistedGradingBatchCommand, CreateAssistedGradingBatchResult>
 {
     private readonly GradingLimitsOptions _limits = limits?.Value ?? new GradingLimitsOptions();
@@ -400,6 +401,20 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             ? selectedItems.Select(item => ParsePositiveLong(item.AssignmentId, "assignmentId")).Distinct().ToArray()
             : assignmentIds.Select(id => ParsePositiveLong(id, "assignmentId")).Distinct().ToArray();
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
+
+        // O worker de correcao executa sem HttpContext. Preserve a conexao que
+        // foi resolvida para esta requisicao para que ele recupere os mesmos
+        // anexos e materiais Moodle, em vez de cair em uma conexao padrao ou
+        // perder a identidade do cliente.
+        var connectorClientId = executionContext?.ClientId;
+        var connectionAlias = connectionSelection?.Alias;
+        if (credentialsProvider is not null)
+        {
+            var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+            connectorClientId = credentials.ClientId;
+            connectionAlias = credentials.Alias;
+        }
+
         var batch = AssistedGradingBatch.Create(
             courseId,
             assignmentIdsAsLong,
@@ -411,8 +426,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             includeRubric: request.IncludeRubric,
             includeSubmissionFiles: request.IncludeSubmissionFiles,
             includeCourseMaterials: request.IncludeCourseMaterials,
-            connectorClientId: executionContext?.ClientId,
-            connectionAlias: connectionSelection?.Alias);
+            connectorClientId: connectorClientId,
+            connectionAlias: connectionAlias);
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
