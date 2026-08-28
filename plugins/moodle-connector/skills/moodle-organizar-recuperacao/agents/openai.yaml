@@ -1,0 +1,4 @@
+interface:
+  display_name: "Organizar recuperação Moodle"
+  short_description: "Preparar recuperação com evidências"
+  default_prompt: "Use $moodle-organizar-recuperacao para analisar quem precisa de recuperação e preparar um plano sem publicar alterações."
