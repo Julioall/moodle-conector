@@ -37,4 +37,10 @@ public sealed class GradingLimitsOptions
     public int DurableBatchPollSeconds { get; init; } = 5;
 
     public int DurableBatchClaimSize { get; init; } = 4;
+
+    /// <summary>
+    /// Orçamento total da chamada MCP de criação. Deve ficar abaixo do timeout
+    /// do transporte para devolver um erro estruturado, não um HTTP 504.
+    /// </summary>
+    public int BatchCreationTimeoutSeconds { get; init; } = 75;
 }

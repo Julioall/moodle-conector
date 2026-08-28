@@ -477,6 +477,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         batch.Property(x => x.CreatedBySubject).HasMaxLength(200).IsRequired();
         batch.Property(x => x.ConnectorClientId).HasMaxLength(64);
         batch.Property(x => x.ConnectionAlias).HasMaxLength(64);
+        batch.Property(x => x.IdempotencyKey).HasMaxLength(128);
         batch.Property(x => x.TeacherInstructions).HasMaxLength(8000);
         batch.Property(x => x.Priority).HasMaxLength(16).IsRequired();
         batch.Property(x => x.IncludeRubric).IsRequired();
@@ -486,6 +487,9 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         batch.Property(x => x.LastErrorCode).HasMaxLength(120);
         batch.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
         batch.HasIndex(x => new { x.CreatedBySubject, x.Status });
+        batch.HasIndex(x => new { x.CreatedBySubject, x.IdempotencyKey })
+            .IsUnique()
+            .HasFilter("\"IdempotencyKey\" IS NOT NULL");
         batch.HasIndex(x => new { x.CourseId, x.Status });
         batch.HasIndex(x => new { x.Status, x.NextAttemptAt, x.LeaseUntil, x.Priority });
 

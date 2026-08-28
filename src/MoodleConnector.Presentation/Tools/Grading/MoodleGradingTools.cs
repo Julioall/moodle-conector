@@ -2,9 +2,11 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
@@ -20,8 +22,10 @@ public sealed class MoodleGradingTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
     IMoodleUserResolver moodleUserResolver,
-    MoodleSnapshotToolContext? snapshotContext = null)
+    MoodleSnapshotToolContext? snapshotContext = null,
+    IOptions<GradingLimitsOptions>? gradingLimits = null)
 {
+    private readonly GradingLimitsOptions _gradingLimits = gradingLimits?.Value ?? new GradingLimitsOptions();
     [McpServerTool(
         Name = "discover_grading_functions",
         Title = "Discover Grading Functions",
@@ -181,6 +185,8 @@ public sealed class MoodleGradingTools(
         string priority = "normal",
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
+        [Description("Chave estável da solicitação para reutilizar o mesmo lote caso o cliente perca a resposta (por exemplo, após HTTP 504).")]
+        string? idempotencyKey = null,
         CancellationToken cancellationToken = default)
     {
         return CreateBatchCoreAsync(
@@ -195,6 +201,7 @@ public sealed class MoodleGradingTools(
                 teacherInstructions,
                 priority,
             moodleAlias,
+            idempotencyKey,
             cancellationToken);
     }
 
@@ -801,6 +808,7 @@ public sealed class MoodleGradingTools(
         string? teacherInstructions,
         string priority,
         string? moodleAlias,
+        string? idempotencyKey,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(courseId))
@@ -820,14 +828,48 @@ public sealed class MoodleGradingTools(
             return ToolResultHelper.Error<CreateAssistedGradingBatchResult>("Usuario nao autenticado para criar lote de correcao.");
         }
 
+        var effectiveCourseId = courseId;
+        IReadOnlyList<string> effectiveAssignmentIds = assignmentIds;
+        IReadOnlyList<AssignmentSubmissionSummary>? prefetchedSubmissions = null;
+        if (snapshotContext is not null && assignmentIds.Count == 1)
+        {
+            try
+            {
+                var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
+                if (scope is not null)
+                {
+                    effectiveCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
+                    var snapshot = await snapshotContext.GetSubmissionsAsync(scope, effectiveCourseId, cancellationToken);
+                    var assignment = snapshot is { Data: not null, IsStale: false }
+                        ? AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, assignmentIds[0])
+                        : null;
+                    if (assignment is { IsComplete: true })
+                    {
+                        effectiveAssignmentIds = [assignment.AssignmentId];
+                        prefetchedSubmissions = assignment.Submissions;
+                    }
+                }
+            }
+            catch
+            {
+                // Snapshot e uma otimizacao. Uma falha local de cache nao
+                // deve esconder a leitura Moodle nem produzir lista vazia.
+                prefetchedSubmissions = null;
+                effectiveCourseId = courseId;
+                effectiveAssignmentIds = assignmentIds;
+            }
+        }
+
         CreateAssistedGradingBatchResult data;
+        using var creationDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        creationDeadline.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(_gradingLimits.BatchCreationTimeoutSeconds, 5, 95)));
         try
         {
             data = await mediator.Send(
                 new CreateAssistedGradingBatchCommand(
                     moodleUserId.Value.ToString(),
-                    courseId,
-                    assignmentIds,
+                    effectiveCourseId,
+                    effectiveAssignmentIds,
                     submissionIds,
                     maxItems,
                     onlyAwaitingGrading,
@@ -835,20 +877,34 @@ public sealed class MoodleGradingTools(
                     includeSubmissionFiles,
                     includeCourseMaterials,
                     teacherInstructions,
-                    priority),
-                cancellationToken);
+                    priority,
+                    prefetchedSubmissions,
+                    idempotencyKey),
+                creationDeadline.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch
+        catch (OperationCanceledException)
         {
-            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>("Nao foi possivel criar o lote de correcao assistida neste momento.");
+            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>(
+                "A criacao do lote excedeu o prazo seguro de processamento. Nenhuma ausencia de pendencias foi inferida; repita com a mesma chave de idempotencia.",
+                errorCode: MoodleErrorContract.RequestTimeout);
+        }
+        catch (MoodleApiException exception)
+        {
+            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>(exception);
+        }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<CreateAssistedGradingBatchResult>(exception);
         }
 
         var response = new ToolResponse<CreateAssistedGradingBatchResult>(
-            "ok",
+            string.Equals(data.Status, "PartialFailure", StringComparison.OrdinalIgnoreCase)
+                ? "partial_failure"
+                : "ok",
             data,
             data.Warnings,
             AuditId: null,
