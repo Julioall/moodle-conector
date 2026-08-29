@@ -48,11 +48,11 @@ public sealed class UpdateAssistedGradingDraftsBatchCommandHandler(
 
         var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
-        
+
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
-        
+
         var itemIds = request.Items.Select(i => i.GradingItemId).Distinct().ToArray();
         var itemsDict = await repository.GetItemsAsync(itemIds, cancellationToken);
         var artifactsDict = await repository.ListArtifactsByItemsAsync(itemIds, cancellationToken);
