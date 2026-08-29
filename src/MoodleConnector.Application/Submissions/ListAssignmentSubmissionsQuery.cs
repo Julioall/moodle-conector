@@ -356,8 +356,11 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         // -1. Preserve that value for diagnostics, but do not treat it as a
         // grade already entered by the teacher.
         var hasMoodleGradeValue = existingGrade?.HasGrade == true;
-        var needsGrading = IsNeedsGrading(submission.GradingStatus, submitted) &&
-            (existingGrades is null ? isGradable != false : !hasMoodleGradeValue);
+        var needsGrading = isGradable == false
+            ? submitted && existingGrades is not null &&
+              (existingGrade is null || (!existingGrade.HasGrade && string.IsNullOrWhiteSpace(existingGrade.Feedback)))
+            : IsNeedsGrading(submission.GradingStatus, submitted) &&
+              (existingGrades is null ? isGradable != false : !hasMoodleGradeValue);
 
         return new AssignmentSubmissionSummary(
             userId,
@@ -373,7 +376,10 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             submission.AttemptNumber,
             submission.FileCount,
             submission.HasOnlineText,
-            submission.Files ?? []);
+            submission.Files ?? [],
+            CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
+            CurrentFeedback: existingGrade?.Feedback,
+            GradeMax: existingGrade?.GradeMax);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter)

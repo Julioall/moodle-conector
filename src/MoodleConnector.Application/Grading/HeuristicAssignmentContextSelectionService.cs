@@ -48,7 +48,28 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
             .Where(token => token.Length >= 2)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        var ranked = request.Candidates
+        var expectedOrdinal = TryExtractActivityOrdinal(request.AssignmentName);
+        var candidatesWithOrdinal = request.Candidates
+            .Where(candidate => TryExtractCandidateOrdinal(candidate) is not null)
+            .ToArray();
+        var compatibilityPool = candidatesWithOrdinal.Length > 0
+            ? candidatesWithOrdinal
+            : request.Candidates;
+        var compatibleCandidates = compatibilityPool
+            .Where(candidate => IsCompatibleWithActivity(candidate, expectedOrdinal))
+            .ToArray();
+        if (compatibleCandidates.Length == 0)
+        {
+            return Task.FromResult(new AssignmentContextSelectionResult(
+                SelectedCandidateId: null,
+                Classification: "blocked",
+                Confidence: 0m,
+                Reason: $"Nenhum documento de contexto corresponde ao identificador da atividade {expectedOrdinal:00}.",
+                SupportingCandidateIds: [],
+                Warnings: ["Os documentos encontrados pertencem a outra atividade; a selecao heuristica foi bloqueada para evitar vincular o enunciado errado."]));
+        }
+
+        var ranked = compatibleCandidates
             .Select(candidate => new CandidateScore(candidate, Score(candidate, assignmentTokens, request.AssignmentName)))
             .OrderByDescending(candidate => candidate.Score)
             .ThenBy(candidate => candidate.Candidate.DistanceFromAssignment ?? int.MaxValue)
@@ -83,6 +104,12 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
         var text = Normalize(candidate.ExtractedText ?? string.Empty);
         var combined = $"{title} {text}";
         var score = 0m;
+        var expectedOrdinal = TryExtractActivityOrdinal(assignmentName);
+        var candidateOrdinal = TryExtractCandidateOrdinal(candidate);
+        if (expectedOrdinal is int expected && candidateOrdinal is int candidateNumber && expected == candidateNumber)
+        {
+            score += 12m;
+        }
 
         foreach (var token in assignmentTokens)
         {
@@ -199,6 +226,51 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
 
     private sealed record CandidateScore(AssignmentContextCandidate Candidate, decimal Score);
 
+    private static bool IsCompatibleWithActivity(AssignmentContextCandidate candidate, int? expectedOrdinal)
+    {
+        if (expectedOrdinal is not int expected)
+        {
+            return true;
+        }
+
+        var candidateOrdinal = TryExtractCandidateOrdinal(candidate);
+        return candidateOrdinal is null || candidateOrdinal == expected;
+    }
+
+    private static int? TryExtractActivityOrdinal(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var match = ActivityOrdinalRegex().Match(Normalize(value));
+        return match.Success && int.TryParse(match.Groups["number"].Value, out var number)
+            ? number
+            : null;
+    }
+
+    private static int? TryExtractCandidateOrdinal(AssignmentContextCandidate candidate)
+    {
+        var activityOrdinal = TryExtractActivityOrdinal(candidate.Title);
+        if (activityOrdinal is not null)
+        {
+            return activityOrdinal;
+        }
+
+        var title = Normalize(candidate.Title);
+        var prefixMatch = CandidateOrdinalPrefixRegex().Match(title);
+        return prefixMatch.Success && int.TryParse(prefixMatch.Groups["number"].Value, out var number)
+            ? number
+            : null;
+    }
+
     [GeneratedRegex(@"[\p{L}\p{N}]+")]
     private static partial Regex TokenRegex();
+
+    [GeneratedRegex(@"(?:ead|atividade|sap|envio)\s*0*(?<number>\d{1,3})")]
+    private static partial Regex ActivityOrdinalRegex();
+
+    [GeneratedRegex(@"^0*(?<number>\d{1,3})(?=[_\-\s])")]
+    private static partial Regex CandidateOrdinalPrefixRegex();
 }

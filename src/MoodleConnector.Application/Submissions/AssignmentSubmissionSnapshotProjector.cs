@@ -110,9 +110,7 @@ public static class AssignmentSubmissionSnapshotProjector
     {
         if (page < 1) throw new ArgumentOutOfRangeException(nameof(page));
         var safePageSize = Math.Clamp(pageSize, 1, 100);
-        var sourceRows = item.IsGradable == false
-            ? item.Submissions.Select(row => row with { NeedsGrading = false }).ToArray()
-            : item.Submissions;
+        var sourceRows = item.Submissions;
         if (filter == AssignmentSubmissionFilter.NeedsGrading &&
             item.Coverage is not null && !item.Coverage.NeedsGradingComplete)
         {
@@ -143,9 +141,7 @@ public static class AssignmentSubmissionSnapshotProjector
     {
         var submission = item.Submissions.FirstOrDefault(itemSubmission =>
             string.Equals(itemSubmission.UserId, studentId?.Trim(), StringComparison.OrdinalIgnoreCase));
-        return submission is not null && item.IsGradable == false
-            ? submission with { NeedsGrading = false }
-            : submission;
+        return submission;
     }
 
     public static AssignmentSubmissionRecord ToRecord(AssignmentSubmissionSummary summary) =>
@@ -159,7 +155,8 @@ public static class AssignmentSubmissionSnapshotProjector
             summary.AttemptNumber,
             summary.FileCount,
             summary.HasOnlineText,
-            Files: summary.Files ?? []);
+            Files: summary.Files ?? [],
+            CurrentFeedback: summary.CurrentFeedback);
 
     private static IReadOnlyList<AssignmentSubmissionSummary> BuildRows(
         IReadOnlyList<CourseParticipantSummary> participants,
@@ -187,14 +184,14 @@ public static class AssignmentSubmissionSnapshotProjector
             latestSubmissionByUser.TryGetValue(participant.UserId, out var submission);
             AssignmentExistingGrade? existingGrade = null;
             existingGrades?.TryGetValue(participant.UserId, out existingGrade);
-            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable, existingGrade));
+            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable, existingGrade, existingGrades is not null));
         }
 
         foreach (var submission in latestSubmissionByUser.Values.Where(submission => !participantIds.Contains(submission.UserId)))
         {
             AssignmentExistingGrade? existingGrade = null;
             existingGrades?.TryGetValue(submission.UserId, out existingGrade);
-            rows.Add(ToSummary(submission.UserId, null, submission, dueAt, isGradable, existingGrade));
+            rows.Add(ToSummary(submission.UserId, null, submission, dueAt, isGradable, existingGrade, existingGrades is not null));
         }
 
         return rows
@@ -225,7 +222,8 @@ public static class AssignmentSubmissionSnapshotProjector
         AssignmentSubmissionRecord? submission,
         DateTimeOffset? dueAt,
         bool? isGradable,
-        AssignmentExistingGrade? existingGrade = null)
+        AssignmentExistingGrade? existingGrade = null,
+        bool gradesRead = false)
     {
         if (submission is null)
         {
@@ -252,10 +250,13 @@ public static class AssignmentSubmissionSnapshotProjector
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
         var submittedAt = submitted ? submission.ModifiedAt ?? submission.CreatedAt : null;
         var late = submittedAt is not null && dueAt is not null && submittedAt > dueAt;
-        var needsGrading = isGradable != false && submitted && (
-            string.Equals(submission.GradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(submission.GradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
+        var needsGrading = isGradable == false
+            ? submitted && gradesRead &&
+              (existingGrade is null || (!existingGrade.HasGrade && string.IsNullOrWhiteSpace(existingGrade.Feedback)))
+            : isGradable != false && submitted && (
+                string.Equals(submission.GradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(submission.GradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
 
         return new AssignmentSubmissionSummary(
             userId,

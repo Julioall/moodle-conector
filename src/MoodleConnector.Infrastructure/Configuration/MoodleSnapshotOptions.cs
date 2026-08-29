@@ -7,6 +7,7 @@ public sealed class MoodleSnapshotOptions
     public int QueueCapacity { get; init; } = 256;
     public int GlobalConcurrency { get; init; } = 4;
     public int PerConnectionConcurrency { get; init; } = 1;
+    public int FeedbackReadConcurrency { get; init; } = 4;
     public int MaxPayloadBytes { get; init; } = 10 * 1024 * 1024;
     public int CoursePageSize { get; init; } = 100;
     public int MaxCoursePages { get; init; } = 10;
@@ -21,6 +22,7 @@ public sealed class MoodleSnapshotOptions
         QueueCapacity = Math.Clamp(QueueCapacity, 16, 10_000),
         GlobalConcurrency = Math.Clamp(GlobalConcurrency, 1, 64),
         PerConnectionConcurrency = Math.Clamp(PerConnectionConcurrency, 1, 16),
+        FeedbackReadConcurrency = Math.Clamp(FeedbackReadConcurrency, 1, 16),
         MaxPayloadBytes = Math.Clamp(MaxPayloadBytes, 64 * 1024, 100 * 1024 * 1024),
         CoursePageSize = Math.Clamp(CoursePageSize, 1, 1000),
         MaxCoursePages = Math.Clamp(MaxCoursePages, 1, 100),

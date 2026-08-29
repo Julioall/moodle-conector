@@ -56,7 +56,8 @@ public sealed partial class GetAssistedGradingContextDiagnosticsQueryHandler(
     IGradingReviewRepository repository,
     ICurrentUserContext currentUser,
     IAssignmentContextSelectionService contextSelectionService,
-    IOptions<GradingLimitsOptions>? limits = null)
+    IOptions<GradingLimitsOptions>? limits = null,
+    IMoodleAssignmentSettingsGateway? settingsGateway = null)
     : IRequestHandler<GetAssistedGradingContextDiagnosticsQuery, AssistedGradingContextDiagnosticsResult>
 {
     private readonly GradingLimitsOptions _limits = limits?.Value ?? new GradingLimitsOptions();
@@ -110,12 +111,30 @@ public sealed partial class GetAssistedGradingContextDiagnosticsQueryHandler(
                     ParseMetadataInt(artifact.SummaryRef, "distance") ?? index))
                 .ToArray();
 
+            AssignmentSettingsSummary? assignmentSettings = null;
+            if (settingsGateway is not null)
+            {
+                try
+                {
+                    assignmentSettings = await settingsGateway.GetAssignmentSettingsAsync(
+                        batch.CreatedBySubject,
+                        item.CourseId.ToString(CultureInfo.InvariantCulture),
+                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                        cancellationToken);
+                }
+                catch
+                {
+                    // A diagnostics read must remain available when the
+                    // optional settings endpoint is unavailable.
+                }
+            }
+
             selection = await contextSelectionService.SelectAsync(
                 new AssignmentContextSelectionRequest(
                     item.CourseId.ToString(CultureInfo.InvariantCulture),
                     item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                    $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
-                    AssignmentDescription: null,
+                    assignmentSettings?.Name ?? $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
+                    AssignmentDescription: assignmentSettings?.Description,
                     candidates),
                 cancellationToken);
 

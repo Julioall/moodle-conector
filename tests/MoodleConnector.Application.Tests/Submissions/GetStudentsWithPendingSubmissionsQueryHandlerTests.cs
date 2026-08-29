@@ -76,6 +76,69 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
     }
 
     [Fact]
+    public async Task Counts_only_no_grade_submissions_without_feedback()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(Module("assign-1", "assign")),
+            Submissions = [new AssignmentSubmissionsBatch(
+                "assign-1",
+                [
+                    new AssignmentSubmissionRecord("submission-1", "student-1", "submitted", "notgraded", DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow, 1, 0, false),
+                    new AssignmentSubmissionRecord("submission-2", "student-2", "submitted", "notgraded", DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow, 1, 0, false)
+                ])],
+            AssignmentSettings = new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
+            {
+                ["assign-1"] = new("assign-1", 0, "Atividade extra", IsGradable: false),
+            },
+            IncludeStudent2 = true,
+            Grades = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["student-1"] = new("assign-1", "student-1", null, false, Feedback: "Feedback já publicado."),
+                ["student-2"] = new("assign-1", "student-2", null, false, Feedback: null),
+            }
+        };
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery("course-1", IncludeAwaitingGrading: true),
+            CancellationToken.None);
+
+        var pending = Assert.Single(result.AwaitingGrading);
+        Assert.Equal("student-2", pending.StudentId);
+        Assert.DoesNotContain(result.AwaitingGrading, item => item.StudentId == "student-1");
+    }
+
+    [Fact]
+    public async Task Reads_feedback_in_parallel_by_assignment_with_bounded_gateway_calls()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(Module("assign-1", "assign"), Module("assign-2", "assign")),
+            Submissions =
+            [
+                new AssignmentSubmissionsBatch("assign-1", [new AssignmentSubmissionRecord("s1", "student-1", "submitted", "notgraded", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1, 0, false)]),
+                new AssignmentSubmissionsBatch("assign-2", [new AssignmentSubmissionRecord("s2", "student-1", "submitted", "notgraded", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 1, 0, false)])
+            ],
+            AssignmentSettings = new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
+            {
+                ["assign-1"] = new("assign-1", 0, "Extra 1", IsGradable: false),
+                ["assign-2"] = new("assign-2", 0, "Extra 2", IsGradable: false),
+            },
+            Grades = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["student-1"] = new("assign-1", "student-1", null, false, Feedback: null),
+            }
+        };
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery("course-1", IncludeAwaitingGrading: true),
+            CancellationToken.None);
+
+        Assert.Equal(2, result.AwaitingGrading.Count);
+        Assert.Equal(2, fixture.FeedbackReads);
+    }
+
+    [Fact]
     public async Task Reuses_prefetched_course_data_and_skips_moodle_reads_for_empty_assign_scope()
     {
         var fixture = new Fixture
@@ -177,6 +240,10 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         public IReadOnlyDictionary<string, AssignmentSettingsSummary> AssignmentSettings { get; init; } =
             new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
         public bool ThrowOnSubmissionRead { get; init; }
+        public bool IncludeStudent2 { get; init; }
+        public IReadOnlyDictionary<string, AssignmentExistingGrade> Grades { get; init; } =
+            new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+        public int FeedbackReads { get; set; }
         public int ParticipantReads { get; set; }
         public int ContentReads { get; set; }
         public int AssignmentSettingsReads { get; set; }
@@ -188,7 +255,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
                 new SubmissionsGateway(this),
                 new ContentsGateway(this),
                 new CurrentUserGateway(),
-                new AssignmentSettingsGateway(this));
+                new AssignmentSettingsGateway(this),
+                Grades.Count > 0 ? new AssignmentGradeReadGateway(this) : null);
     }
 
     private sealed class ParticipantsGateway(Fixture fixture) : IMoodleParticipantsGateway
@@ -205,9 +273,14 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             CancellationToken cancellationToken)
         {
             fixture.ParticipantReads++;
-            return Task.FromResult(new CourseParticipantsPage(courseId, page, pageSize, statusFilter, studentsOnly, includeEmail, false, [
-                new CourseParticipantSummary("student-1", "Aluno 1", null, false, null, null, null, [], [])
-            ]));
+            var participants = fixture.IncludeStudent2
+                ? new[]
+                {
+                    new CourseParticipantSummary("student-1", "Aluno 1", null, false, null, null, null, [], []),
+                    new CourseParticipantSummary("student-2", "Aluno 2", null, false, null, null, null, [], [])
+                }
+                : new[] { new CourseParticipantSummary("student-1", "Aluno 1", null, false, null, null, null, [], []) };
+            return Task.FromResult(new CourseParticipantsPage(courseId, page, pageSize, statusFilter, studentsOnly, includeEmail, false, participants));
         }
 
         public Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(string userExternalId, string courseId, CancellationToken cancellationToken) =>
@@ -275,6 +348,23 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             string courseId,
             string assignmentId,
             CancellationToken cancellationToken) => Task.FromResult<AssignmentSettingsSummary?>(null);
+    }
+
+    private sealed class AssignmentGradeReadGateway(Fixture fixture) : IMoodleAssignmentGradeReadGateway
+    {
+        public Task<AssignmentExistingGrade?> GetExistingGradeAsync(string userExternalId, string assignmentId, string studentId, CancellationToken cancellationToken) =>
+            Task.FromResult<AssignmentExistingGrade?>(fixture.Grades.GetValueOrDefault(studentId));
+
+        public async Task<IReadOnlyDictionary<string, AssignmentExistingGrade>> GetExistingGradesAsync(
+            string userExternalId,
+            string assignmentId,
+            IReadOnlyCollection<string> studentIds,
+            CancellationToken cancellationToken)
+        {
+            fixture.FeedbackReads++;
+            await Task.Delay(1, cancellationToken);
+            return fixture.Grades;
+        }
     }
 
 }

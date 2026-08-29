@@ -934,19 +934,47 @@ internal sealed class MoodleSnapshotSyncQueue(
                 var existingGrades = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(
                     StringComparer.OrdinalIgnoreCase);
                 var gradesPartial = false;
-                foreach (var assignmentId in assignmentIds)
+                using (var feedbackLimiter = new SemaphoreSlim(_options.FeedbackReadConcurrency, _options.FeedbackReadConcurrency))
                 {
-                    try
+                    var feedbackTasks = assignmentIds.Select(async assignmentId =>
                     {
-                        existingGrades[assignmentId] = await assignmentGradeReadGateway.GetExistingGradesAsync(
-                            work.UserExternalId,
-                            assignmentId,
-                            participants.Participants.Select(participant => participant.UserId).ToArray(),
-                            cancellationToken);
-                    }
-                    catch
+                        await feedbackLimiter.WaitAsync(cancellationToken);
+                        try
+                        {
+                            var grades = await assignmentGradeReadGateway.GetExistingGradesAsync(
+                                work.UserExternalId,
+                                assignmentId,
+                                participants.Participants.Select(participant => participant.UserId).ToArray(),
+                                cancellationToken);
+                            return (AssignmentId: assignmentId, Grades: grades, Success: true);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch
+                        {
+                            return (AssignmentId: assignmentId,
+                                Grades: (IReadOnlyDictionary<string, AssignmentExistingGrade>)new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase),
+                                Success: false);
+                        }
+                        finally
+                        {
+                            feedbackLimiter.Release();
+                        }
+                    }).ToArray();
+
+                    var feedbackResults = await Task.WhenAll(feedbackTasks);
+                    foreach (var result in feedbackResults)
                     {
-                        gradesPartial = true;
+                        if (result.Success)
+                        {
+                            existingGrades[result.AssignmentId] = result.Grades;
+                        }
+                        else
+                        {
+                            gradesPartial = true;
+                        }
                     }
                 }
 

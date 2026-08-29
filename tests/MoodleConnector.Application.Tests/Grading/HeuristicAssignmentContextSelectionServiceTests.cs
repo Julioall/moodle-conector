@@ -67,4 +67,53 @@ public sealed class HeuristicAssignmentContextSelectionServiceTests
         Assert.Equal(0m, result.Confidence);
         Assert.Contains(result.Warnings, warning => warning.Contains("candidato", StringComparison.OrdinalIgnoreCase));
     }
+
+    [Fact]
+    public async Task SelectAsync_RejeitaDocumentoDeOutraAtividadeMesmoComTextoParecido()
+    {
+        var sut = new HeuristicAssignmentContextSelectionService();
+
+        var result = await sut.SelectAsync(
+            new AssignmentContextSelectionRequest(
+                CourseId: "1",
+                AssignmentId: "117499",
+                AssignmentName: "Atividade EAD 04",
+                AssignmentDescription: null,
+                Candidates:
+                [
+                    new AssignmentContextCandidate(
+                        "ead03",
+                        "resource",
+                        "03_Pre_Problema_antes_da_tecnologia.docx",
+                        "Enunciado da Atividade EAD 03 com instruções de entrega.",
+                        SectionNumber: 1,
+                        DistanceFromAssignment: 0)
+                ]),
+            CancellationToken.None);
+
+        Assert.Null(result.SelectedCandidateId);
+        Assert.Equal("blocked", result.Classification);
+        Assert.Contains(result.Warnings, warning => warning.Contains("outra atividade", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SelectAsync_PriorizaNumeroCorrespondenteQuandoHaCandidatosEad03EEad04()
+    {
+        var sut = new HeuristicAssignmentContextSelectionService();
+
+        var result = await sut.SelectAsync(
+            new AssignmentContextSelectionRequest(
+                CourseId: "1",
+                AssignmentId: "117499",
+                AssignmentName: "Atividade EAD 03",
+                AssignmentDescription: null,
+                Candidates:
+                [
+                    new AssignmentContextCandidate("ead04", "resource", "04_Pre_Projeto.docx", "Enunciado EAD 04", 1, 0),
+                    new AssignmentContextCandidate("ead03", "resource", "03_Pre_Problema_antes_da_tecnologia.docx", "Enunciado EAD 03", 1, 1)
+                ]),
+            CancellationToken.None);
+
+        Assert.Equal("ead03", result.SelectedCandidateId);
+    }
 }

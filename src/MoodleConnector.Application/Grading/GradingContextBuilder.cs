@@ -32,6 +32,7 @@ public sealed partial class GradingContextBuilder(
 
         string? submissionText = null;
         string? assignmentStatement = null;
+        string? assignmentNameFromSettings = null;
         string? assignmentDescriptionFromSettings = null;
         string? criteria = null;
         string? rubricDescription = null;
@@ -42,6 +43,8 @@ public sealed partial class GradingContextBuilder(
         var attachedFiles = new List<GradingFileInfo>();
         IReadOnlyList<GradingArtifact> artifacts = [];
         var artifactReferences = new List<GradingArtifactReferenceSnapshot>();
+        var contextSelectionRejected = false;
+        string? contextSelectionReason = null;
 
         // ============================================================
         // PASSO 1: Buscar MaxGrade PRIMEIRO via API Moodle.
@@ -62,6 +65,7 @@ public sealed partial class GradingContextBuilder(
                         item.AssignmentId.ToString(CultureInfo.InvariantCulture),
                         cancellationToken);
 
+                    assignmentNameFromSettings = settings?.Name;
                     assignmentDescriptionFromSettings = settings?.Description;
 
                     gradingMode = settings?.IsGradable switch
@@ -202,8 +206,8 @@ public sealed partial class GradingContextBuilder(
                     new AssignmentContextSelectionRequest(
                         item.CourseId.ToString(CultureInfo.InvariantCulture),
                         item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                        $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
-                        AssignmentDescription: null,
+                        assignmentNameFromSettings ?? $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
+                        AssignmentDescription: assignmentDescriptionFromSettings,
                         candidates),
                     cancellationToken);
 
@@ -223,13 +227,19 @@ public sealed partial class GradingContextBuilder(
                     // critérios semânticos, e o StructuredGradingAnalysisService usa o
                     // assignmentStatement como contexto pedagógico (não como critérios).
                 }
+                else
+                {
+                    contextSelectionRejected = true;
+                    contextSelectionReason = selection.Reason ?? selection.Warnings.FirstOrDefault();
+                }
             }
         }
 
         // Algumas instalações Moodle não expõem a descrição no endpoint de
         // conteúdo do curso, mas a retornam como `intro` em
         // mod_assign_get_assignments. Use essa fonte oficial como fallback.
-        if (string.IsNullOrWhiteSpace(assignmentStatement) &&
+        if (!contextSelectionRejected &&
+            string.IsNullOrWhiteSpace(assignmentStatement) &&
             !string.IsNullOrWhiteSpace(assignmentDescriptionFromSettings))
         {
             assignmentStatement = Truncate(assignmentDescriptionFromSettings, maxChars);
@@ -302,11 +312,13 @@ public sealed partial class GradingContextBuilder(
         // o item depois que uma nova tentativa materializou contexto legível.
         // Mantemos o artifact de diagnóstico para auditoria, mas ele deixa de ser
         // impeditivo quando há pelo menos um artifact de contexto utilizável.
-        var hasReadableContext = artifacts.Any(artifact =>
+        var hasReadableContext = !contextSelectionRejected && artifacts.Any(artifact =>
             string.Equals(artifact.ArtifactType, "assignment_context", StringComparison.OrdinalIgnoreCase) &&
             ExtractionStatus.IsReadable(artifact.ExtractionStatus) &&
             !string.IsNullOrWhiteSpace(artifact.ExtractedTextRef));
-        IReadOnlyList<string> contextBlockers = hasReadableContext
+        IReadOnlyList<string> contextBlockers = contextSelectionRejected
+            ? [$"O enunciado da atividade foi rejeitado porque não corresponde ao contexto identificado. {contextSelectionReason}".Trim()]
+            : hasReadableContext
             ? Array.Empty<string>()
             : artifacts
                 .Where(artifact =>

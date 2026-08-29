@@ -60,4 +60,5 @@ public sealed record AssignmentSubmissionRecord(
     int? AttemptNumber,
     int FileCount,
     bool HasOnlineText,
-    IReadOnlyList<AssignmentSubmissionFile>? Files = null);
+    IReadOnlyList<AssignmentSubmissionFile>? Files = null,
+    string? CurrentFeedback = null);

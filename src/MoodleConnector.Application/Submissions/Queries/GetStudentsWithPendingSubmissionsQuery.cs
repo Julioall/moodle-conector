@@ -1,5 +1,6 @@
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Application.Submissions.Queries;
@@ -67,7 +68,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
-    IMoodleAssignmentSettingsGateway assignmentSettingsGateway)
+    IMoodleAssignmentSettingsGateway assignmentSettingsGateway,
+    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null)
     : IRequestHandler<GetStudentsWithPendingSubmissionsQuery, GetStudentsWithPendingSubmissionsResult>
 {
     public async Task<GetStudentsWithPendingSubmissionsResult> Handle(
@@ -182,10 +184,13 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         assignmentSettings ??= new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
 
         var canClassifyNoGradeActivities = assignmentSettings.Count > 0;
-        // Atividades sem nota exigiriam uma leitura Moodle por envio para
-        // confirmar feedback. Elas ficam fora do contador agregado para que a
-        // atualização diária permaneça previsível mesmo em turmas grandes.
+        // Atividades sem nota usam feedback por atividade (não por envio).
+        // Quando a leitura não está disponível, não inventamos pendências:
+        // marcamos a cobertura como incompleta e preservamos a velocidade.
         var noGradeFeedbackSkipped = false;
+        var feedbackByAssignment = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(StringComparer.OrdinalIgnoreCase);
+        var feedbackReadyAssignments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var feedbackReadFailures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var submissionReadFailed = false;
 
         IReadOnlyList<AssignmentSubmissionsBatch> submissionBatches = [];
@@ -226,6 +231,51 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 {
                     submissionBatches = [];
                     submissionReadFailed = true;
+                }
+            }
+        }
+
+        var noGradeAssignmentIds = assignmentContexts
+            .Where(context => IsNoGradeActivity(context.Module, assignmentSettings))
+            .Select(context => context.Module.InstanceId!)
+            .ToArray();
+        if (request.IncludeAwaitingGrading && noGradeAssignmentIds.Length > 0)
+        {
+            if (IsForCourse(request.PrefetchedSubmissions, request.CourseId))
+            {
+                foreach (var assignmentId in noGradeAssignmentIds)
+                {
+                    var snapshotItem = request.PrefetchedSubmissions!.Assignments.FirstOrDefault(item =>
+                        string.Equals(item.AssignmentId, assignmentId, StringComparison.OrdinalIgnoreCase));
+                    if (snapshotItem?.Coverage?.GradesComplete == true)
+                    {
+                        feedbackReadyAssignments.Add(assignmentId);
+                    }
+                    else
+                    {
+                        feedbackReadFailures.Add(assignmentId);
+                    }
+                }
+            }
+            else if (gradeReadGateway is not null)
+            {
+                var feedbackReads = await ReadFeedbackByAssignmentAsync(
+                    currentUserExternalId,
+                    noGradeAssignmentIds,
+                    studentMap.Keys,
+                    feedbackReadFailures,
+                    cancellationToken);
+                foreach (var pair in feedbackReads)
+                {
+                    feedbackByAssignment[pair.Key] = pair.Value;
+                    feedbackReadyAssignments.Add(pair.Key);
+                }
+            }
+            else
+            {
+                foreach (var assignmentId in noGradeAssignmentIds)
+                {
+                    feedbackReadFailures.Add(assignmentId);
                 }
             }
         }
@@ -274,7 +324,28 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                     var needsFeedback = IsAwaitingGrading(record.GradingStatus);
                     if (isNoGradeActivity)
                     {
-                        noGradeFeedbackSkipped = true;
+                        if (!feedbackReadyAssignments.Contains(module.InstanceId!))
+                        {
+                            noGradeFeedbackSkipped = true;
+                            continue;
+                        }
+
+                        var feedback = record.CurrentFeedback;
+                        if (feedbackByAssignment.TryGetValue(module.InstanceId!, out var grades) &&
+                            grades.TryGetValue(record.UserId, out var existingGrade))
+                        {
+                            feedback = existingGrade.Feedback;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(feedback) &&
+                            gradingByStudent.TryGetValue(record.UserId, out var feedbackList))
+                        {
+                            feedbackList.Add(new AwaitingGradingItem(
+                                module.InstanceId!,
+                                module.Name,
+                                dueDate,
+                                record.ModifiedAt ?? record.CreatedAt));
+                        }
                         continue;
                     }
 
@@ -377,6 +448,51 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(gradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>> ReadFeedbackByAssignmentAsync(
+        string userExternalId,
+        IReadOnlyCollection<string> assignmentIds,
+        IEnumerable<string> studentIds,
+        ISet<string> failures,
+        CancellationToken cancellationToken)
+    {
+        const int maxConcurrency = 4;
+        using var limiter = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        var students = studentIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var tasks = assignmentIds.Select(async assignmentId =>
+        {
+            await limiter.WaitAsync(cancellationToken);
+            try
+            {
+                var grades = await gradeReadGateway!.GetExistingGradesAsync(
+                    userExternalId,
+                    assignmentId,
+                    students,
+                    cancellationToken);
+                return (AssignmentId: assignmentId, Grades: grades, Success: true);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                failures.Add(assignmentId);
+                return (AssignmentId: assignmentId,
+                    Grades: (IReadOnlyDictionary<string, AssignmentExistingGrade>)new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase),
+                    Success: false);
+            }
+            finally
+            {
+                limiter.Release();
+            }
+        }).ToArray();
+
+        var results = await Task.WhenAll(tasks);
+        return results
+            .Where(result => result.Success)
+            .ToDictionary(result => result.AssignmentId, result => result.Grades, StringComparer.OrdinalIgnoreCase);
+    }
 
     private static bool IsForCourse(CourseContentsSummary? contents, string courseId) =>
         contents is not null &&

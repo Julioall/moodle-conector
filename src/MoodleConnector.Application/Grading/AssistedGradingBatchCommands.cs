@@ -206,7 +206,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     IOptions<GradingLimitsOptions>? limits = null,
     IConnectorExecutionContext? executionContext = null,
     IMoodleConnectionSelection? connectionSelection = null,
-    IMoodleConnectorCredentialsProvider? credentialsProvider = null)
+    IMoodleConnectorCredentialsProvider? credentialsProvider = null,
+    IMoodleAssignmentSettingsGateway? settingsGateway = null,
+    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null)
     : IRequestHandler<CreateAssistedGradingBatchCommand, CreateAssistedGradingBatchResult>
 {
     private readonly GradingLimitsOptions _limits = limits?.Value ?? new GradingLimitsOptions();
@@ -284,7 +286,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             {
                 if (selectedItems.Count >= safeMaxItems ||
                     (selectedSubmissionIds.Count > 0 &&
-                     (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId))))
+                     (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId))) ||
+                    (request.OnlyAwaitingGrading && !submission.NeedsGrading))
                 {
                     continue;
                 }
@@ -413,6 +416,76 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     // unrelated Moodle failures from the direct read.
                 }
             }
+            var noGradeAssignments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var feedbackByAssignment = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(StringComparer.OrdinalIgnoreCase);
+            if (request.OnlyAwaitingGrading && settingsGateway is not null)
+            {
+                try
+                {
+                    var settings = await settingsGateway.GetCourseAssignmentSettingsAsync(
+                        request.UserExternalId,
+                        request.CourseId,
+                        cancellationToken);
+                    foreach (var assignmentId in assignmentIds)
+                    {
+                        if (settings.TryGetValue(assignmentId, out var assignmentSettings) &&
+                            assignmentSettings.IsGradable == false)
+                        {
+                            noGradeAssignments.Add(assignmentId);
+                        }
+                    }
+                }
+                catch
+                {
+                    // Without authoritative configuration, preserve the
+                    // existing grading-status behavior for numeric tasks.
+                }
+            }
+
+            if (noGradeAssignments.Count > 0 && gradeReadGateway is not null)
+            {
+                using var feedbackLimiter = new SemaphoreSlim(4, 4);
+                var studentIds = submissionBatches
+                    .SelectMany(batch => batch.Submissions)
+                    .Select(submission => submission.UserId)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var feedbackTasks = noGradeAssignments.Select(async assignmentId =>
+                {
+                    await feedbackLimiter.WaitAsync(cancellationToken);
+                    try
+                    {
+                        var grades = await gradeReadGateway.GetExistingGradesAsync(
+                            request.UserExternalId,
+                            effectiveAssignmentIds.GetValueOrDefault(assignmentId, assignmentId),
+                            studentIds,
+                            cancellationToken);
+                        return (AssignmentId: assignmentId, Grades: grades, Success: true);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        return (AssignmentId: assignmentId,
+                            Grades: (IReadOnlyDictionary<string, AssignmentExistingGrade>)new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase),
+                            Success: false);
+                    }
+                    finally
+                    {
+                        feedbackLimiter.Release();
+                    }
+                }).ToArray();
+                foreach (var feedback in await Task.WhenAll(feedbackTasks))
+                {
+                    if (feedback.Success)
+                    {
+                        feedbackByAssignment[feedback.AssignmentId] = feedback.Grades;
+                    }
+                }
+            }
+
             foreach (var assignmentId in assignmentIds)
             {
                 if (!batchesByAssignment.TryGetValue(assignmentId, out var submissionBatch))
@@ -443,7 +516,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 {
                     if (selectedItems.Count >= safeMaxItems ||
                         (selectedSubmissionIds.Count > 0 && !selectedSubmissionIds.Contains(submission.SubmissionId)) ||
-                        (request.OnlyAwaitingGrading && !NeedsGrading(submission)))
+                        (request.OnlyAwaitingGrading && !NeedsGrading(
+                            effectiveAssignmentIds[assignmentId],
+                            submission,
+                            noGradeAssignments,
+                            feedbackByAssignment)))
                     {
                         continue;
                     }
@@ -1007,7 +1084,24 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         return string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase) &&
                (string.Equals(submission.GradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(submission.GradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
+               string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool NeedsGrading(
+        string assignmentId,
+        AssignmentSubmissionRecord submission,
+        ISet<string> noGradeAssignments,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>> feedbackByAssignment)
+    {
+        if (!noGradeAssignments.Contains(assignmentId))
+        {
+            return NeedsGrading(submission);
+        }
+
+        return string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase) &&
+            feedbackByAssignment.TryGetValue(assignmentId, out var grades) &&
+            (!grades.TryGetValue(submission.UserId, out var grade) ||
+             (!grade.HasGrade && string.IsNullOrWhiteSpace(grade.Feedback)));
     }
 
     private static string BuildSubmissionSelectionKey(
