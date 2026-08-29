@@ -49,10 +49,11 @@ internal sealed class MoodleAssignmentGradingGateway(
         {
             ["assignmentid"] = ParseMoodleId(request.AssignmentId, "assignmentId").ToString(CultureInfo.InvariantCulture),
             ["userid"] = ParseMoodleId(request.StudentId, "studentId").ToString(CultureInfo.InvariantCulture),
-            // Moodle requires this field even on activities configured without
-            // a numeric grade. In that mode zero is only a transport sentinel;
-            // the internal review and audit retain Grade=null (feedback-only).
-            ["grade"] = (request.Grade ?? 0m).ToString(CultureInfo.InvariantCulture),
+            // mod_assign_save_grade requires the field even for feedback-only
+            // activities. Moodle defines -1 as ASSIGN_GRADE_NOT_SET; translate
+            // the internal null only at this transport boundary. Zero is a real
+            // academic grade and must never be used as the no-grade sentinel.
+            ["grade"] = (request.Grade ?? -1m).ToString(CultureInfo.InvariantCulture),
             ["attemptnumber"] = request.AttemptNumber.ToString(CultureInfo.InvariantCulture),
             ["addattempt"] = ToMoodleBool(request.AddAttempt),
             ["workflowstate"] = string.IsNullOrWhiteSpace(request.WorkflowState) ? "graded" : request.WorkflowState,

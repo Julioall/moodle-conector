@@ -24,7 +24,11 @@ public sealed record GradingCriterionSnapshot(
 
 public sealed record GradingRubricSnapshot(string? Description, string? RubricSource);
 
-public sealed record GradingScaleSnapshot(decimal? MaximumGrade, string? Name, string? Description);
+public sealed record GradingScaleSnapshot(
+    decimal? MaximumGrade,
+    string? Name,
+    string? Description,
+    string GradingMode = "unknown");
 
 public sealed record GradingSourceMetadata(
     string? ModuleType,
@@ -314,6 +318,16 @@ public sealed class GradingContextSnapshot
 
         var json = SerializeCanonicalPayload(snapshot);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
+    }
+
+    public static string ComputeCanonicalPayloadHash(string canonicalPayload)
+    {
+        if (string.IsNullOrWhiteSpace(canonicalPayload))
+        {
+            throw new ArgumentException("O payload canonico do contexto e obrigatorio.", nameof(canonicalPayload));
+        }
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalPayload))).ToLowerInvariant();
     }
 
     /// <summary>

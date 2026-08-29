@@ -32,6 +32,13 @@ public sealed class GradingContext
 
     public string? GradeScale { get; private init; }
 
+    /// <summary>
+    /// Modo de avaliacao confirmado na configuracao da atividade. A ausencia
+    /// de nota maxima, sozinha, nao distingue uma escala desconhecida de uma
+    /// atividade configurada apenas para feedback.
+    /// </summary>
+    public string GradingMode { get; private init; } = "unknown";
+
     public string? SubmissionText { get; private init; }
 
     public IReadOnlyList<GradingFileInfo> AttachedFiles { get; private init; } = [];
@@ -76,7 +83,8 @@ public sealed class GradingContext
         string? teacherInstructions,
         string? criteriaGenerationNotes = null,
         IReadOnlyList<GradingArtifactReferenceSnapshot>? artifactReferences = null,
-        IReadOnlyList<string>? additionalBlockers = null)
+        IReadOnlyList<string>? additionalBlockers = null,
+        string gradingMode = "unknown")
     {
         var blockers = additionalBlockers?
             .Where(blocker => !string.IsNullOrWhiteSpace(blocker))
@@ -139,6 +147,7 @@ public sealed class GradingContext
             RubricDescription = rubricDescription,
             MaxGrade = maxGrade,
             GradeScale = gradeScale,
+            GradingMode = NormalizeGradingMode(gradingMode, maxGrade),
             SubmissionText = submissionText,
             AttachedFiles = attachedFiles ?? [],
             ArtifactReferences = artifactReferences ?? [],
@@ -146,6 +155,19 @@ public sealed class GradingContext
             TeacherInstructions = teacherInstructions,
             CriteriaGenerationNotes = criteriaGenerationNotes,
             Blockers = blockers
+        };
+    }
+
+    private static string NormalizeGradingMode(string? gradingMode, decimal? maxGrade)
+    {
+        var normalized = gradingMode?.Trim().ToLowerInvariant();
+        return normalized switch
+        {
+            "numeric" when maxGrade is > 0 => "numeric",
+            "scale" => "scale",
+            "feedback_only" => "feedback_only",
+            _ when maxGrade is > 0 => "numeric",
+            _ => "unknown"
         };
     }
 }

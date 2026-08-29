@@ -104,6 +104,35 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreview_RestauraContextoPersistidoDeItemCriadoDuranteRollout()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(null, 0.8m, "Rascunho de feedback.");
+        item.ApplyTeacherReview(null, "Feedback final sem nota.", "teacher-1", 321, "approved", null);
+        var snapshot = AttachVersionedContext(item, batch, attachToItem: false);
+        fixture.GradingRepository.Batches.Add(batch);
+        fixture.GradingRepository.Items.Add(item);
+        fixture.GradingRepository.Snapshots.Add(GradingContextSnapshotDocument.FromSnapshot(snapshot));
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: true),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ReadyItems);
+        Assert.Contains("SOMENTE_FEEDBACK", result.ConfirmationText, StringComparison.Ordinal);
+        Assert.Equal(snapshot.ContextHash, item.ContextHash);
+        Assert.Equal(snapshot.Version, item.ContextVersion);
+        Assert.Null(Assert.Single(fixture.PendingActions.LastPayload!.Items).Grade);
+    }
+
+    [Fact]
     public async Task CreatePreview_BloqueiaNotaFinalAcimaDaNotaMaximaDasEvidencias()
     {
         var fixture = new Fixture();
@@ -945,7 +974,10 @@ public sealed class GradingLaunchCommandHandlerTests
         }
     }
 
-    private static void AttachVersionedContext(AssistedGradingItem item, AssistedGradingBatch batch)
+    private static GradingContextSnapshot AttachVersionedContext(
+        AssistedGradingItem item,
+        AssistedGradingBatch batch,
+        bool attachToItem = true)
     {
         var context = GradingContext.Build(
             item.Id,
@@ -970,7 +1002,12 @@ public sealed class GradingLaunchCommandHandlerTests
                 IncludeRubric: true,
                 IncludeSubmissionFiles: true,
                 IncludeCourseMaterials: false));
-        item.RecordContextSnapshot(snapshot);
+        if (attachToItem)
+        {
+            item.RecordContextSnapshot(snapshot);
+        }
+
+        return snapshot;
     }
 
     private sealed class FakeCurrentUserContext(string subject, IReadOnlyCollection<string>? scopes = null) : ICurrentUserContext
@@ -1000,6 +1037,7 @@ public sealed class GradingLaunchCommandHandlerTests
         public List<AssistedGradingBatch> Batches { get; } = [];
         public List<AssistedGradingItem> Items { get; } = [];
         public List<GradingEvidence> Evidence { get; } = [];
+        public List<GradingContextSnapshotDocument> Snapshots { get; } = [];
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
         {
@@ -1068,6 +1106,14 @@ public sealed class GradingLaunchCommandHandlerTests
                 .Where(evidence => evidence.GradingItemId == gradingItemId)
                 .ToArray());
         }
+
+        public Task<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>> ListLatestContextSnapshotsByItemsAsync(
+            IReadOnlyCollection<Guid> gradingItemIds,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>>(Snapshots
+                .Where(snapshot => gradingItemIds.Contains(snapshot.GradingItemId))
+                .GroupBy(snapshot => snapshot.GradingItemId)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(snapshot => snapshot.Version).First()));
 
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
             GradingBatchStatus status, CancellationToken cancellationToken)

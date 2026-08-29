@@ -1978,9 +1978,9 @@ public sealed record GradingContextForChatResult(
     [property: JsonPropertyName("courseId")] string CourseId,
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
-    // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
-    [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("maxGrade")] decimal? MaxGrade,
     [property: JsonPropertyName("isGradable")] bool? IsGradable,
+    [property: JsonPropertyName("gradingMode")] string GradingMode,
     [property: JsonPropertyName("submissionId")] string? SubmissionId,
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
@@ -2114,8 +2114,9 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             item.CourseId.ToString(CultureInfo.InvariantCulture),
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             assignmentName,
-            maxGrade ?? 0m,
+            maxGrade,
             isGradable,
+            ResolveGradingMode(maxGrade, isGradable),
             item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             assignmentStatement,
@@ -2129,6 +2130,15 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             warnings,
             item.ContextHash);
     }
+
+    private static string ResolveGradingMode(decimal? maxGrade, bool? isGradable) =>
+        isGradable switch
+        {
+            false => "feedback_only",
+            true when maxGrade is > 0 => "numeric",
+            true => "scale",
+            _ => "unknown"
+        };
 }
 
 // ============================================================
@@ -2153,9 +2163,9 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("submissionId")] string? SubmissionId,
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
-    // Mantém o contrato MCP numérico legado: 0 significa escala não confirmada.
-    [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("maxGrade")] decimal? MaxGrade,
     [property: JsonPropertyName("isGradable")] bool? IsGradable,
+    [property: JsonPropertyName("gradingMode")] string GradingMode,
     [property: JsonPropertyName("assignmentStatement")] string? AssignmentStatement,
     [property: JsonPropertyName("extractedCriteria")] string? ExtractedCriteria,
     [property: JsonPropertyName("extractedText")] string? ExtractedText,
@@ -2290,8 +2300,9 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
                 item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
                 assignmentName,
-                maxGrade ?? 0m,
+                maxGrade,
                 isGradable,
+                snapshotData.GradingMode,
                 assignmentStatement,
                 extractedCriteria,
                 combinedSubmission,
@@ -2363,7 +2374,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
     {
         if (string.IsNullOrWhiteSpace(payloadJson))
         {
-            return new SnapshotDisplayData(null, null, null, null, ["Snapshot de contexto ainda não publicado; escala não confirmada."]);
+            return new SnapshotDisplayData(null, null, null, null, "unknown", ["Snapshot de contexto ainda não publicado; escala não confirmada."]);
         }
 
         try
@@ -2374,21 +2385,35 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             var statement = GetString(root, "AssignmentStatement");
             decimal? maxGrade = null;
             bool? isGradable = null;
+            var gradingMode = "unknown";
             if (TryGetProperty(root, "GradingScale", out var scale) && scale.ValueKind == JsonValueKind.Object)
             {
                 maxGrade = GetDecimal(scale, "MaximumGrade");
-                isGradable = maxGrade is > 0m ||
-                    !string.IsNullOrWhiteSpace(GetString(scale, "Name")) ||
-                    !string.IsNullOrWhiteSpace(GetString(scale, "Description"));
+                gradingMode = GetString(scale, "GradingMode")?.Trim().ToLowerInvariant() switch
+                {
+                    "numeric" => "numeric",
+                    "scale" => "scale",
+                    "feedback_only" => "feedback_only",
+                    _ when maxGrade is > 0m => "numeric",
+                    _ when !string.IsNullOrWhiteSpace(GetString(scale, "Name")) ||
+                           !string.IsNullOrWhiteSpace(GetString(scale, "Description")) => "scale",
+                    _ => "unknown"
+                };
+                isGradable = gradingMode switch
+                {
+                    "feedback_only" => false,
+                    "numeric" or "scale" => true,
+                    _ => null
+                };
             }
 
             var warnings = GetStringArray(root, "Warnings").Concat(GetStringArray(root, "Blockers"))
                 .Distinct(StringComparer.Ordinal).ToArray();
-            return new SnapshotDisplayData(activityName, statement, maxGrade, isGradable, warnings);
+            return new SnapshotDisplayData(activityName, statement, maxGrade, isGradable, gradingMode, warnings);
         }
         catch (JsonException)
         {
-            return new SnapshotDisplayData(null, null, null, null, ["Snapshot de contexto inválido; escala não confirmada."]);
+            return new SnapshotDisplayData(null, null, null, null, "unknown", ["Snapshot de contexto inválido; escala não confirmada."]);
         }
     }
 
@@ -2407,7 +2432,11 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         TryGetProperty(element, name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static decimal? GetDecimal(JsonElement element, string name) =>
-        TryGetProperty(element, name, out var value) && value.TryGetDecimal(out var number) ? number : null;
+        TryGetProperty(element, name, out var value) &&
+        value.ValueKind == JsonValueKind.Number &&
+        value.TryGetDecimal(out var number)
+            ? number
+            : null;
 
     private static IEnumerable<string> GetStringArray(JsonElement element, string name) =>
         TryGetProperty(element, name, out var value) && value.ValueKind == JsonValueKind.Array
@@ -2419,6 +2448,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         string? AssignmentStatement,
         decimal? MaxGrade,
         bool? IsGradable,
+        string GradingMode,
         IReadOnlyList<string> Warnings);
 }
 
@@ -2760,11 +2790,17 @@ public sealed class SaveAiGradingBatchCommandHandler(
         try
         {
             using var document = JsonDocument.Parse(payloadJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return null;
             if (!document.RootElement.TryGetProperty("GradingScale", out var scale) &&
                 !document.RootElement.TryGetProperty("gradingScale", out scale)) return null;
+            if (scale.ValueKind != JsonValueKind.Object) return null;
             if (!scale.TryGetProperty("MaximumGrade", out var value) &&
                 !scale.TryGetProperty("maximumGrade", out value)) return null;
-            return value.TryGetDecimal(out var max) && max > 0 ? max : null;
+            return value.ValueKind == JsonValueKind.Number &&
+                value.TryGetDecimal(out var max) &&
+                max > 0
+                    ? max
+                    : null;
         }
         catch (JsonException) { return null; }
     }

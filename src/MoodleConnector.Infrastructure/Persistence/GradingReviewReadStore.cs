@@ -105,14 +105,19 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
         var maxGrade = payload?.GradingScale?.MaximumGrade is > 0
             ? payload.GradingScale.MaximumGrade
             : null;
-        var gradingMode = maxGrade is not null
-            ? "numeric"
-            : payload?.GradingScale is null
-                ? "unknown"
-                : !string.IsNullOrWhiteSpace(payload.GradingScale.Name) ||
-                  !string.IsNullOrWhiteSpace(payload.GradingScale.Description)
-                    ? "scale"
-                    : "feedback_only";
+        var gradingMode = payload?.GradingScale?.GradingMode?.Trim().ToLowerInvariant() switch
+        {
+            "numeric" when maxGrade is not null => "numeric",
+            "scale" => "scale",
+            "feedback_only" => "feedback_only",
+            _ when maxGrade is not null => "numeric",
+            _ when payload?.GradingScale is null => "unknown",
+            _ when !string.IsNullOrWhiteSpace(payload.GradingScale.Name) ||
+                   !string.IsNullOrWhiteSpace(payload.GradingScale.Description) => "scale",
+            // Compatibilidade com snapshots v1, que representavam uma
+            // atividade sem nota como um objeto de escala vazio.
+            _ => "feedback_only"
+        };
 
         var reason = item.PrivateNotesToTeacher
             ?? (warnings.Length > 0 ? warnings[0] : null)
@@ -170,5 +175,9 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
         IReadOnlyList<string>? Warnings,
         IReadOnlyList<string>? Blockers,
         GradingEvidenceCoverage? Coverage = null);
-    private sealed record ReviewScalePayload(decimal? MaximumGrade, string? Name, string? Description);
+    private sealed record ReviewScalePayload(
+        decimal? MaximumGrade,
+        string? Name,
+        string? Description,
+        string? GradingMode = null);
 }

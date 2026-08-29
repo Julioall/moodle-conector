@@ -103,7 +103,11 @@ public static class GradingContextSnapshotFactory
             rubric: string.IsNullOrWhiteSpace(context.RubricDescription)
                 ? null
                 : new GradingRubricSnapshot(context.RubricDescription, "artifact:rubric"),
-            gradingScale: new GradingScaleSnapshot(context.MaxGrade, context.GradeScale, null),
+            gradingScale: new GradingScaleSnapshot(
+                context.MaxGrade,
+                context.GradeScale,
+                null,
+                context.GradingMode),
             evidence: [],
             artifacts: artifacts,
             extraction: extraction,

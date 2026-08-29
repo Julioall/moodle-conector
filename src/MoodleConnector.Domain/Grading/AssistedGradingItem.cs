@@ -291,6 +291,31 @@ public sealed class AssistedGradingItem
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Repara a identidade desnormalizada do item a partir do documento
+    /// append-only já persistido. Isso cobre lotes criados durante rollout,
+    /// sem aceitar hashes ou payloads não verificados.
+    /// </summary>
+    public void RestoreContextSnapshotIdentity(GradingContextSnapshotDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (document.GradingItemId != Id || document.BatchId != BatchId)
+        {
+            throw new InvalidOperationException("O documento de contexto nao pertence ao item de correcao informado.");
+        }
+
+        var computedHash = GradingContextSnapshot.ComputeCanonicalPayloadHash(document.PayloadJson);
+        if (!string.Equals(computedHash, document.ContextHash, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("A integridade do documento de contexto nao pode ser confirmada.");
+        }
+
+        ContextVersion = document.Version;
+        ContextHash = document.ContextHash;
+        ContextStatus = document.ContextStatus;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void MarkProcessingStage(string stage, DateTimeOffset? at = null)
     {
         if (!GradingProcessingStage.IsKnown(stage))

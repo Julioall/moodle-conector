@@ -361,6 +361,69 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.DoesNotContain("cumprimente o aluno pelo nome", result.Instructions, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task FeedbackOnly_PrepareAndSave_PreserveNullGradeAndExplicitMode()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        var context = GradingContext.Build(
+            item.Id,
+            batch.Id,
+            "10",
+            "501",
+            "9001",
+            "101",
+            "Enunciado da atividade",
+            "Criterio qualitativo",
+            rubricDescription: null,
+            maxGrade: null,
+            gradeScale: null,
+            submissionText: "Texto entregue pelo estudante.",
+            attachedFiles: [],
+            courseMaterials: null,
+            teacherInstructions: null,
+            gradingMode: "feedback_only");
+        var snapshot = GradingContextSnapshotFactory.Create(item, context, new GradingContextOptions());
+        item.RecordContextSnapshot(snapshot);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        repository.AddSnapshot(snapshot);
+
+        var prepare = new PrepareAiGradingBatchQueryHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunAssignmentSettingsGateway(maxGrade: 0m));
+        var package = await prepare.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None);
+
+        var packageItem = Assert.Single(package.Items);
+        Assert.Null(packageItem.MaxGrade);
+        Assert.False(packageItem.IsGradable);
+        Assert.Equal("feedback_only", packageItem.GradingMode);
+
+        var save = new SaveAiGradingBatchCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunMoodleUserResolver(),
+            new RunAuditLogRepository(),
+            new RunAssignmentSettingsGateway(maxGrade: 0m));
+        var saved = await save.Handle(
+            new SaveAiGradingBatchCommand(
+                batch.Id,
+                [new AiGradingItemInput(
+                    item.Id,
+                    Nome: null,
+                    Nota: null,
+                    Feedback: "Feedback qualitativo gerado pela IA.")]),
+            CancellationToken.None);
+
+        Assert.Equal(1, saved.SavedItems);
+        Assert.Null(item.SuggestedGrade);
+        Assert.Equal(GradingItemStatus.DraftReady, item.Status);
+        Assert.Null(Assert.Single(saved.UpdatedItems!).SuggestedGrade);
+    }
+
     private sealed class RunCurrentUserContext(string subject) : ICurrentUserContext
     {
         public string Subject { get; } = subject;
@@ -617,6 +680,10 @@ public sealed class PendingGradingRunCommandHandlerTests
     {
         private readonly List<AssistedGradingBatch> _batches = [];
         private readonly List<AssistedGradingItem> _items = [];
+        private readonly List<GradingContextSnapshotDocument> _snapshots = [];
+
+        public void AddSnapshot(GradingContextSnapshot snapshot) =>
+            _snapshots.Add(GradingContextSnapshotDocument.FromSnapshot(snapshot));
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
         {
@@ -655,6 +722,13 @@ public sealed class PendingGradingRunCommandHandlerTests
             Task.FromResult<IReadOnlyList<GradingArtifact>>([]);
         public Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(Guid gradingItemId, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<GradingEvidence>>([]);
+        public Task<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>> ListLatestContextSnapshotsByItemsAsync(
+            IReadOnlyCollection<Guid> gradingItemIds,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>>(_snapshots
+                .Where(snapshot => gradingItemIds.Contains(snapshot.GradingItemId))
+                .GroupBy(snapshot => snapshot.GradingItemId)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(snapshot => snapshot.Version).First()));
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(GradingBatchStatus status, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<AssistedGradingBatch>>([]);
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(string createdBySubject, CancellationToken cancellationToken) =>

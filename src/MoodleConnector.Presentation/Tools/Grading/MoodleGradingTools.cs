@@ -2117,9 +2117,11 @@ public sealed class MoodleGradingTools(
                 : item.TextTruncated
                     ? $"texto truncado ({item.ExtractedText.Length} chars)"
                     : $"texto completo ({item.ExtractedText.Length} chars)";
-            var gradeInfo = item.MaxGrade > 0
-                ? $"nota maxima: {item.MaxGrade}"
-                : "nota maxima: nao confirmada (sugestao numerica bloqueada)";
+            var gradeInfo = item.GradingMode == "feedback_only"
+                ? "modo: somente feedback (sem nota)"
+                : item.MaxGrade > 0
+                    ? $"nota maxima: {item.MaxGrade}"
+                    : "nota maxima: nao confirmada (sugestao numerica bloqueada)";
             sb.AppendLine($"- **Aluno {item.StudentId}** (item {item.GradingItemId}): {textInfo}, {gradeInfo}");
         }
 
@@ -2311,9 +2313,11 @@ public sealed class MoodleGradingTools(
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"## Contexto para Correcao — {data.AssignmentName ?? $"Tarefa {data.AssignmentId}"}");
         sb.AppendLine();
-        sb.AppendLine(data.MaxGrade > 0
-            ? $"**Nota maxima:** {data.MaxGrade} pontos"
-            : "**Nota maxima:** nao confirmada — sugestao numerica bloqueada");
+        sb.AppendLine(data.GradingMode == "feedback_only"
+            ? "**Modo de avaliacao:** somente feedback, sem nota numerica"
+            : data.MaxGrade > 0
+                ? $"**Nota maxima:** {data.MaxGrade} pontos"
+                : "**Nota maxima:** nao confirmada — sugestao numerica bloqueada");
         sb.AppendLine($"**Aluno (ID):** {data.StudentId}");
         sb.AppendLine($"**Item ID:** {data.GradingItemId}");
         sb.AppendLine();

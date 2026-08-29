@@ -36,6 +36,7 @@ public sealed partial class GradingContextBuilder(
         string? criteria = null;
         string? rubricDescription = null;
         decimal? maxGrade = null;
+        var gradingMode = "unknown";
         string? courseMaterials = null;
         string? criteriaGenerationNotes = null;
         var attachedFiles = new List<GradingFileInfo>();
@@ -62,6 +63,14 @@ public sealed partial class GradingContextBuilder(
                         cancellationToken);
 
                     assignmentDescriptionFromSettings = settings?.Description;
+
+                    gradingMode = settings?.IsGradable switch
+                    {
+                        false => "feedback_only",
+                        true when settings.MaxGrade > 0 => "numeric",
+                        true => "scale",
+                        _ => "unknown"
+                    };
 
                     if (settings != null && settings.MaxGrade > 0)
                     {
@@ -150,11 +159,12 @@ public sealed partial class GradingContextBuilder(
             {
                 rubricDescription = Truncate(rubricArtifacts[0].ExtractedTextRef!, maxChars);
                 // Só usar regex na rubrica se a API Moodle não retornou MaxGrade
-                if (maxGrade == null)
+                if (maxGrade == null && gradingMode == "unknown")
                 {
                     maxGrade = ExtractMaxGrade(rubricDescription);
                     if (maxGrade != null)
                     {
+                        gradingMode = "numeric";
                         logger?.LogDebug(
                             "MaxGrade extraida via regex de rubrica: {MaxGrade} para assignment {AssignmentId}",
                             maxGrade, item.AssignmentId);
@@ -228,11 +238,14 @@ public sealed partial class GradingContextBuilder(
 
         // Fallback regex: tentar extrair nota máxima do texto do enunciado
         // SOMENTE quando a API Moodle e a rubrica não retornaram MaxGrade.
-        if (maxGrade == null && !string.IsNullOrWhiteSpace(assignmentStatement))
+        if (maxGrade == null &&
+            gradingMode == "unknown" &&
+            !string.IsNullOrWhiteSpace(assignmentStatement))
         {
             maxGrade = ExtractMaxGrade(assignmentStatement);
             if (maxGrade != null)
             {
+                gradingMode = "numeric";
                 logger?.LogDebug(
                     "MaxGrade extraida via regex do enunciado: {MaxGrade} para assignment {AssignmentId}",
                     maxGrade, item.AssignmentId);
@@ -323,7 +336,8 @@ public sealed partial class GradingContextBuilder(
             teacherInstructions: teacherInstructions,
             criteriaGenerationNotes: criteriaGenerationNotes,
             artifactReferences: artifactReferences,
-            additionalBlockers: contextBlockers);
+            additionalBlockers: contextBlockers,
+            gradingMode: gradingMode);
     }
 
     private static string? DescribeContextFailure(string? summaryRef)

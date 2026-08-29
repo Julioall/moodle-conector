@@ -111,12 +111,31 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         var launchable = selected
             .Where(item => IsReadyForLaunch(item, request.OnlyReviewed))
             .ToArray();
+        var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(
+            launchable.Select(item => item.Id).ToArray(),
+            cancellationToken);
+        var restoredContextIdentity = false;
         var scaleWarnings = new List<string>();
         var contextWarnings = new List<string>();
         var ready = new List<AssistedGradingItem>();
         var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
         foreach (var item in launchable)
         {
+            if (NeedsContextIdentityRestore(item) &&
+                snapshotsByItem.TryGetValue(item.Id, out var snapshotDocument))
+            {
+                try
+                {
+                    item.RestoreContextSnapshotIdentity(snapshotDocument);
+                    restoredContextIdentity = true;
+                }
+                catch (InvalidOperationException)
+                {
+                    // A mensagem segura e uniforme abaixo evita expor detalhes
+                    // de integridade e mantém o lançamento bloqueado.
+                }
+            }
+
             if (!HasVersionedContext(item))
             {
                 contextWarnings.Add(
@@ -143,6 +162,11 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             }
 
             ready.Add(item);
+        }
+
+        if (restoredContextIdentity)
+        {
+            await repository.SaveChangesAsync(cancellationToken);
         }
 
         var blocked = selected.Count - ready.Count;
@@ -322,6 +346,12 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         !string.IsNullOrWhiteSpace(item.ContextStatus) &&
         !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) &&
         !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
+
+    private static bool NeedsContextIdentityRestore(AssistedGradingItem item) =>
+        item.ContextVersion is null or <= 0 ||
+        string.IsNullOrWhiteSpace(item.ContextHash) ||
+        string.IsNullOrWhiteSpace(item.ContextStatus) ||
+        string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class ConfirmMoodleBatchLaunchCommandHandler(
