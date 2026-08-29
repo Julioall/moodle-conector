@@ -10,6 +10,9 @@ public sealed class AssistedGradingBatch
 
     public long CourseId { get; private init; }
 
+    /// <summary>Nome de exibição capturado na descoberta, quando autorizado.</summary>
+    public string? CourseDisplayName { get; private init; }
+
     public IReadOnlyList<long> AssignmentIds { get; private init; } = [];
 
     public string CreatedBySubject { get; private init; } = string.Empty;
@@ -93,7 +96,8 @@ public sealed class AssistedGradingBatch
         bool includeCourseMaterials = false,
         string? connectorClientId = null,
         string? connectionAlias = null,
-        string? idempotencyKey = null)
+        string? idempotencyKey = null,
+        string? courseDisplayName = null)
     {
         if (courseId <= 0)
         {
@@ -148,6 +152,7 @@ public sealed class AssistedGradingBatch
         return new AssistedGradingBatch
         {
             CourseId = courseId,
+            CourseDisplayName = string.IsNullOrWhiteSpace(courseDisplayName) ? null : courseDisplayName.Trim(),
             AssignmentIds = assignmentIds.Distinct().ToArray(),
             CreatedBySubject = createdBySubject.Trim(),
             CreatedByMoodleUserId = createdByMoodleUserId,

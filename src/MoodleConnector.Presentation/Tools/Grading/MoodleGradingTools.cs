@@ -12,6 +12,7 @@ using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
+using MoodleConnector.Domain.Grading;
 using MoodleConnector.Presentation.Tools;
 using MoodleConnector.Presentation.Configuration;
 
@@ -195,11 +196,11 @@ public sealed class MoodleGradingTools(
             submissionIds ?? [],
             maxItems,
             onlyAwaitingGrading,
-                includeRubric,
-                includeSubmissionFiles,
-                includeCourseMaterials,
-                teacherInstructions,
-                priority,
+            includeRubric,
+            includeSubmissionFiles,
+            includeCourseMaterials,
+            teacherInstructions,
+            priority,
             moodleAlias,
             idempotencyKey,
             cancellationToken);
@@ -429,6 +430,8 @@ public sealed class MoodleGradingTools(
         OutputSchemaType = typeof(ToolResponse<BatchDraftUpdateResult>))]
     [Description("Salva, em uma unica chamada, as revisoes humanas de nota e feedback de varios itens. Nao escreve no Moodle.")]
     public async Task<CallToolResult> AtualizarRascunhosCorrecaoLoteAsync(
+        [Description("Identificador do lote de correcao assistida.")]
+        Guid batchJobId,
         [Description("Revisoes selecionadas pelo professor/tutor.")]
         ReviewedGradingDraftInput[] items,
         CancellationToken cancellationToken = default)
@@ -438,37 +441,29 @@ public sealed class MoodleGradingTools(
             return ToolResultHelper.Error<BatchDraftUpdateResult>("Selecione pelo menos uma correcao para salvar.");
         }
 
-        var savedIds = new List<Guid>();
-        var failures = new List<BatchDraftUpdateFailure>();
-        foreach (var item in items)
-        {
-            try
-            {
-                await mediator.Send(new UpdateAssistedGradingDraftCommand(
-                    item.GradingItemId,
-                    item.FinalGrade,
-                    item.FinalFeedback,
-                    item.TeacherDecision,
-                    item.ReviewNotes,
-                    item.ExpectedReviewStatus,
-                    item.ExpectedDraftVersionHash), cancellationToken);
-                savedIds.Add(item.GradingItemId);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException)
-            {
-                failures.Add(new BatchDraftUpdateFailure(item.GradingItemId, ex.Message));
-            }
-        }
+        var commandItems = items.Select(item => new UpdateAssistedGradingDraftItemInput(
+            item.GradingItemId,
+            item.FinalGrade,
+            item.FinalFeedback,
+            item.TeacherDecision,
+            item.ReviewNotes,
+            item.ExpectedReviewStatus,
+            item.ExpectedDraftVersionHash
+        )).ToArray();
 
-        var data = new BatchDraftUpdateResult(savedIds.Count, failures.Count, savedIds, failures);
+        var result = await mediator.Send(new UpdateAssistedGradingDraftsBatchCommand(batchJobId, commandItems), cancellationToken);
+
+        var data = new BatchDraftUpdateResult(
+            result.SuccessCount,
+            result.FailureCount,
+            result.SavedIds,
+            result.Failures.Select(f => new BatchDraftUpdateFailure(f.GradingItemId, f.Message)).ToArray()
+        );
+
         var response = new ToolResponse<BatchDraftUpdateResult>(
-            failures.Count == 0 ? "ok" : "partial_failure",
+            result.FailureCount == 0 ? "ok" : "partial_failure",
             data,
-            failures.Select(failure => failure.Message).ToArray(),
+            result.Failures.Select(failure => failure.Message).ToArray(),
             AuditId: null,
             DateTimeOffset.UtcNow);
 
@@ -476,12 +471,12 @@ public sealed class MoodleGradingTools(
         {
             Content = [new TextContentBlock
             {
-                Text = failures.Count == 0
-                    ? $"{savedIds.Count} correcao(oes) revisada(s) foram salvas e estao prontas para preparar o envio."
-                    : $"Salvei {savedIds.Count} correcao(oes), mas {failures.Count} precisam ser revisadas novamente."
+                Text = result.FailureCount == 0
+                    ? $"{result.SuccessCount} correcao(oes) revisada(s) foram salvas e estao prontas para preparar o envio."
+                    : $"Salvei {result.SuccessCount} correcao(oes), mas {result.FailureCount} precisam ser revisadas novamente."
             }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = savedIds.Count == 0
+            IsError = result.SuccessCount == 0
         };
     }
 
@@ -1102,7 +1097,8 @@ public sealed class MoodleGradingTools(
                         ? null
                         : AssignmentSubmissionSnapshotProjector.FindAssignment(submissionsSnapshot.Data, assignmentId);
                     if (snapshotItem is { IsComplete: true } &&
-                        (filter != AssignmentSubmissionFilter.NeedsGrading || snapshotItem.IsGradable is not null))
+                        (filter != AssignmentSubmissionFilter.NeedsGrading ||
+                         snapshotItem.Coverage?.NeedsGradingComplete == true))
                     {
                         submissions = AssignmentSubmissionSnapshotProjector.ToPage(
                             snapshotItem,
@@ -1134,7 +1130,8 @@ public sealed class MoodleGradingTools(
                         usedLive = true;
                         if (snapshotScope is not null &&
                             (snapshotItem is null || !snapshotItem.IsComplete ||
-                             (filter == AssignmentSubmissionFilter.NeedsGrading && snapshotItem.IsGradable is null)))
+                            (filter == AssignmentSubmissionFilter.NeedsGrading &&
+                             snapshotItem.Coverage?.NeedsGradingComplete != true)))
                         {
                             refreshQueued |= await snapshotContext!.QueueAsync(
                                 snapshotScope,

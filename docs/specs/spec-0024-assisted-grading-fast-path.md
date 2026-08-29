@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft.
+Implementação concluída; homologação de desempenho e rollout pendentes.
 
 ## Objetivo
 
@@ -306,24 +306,24 @@ O detalhamento operacional está em
 
 ## Critérios de aceite
 
-- [ ] `review_batch_feedbacks` e `get_batch_grading_ui_state` executam zero chamadas Moodle.
-- [ ] Uma página de 50 itens usa no máximo cinco comandos SQL; alvo de três comandos.
+- [x] `review_batch_feedbacks` e `get_batch_grading_ui_state` executam zero chamadas Moodle.
+- [x] Uma página de 50 itens usa no máximo cinco comandos SQL; alvo de três comandos.
 - [ ] Abertura da revisão possui p95 menor ou igual a 10 s no ambiente da medição e p50 menor
       ou igual ao custo-base mais 2 s.
-- [ ] Falha de rede após salvar/confirmar não transforma gravação concluída em falha da operação.
-- [ ] Pacote de IA para 50 itens não executa N+1 e usa no máximo cinco comandos SQL, exceto
+- [x] Falha de rede após salvar/confirmar não transforma gravação concluída em falha da operação.
+- [x] Pacote de IA para 50 itens não executa N+1 e usa no máximo cinco comandos SQL, exceto
       escrita explícita de métricas.
-- [ ] Salvamento de 50 revisões é atômico por item, set-based, idempotente e não recarrega o
+- [x] Salvamento de 50 revisões é atômico por item, set-based, idempotente e não recarrega o
       lote item a item.
 - [ ] Listagem direta de uma atividade possui p95 menor ou igual a 6 s quando não há retry.
-- [ ] Snapshot responde `NeedsGrading` somente com coverage completo; incompletude retorna
+- [x] Snapshot responde `NeedsGrading` somente com coverage completo; incompletude retorna
       `partial_failure`/`unknown`, nunca lista vazia autoritativa.
 - [ ] `cmid` e `assignmentInstanceId` são resolvidos uma vez e persistidos separadamente.
-- [ ] Downloads de DOCX/PDF usam concorrência limitada, validam host/tamanho e não expõem token.
-- [ ] Item cujo arquivo não foi lido não recebe proposta de feedback apresentada como avaliação.
-- [ ] Atividade sem nota persiste `finalGrade=null`, exibe `feedback_only` e não publica nota 0.
+- [x] Downloads de DOCX/PDF usam concorrência limitada, validam host/tamanho e não expõem token.
+- [x] Item cujo arquivo não foi lido não recebe proposta de feedback apresentada como avaliação.
+- [x] Atividade sem nota persiste `finalGrade=null`, exibe `feedback_only` e não publica nota 0.
 - [ ] Confirmação não repete consultas de curso, participantes, enunciado ou escala.
-- [ ] Nenhuma escrita usa retry cego; resultado remoto desconhecido entra em `ExecutionUnknown`.
+- [x] Nenhuma escrita usa retry cego; resultado remoto desconhecido entra em `ExecutionUnknown`.
 - [ ] Fluxo completo, sem geração da IA, fica entre 25–40 s no cenário de referência.
 - [ ] Métricas expõem fase, query count, funções Moodle, retries, cache/snapshot hit e coverage,
       sem PII ou conteúdo acadêmico.

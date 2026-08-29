@@ -110,6 +110,27 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         return Math.Max(persistedCurrent ?? 0, localCurrent) + 1;
     }
 
+    public async Task<IReadOnlyDictionary<Guid, int>> GetNextVersionsAsync(
+        IReadOnlyCollection<Guid> gradingItemIds,
+        CancellationToken cancellationToken)
+    {
+        if (gradingItemIds.Count == 0) return new Dictionary<Guid, int>();
+        var persisted = await dbContext.AiGradingProposals
+            .Where(proposal => gradingItemIds.Contains(proposal.GradingItemId))
+            .GroupBy(proposal => proposal.GradingItemId)
+            .Select(group => new { group.Key, Version = group.Max(proposal => proposal.Version) })
+            .ToDictionaryAsync(row => row.Key, row => row.Version, cancellationToken);
+        foreach (var itemId in gradingItemIds)
+        {
+            var local = dbContext.AiGradingProposals.Local
+                .Where(proposal => proposal.GradingItemId == itemId)
+                .Select(proposal => (int?)proposal.Version)
+                .Max() ?? 0;
+            persisted[itemId] = Math.Max(persisted.GetValueOrDefault(itemId), local) + 1;
+        }
+        return persisted;
+    }
+
     public async Task PublishAsync(
         AiGradingProposal proposal,
         CancellationToken cancellationToken)
@@ -138,6 +159,34 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         await dbContext.AiGradingProposals.AddAsync(
             AiGradingProposalDocument.FromProposal(proposal),
             cancellationToken);
+    }
+
+    public async Task PublishManyAsync(
+        IReadOnlyCollection<AiGradingProposal> proposals,
+        CancellationToken cancellationToken)
+    {
+        if (proposals.Count == 0) return;
+        var itemIds = proposals.Select(proposal => proposal.ItemId).Distinct().ToArray();
+        var hashes = (await dbContext.AiGradingProposals.AsNoTracking()
+                .Where(document => itemIds.Contains(document.GradingItemId))
+                .Select(document => new { document.GradingItemId, document.Version, document.ProposalHash })
+                .ToArrayAsync(cancellationToken))
+            .Select(document => (document.GradingItemId, document.Version, document.ProposalHash))
+            .ToHashSet();
+        foreach (var proposal in proposals)
+        {
+            var key = (proposal.ItemId, proposal.Version, proposal.ProposalHash);
+            var localExists = dbContext.AiGradingProposals.Local.Any(document =>
+                document.GradingItemId == proposal.ItemId &&
+                document.Version == proposal.Version &&
+                document.ProposalHash == proposal.ProposalHash);
+            if (!hashes.Contains(key) && !localExists)
+            {
+                await dbContext.AiGradingProposals.AddAsync(
+                    AiGradingProposalDocument.FromProposal(proposal), cancellationToken);
+                hashes.Add(key);
+            }
+        }
     }
 
     public async Task<int> RedactExpiredArtifactTextAsync(
@@ -193,6 +242,17 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         return dbContext.GradingItems.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, AssistedGradingItem>> GetItemsAsync(
+        IReadOnlyCollection<Guid> ids,
+        CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0) return new Dictionary<Guid, AssistedGradingItem>();
+        return (await dbContext.GradingItems
+                .Where(item => ids.Contains(item.Id))
+                .ToArrayAsync(cancellationToken))
+            .ToDictionary(item => item.Id);
+    }
+
     public async Task<IReadOnlyList<AssistedGradingItem>> ListItemsByBatchAsync(
         Guid batchId,
         int page,
@@ -225,6 +285,23 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .ToArrayAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<GradingArtifact>>> ListArtifactsByItemsAsync(
+        IReadOnlyCollection<Guid> gradingItemIds,
+        CancellationToken cancellationToken)
+    {
+        if (gradingItemIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<GradingArtifact>>();
+        }
+
+        return (await dbContext.GradingArtifacts.AsNoTracking()
+                .Where(artifact => gradingItemIds.Contains(artifact.GradingItemId))
+                .OrderBy(artifact => artifact.CreatedAt)
+                .ToArrayAsync(cancellationToken))
+            .GroupBy(artifact => artifact.GradingItemId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<GradingArtifact>)group.ToArray());
+    }
+
     public async Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(
         Guid gradingItemId,
         CancellationToken cancellationToken)
@@ -234,6 +311,42 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .OrderBy(evidence => evidence.CreatedAt)
             .ThenBy(evidence => evidence.Id)
             .ToArrayAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<GradingEvidence>>> ListEvidenceByItemsAsync(
+        IReadOnlyCollection<Guid> gradingItemIds,
+        CancellationToken cancellationToken)
+    {
+        if (gradingItemIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<GradingEvidence>>();
+        }
+
+        return (await dbContext.GradingEvidence.AsNoTracking()
+                .Where(evidence => gradingItemIds.Contains(evidence.GradingItemId))
+                .OrderBy(evidence => evidence.CreatedAt)
+                .ThenBy(evidence => evidence.Id)
+                .ToArrayAsync(cancellationToken))
+            .GroupBy(evidence => evidence.GradingItemId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<GradingEvidence>)group.ToArray());
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>> ListLatestContextSnapshotsByItemsAsync(
+        IReadOnlyCollection<Guid> gradingItemIds,
+        CancellationToken cancellationToken)
+    {
+        if (gradingItemIds.Count == 0)
+        {
+            return new Dictionary<Guid, GradingContextSnapshotDocument>();
+        }
+
+        var snapshots = await dbContext.GradingContextSnapshots.AsNoTracking()
+            .Where(snapshot => gradingItemIds.Contains(snapshot.GradingItemId))
+            .OrderByDescending(snapshot => snapshot.Version)
+            .ToArrayAsync(cancellationToken);
+        return snapshots
+            .GroupBy(snapshot => snapshot.GradingItemId)
+            .ToDictionary(group => group.Key, group => group.First());
     }
 
     public async Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(

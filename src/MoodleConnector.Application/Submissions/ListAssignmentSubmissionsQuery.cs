@@ -102,54 +102,40 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         }
 
         var assignmentInstanceId = assignment.InstanceId ?? assignment.ActivityId;
-        var participants = await GetStudentsAsync(request.UserExternalId, course.CourseId, cancellationToken);
-        var submissions = await submissionsGateway.GetAssignmentSubmissionsAsync(
+        // Depois de resolver a atividade canônica, participantes e submissões
+        // são leituras independentes. Mantê-las concorrentes reduz a latência
+        // do fallback ao vivo sem compartilhar estado mutável entre gateways.
+        var participantsTask = GetStudentsAsync(request.UserExternalId, course.CourseId, cancellationToken);
+        var submissionsTask = submissionsGateway.GetAssignmentSubmissionsAsync(
             request.UserExternalId,
             assignmentInstanceId,
             ToMoodleSubmissionStatus(request.Filter),
             request.Since,
             request.Before,
             cancellationToken);
+        await Task.WhenAll(participantsTask, submissionsTask);
+        var participants = await participantsTask;
+        var submissions = await submissionsTask;
 
-        AssignmentSettingsSummary? assignmentSettings = null;
-        if (assignmentSettingsGateway is not null)
-        {
-            try
-            {
-                assignmentSettings = await assignmentSettingsGateway.GetAssignmentSettingsAsync(
-                    request.UserExternalId,
-                    course.CourseId,
-                    assignmentInstanceId,
-                    cancellationToken);
-            }
-            catch
-            {
-                // The submission status remains useful when optional grading
-                // configuration is unavailable. Do not infer no-grade here.
-            }
-        }
+        var settingsTask = ReadAssignmentSettingsAsync(
+            request.UserExternalId,
+            course.CourseId,
+            assignmentInstanceId,
+            cancellationToken);
+        var gradesTask = request.Filter == AssignmentSubmissionFilter.NeedsGrading
+            ? ReadExistingGradesAsync(
+                request.UserExternalId,
+                assignmentInstanceId,
+                submissions,
+                cancellationToken)
+            : Task.FromResult<IReadOnlyDictionary<string, AssignmentExistingGrade>?>(null);
+        await Task.WhenAll(settingsTask, gradesTask);
+        var assignmentSettings = await settingsTask;
 
         bool? isGradable = assignmentSettings is null
             ? null
             : assignmentSettings.IsGradable ?? (assignmentSettings.MaxGrade > 0 ? true : null);
-        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades = null;
-        if (request.Filter == AssignmentSubmissionFilter.NeedsGrading && gradeReadGateway is not null)
-        {
-            try
-            {
-                existingGrades = await gradeReadGateway.GetExistingGradesAsync(
-                    request.UserExternalId,
-                    assignmentInstanceId,
-                    submissions.Select(submission => submission.UserId).ToArray(),
-                    cancellationToken);
-            }
-            catch
-            {
-                // Do not turn a missing grade capability into zero pending
-                // submissions. Fall back to Moodle's submission status.
-                existingGrades = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
-            }
-        }
+        var existingGrades = await gradesTask;
 
         var rows = BuildRows(
             participants,
@@ -166,6 +152,60 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             assignment.ActivityId,
             assignment.Name,
             rows);
+    }
+
+    private async Task<AssignmentSettingsSummary?> ReadAssignmentSettingsAsync(
+        string userExternalId,
+        string courseId,
+        string assignmentId,
+        CancellationToken cancellationToken)
+    {
+        if (assignmentSettingsGateway is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await assignmentSettingsGateway.GetAssignmentSettingsAsync(
+                userExternalId,
+                courseId,
+                assignmentId,
+                cancellationToken);
+        }
+        catch
+        {
+            // The submission status remains useful when optional grading
+            // configuration is unavailable. Do not infer no-grade here.
+            return null;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, AssignmentExistingGrade>?> ReadExistingGradesAsync(
+        string userExternalId,
+        string assignmentId,
+        IReadOnlyList<AssignmentSubmissionRecord> submissions,
+        CancellationToken cancellationToken)
+    {
+        if (gradeReadGateway is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await gradeReadGateway.GetExistingGradesAsync(
+                userExternalId,
+                assignmentId,
+                submissions.Select(submission => submission.UserId).ToArray(),
+                cancellationToken);
+        }
+        catch
+        {
+            // Do not turn a missing grade capability into zero pending
+            // submissions. Fall back to Moodle's submission status.
+            return new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     internal async Task<CourseActivitySummary?> ResolveAssignmentAsync(

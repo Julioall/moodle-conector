@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
@@ -765,6 +766,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         var participantsGateway = services.GetRequiredService<IMoodleParticipantsGateway>();
         var submissionsGateway = services.GetRequiredService<IMoodleAssignmentSubmissionsGateway>();
         var assignmentSettingsGateway = services.GetRequiredService<IMoodleAssignmentSettingsGateway>();
+        var assignmentGradeReadGateway = services.GetRequiredService<IMoodleAssignmentGradeReadGateway>();
 
         if (work.Dataset is MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses)
         {
@@ -924,16 +926,42 @@ internal sealed class MoodleSnapshotSyncQueue(
                     }
                 }
 
+                // mod_assign_get_grades returns all grade rows for an assignment
+                // in one call. Keep the result keyed by assignment so the
+                // projector can persist current grade/feedback and mark grade
+                // coverage explicitly instead of guessing from submission
+                // status alone.
+                var existingGrades = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(
+                    StringComparer.OrdinalIgnoreCase);
+                var gradesPartial = false;
+                foreach (var assignmentId in assignmentIds)
+                {
+                    try
+                    {
+                        existingGrades[assignmentId] = await assignmentGradeReadGateway.GetExistingGradesAsync(
+                            work.UserExternalId,
+                            assignmentId,
+                            participants.Participants.Select(participant => participant.UserId).ToArray(),
+                            cancellationToken);
+                    }
+                    catch
+                    {
+                        gradesPartial = true;
+                    }
+                }
+
                 var snapshot = AssignmentSubmissionSnapshotProjector.Build(
                     contents,
                     participants,
                     batches,
-                    assignmentSettings);
+                    assignmentSettings,
+                    existingGrades);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Activities, courseSummary.CourseId, contents, finishedCourse ? "cold" : "hot", finishedCourse, cancellationToken);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Students, courseSummary.CourseId, participants, "hot", false, cancellationToken);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Submissions, courseSummary.CourseId, snapshot, finishedCourse ? "cold" : "hot", finishedCourse, cancellationToken);
                 records = CountRecords(snapshot);
-                partial = participants.HasMore || snapshot.Assignments.Any(assignment => !assignment.IsComplete);
+                partial = participants.HasMore || gradesPartial || snapshot.Assignments.Any(assignment =>
+                    !assignment.IsComplete || assignment.Coverage is not null && !assignment.Coverage.NeedsGradingComplete);
                 break;
             }
             default:

@@ -18,6 +18,9 @@ public sealed class AssistedGradingItem
 
     public long MoodleUserId { get; private init; }
 
+    /// <summary>Nome autorizado do estudante, sem ser usado como identidade.</summary>
+    public string? StudentDisplayName { get; private init; }
+
     public int? AttemptNumber { get; private init; }
 
     public GradingItemStatus Status { get; private set; } = GradingItemStatus.Pending;
@@ -96,7 +99,8 @@ public sealed class AssistedGradingItem
         long assignmentId,
         long? submissionId,
         long moodleUserId,
-        int? attemptNumber)
+        int? attemptNumber,
+        string? studentDisplayName = null)
     {
         if (batchId == Guid.Empty)
         {
@@ -115,6 +119,7 @@ public sealed class AssistedGradingItem
             AssignmentId = assignmentId,
             SubmissionId = submissionId,
             MoodleUserId = moodleUserId,
+            StudentDisplayName = string.IsNullOrWhiteSpace(studentDisplayName) ? null : studentDisplayName.Trim(),
             AttemptNumber = attemptNumber
         };
     }

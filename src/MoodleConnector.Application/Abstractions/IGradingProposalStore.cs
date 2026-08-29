@@ -10,5 +10,27 @@ public interface IGradingProposalStore
 {
     Task<int> GetNextVersionAsync(Guid gradingItemId, CancellationToken cancellationToken);
 
+    async Task<IReadOnlyDictionary<Guid, int>> GetNextVersionsAsync(
+        IReadOnlyCollection<Guid> gradingItemIds,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, int>();
+        foreach (var id in gradingItemIds)
+        {
+            result[id] = await GetNextVersionAsync(id, cancellationToken);
+        }
+        return result;
+    }
+
     Task PublishAsync(AiGradingProposal proposal, CancellationToken cancellationToken);
+
+    async Task PublishManyAsync(
+        IReadOnlyCollection<AiGradingProposal> proposals,
+        CancellationToken cancellationToken)
+    {
+        foreach (var proposal in proposals)
+        {
+            await PublishAsync(proposal, cancellationToken);
+        }
+    }
 }

@@ -404,6 +404,7 @@ Tools universais de leitura:
 | `moodle_check_function` | Verifica disponibilidade e classificação de risco local. | Implementada; diagnóstico técnico oculto em `Production` |
 | `moodle_list_available_flows` | Mostra estratégias selecionadas e funções ausentes por fluxo. | Implementada; exposta em `Production` |
 | `moodle_execute_read` | Executa somente funções explicitamente classificadas como leitura segura. | Implementada |
+| `moodle_download_file` | Baixa arquivo Moodle emitido pela conexão ativa, com host/path/MIME/tamanho validados e conteúdo como recurso MCP. | Implementada; depende de `UniversalMoodleFileDownloadEnabled=true` |
 | `moodle_prepare_write` | Cria prévia de escrita controlada sem chamar o Moodle. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
 | `moodle_confirm_write` | Executa uma prévia confirmada uma única vez. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
 

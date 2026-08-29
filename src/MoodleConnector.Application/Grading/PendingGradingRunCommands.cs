@@ -198,6 +198,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                                 IncludeCourseMaterials: request.IncludeCourseMaterials,
                                 TeacherInstructions: request.TeacherInstructions,
                                 Priority: request.Priority,
+                                CourseDisplayName: courseName,
                                 PrefetchedSubmissions: submissionChunk),
                             cancellationToken);
                     }
@@ -338,9 +339,11 @@ public sealed class StartPendingGradingRunCommandHandler(
         var courseMessages = new List<string>();
         foreach (var assignment in snapshot.Data.Assignments)
         {
-            if (!assignment.IsComplete)
+            if (!assignment.IsComplete ||
+                assignment.Coverage is not null && !assignment.Coverage.NeedsGradingComplete)
             {
-                var message = assignment.ErrorMessage ?? "Os dados da tarefa estão incompletos no snapshot.";
+                var message = assignment.ErrorMessage ??
+                    "Os dados da tarefa não possuem cobertura completa de participantes, submissões, configuração e notas.";
                 courseMessages.Add($"Tarefa {assignment.AssignmentId}: {message}");
                 warnings.Add($"Curso {course.CourseId}: tarefa {assignment.AssignmentId}: {message}");
                 continue;
@@ -366,6 +369,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                             IncludeCourseMaterials: request.IncludeCourseMaterials,
                             TeacherInstructions: request.TeacherInstructions,
                             Priority: request.Priority,
+                            CourseDisplayName: courseName,
                             PrefetchedSubmissions: submissionChunk),
                         cancellationToken);
 

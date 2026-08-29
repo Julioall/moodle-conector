@@ -27,15 +27,17 @@ public sealed record GradingReviewPageReadModel(
     int PageSize,
     bool HasMore,
     IReadOnlyList<GradingReviewItemReadModel> Items,
+    string? CourseName = null,
     string DataSource = "local_read_model",
     string ReadModelVersion = "1",
-    int QueryCount = 2);
+    int QueryCount = 3);
 
 public sealed record GradingReviewItemReadModel(
     Guid GradingItemId,
     string AssignmentId,
     string? SubmissionId,
     string StudentId,
+    string? StudentName,
     string Status,
     string ReviewStatus,
     string CommitStatus,
@@ -51,4 +53,5 @@ public sealed record GradingReviewItemReadModel(
     decimal? Confidence,
     string? ContextHash,
     IReadOnlyList<string> Warnings,
-    IReadOnlyList<GradingEvidence> Evidence);
+    IReadOnlyList<GradingEvidence> Evidence,
+    GradingEvidenceCoverage? Coverage = null);

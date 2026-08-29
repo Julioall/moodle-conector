@@ -1,5 +1,6 @@
 using MoodleConnector.Domain;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 
 namespace MoodleConnector.Application.Submissions;
 
@@ -13,7 +14,8 @@ public static class AssignmentSubmissionSnapshotProjector
         CourseContentsSummary contents,
         CourseParticipantsPage participants,
         IReadOnlyList<AssignmentSubmissionsBatch> batches,
-        IReadOnlyDictionary<string, AssignmentSettingsSummary>? assignmentSettings = null)
+        IReadOnlyDictionary<string, AssignmentSettingsSummary>? assignmentSettings = null,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>? existingGrades = null)
     {
         var batchesByAssignment = batches
             .GroupBy(batch => batch.AssignmentId, StringComparer.OrdinalIgnoreCase)
@@ -29,6 +31,8 @@ public static class AssignmentSubmissionSnapshotProjector
             {
                 var assignmentId = module.InstanceId!;
                 var dueAt = FindDueDate(module.Dates);
+                IReadOnlyDictionary<string, AssignmentExistingGrade>? moduleExistingGrades = null;
+                existingGrades?.TryGetValue(assignmentId, out moduleExistingGrades);
                 if (!batchesByAssignment.TryGetValue(assignmentId, out var batch))
                 {
                     return new AssignmentSubmissionsSnapshotItem(
@@ -41,7 +45,15 @@ public static class AssignmentSubmissionSnapshotProjector
                         ErrorCode: "assignment_snapshot_missing",
                         ErrorMessage: "O Moodle não retornou dados desta tarefa durante a sincronização.",
                         MaxGrade: FindMaxGrade(assignmentSettings, module),
-                        IsGradable: FindIsGradable(assignmentSettings, module));
+                        IsGradable: FindIsGradable(assignmentSettings, module),
+                        GradingMode: ResolveGradingMode(assignmentSettings, module),
+                        Coverage: assignmentSettings is null ? null : BuildCoverage(
+                            participants,
+                            batch: null,
+                            assignmentSettings,
+                            module,
+                            gradesComplete: existingGrades?.ContainsKey(assignmentId) == true),
+                        ReadAt: DateTimeOffset.UtcNow);
                 }
 
                 return new AssignmentSubmissionsSnapshotItem(
@@ -53,12 +65,21 @@ public static class AssignmentSubmissionSnapshotProjector
                         participants.Participants,
                         batch.Submissions,
                         dueAt,
-                        FindIsGradable(assignmentSettings, module)),
+                        FindIsGradable(assignmentSettings, module),
+                        moduleExistingGrades),
                     IsComplete: string.IsNullOrWhiteSpace(batch.ErrorCode),
                     ErrorCode: batch.ErrorCode,
                     ErrorMessage: batch.ErrorMessage,
                     MaxGrade: FindMaxGrade(assignmentSettings, module),
-                    IsGradable: FindIsGradable(assignmentSettings, module));
+                    IsGradable: FindIsGradable(assignmentSettings, module),
+                    GradingMode: ResolveGradingMode(assignmentSettings, module),
+                    Coverage: assignmentSettings is null ? null : BuildCoverage(
+                        participants,
+                        batch,
+                        assignmentSettings,
+                        module,
+                        gradesComplete: existingGrades?.ContainsKey(assignmentId) == true),
+                    ReadAt: DateTimeOffset.UtcNow);
             })
             .ToArray();
 
@@ -92,6 +113,11 @@ public static class AssignmentSubmissionSnapshotProjector
         var sourceRows = item.IsGradable == false
             ? item.Submissions.Select(row => row with { NeedsGrading = false }).ToArray()
             : item.Submissions;
+        if (filter == AssignmentSubmissionFilter.NeedsGrading &&
+            item.Coverage is not null && !item.Coverage.NeedsGradingComplete)
+        {
+            throw new InvalidOperationException("O snapshot de submissões não possui cobertura completa para responder NeedsGrading.");
+        }
         var rows = FilterRows(sourceRows, filter, since, before, includeLate, includeUngraded);
         var pageRows = rows.Skip((page - 1) * safePageSize).Take(safePageSize + 1).ToArray();
         return new AssignmentSubmissionsPage(
@@ -139,7 +165,8 @@ public static class AssignmentSubmissionSnapshotProjector
         IReadOnlyList<CourseParticipantSummary> participants,
         IReadOnlyList<AssignmentSubmissionRecord> submissions,
         DateTimeOffset? dueAt,
-        bool? isGradable = null)
+        bool? isGradable = null,
+        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades = null)
     {
         var latestSubmissionByUser = submissions
             .GroupBy(submission => submission.UserId, StringComparer.OrdinalIgnoreCase)
@@ -158,12 +185,16 @@ public static class AssignmentSubmissionSnapshotProjector
         foreach (var participant in participants)
         {
             latestSubmissionByUser.TryGetValue(participant.UserId, out var submission);
-            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable));
+            AssignmentExistingGrade? existingGrade = null;
+            existingGrades?.TryGetValue(participant.UserId, out existingGrade);
+            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable, existingGrade));
         }
 
         foreach (var submission in latestSubmissionByUser.Values.Where(submission => !participantIds.Contains(submission.UserId)))
         {
-            rows.Add(ToSummary(submission.UserId, null, submission, dueAt, isGradable));
+            AssignmentExistingGrade? existingGrade = null;
+            existingGrades?.TryGetValue(submission.UserId, out existingGrade);
+            rows.Add(ToSummary(submission.UserId, null, submission, dueAt, isGradable, existingGrade));
         }
 
         return rows
@@ -193,7 +224,8 @@ public static class AssignmentSubmissionSnapshotProjector
         string? fullName,
         AssignmentSubmissionRecord? submission,
         DateTimeOffset? dueAt,
-        bool? isGradable)
+        bool? isGradable,
+        AssignmentExistingGrade? existingGrade = null)
     {
         if (submission is null)
         {
@@ -211,7 +243,10 @@ public static class AssignmentSubmissionSnapshotProjector
                 AttemptNumber: null,
                 FileCount: 0,
                 HasOnlineText: false,
-                Files: []);
+                Files: [],
+                CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
+                CurrentFeedback: existingGrade?.Feedback,
+                GradeMax: existingGrade?.GradeMax);
         }
 
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
@@ -236,7 +271,10 @@ public static class AssignmentSubmissionSnapshotProjector
             submission.AttemptNumber,
             submission.FileCount,
             submission.HasOnlineText,
-            Files: submission.Files ?? []);
+            Files: submission.Files ?? [],
+            CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
+            CurrentFeedback: existingGrade?.Feedback,
+            GradeMax: existingGrade?.GradeMax);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter) =>
@@ -295,4 +333,33 @@ public static class AssignmentSubmissionSnapshotProjector
 
     private static bool? ResolveIsGradable(AssignmentSettingsSummary settings) =>
         settings.IsGradable ?? (settings.MaxGrade > 0 ? true : null);
+
+    private static AssignmentGradingMode ResolveGradingMode(
+        IReadOnlyDictionary<string, AssignmentSettingsSummary>? settings,
+        CourseModuleSummary module)
+    {
+        var isGradable = FindIsGradable(settings, module);
+        if (isGradable == false) return AssignmentGradingMode.FeedbackOnly;
+        if (isGradable == true)
+        {
+            return FindMaxGrade(settings, module) is > 0
+                ? AssignmentGradingMode.Numeric
+                : AssignmentGradingMode.Scale;
+        }
+
+        return AssignmentGradingMode.Unknown;
+    }
+
+    private static AssignmentSnapshotCoverage BuildCoverage(
+        CourseParticipantsPage participants,
+        AssignmentSubmissionsBatch? batch,
+        IReadOnlyDictionary<string, AssignmentSettingsSummary>? settings,
+        CourseModuleSummary module,
+        bool gradesComplete) =>
+        new(
+            ParticipantsComplete: !participants.HasMore,
+            SubmissionsComplete: batch is not null && string.IsNullOrWhiteSpace(batch.ErrorCode),
+            ConfigurationComplete: FindIsGradable(settings, module) is not null || FindMaxGrade(settings, module) is not null,
+            GradesComplete: gradesComplete || FindIsGradable(settings, module) == false,
+            DateTimeOffset.UtcNow);
 }

@@ -147,7 +147,7 @@ public class ToolMetadataRegistryTests
     {
         var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
 
-        Assert.Equal(109, reg.Entries.Count);
+        Assert.Equal(110, reg.Entries.Count);
         Assert.All(reg.Entries, entry =>
         {
             Assert.False(string.IsNullOrWhiteSpace(entry.Key));
@@ -181,7 +181,7 @@ public class ToolMetadataRegistryTests
         Assert.Equal(canonicalSubmission.RequiredMoodleCapabilities, submissionAlias.RequiredMoodleCapabilities);
 
         var inventory = new ToolSurfaceInventory(reg);
-        Assert.Equal(109, inventory.Total);
+        Assert.Equal(110, inventory.Total);
         Assert.Equal(9, inventory.StructuralCount);
         Assert.Equal(51, inventory.SpecializedCount);
         Assert.Equal(27, inventory.ControlledWriteCount);

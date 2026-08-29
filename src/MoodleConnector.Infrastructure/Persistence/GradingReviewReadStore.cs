@@ -65,6 +65,7 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
             .Select(candidate => new
             {
                 candidate.Id,
+                candidate.CourseDisplayName,
                 candidate.Status,
                 candidate.TotalItems,
                 candidate.ReadyItems,
@@ -90,6 +91,7 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
             safePageSize,
             rows.Length > safePageSize,
             items,
+            batch.CourseDisplayName,
             QueryCount: 3);
     }
 
@@ -100,12 +102,17 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
     {
         var payload = DeserializePayload(snapshot?.PayloadJson);
         var warnings = (payload?.Warnings ?? []).Concat(payload?.Blockers ?? []).Distinct(StringComparer.Ordinal).ToArray();
-        var maxGrade = payload?.GradingScale?.MaximumGrade;
-        var gradingMode = maxGrade is not null ? "numeric" : "feedback_only";
-        if (payload?.GradingScale is null)
-        {
-            gradingMode = "unknown";
-        }
+        var maxGrade = payload?.GradingScale?.MaximumGrade is > 0
+            ? payload.GradingScale.MaximumGrade
+            : null;
+        var gradingMode = maxGrade is not null
+            ? "numeric"
+            : payload?.GradingScale is null
+                ? "unknown"
+                : !string.IsNullOrWhiteSpace(payload.GradingScale.Name) ||
+                  !string.IsNullOrWhiteSpace(payload.GradingScale.Description)
+                    ? "scale"
+                    : "feedback_only";
 
         var reason = item.PrivateNotesToTeacher
             ?? (warnings.Length > 0 ? warnings[0] : null)
@@ -117,6 +124,7 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
             item.AssignmentId.ToString(System.Globalization.CultureInfo.InvariantCulture),
             item.SubmissionId?.ToString(System.Globalization.CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            item.StudentDisplayName,
             item.Status.ToString(),
             item.ReviewStatus.ToString(),
             item.CommitStatus.ToString(),
@@ -132,7 +140,8 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
             item.Confidence,
             snapshot?.ContextHash ?? item.ContextHash,
             warnings,
-            evidence);
+            evidence,
+            payload?.Coverage);
     }
 
     private static ReviewSnapshotPayload? DeserializePayload(string? json)
@@ -159,6 +168,7 @@ public sealed class GradingReviewReadStore(ConnectorDbContext dbContext) : IGrad
         string? ActivityName,
         ReviewScalePayload? GradingScale,
         IReadOnlyList<string>? Warnings,
-        IReadOnlyList<string>? Blockers);
+        IReadOnlyList<string>? Blockers,
+        GradingEvidenceCoverage? Coverage = null);
     private sealed record ReviewScalePayload(decimal? MaximumGrade, string? Name, string? Description);
 }

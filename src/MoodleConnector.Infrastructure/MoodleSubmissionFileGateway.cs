@@ -119,6 +119,11 @@ internal sealed class MoodleSubmissionFileGateway(
 
     private static bool IsAllowedFileEndpoint(Uri fileUri, Uri moodleUri)
     {
+        if (!IsPluginFilePath(fileUri.AbsolutePath))
+        {
+            return false;
+        }
+
         if (fileUri.Scheme == Uri.UriSchemeHttps && moodleUri.Scheme == Uri.UriSchemeHttps)
         {
             return true;
@@ -128,7 +133,22 @@ internal sealed class MoodleSubmissionFileGateway(
                moodleUri.Scheme == Uri.UriSchemeHttp &&
                (string.Equals(fileUri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
                 System.Net.IPAddress.TryParse(fileUri.Host, out var address) &&
-                System.Net.IPAddress.IsLoopback(address));
+               System.Net.IPAddress.IsLoopback(address));
+    }
+
+    private static bool IsPluginFilePath(string path)
+    {
+        foreach (var endpoint in new[] { "/pluginfile.php", "/webservice/pluginfile.php" })
+        {
+            var index = path.IndexOf(endpoint, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0 &&
+                (index + endpoint.Length == path.Length || path[index + endpoint.Length] == '/'))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string DetectMimeType(HttpResponseMessage response, string filename)

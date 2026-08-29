@@ -1,4 +1,5 @@
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 
@@ -156,6 +157,71 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
 
         Assert.Equal(100m, Assert.Single(snapshot.Assignments).MaxGrade);
         Assert.Equal(true, Assert.Single(snapshot.Assignments).IsGradable);
+    }
+
+    [Fact]
+    public void Build_persists_current_grade_feedback_and_complete_grade_coverage()
+    {
+        var snapshot = AssignmentSubmissionSnapshotProjector.Build(
+            Contents(DateTimeOffset.UtcNow.AddDays(1)),
+            Participants(),
+            [new AssignmentSubmissionsBatch("assignment-1", [new AssignmentSubmissionRecord(
+                "submission-1",
+                "student-1",
+                "submitted",
+                "graded",
+                DateTimeOffset.UtcNow.AddHours(-1),
+                DateTimeOffset.UtcNow.AddHours(-1),
+                1,
+                0,
+                false)])],
+            new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
+            {
+                ["assignment-1"] = new("assignment-1", 100m, "Assignment 1"),
+            },
+            new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["assignment-1"] = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["student-1"] = new("assignment-1", "student-1", 87.5m, true, "Bom trabalho", 100m)
+                }
+            });
+
+        var assignment = Assert.Single(snapshot.Assignments);
+        Assert.Equal(AssignmentGradingMode.Numeric, assignment.GradingMode);
+        Assert.NotNull(assignment.Coverage);
+        Assert.True(assignment.Coverage!.NeedsGradingComplete);
+        var submitted = Assert.Single(assignment.Submissions, row => row.UserId == "student-1");
+        Assert.Equal(87.5m, submitted.CurrentGrade);
+        Assert.Equal("Bom trabalho", submitted.CurrentFeedback);
+        Assert.Equal(100m, submitted.GradeMax);
+    }
+
+    [Fact]
+    public void Build_marks_grade_coverage_incomplete_when_grade_read_is_missing()
+    {
+        var snapshot = AssignmentSubmissionSnapshotProjector.Build(
+            Contents(DateTimeOffset.UtcNow.AddDays(1)),
+            Participants(),
+            [new AssignmentSubmissionsBatch("assignment-1", [])],
+            new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal)
+            {
+                ["assignment-1"] = new("assignment-1", 100m, "Assignment 1"),
+            });
+
+        var assignment = Assert.Single(snapshot.Assignments);
+        Assert.NotNull(assignment.Coverage);
+        Assert.False(assignment.Coverage!.NeedsGradingComplete);
+        Assert.Throws<InvalidOperationException>(() => AssignmentSubmissionSnapshotProjector.ToPage(
+            assignment,
+            "course-1",
+            AssignmentSubmissionFilter.NeedsGrading,
+            page: 1,
+            pageSize: 20,
+            since: null,
+            before: null,
+            includeLate: true,
+            includeUngraded: true));
     }
 
     private static CourseContentsSummary Contents(DateTimeOffset dueAt) =>

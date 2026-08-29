@@ -84,6 +84,7 @@ humana e minimização de dados.
 | `moodle_check_function` | Verificar Função Moodle | `ReadOnly` | Consulta disponibilidade e classificação local de risco | Não | Implementada; diagnóstico técnico, oculta em `Production` |
 | `moodle_list_available_flows` | Listar Fluxos Moodle Disponíveis | `ReadOnly` | Mostra a estratégia compatível e as funções ausentes | Não | Implementada; exposta em `Production` para roteamento |
 | `moodle_execute_read` | Executar Leitura Moodle | `ReadOnly` | Executa somente funções classificadas como leitura | Não | Implementada |
+| `moodle_download_file` | Download Moodle File | `SensitiveRead` | Baixa somente pluginfile.php autorizado e devolve blob MCP sem token | Não | Implementada; flag `UniversalMoodleFileDownloadEnabled` |
 | `moodle_prepare_write` | Preparar Escrita Moodle | `HumanConfirmedWrite` | Prévia, hash de parâmetros e ação pendente | Não | Implementada; desativada por padrão |
 | `moodle_confirm_write` | Confirmar Escrita Moodle | `HumanConfirmedWrite` | Não | Executa escrita controlada após confirmação literal | Implementada; desativada por padrão |
 | `save_user_memory_document` | Salvar documento de memoria do usuario | `InternalStateWrite` | Nao | Salva documento interno e link de memoria | Implementada |

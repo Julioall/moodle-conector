@@ -23,19 +23,19 @@ custo-base atual.
 
 | ID | Prioridade | Entrega | Dependência | Estado |
 |---|---:|---|---|---|
-| FAST-00 | P0 | Baseline e métricas internas por fase | — | Pendente |
-| FAST-01 | P0 | `IGradingReviewReadStore` paginado | FAST-00 | Pendente |
-| FAST-02 | P0 | UI de revisão sem Moodle | FAST-01 | Pendente |
-| FAST-03 | P0 | Nomes e contexto vindos do banco/snapshot | FAST-01 | Pendente |
-| FAST-04 | P0 | Resposta de save reconciliada localmente | FAST-02 | Pendente |
-| FAST-05 | P1 | Pacote IA set-based | FAST-01 | Pendente |
-| FAST-06 | P1 | Salvamento de revisões em lote | FAST-01 | Pendente |
-| FAST-07 | P1 | Snapshot com coverage de avaliação | FAST-00 | Pendente |
-| FAST-08 | P1 | Descoberta/listagem direta e fallback paralelo | FAST-07 | Pendente |
-| FAST-09 | P1 | Downloads autenticados concorrentes no worker | SPEC-0022 | Pendente |
-| FAST-10 | P2 | `moodle_download_file` controlada | FAST-09, SPEC-0014 | Pendente |
-| FAST-11 | P2 | Certificação da escrita universal existente | SPEC-0011/0012 | Pendente |
-| FAST-12 | P0 | Carga, fault injection e rollout | FAST-01–11 aplicáveis | Pendente |
+| FAST-00 | P0 | Baseline e métricas internas por fase | — | Parcial — telemetria base e métricas da revisão implementadas; benchmark pendente |
+| FAST-01 | P0 | `IGradingReviewReadStore` paginado | FAST-00 | Implementado |
+| FAST-02 | P0 | UI de revisão sem Moodle | FAST-01 | Implementado |
+| FAST-03 | P0 | Nomes e contexto vindos do banco/snapshot | FAST-01 | Implementado |
+| FAST-04 | P0 | Resposta de save reconciliada localmente | FAST-02 | Implementado |
+| FAST-05 | P1 | Pacote IA set-based | FAST-01 | Implementado |
+| FAST-06 | P1 | Salvamento de revisões em lote | FAST-01 | Implementado |
+| FAST-07 | P1 | Snapshot com coverage de avaliação | FAST-00 | Implementado |
+| FAST-08 | P1 | Descoberta/listagem direta e fallback paralelo | FAST-07 | Implementado |
+| FAST-09 | P1 | Downloads autenticados concorrentes no worker | SPEC-0022 | Implementado |
+| FAST-10 | P2 | `moodle_download_file` controlada | FAST-09, SPEC-0014 | Implementado atrás de flag |
+| FAST-11 | P2 | Certificação da escrita universal existente | SPEC-0011/0012 | Preservado; homologação manual pendente |
+| FAST-12 | P0 | Carga, fault injection e rollout | FAST-01–11 aplicáveis | Pendente — requer homologação no ambiente Moodle |
 
 ## Fase 0 — baseline e instrumentação
 

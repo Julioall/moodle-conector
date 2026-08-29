@@ -1,4 +1,5 @@
 using MoodleConnector.Domain;
+using MoodleConnector.Application.MoodleApi;
 
 namespace MoodleConnector.Application.Abstractions;
 
@@ -37,20 +38,42 @@ public interface IMoodleAssignmentSubmissionsGateway
         DateTimeOffset? before,
         CancellationToken cancellationToken)
     {
-        var result = new List<AssignmentSubmissionsBatch>(assignmentIds.Count);
-        foreach (var assignmentId in assignmentIds)
+        const int maxConcurrentFallbackReads = 4;
+        using var gate = new SemaphoreSlim(maxConcurrentFallbackReads, maxConcurrentFallbackReads);
+        var results = await Task.WhenAll(assignmentIds.Select(async assignmentId =>
         {
-            var submissions = await GetAssignmentSubmissionsAsync(
-                userExternalId,
-                assignmentId,
-                status,
-                since,
-                before,
-                cancellationToken);
-            result.Add(new AssignmentSubmissionsBatch(assignmentId, submissions));
-        }
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                var submissions = await GetAssignmentSubmissionsAsync(
+                    userExternalId,
+                    assignmentId,
+                    status,
+                    since,
+                    before,
+                    cancellationToken);
+                return new AssignmentSubmissionsBatch(assignmentId, submissions);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var failure = MoodleErrorContract.Describe(exception);
+                return new AssignmentSubmissionsBatch(
+                    assignmentId,
+                    [],
+                    failure.ErrorCode,
+                    failure.Message);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
 
-        return result;
+        return results;
     }
 }
 

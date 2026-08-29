@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -10,12 +11,14 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
 [McpServerToolType]
 public sealed class MoodleGradingReviewAppTools(
-    IMediator mediator)
+    IMediator mediator,
+    IGradingOperationTelemetry? telemetry = null)
 {
     [McpServerTool(
         Name = "review_batch_feedbacks",
@@ -42,6 +45,7 @@ public sealed class MoodleGradingReviewAppTools(
         }
 
         GradingReviewPageReadModel page;
+        var stopwatch = Stopwatch.StartNew();
         try
         {
             page = await mediator.Send(
@@ -54,8 +58,10 @@ public sealed class MoodleGradingReviewAppTools(
         }
         catch
         {
+            telemetry?.RecordPhase("review", "read_model", "error", stopwatch.Elapsed.TotalMilliseconds);
             return Error("Não foi possível consultar o lote de correção assistida neste momento.");
         }
+        telemetry?.RecordPhase("review", "read_model", "success", stopwatch.Elapsed.TotalMilliseconds, page.QueryCount, page.Items.Count);
 
         var enrichedItems = page.Items.Select(item =>
         {
@@ -63,12 +69,18 @@ public sealed class MoodleGradingReviewAppTools(
             var capabilities = ResolveCapabilities(workflowState);
             return new GradingReviewItem(
                 item.GradingItemId, item.AssignmentId, item.SubmissionId, item.StudentId,
-                StudentName: null, item.Status, item.ReviewStatus, item.CommitStatus,
+                StudentName: item.StudentName, item.Status, item.ReviewStatus, item.CommitStatus,
                 workflowState, capabilities.CanEdit, capabilities.CanSelect, capabilities.CanSend,
                 item.StatusReason, item.DraftVersionHash, item.FinalGrade, item.FinalFeedback,
-                item.SuggestedGrade, item.DraftFeedback, item.MaxGrade ?? 0m,
-                item.GradingMode == "numeric", item.AssignmentName, item.Confidence,
-                item.ContextHash, item.GradingMode, item.Warnings);
+                item.SuggestedGrade, item.DraftFeedback, item.MaxGrade,
+                item.GradingMode switch
+                {
+                    "numeric" => true,
+                    "feedback_only" => false,
+                    _ => null
+                },
+                item.AssignmentName, item.Confidence,
+                item.ContextHash, item.GradingMode, item.Warnings, item.Coverage);
         }).ToArray();
 
         var appData = new GradingReviewAppData(
@@ -83,7 +95,7 @@ public sealed class MoodleGradingReviewAppTools(
             page.PageSize,
             page.HasMore,
             enrichedItems,
-            CourseName: null,
+            CourseName: page.CourseName,
             DataSource: page.DataSource,
             ReadModelVersion: page.ReadModelVersion,
             QueryCount: page.QueryCount);
@@ -216,8 +228,8 @@ public sealed class MoodleGradingReviewAppTools(
                 ? item.FinalFeedback
                 : item.DraftFeedback;
             var grade = displayGrade.HasValue
-                ? item.MaxGrade > 0
-                    ? $"{displayGrade.Value:F1}/{item.MaxGrade:F0}"
+                ? item.MaxGrade is > 0
+                    ? $"{displayGrade.Value:F1}/{item.MaxGrade.Value:F0}"
                     : $"{displayGrade.Value:F1}/?"
                 : "—";
 
@@ -439,10 +451,11 @@ public sealed record GradingReviewItem(
     [property: JsonPropertyName("finalFeedback")] string? FinalFeedback,
     [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
     [property: JsonPropertyName("draftFeedback")] string? DraftFeedback,
-    [property: JsonPropertyName("maxGrade")] decimal MaxGrade,
+    [property: JsonPropertyName("maxGrade")] decimal? MaxGrade,
     [property: JsonPropertyName("isGradable")] bool? IsGradable,
     [property: JsonPropertyName("assignmentName")] string? AssignmentName,
     [property: JsonPropertyName("confidence")] decimal? Confidence,
     [property: JsonPropertyName("contextHash")] string? ContextHash = null,
     [property: JsonPropertyName("gradingMode")] string GradingMode = "unknown",
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string>? Warnings = null);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string>? Warnings = null,
+    [property: JsonPropertyName("coverage")] GradingEvidenceCoverage? Coverage = null);

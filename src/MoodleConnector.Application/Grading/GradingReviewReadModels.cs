@@ -27,10 +27,13 @@ public sealed class GetGradingReviewPageQueryHandler(
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
-        return await readStore.GetPageAsync(
+        var page = await readStore.GetPageAsync(
             batch.Id,
             Math.Max(1, request.Page),
             Math.Clamp(request.PageSize, 1, 100),
             cancellationToken);
+        // The read store executes three set-based queries. Include the single
+        // ownership lookup above in the diagnostic count returned to the UI.
+        return page with { QueryCount = page.QueryCount + 1 };
     }
 }

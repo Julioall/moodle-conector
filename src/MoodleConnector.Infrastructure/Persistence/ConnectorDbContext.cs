@@ -475,6 +475,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
                 value => value.Aggregate(0, (hash, item) => HashCode.Combine(hash, item.GetHashCode())),
                 value => value.ToArray()));
         batch.Property(x => x.CreatedBySubject).HasMaxLength(200).IsRequired();
+        batch.Property(x => x.CourseDisplayName).HasMaxLength(240);
         batch.Property(x => x.ConnectorClientId).HasMaxLength(64);
         batch.Property(x => x.ConnectionAlias).HasMaxLength(64);
         batch.Property(x => x.IdempotencyKey).HasMaxLength(128);
@@ -497,6 +498,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         item.ToTable("grading_item");
         item.HasKey(x => x.Id);
         item.Property(x => x.Status).HasConversion<string>().HasMaxLength(80).IsRequired();
+        item.Property(x => x.StudentDisplayName).HasMaxLength(240);
         item.Property(x => x.ProcessingStage).HasMaxLength(32).IsRequired();
         item.Property(x => x.ProcessingStageUpdatedAt);
         item.Property(x => x.ReviewStatus).HasConversion<string>().HasMaxLength(80).IsRequired();

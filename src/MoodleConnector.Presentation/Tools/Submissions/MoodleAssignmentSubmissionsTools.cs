@@ -287,7 +287,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
                         // A snapshot only stores the latter, so it cannot
                         // distinguish an empty grade from Moodle's -1 marker.
                         if (item is { IsComplete: true } &&
-                            filter != AssignmentSubmissionFilter.NeedsGrading)
+                            (filter != AssignmentSubmissionFilter.NeedsGrading ||
+                             item.Coverage?.NeedsGradingComplete == true))
                         {
                             submissionsPage = AssignmentSubmissionSnapshotProjector.ToPage(
                                 item,

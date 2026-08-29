@@ -48,6 +48,27 @@ public sealed class MoodleSubmissionFileGatewayTests
         Assert.Equal(1, tokens.Invalidations);
     }
 
+    [Fact]
+    public async Task DownloadFileAsync_AceitaEndpointWebservicePluginfile()
+    {
+        var handler = new Handler();
+        var sut = new MoodleSubmissionFileGateway(
+            new HttpClient(handler),
+            Options.Create(new MoodleApiOptions()),
+            new TokenProvider(),
+            new CredentialsProvider());
+
+        var result = await sut.DownloadFileAsync(
+            "1",
+            "https://moodle.example/webservice/pluginfile.php/1/a.pdf",
+            "a.pdf",
+            1000,
+            CancellationToken.None);
+
+        Assert.Equal(3, result.SizeBytes);
+        Assert.Contains("/webservice/pluginfile.php/", handler.Uri!.AbsolutePath, StringComparison.Ordinal);
+    }
+
     private sealed class Handler(HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler
     {
         public Uri? Uri { get; private set; }

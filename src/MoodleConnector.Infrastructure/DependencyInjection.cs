@@ -90,6 +90,7 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddSingleton<MoodleSnapshotMetrics>();
         services.AddSingleton<IMoodleCallTelemetry, MoodleCallMetrics>();
+        services.AddSingleton<IGradingOperationTelemetry, GradingOperationTelemetry>();
         services.AddSingleton<IMcpToolUsageTelemetry, McpToolUsageMetrics>();
         services.AddScoped<IMoodleSnapshotStore, MoodleSnapshotStore>();
         services.AddSingleton<MoodleSnapshotSyncQueue>();

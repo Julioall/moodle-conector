@@ -20,7 +20,16 @@ public sealed class GradingLimitsOptions
 
     public int MoodleMaxConcurrentRequests { get; init; } = 5;
 
-    public int FileDownloadWorkers { get; init; } = 5;
+    /// <summary>
+    /// Limite legado por item. Os limites explícitos abaixo também protegem
+    /// o lote e a conexão; manter os três permite uma migração de configuração
+    /// sem aumentar a concorrência acidentalmente.
+    /// </summary>
+    public int FileDownloadWorkers { get; init; } = 4;
+
+    public int MaxConcurrentDownloadsPerConnection { get; init; } = 4;
+
+    public int MaxConcurrentDownloadsPerBatch { get; init; } = 4;
 
     public int ExtractionWorkers { get; init; } = 4;
 

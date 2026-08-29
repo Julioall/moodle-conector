@@ -19,4 +19,26 @@ public sealed record AssignmentSubmissionsSnapshotItem(
     string? ErrorCode = null,
     string? ErrorMessage = null,
     decimal? MaxGrade = null,
-    bool? IsGradable = null);
+    bool? IsGradable = null,
+    AssignmentGradingMode GradingMode = AssignmentGradingMode.Unknown,
+    AssignmentSnapshotCoverage? Coverage = null,
+    DateTimeOffset? ReadAt = null);
+
+public enum AssignmentGradingMode
+{
+    Unknown = 0,
+    Numeric = 1,
+    Scale = 2,
+    FeedbackOnly = 3
+}
+
+public sealed record AssignmentSnapshotCoverage(
+    bool ParticipantsComplete,
+    bool SubmissionsComplete,
+    bool ConfigurationComplete,
+    bool GradesComplete,
+    DateTimeOffset ObservedAt)
+{
+    public bool NeedsGradingComplete =>
+        ParticipantsComplete && SubmissionsComplete && ConfigurationComplete && GradesComplete;
+}

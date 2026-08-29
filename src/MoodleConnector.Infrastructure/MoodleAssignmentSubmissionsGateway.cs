@@ -72,17 +72,24 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
                 // single activity is unavailable to the current role. Retry
                 // omitted IDs individually so one bad Extra activity does not
                 // erase valid submissions from the remaining activities.
+                var missingAssignmentIds = new List<string>();
                 foreach (var assignmentId in chunk)
                 {
                     if (returnedAssignments.TryGetValue(assignmentId, out var batch))
                     {
                         result.Add(batch);
-                        continue;
                     }
+                    else
+                    {
+                        missingAssignmentIds.Add(assignmentId);
+                    }
+                }
 
-                    result.Add(await GetSingleAssignmentBatchAsync(
+                if (missingAssignmentIds.Count > 0)
+                {
+                    result.AddRange(await GetSingleAssignmentBatchesConcurrentlyAsync(
                         credentials,
-                        assignmentId,
+                        missingAssignmentIds,
                         status,
                         since,
                         before,
@@ -98,20 +105,48 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
                 // A single invalid/hidden assignment can make Moodle reject
                 // the complete array. Fall back to isolated calls and retain
                 // a structured failure for assignments that still fail.
-                foreach (var assignmentId in chunk)
-                {
-                    result.Add(await GetSingleAssignmentBatchAsync(
-                        credentials,
-                        assignmentId,
-                        status,
-                        since,
-                        before,
-                        cancellationToken));
-                }
+                result.AddRange(await GetSingleAssignmentBatchesConcurrentlyAsync(
+                    credentials,
+                    chunk,
+                    status,
+                    since,
+                    before,
+                    cancellationToken));
             }
         }
 
         return result;
+    }
+
+    private async Task<IReadOnlyList<AssignmentSubmissionsBatch>> GetSingleAssignmentBatchesConcurrentlyAsync(
+        MoodleConnectorCredentials credentials,
+        IReadOnlyCollection<string> assignmentIds,
+        string? status,
+        DateTimeOffset? since,
+        DateTimeOffset? before,
+        CancellationToken cancellationToken)
+    {
+        const int maxConcurrentFallbackReads = 4;
+        using var gate = new SemaphoreSlim(maxConcurrentFallbackReads, maxConcurrentFallbackReads);
+        var batches = await Task.WhenAll(assignmentIds.Select(async assignmentId =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await GetSingleAssignmentBatchAsync(
+                    credentials,
+                    assignmentId,
+                    status,
+                    since,
+                    before,
+                    cancellationToken);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+        return batches;
     }
 
     public async Task<IReadOnlyList<AssignmentSubmissionRecord>> GetAssignmentSubmissionsAsync(

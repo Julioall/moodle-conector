@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
 using Microsoft.Extensions.Options;
@@ -26,7 +28,8 @@ public sealed record CreateAssistedGradingBatchCommand(
     string? TeacherInstructions = null,
     string Priority = "normal",
     IReadOnlyList<AssignmentSubmissionSummary>? PrefetchedSubmissions = null,
-    string? IdempotencyKey = null) : IRequest<CreateAssistedGradingBatchResult>;
+    string? IdempotencyKey = null,
+    string? CourseDisplayName = null) : IRequest<CreateAssistedGradingBatchResult>;
 
 public sealed record AssistedGradingBatchDiscoveryFailure(
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
@@ -297,7 +300,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                     submission.SubmissionId,
                     submission.UserId,
                     submission.AttemptNumber,
-                    submission.Files ?? []));
+                    submission.Files ?? [],
+                    submission.FullName));
                 resolvedCourseId ??= request.CourseId;
             }
         }
@@ -532,7 +536,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             includeCourseMaterials: request.IncludeCourseMaterials,
             connectorClientId: connectorClientId,
             connectionAlias: connectionAlias,
-            idempotencyKey: normalizedIdempotencyKey);
+            idempotencyKey: normalizedIdempotencyKey,
+            courseDisplayName: request.CourseDisplayName);
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
@@ -545,7 +550,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 ParsePositiveLong(seed.AssignmentId, "assignmentId"),
                 ParseNullablePositiveLong(seed.SubmissionId, "submissionId"),
                 ParsePositiveLong(seed.StudentId, "studentId"),
-                seed.AttemptNumber);
+                seed.AttemptNumber,
+                seed.StudentDisplayName);
 
             await repository.AddItemAsync(item, cancellationToken);
             if (request.IncludeSubmissionFiles)
@@ -1074,7 +1080,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         string? SubmissionId,
         string StudentId,
         int? AttemptNumber,
-        IReadOnlyList<AssignmentSubmissionFile> Files);
+        IReadOnlyList<AssignmentSubmissionFile> Files,
+        string? StudentDisplayName = null);
 
     private sealed record AssignmentContextCacheKey(
         long CourseId,
@@ -2159,7 +2166,8 @@ public sealed record AiGradingBatchItemPackage(
 public sealed class PrepareAiGradingBatchQueryHandler(
     IGradingReviewRepository repository,
     ICurrentUserContext currentUser,
-    IMoodleAssignmentSettingsGateway settingsGateway)
+    IMoodleAssignmentSettingsGateway settingsGateway,
+    IGradingOperationTelemetry? telemetry = null)
     : IRequestHandler<PrepareAiGradingBatchQuery, AiGradingBatchPackageResult>
 {
     private const int MaxTextLength = 3000;
@@ -2169,6 +2177,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         PrepareAiGradingBatchQuery request,
         CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
+        _ = settingsGateway; // Compatibilidade de DI; a escala canônica vem do snapshot local.
         if (request.BatchJobId == Guid.Empty)
         {
             throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
@@ -2179,8 +2189,11 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
         var globalWarnings = new List<string>();
-        var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
         var items = await LoadAllBatchItemsAsync(batch.Id, cancellationToken);
+        var itemIds = items.Select(item => item.Id).ToArray();
+        var artifactsByItem = await repository.ListArtifactsByItemsAsync(itemIds, cancellationToken);
+        var evidenceByItem = await repository.ListEvidenceByItemsAsync(itemIds, cancellationToken);
+        var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(itemIds, cancellationToken);
         var packageItems = new List<AiGradingBatchItemPackage>();
         var eligibleItems = items
             .Where(item => item.Status == GradingItemStatus.AwaitingAiAnalysis)
@@ -2200,7 +2213,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         foreach (var item in eligibleItems)
         {
             var itemWarnings = new List<string>();
-            var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+            var artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
 
             // Texto da submissão (combina múltiplos arquivos se houver)
             var allSubmissionTexts = artifacts
@@ -2249,52 +2262,26 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             var assignmentName = contextArtifact?.Filename;
 
             // Critérios (evidências do processamento anterior, se existirem)
-            var evidence = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
+            var evidence = evidenceByItem.GetValueOrDefault(item.Id, []);
             var extractedCriteria = evidence.Count > 0
                 ? string.Join("\n", evidence.Select(e => $"- {e.CriterionText}"))
                 : null;
 
-            // MaxGrade via API Moodle (cache por assignmentId)
-            decimal? maxGrade = null;
-            if (!settingsCache.TryGetValue(item.AssignmentId, out var settings))
-            {
-                try
-                {
-                    settings = await settingsGateway.GetAssignmentSettingsAsync(
-                        batch.CreatedBySubject,
-                        item.CourseId.ToString(CultureInfo.InvariantCulture),
-                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                        cancellationToken);
-                }
-                catch
-                {
-                    settings = null;
-                }
+            // Escala, nome e enunciado vêm do snapshot canônico publicado pelo
+            // worker. A preparação da IA nunca reconstrói contexto no Moodle.
+            var snapshot = snapshotsByItem.GetValueOrDefault(item.Id);
+            var snapshotData = ParseSnapshotDisplay(snapshot?.PayloadJson);
+            assignmentName = snapshotData.ActivityName ?? assignmentName;
+            assignmentStatement ??= snapshotData.AssignmentStatement;
+            var maxGrade = snapshotData.MaxGrade;
+            var isGradable = snapshotData.IsGradable;
+            itemWarnings.AddRange(snapshotData.Warnings);
 
-                settingsCache[item.AssignmentId] = settings;
-            }
-            var isGradable = settings?.IsGradable;
-
-            if (string.IsNullOrWhiteSpace(assignmentStatement) && !string.IsNullOrWhiteSpace(settings?.Description))
+            if (maxGrade is null)
             {
-                assignmentStatement = settings.Description;
-            }
-            if (!string.IsNullOrWhiteSpace(settings?.Name))
-            {
-                assignmentName = settings.Name;
-            }
-
-            if (settings is not null && settings.MaxGrade > 0)
-            {
-                maxGrade = settings.MaxGrade;
-            }
-            else if (settings?.IsGradable == false)
-            {
-                itemWarnings.Add("Atividade sem avaliacao numerica no Moodle. Gere somente feedback, sem nota.");
-            }
-            else
-            {
-                itemWarnings.Add("Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
+                itemWarnings.Add(isGradable == false
+                    ? "Atividade sem avaliacao numerica no Moodle. Gere somente feedback, sem nota."
+                    : "Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
             }
 
             packageItems.Add(new AiGradingBatchItemPackage(
@@ -2336,7 +2323,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
             "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida SEMPRE chame revisar_feedbacks_lote para que o professor revise e edite os feedbacks na interface antes de lancar. Nunca pule a revisao.");
 
-        return new AiGradingBatchPackageResult(
+        var result = new AiGradingBatchPackageResult(
             batch.Id,
             batch.CourseId.ToString(CultureInfo.InvariantCulture),
             batch.AssignmentIds.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToArray(),
@@ -2344,6 +2331,14 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             packageItems,
             instructions,
             globalWarnings);
+        telemetry?.RecordPhase(
+            "grading",
+            "package",
+            "success",
+            stopwatch.Elapsed.TotalMilliseconds,
+            queryCount: 5,
+            itemCount: packageItems.Count);
+        return result;
     }
 
     private Task<IReadOnlyList<AssistedGradingItem>> LoadAllBatchItemsAsync(
@@ -2363,6 +2358,68 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         "Committed" => "ja lancado(s) no Moodle",
         _ => status
     };
+
+    private static SnapshotDisplayData ParseSnapshotDisplay(string? payloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson))
+        {
+            return new SnapshotDisplayData(null, null, null, null, ["Snapshot de contexto ainda não publicado; escala não confirmada."]);
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            var root = document.RootElement;
+            var activityName = GetString(root, "ActivityName");
+            var statement = GetString(root, "AssignmentStatement");
+            decimal? maxGrade = null;
+            bool? isGradable = null;
+            if (TryGetProperty(root, "GradingScale", out var scale) && scale.ValueKind == JsonValueKind.Object)
+            {
+                maxGrade = GetDecimal(scale, "MaximumGrade");
+                isGradable = maxGrade is > 0m ||
+                    !string.IsNullOrWhiteSpace(GetString(scale, "Name")) ||
+                    !string.IsNullOrWhiteSpace(GetString(scale, "Description"));
+            }
+
+            var warnings = GetStringArray(root, "Warnings").Concat(GetStringArray(root, "Blockers"))
+                .Distinct(StringComparer.Ordinal).ToArray();
+            return new SnapshotDisplayData(activityName, statement, maxGrade, isGradable, warnings);
+        }
+        catch (JsonException)
+        {
+            return new SnapshotDisplayData(null, null, null, null, ["Snapshot de contexto inválido; escala não confirmada."]);
+        }
+    }
+
+    private static bool TryGetProperty(JsonElement element, string name, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out value)) return true;
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)) { value = property.Value; return true; }
+        }
+        value = default;
+        return false;
+    }
+
+    private static string? GetString(JsonElement element, string name) =>
+        TryGetProperty(element, name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static decimal? GetDecimal(JsonElement element, string name) =>
+        TryGetProperty(element, name, out var value) && value.TryGetDecimal(out var number) ? number : null;
+
+    private static IEnumerable<string> GetStringArray(JsonElement element, string name) =>
+        TryGetProperty(element, name, out var value) && value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String).Select(item => item.GetString()!).Where(item => !string.IsNullOrWhiteSpace(item))
+            : [];
+
+    private sealed record SnapshotDisplayData(
+        string? ActivityName,
+        string? AssignmentStatement,
+        decimal? MaxGrade,
+        bool? IsGradable,
+        IReadOnlyList<string> Warnings);
 }
 
 // ============================================================
@@ -2389,7 +2446,15 @@ public sealed record SaveAiGradingBatchResult(
     [property: JsonPropertyName("failedItems")] int FailedItems,
     [property: JsonPropertyName("totalItems")] int TotalItems,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
-    [property: JsonPropertyName("nextStep")] string NextStep);
+    [property: JsonPropertyName("nextStep")] string NextStep,
+    [property: JsonPropertyName("updatedItems")] IReadOnlyList<SaveAiGradingBatchItemResult>? UpdatedItems = null);
+
+public sealed record SaveAiGradingBatchItemResult(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
+    [property: JsonPropertyName("suggestedGrade")] decimal? SuggestedGrade,
+    [property: JsonPropertyName("draftFeedback")] string? DraftFeedback);
 
 public sealed class SaveAiGradingBatchCommandHandler(
     IGradingReviewRepository repository,
@@ -2397,7 +2462,8 @@ public sealed class SaveAiGradingBatchCommandHandler(
     IMoodleUserResolver moodleUserResolver,
     IMoodleAuditLogRepository auditLogs,
     IMoodleAssignmentSettingsGateway settingsGateway,
-    IGradingProposalStore? proposalStore = null)
+    IGradingProposalStore? proposalStore = null,
+    IGradingOperationTelemetry? telemetry = null)
     : IRequestHandler<SaveAiGradingBatchCommand, SaveAiGradingBatchResult>
 {
     // O contrato atual de salvar_correcoes_ia_lote é legado: não transporta
@@ -2411,6 +2477,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
         SaveAiGradingBatchCommand request,
         CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         if (request.BatchJobId == Guid.Empty)
         {
             throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
@@ -2425,12 +2492,24 @@ public sealed class SaveAiGradingBatchCommandHandler(
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
+        _ = settingsGateway; // Compatibilidade de DI; a escala vem do snapshot local.
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
         var warnings = new List<string>();
         var savedCount = 0;
         var skippedCount = 0;
         var failedCount = 0;
-        var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
+        var proposalsToPublish = new List<AiGradingProposal>();
+        var updatedItems = new List<SaveAiGradingBatchItemResult>();
+        var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(
+            request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
+            cancellationToken);
+        var legacySettingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
+        var itemsById = await repository.GetItemsAsync(
+            request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
+            cancellationToken);
+        var nextProposalVersions = proposalStore is null
+            ? new Dictionary<Guid, int>()
+            : new Dictionary<Guid, int>(await proposalStore.GetNextVersionsAsync(itemsById.Keys.ToArray(), cancellationToken));
 
         foreach (var input in request.Items)
         {
@@ -2457,8 +2536,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     continue;
                 }
 
-                var item = await repository.GetItemAsync(input.GradingItemId, cancellationToken);
-                if (item is null)
+                if (!itemsById.TryGetValue(input.GradingItemId, out var item))
                 {
                     warnings.Add($"Item {input.GradingItemId} nao encontrado.");
                     failedCount++;
@@ -2507,28 +2585,28 @@ public sealed class SaveAiGradingBatchCommandHandler(
                 }
 
                 var requestedGrade = input.Proposal?.SuggestedGrade ?? input.Nota;
-                decimal? maxGrade = null;
+                var maxGrade = TryReadMaxGrade(snapshotsByItem.GetValueOrDefault(item.Id)?.PayloadJson);
+                if (maxGrade is null && requestedGrade is not null && !snapshotsByItem.ContainsKey(item.Id))
+                {
+                    // Compatibilidade para lotes legados que ainda não têm
+                    // snapshot. Lotes novos nunca chegam a este fallback.
+                    if (!legacySettingsCache.TryGetValue(item.AssignmentId, out var legacySettings))
+                    {
+                        legacySettings = await settingsGateway.GetAssignmentSettingsAsync(
+                            batch.CreatedBySubject,
+                            item.CourseId.ToString(CultureInfo.InvariantCulture),
+                            item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                            cancellationToken);
+                        legacySettingsCache[item.AssignmentId] = legacySettings;
+                    }
+                    maxGrade = legacySettings?.MaxGrade > 0 ? legacySettings.MaxGrade : null;
+                    if (maxGrade is not null)
+                    {
+                        warnings.Add($"Item {input.GradingItemId}: escala obtida pelo fallback legado; publique um snapshot para eliminar a leitura Moodle.");
+                    }
+                }
                 if (requestedGrade is not null)
                 {
-                    if (!settingsCache.TryGetValue(item.AssignmentId, out var settings))
-                    {
-                        try
-                        {
-                            settings = await settingsGateway.GetAssignmentSettingsAsync(
-                                batch.CreatedBySubject,
-                                item.CourseId.ToString(CultureInfo.InvariantCulture),
-                                item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                                cancellationToken);
-                        }
-                        catch
-                        {
-                            settings = null;
-                        }
-
-                        settingsCache[item.AssignmentId] = settings;
-                    }
-
-                    maxGrade = settings?.MaxGrade > 0 ? settings.MaxGrade : null;
                     if (maxGrade is null)
                     {
                         warnings.Add($"Item {input.GradingItemId} ignorado: escala maxima nao confirmada; nota numerica bloqueada.");
@@ -2563,7 +2641,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
 
                     var proposalVersion = proposalStore is null
                         ? input.Proposal.Version
-                        : await proposalStore.GetNextVersionAsync(item.Id, cancellationToken);
+                        : nextProposalVersions.GetValueOrDefault(item.Id, input.Proposal.Version);
                     proposal = AiGradingProposalFactory.Create(
                         item,
                         input.Proposal,
@@ -2572,19 +2650,19 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         input.Feedback);
                     if (proposalStore is not null)
                     {
-                        await proposalStore.PublishAsync(proposal, cancellationToken);
+                        proposalsToPublish.Add(proposal);
                     }
                 }
                 else if (proposalStore is not null)
                 {
-                    var legacyVersion = await proposalStore.GetNextVersionAsync(item.Id, cancellationToken);
-                    await proposalStore.PublishAsync(AiGradingProposal.FromLegacy(
+                    var legacyVersion = nextProposalVersions.GetValueOrDefault(item.Id, 1);
+                    proposalsToPublish.Add(AiGradingProposal.FromLegacy(
                         item.Id,
                         item.BatchId,
                         legacyVersion,
                         item.ContextHash,
                         input.Nota,
-                        input.Feedback), cancellationToken);
+                        input.Feedback));
                 }
 
                 item.SetDraft(
@@ -2601,6 +2679,12 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     maxGrade: maxGrade);
 
                 savedCount++;
+                updatedItems.Add(new SaveAiGradingBatchItemResult(
+                    item.Id,
+                    item.Status.ToString(),
+                    GradingDraftVersionHash.Compute(item),
+                    item.SuggestedGrade,
+                    item.DraftFeedback));
             }
             catch (OperationCanceledException)
             {
@@ -2611,6 +2695,11 @@ public sealed class SaveAiGradingBatchCommandHandler(
                 warnings.Add($"Falha ao salvar item {input.GradingItemId}: {ex.Message}");
                 failedCount++;
             }
+        }
+
+        if (proposalStore is not null)
+        {
+            await proposalStore.PublishManyAsync(proposalsToPublish, cancellationToken);
         }
 
         // Atualizar contadores do lote
@@ -2644,7 +2733,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
         }, cancellationToken);
         await auditLogs.SaveChangesAsync(cancellationToken);
 
-        return new SaveAiGradingBatchResult(
+        var result = new SaveAiGradingBatchResult(
             batch.Id,
             savedCount,
             skippedCount,
@@ -2653,6 +2742,30 @@ public sealed class SaveAiGradingBatchCommandHandler(
             warnings,
             NextStep: savedCount > 0
                 ? "IMPORTANTE: agora chame revisar_feedbacks_lote para exibir a interface de revisao ao professor. O professor precisa revisar e editar nota e feedback antes do lancamento. Nunca pule esta etapa."
-                : "Nenhum item foi salvo. Verifique os avisos.");
+                : "Nenhum item foi salvo. Verifique os avisos.",
+            updatedItems);
+        telemetry?.RecordPhase(
+            "grading",
+            "save",
+            failedCount > 0 ? "partial_failure" : "success",
+            stopwatch.Elapsed.TotalMilliseconds,
+            queryCount: 5,
+            itemCount: savedCount);
+        return result;
+    }
+
+    private static decimal? TryReadMaxGrade(string? payloadJson)
+    {
+        if (string.IsNullOrWhiteSpace(payloadJson)) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            if (!document.RootElement.TryGetProperty("GradingScale", out var scale) &&
+                !document.RootElement.TryGetProperty("gradingScale", out scale)) return null;
+            if (!scale.TryGetProperty("MaximumGrade", out var value) &&
+                !scale.TryGetProperty("maximumGrade", out value)) return null;
+            return value.TryGetDecimal(out var max) && max > 0 ? max : null;
+        }
+        catch (JsonException) { return null; }
     }
 }
