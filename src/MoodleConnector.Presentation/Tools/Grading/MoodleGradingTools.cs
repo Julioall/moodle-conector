@@ -467,16 +467,23 @@ public sealed class MoodleGradingTools(
             AuditId: null,
             DateTimeOffset.UtcNow);
 
+        var failureDetails = result.Failures.Count == 0
+            ? string.Empty
+            : $" Motivo(s): {string.Join("; ", result.Failures.Take(3).Select(failure => failure.Message))}.";
         return new CallToolResult
         {
             Content = [new TextContentBlock
             {
                 Text = result.FailureCount == 0
                     ? $"{result.SuccessCount} correcao(oes) revisada(s) foram salvas e estao prontas para preparar o envio."
-                    : $"Salvei {result.SuccessCount} correcao(oes), mas {result.FailureCount} precisam ser revisadas novamente."
+                    : $"Salvei {result.SuccessCount} correcao(oes), mas {result.FailureCount} precisam ser revisadas novamente.{failureDetails}"
             }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = result.SuccessCount == 0
+            // A chamada foi processada; falhas por item são dados estruturados
+            // para a UI reconciliar, não uma falha de transporte MCP. Retornar
+            // IsError=true faria o bridge descartar data.failures e expor apenas
+            // INVALID_ARGUMENT ao usuário.
+            IsError = false
         };
     }
 
@@ -702,7 +709,9 @@ public sealed class MoodleGradingTools(
         {
             Content = [new TextContentBlock { Text = BuildSaveAiGradingNarration(data) }],
             StructuredContent = JsonSerializer.SerializeToElement(response),
-            IsError = data.SavedItems == 0 && data.FailedItems > 0
+            // Falhas de itens são reportadas em warnings/updatedItems para o
+            // cliente reconciliar, sem virar RuntimeException no bridge MCP.
+            IsError = false
         };
     }
 
@@ -2140,6 +2149,11 @@ public sealed class MoodleGradingTools(
         sb.AppendLine($"- **Falhas:** {data.FailedItems}");
         sb.AppendLine();
         sb.AppendLine($"**Proximo passo:** {data.NextStep}");
+        if (data.Warnings.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("**Avisos:** " + string.Join("; ", data.Warnings.Take(3)));
+        }
         return sb.ToString();
     }
 

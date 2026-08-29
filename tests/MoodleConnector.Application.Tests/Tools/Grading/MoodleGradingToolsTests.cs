@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MediatR;
+using ModelContextProtocol.Protocol;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Submissions;
@@ -186,6 +187,35 @@ public sealed class MoodleGradingToolsTests
         var failure = Assert.Single(data.GetProperty("failedAssignments").EnumerateArray());
         Assert.Equal("502", failure.GetProperty("assignmentId").GetString());
         Assert.False(string.IsNullOrWhiteSpace(failure.GetProperty("errorCode").GetString()));
+    }
+
+    [Fact]
+    public async Task Atualizacao_em_lote_com_falha_por_item_preserva_diagnostico_estruturado()
+    {
+        var itemId = Guid.Parse("00000000-0000-0000-0000-000000000456");
+        var mediator = new FakeMediator
+        {
+            BatchDraftUpdateResult = new BatchDraftUpdateResultDto(
+                SuccessCount: 0,
+                FailureCount: 1,
+                SavedIds: [],
+                Failures: [new BatchDraftUpdateFailureDto(itemId, "O feedback final revisado e obrigatorio.")])
+        };
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321));
+
+        var result = await sut.AtualizarRascunhosCorrecaoLoteAsync(
+            Guid.Parse("00000000-0000-0000-0000-000000000123"),
+            [new ReviewedGradingDraftInput(itemId, null, "", "approved")]);
+
+        Assert.False(result.IsError ?? false);
+        var text = Assert.IsType<TextContentBlock>(result.Content[0]).Text;
+        Assert.Contains("feedback final revisado e obrigatorio", text, StringComparison.OrdinalIgnoreCase);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("partial_failure", structured.GetProperty("status").GetString());
+        Assert.Equal("O feedback final revisado e obrigatorio.", structured.GetProperty("data").GetProperty("failures")[0].GetProperty("message").GetString());
     }
 
     [Fact]
@@ -508,6 +538,8 @@ public sealed class MoodleGradingToolsTests
 
         public GetGradingBatchAuditQuery? LastBatchAuditQuery { get; private set; }
 
+        public BatchDraftUpdateResultDto? BatchDraftUpdateResult { get; init; }
+
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -687,6 +719,11 @@ public sealed class MoodleGradingToolsTests
                     DraftVersionHash: "hash-item-2",
                     PendingIssues: [],
                     Evidence: []));
+            }
+
+            if (request is UpdateAssistedGradingDraftsBatchCommand && BatchDraftUpdateResult is not null)
+            {
+                return Task.FromResult((TResponse)(object)BatchDraftUpdateResult);
             }
 
             if (request is CreateGradingLaunchPreviewCommand createPreview)
