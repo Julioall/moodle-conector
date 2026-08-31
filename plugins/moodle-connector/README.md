@@ -6,7 +6,7 @@ meio de `.app.json`.
 
 ## Estado atual
 
-- O manifesto `.codex-plugin/plugin.json` está validado e referencia as onze skills em `skills/`.
+- O manifesto `.codex-plugin/plugin.json` está validado e referencia dezenove skills em `skills/`, cobrindo consulta, correção, auditoria, recuperação, questionários e fechamento de UC.
 - `.app.json` vincula o pacote à conexão MCP remota registrada no ChatGPT.
 - Não há `.mcp.json`: o servidor Moodle Connector é remoto e não deve ser empacotado como processo
   local.
