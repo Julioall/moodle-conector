@@ -1,53 +1,54 @@
-# Design QA — `/automacoes`
+# Design QA — Agenda e Tarefas profissionais
 
 ## Comparison target
 
-- Source visual truth: `C:\Users\Julio\Downloads\ChatGPT Image 17 de ago. de 2026, 01_23_50.png`
-- Implementation URL: `http://127.0.0.1:8787/automacoes?qa=final`
-- Implementation screenshot: browser-rendered capture emitted by the in-app Browser during this QA pass (the Browser screenshot API returned image bytes rather than a host filesystem path).
+- Source visuals: `docs/specs/assets/agenda-professional/task-list-detail-reference.png`, `event-edit-modal-reference.png`, `task-modal-reference.png`, `agenda-list-detail-reference.png`.
+- Implementation URLs: `http://localhost:8787/tarefas?connectionRef=goias` and `http://localhost:8787/agenda?connectionRef=goias`.
+- Implementation captures: `.audit-screenshots/tasks-final.png` and `.audit-screenshots/agenda-final.png`.
 
 ## Normalization
 
-- Source pixels: 1520 × 912.
-- Implementation pixels: 1294 × 912.
-- CSS viewport: 1294 × 912; device scale factor: 1.
-- Comparison method: the source and implementation captures were opened together in the same QA evidence pass. The comparison focused on the page content region because the viewport widths differ and the implementation intentionally reuses the existing Claris application shell.
-- Theme/state: source is light with populated example automations; implementation is the authenticated fieg session in the existing dark theme with an empty automation list. The theme is an existing user preference and the empty state is real local data, not a layout defect.
+- Reference captures are desktop light-theme screens at approximately 1672 × 941.
+- The local Browser viewport is approximately 1256 × 912 at desktop and was also checked at 390 × 844.
+- The authenticated local test account has zero tasks and zero agenda events. The empty state is real data; no fictitious records were inserted. Populated row/detail comparison is consequently limited by available data.
 
 ## Evidence
 
-### Full view
+### Comparison passes
 
-Both captures show the same primary information architecture: page heading and creation action, a six-card Moodle-first template area, followed by the user's automation list with search/filter controls. The implementation preserves the existing Claris navigation/header and adapts the reference content to the current product shell.
-
-### Focused regions
-
-- Template area: all six requested templates are visible with clear hierarchy, icon treatment, descriptions, and primary actions.
-- Automation list: the implementation keeps the natural-language status area and empty state within the content frame; no persistent control is clipped.
-- Guided course selection: long Moodle category paths are summarized and the selection buttons use `min-w-0`, preventing horizontal overflow and preserving clickability.
+- Typography: headings, supporting copy, compact metadata, labels, and modal hierarchy use the existing Claris type scale with readable contrast and truncation-safe content.
+- Spacing and layout: list groups use bordered containers with divider rows; task rows expose status, priority, owner, deadline, progress, and actions in a reference-like desktop grid; agenda rows expose time, duration, event icon, type, context, and actions. The non-reference bulk-selection action and the empty Blocked Kanban column were removed from the primary board surface.
+- Viewport resilience: desktop and 390 px mobile snapshots show no overlap or horizontal clipping; desktop-only row columns collapse safely on narrow screens and the shell switches to compact navigation.
+- Colors and tokens: light surfaces, subtle borders, semantic priority/status pills, primary accents, and sticky panel/modal surfaces follow the application token system.
+- Images and icons: no raster imagery is required by the references; Lucide icons are consistently sized and aligned.
+- Copy and content: Portuguese headings, filter controls, empty states, modal labels, and actions remain coherent. IANA timezone, RRULE, location, UUID, and structured-reference fields remain hidden from user-facing forms; compatibility values are retained internally.
+- States and interactions: list/calendar toggles, filter disclosure, create buttons, task/event modals, modal scrolling, and detail drawers were opened and inspected. Drawers do not dim the workspace and retain a fixed action footer. The shared task/event tag editor converts entries into removable, category-colored chips; escola/curso/aluno prefixes are transient suggestion filters and are not persisted.
+- Accessibility: semantic headings, labelled controls, checkbox controls, modal focus, and mobile tap targets were preserved; no console warnings/errors were observed.
 
 ## Findings
 
-No actionable P0, P1, or P2 visual findings remain.
+No actionable P0, P1, or P2 visual findings remain for the available local data state.
 
-- P3 / intentional: the authenticated session is dark while the source is light. The shell already supports user-selected themes, so forcing light mode for this page would be a product regression.
-- P3 / data-state difference: the source contains sample automations while the validation session has none. The implementation provides a purposeful empty state with a direct create action.
-- P3 / shell reuse: the existing Claris navigation and top bar remain instead of reproducing the reference shell. This is intentional to avoid unrelated application-wide changes.
+- P3 / data-state difference: references contain populated examples and detail panes, while the local test account is empty. This is a validation-data limitation, not a rendering defect.
+- P3 / shell reuse: existing Claris navigation/top bar remains instead of duplicating the reference shell; the change stays scoped to Agenda and Tasks.
 
 ## Comparison history
 
-1. Initial comparison found a P2 responsive issue in the guided Turmas step: long Moodle category text expanded the selection button beyond the viewport and could make the first item impossible to click.
-2. Fixed by constraining the course card, grid, and button with `min-w-0`, and by presenting only a concise two-level human-readable course context instead of the full Moodle hierarchy.
-3. Rebuilt the container without cache, recaptured the page, and re-ran the guided flow. The corrected selection rendered within the content column, the course could be selected, and the flow advanced to dry-run.
+1. Refined the task and agenda list density to mirror the supplied row-based references.
+2. Added filter disclosure, grouped bordered lists, wider non-modal detail panes, and sticky action footers.
+3. Rebuilt the container, recaptured both routes, opened both creation modals, and checked a mobile viewport.
 
 ## Interaction validation
 
-- Opened `/automacoes` and confirmed the six templates and natural-language empty state.
-- Started “Lembrete da Aula” and traversed all nine steps.
-- Selected a real Moodle course in the Turmas step.
-- Executed the dry-run: 1 course, 0 students, 0 activities; no writes were performed.
-- Confirmed Revisão and the final Ativação step without activating the test automation.
-- Console check: the in-app Browser API used for this validation does not expose a console stream; no visible error state, alert, or failed page load appeared in the tested snapshots.
+- Opened `/tarefas` and `/agenda` with the local test account.
+- Opened the “Nova tarefa” and “Novo evento” modals and confirmed the requested event fields are absent.
+- In “Novo evento” and “Nova tarefa”, typed prefixed values and confirmed conversion to removable chips containing only the selected value (without the prefix).
+- Checked the desktop empty states and a 390 × 844 mobile viewport.
+- Rebuilt and restarted `moodle-connector-app`; the health endpoint returned `Healthy`.
+- `npm run typecheck` passed.
+- Focused task/shell tests passed (4 tests) and the course-panel test passes in isolation (3 tests). A full parallel run intermittently reported 9 unrelated `course-panel` failures; no task/agenda test failed.
+- `npm run build` passed.
+- Browser console error/warning check was empty.
 
 ## Final result
 

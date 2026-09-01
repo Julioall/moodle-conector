@@ -38,6 +38,10 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
         [Description("Início do intervalo em ISO 8601. Padrão: agora.")] DateTimeOffset? from = null,
         [Description("Fim do intervalo em ISO 8601. Padrão: 30 dias após o início.")] DateTimeOffset? to = null,
         [Description("Limite de eventos, entre 1 e 200.")] int limit = 100,
+        [Description("Filtra por tag livre.")] string? tag = null,
+        [Description("Filtra por Task relacionada.")] Guid? taskId = null,
+        [Description("Tipo da referência estruturada.")] string? referenceType = null,
+        [Description("Identificador da referência estruturada.")] string? referenceId = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -49,14 +53,14 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
                 throw new ArgumentException("O fim do intervalo deve ser posterior ao início.", nameof(to));
 
             limit = Math.Clamp(limit, 1, 200);
-            var eventEntities = await dbContext.CalendarEvents
-                .AsNoTracking()
-                .Where(item => item.OwnerId == identity.Id && item.StartAt >= start && item.StartAt < end)
-                .OrderBy(item => item.StartAt)
-                .Take(limit)
-                .ToListAsync(cancellationToken);
-            var links = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, eventEntities.Select(item => item.Id).ToArray(), cancellationToken);
-            var events = eventEntities.Select(item => ToDto(item, links.GetValueOrDefault(item.Id, []))).ToArray();
+            var occurrences = await new ProfessionalPlannerService(dbContext).OccurrencesAsync(identity.Id, start, end, tag, taskId, cancellationToken, referenceType, referenceId);
+            var events = occurrences.Take(limit).Select(item => new CalendarEventDto(item.Id, item.Title, item.Description, item.OccurrenceStartAt, item.OccurrenceEndAt, item.Type, item.CreatedAt, item.UpdatedAt,
+                item.References.Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, null, null, null)).ToArray())
+            {
+                OccurrenceStartAt = item.OccurrenceStartAt,
+                TimeZoneId = item.TimeZoneId, Location = item.Location, AvailabilityStatus = item.AvailabilityStatus,
+                IsAllDay = item.IsAllDay, RRule = item.RRule, Tags = item.Tags, Version = item.Version
+            }).ToArray();
 
             return Success(new PortalAgendaListResponse(events, events.Length, start, end),
                 $"{events.Length} evento(s) retornado(s).");
@@ -91,31 +95,27 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
         [Description("Descrição opcional.")] string? description = null,
         [Description("Tipo: meeting, alignment, delivery, training, webclass ou other.")] string? type = null,
         [Description("Vínculos com objetos Moodle: course, student, class ou school. Para turmas, informe parentReferenceId com o curso.")] IReadOnlyList<PlannerReferenceInput>? references = null,
+        [Description("Fuso IANA, por padrão America/Sao_Paulo.")] string? timeZoneId = null,
+        [Description("Local físico ou link, opcional.")] string? location = null,
+        [Description("Disponibilidade: free, busy ou tentative.")] string? availabilityStatus = null,
+        [Description("Indica evento de dia inteiro.")] bool isAllDay = false,
+        [Description("Tags livres do evento.")] IReadOnlyList<string>? tags = null,
+        [Description("RRULE e exceções da série, opcional.")] EventRecurrenceInput? recurrence = null,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var identity = await identityResolver.ResolveAsync(cancellationToken);
             ValidateRange(startAt, endAt);
-            var now = DateTimeOffset.UtcNow;
-            var calendarEvent = new CalendarEventEntity
+            var refs = references?.Select(r => new TaskReferenceV2Input(r.ReferenceType, r.ReferenceId, r.ReferenceName, r.ConnectionRef)).ToArray();
+            var result = await new ProfessionalPlannerService(dbContext).CreateEventAsync(identity.Id, identity.Id, new EventProfessionalInput(title, description, startAt, endAt, timeZoneId, location, availabilityStatus, isAllDay, tags, refs, recurrence, Type: type), cancellationToken);
+            var links = result.References.Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, null, null, null)).ToArray();
+            return Success(new PortalAgendaWriteResponse("created", new CalendarEventDto(result.Id, result.Title, result.Description, result.StartAt, result.EndAt, result.Type, result.CreatedAt, result.UpdatedAt, links)
             {
-                Id = Guid.NewGuid(),
-                OwnerId = identity.Id,
-                Title = PortalMcpValueNormalizer.RequireTitle(title),
-                Description = PortalMcpValueNormalizer.NormalizeDescription(description),
-                StartAt = startAt,
-                EndAt = endAt,
-                Type = PortalMcpValueNormalizer.NormalizeCalendarEventType(type),
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-
-            dbContext.CalendarEvents.Add(calendarEvent);
-            if (references is not null) await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, calendarEvent.Id, references, cancellationToken);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            var links = references is null ? Array.Empty<PlannerReferenceDto>() : PlannerReferenceStore.Normalize(references).Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, reference.ParentReferenceType, reference.ParentReferenceId, reference.ParentReferenceName)).ToArray();
-            return Success(new PortalAgendaWriteResponse("created", ToDto(calendarEvent, links)), "Evento criado na agenda.");
+                TimeZoneId = result.TimeZoneId, Location = result.Location, AvailabilityStatus = result.AvailabilityStatus,
+                IsAllDay = result.IsAllDay, Source = result.Source, ExternalUid = result.ExternalUid, RRule = result.RRule,
+                Tags = result.Tags, Version = result.Version
+            }), "Evento criado na agenda.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -149,6 +149,13 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
         [Description("Novo tipo do evento.")] string? type = null,
         [Description("Limpa o fim do evento quando true.")] bool clearEndAt = false,
         [Description("Substitui os vínculos quando informado: course, student, class ou school.")] IReadOnlyList<PlannerReferenceInput>? references = null,
+        [Description("Fuso IANA, quando alterado.")] string? timeZoneId = null,
+        [Description("Novo local, quando alterado.")] string? location = null,
+        [Description("Nova disponibilidade.")] string? availabilityStatus = null,
+        [Description("Altera o modo dia inteiro.")] bool? isAllDay = null,
+        [Description("Substitui tags quando informado.")] IReadOnlyList<string>? tags = null,
+        [Description("Substitui a recorrência quando informado.")] EventRecurrenceInput? recurrence = null,
+        [Description("Versão esperada para concorrência otimista.")] long? expectedVersion = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -157,32 +164,16 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
                 throw new ArgumentException("Informe um eventId UUID válido.", nameof(eventId));
 
             var identity = await identityResolver.ResolveAsync(cancellationToken);
-            var calendarEvent = await dbContext.CalendarEvents
-                .SingleOrDefaultAsync(item => item.Id == eventId && item.OwnerId == identity.Id, cancellationToken);
-            if (calendarEvent is null)
-                return ToolResultHelper.Error<PortalAgendaWriteResponse>("Evento não encontrado.", errorCode: "portal_agenda_event_not_found");
-
-            var nextStart = startAt ?? calendarEvent.StartAt;
-            var nextEnd = clearEndAt ? null : endAt ?? calendarEvent.EndAt;
-            ValidateRange(nextStart, nextEnd);
-
-            if (title is not null)
-                calendarEvent.Title = PortalMcpValueNormalizer.RequireTitle(title);
-            if (description is not null)
-                calendarEvent.Description = PortalMcpValueNormalizer.NormalizeDescription(description);
-            if (startAt is not null)
-                calendarEvent.StartAt = startAt.Value;
-            if (clearEndAt || endAt is not null)
-                calendarEvent.EndAt = nextEnd;
-            if (type is not null)
-                calendarEvent.Type = PortalMcpValueNormalizer.NormalizeCalendarEventType(type);
-            if (references is not null)
-                await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, calendarEvent.Id, references, cancellationToken);
-
-            calendarEvent.UpdatedAt = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-            var links = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, [calendarEvent.Id], cancellationToken);
-            return Success(new PortalAgendaWriteResponse("updated", ToDto(calendarEvent, links.GetValueOrDefault(calendarEvent.Id, []))), "Evento atualizado.");
+            var refs = references?.Select(r => new TaskReferenceV2Input(r.ReferenceType, r.ReferenceId, r.ReferenceName, r.ConnectionRef)).ToArray();
+            var result = await new ProfessionalPlannerService(dbContext).UpdateEventAsync(identity.Id, identity.Id, eventId,
+                new EventProfessionalInput(title, description, startAt, endAt, timeZoneId, location, availabilityStatus, isAllDay, tags, refs, recurrence, expectedVersion, type, clearEndAt), cancellationToken);
+            var links = result.References.Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, null, null, null)).ToArray();
+            return Success(new PortalAgendaWriteResponse("updated", new CalendarEventDto(result.Id, result.Title, result.Description, result.StartAt, result.EndAt, result.Type, result.CreatedAt, result.UpdatedAt, links)
+            {
+                TimeZoneId = result.TimeZoneId, Location = result.Location, AvailabilityStatus = result.AvailabilityStatus,
+                IsAllDay = result.IsAllDay, Source = result.Source, ExternalUid = result.ExternalUid, RRule = result.RRule,
+                Tags = result.Tags, Version = result.Version
+            }), "Evento atualizado.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -217,13 +208,14 @@ public sealed class PortalAgendaTools(ConnectorDbContext dbContext, PortalMcpIde
                 throw new ArgumentException("Informe um eventId UUID válido.", nameof(eventId));
 
             var identity = await identityResolver.ResolveAsync(cancellationToken);
-            var calendarEvent = await dbContext.CalendarEvents
-                .SingleOrDefaultAsync(item => item.Id == eventId && item.OwnerId == identity.Id, cancellationToken);
-            if (calendarEvent is null)
+            try
+            {
+                await new ProfessionalPlannerService(dbContext).DeleteEventAsync(identity.Id, eventId, cancellationToken);
+            }
+            catch (KeyNotFoundException)
+            {
                 return ToolResultHelper.Error<PortalAgendaRemovalResponse>("Evento não encontrado.", errorCode: "portal_agenda_event_not_found");
-
-            dbContext.CalendarEvents.Remove(calendarEvent);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            }
             return Success(new PortalAgendaRemovalResponse(eventId, true), "Evento removido da agenda.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)

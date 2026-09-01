@@ -345,7 +345,6 @@ var mcpServerBuilder = builder.Services
     .AddSingleton<DashboardOverviewRefreshQueue>()
     .AddSingleton<IDashboardOverviewRefreshQueue>(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
     .AddHostedService(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
-    .AddHostedService<DashboardAccessSnapshotWorker>()
     .AddMcpServer(options => options.ServerInstructions = MoodleConnectorInstructions.Text)
     .WithHttpTransport()
     .WithRequestFilters(filters =>
@@ -671,6 +670,23 @@ app.UseMiddleware<AuthenticatedPrincipalEnrichmentMiddleware>();
 app.UseMiddleware<PortalApiAuthorizationMiddleware>();
 app.UseMiddleware<McpRequestSecurityMiddleware>();
 
+// Rollout guard: disabling either professional surface is a safe, reversible
+// kill switch. Data and compatibility migrations remain intact while routes
+// return 404 until the corresponding flag is re-enabled.
+var plannerFeatures = app.Services.GetRequiredService<IOptions<FeatureOptions>>().Value;
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path;
+    var tasksPath = path.StartsWithSegments("/api/tasks", StringComparison.OrdinalIgnoreCase);
+    var agendaPath = path.StartsWithSegments("/api/agenda", StringComparison.OrdinalIgnoreCase);
+    if ((tasksPath && !plannerFeatures.ProfessionalTasksEnabled) || (agendaPath && !plannerFeatures.ProfessionalAgendaEnabled))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+    await next();
+});
+
 app.UseRateLimiter();
 app.UseMiddleware<AdminApiKeyAuthorizationMiddleware>();
 
@@ -678,17 +694,25 @@ OperationalEndpoints.MapStatusAndHealth(app, builder.Configuration, mcpPath);
 OperationalEndpoints.MapOAuthDiscovery(app, mcpPath);
 OAuthAuthorizationEndpoints.MapAuthorization(app, mcpPath);
 
-PortalTaskEndpoints.MapTasks(app, AppAuthRateLimitPolicy);
+ProfessionalPlannerEndpoints.Map(app, AppAuthRateLimitPolicy);
 
-app.MapGet("/api/agenda", async (HttpContext context, ConnectorDbContext dbContext, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken cancellationToken = default) =>
+app.MapGet("/api/agenda", async (HttpContext context, ConnectorDbContext dbContext, DateTimeOffset? from = null, DateTimeOffset? to = null, string? tag = null, Guid? taskId = null, string? referenceType = null, string? referenceId = null, Guid? tutorId = null, CancellationToken cancellationToken = default) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var start = from ?? GetBrazilTodayStart(DateTimeOffset.UtcNow);
     var end = to ?? start.AddDays(30);
-    var eventEntities = await dbContext.CalendarEvents.AsNoTracking().Where(x => x.OwnerId == identity.Id && x.StartAt >= start && x.StartAt < end).OrderBy(x => x.StartAt).ToListAsync(cancellationToken);
-    var eventReferences = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, eventEntities.Select(item => item.Id).ToArray(), cancellationToken);
-    var events = eventEntities.Select(x => new CalendarEventDto(x.Id, x.Title, x.Description, x.StartAt, x.EndAt, x.Type, x.CreatedAt, x.UpdatedAt, eventReferences.GetValueOrDefault(x.Id, []))).ToList();
+    if (end <= start) return Results.BadRequest(new { error = new { code = "invalid_calendar_range", message = "O fim deve ser posterior ao início." } });
+    referenceType ??= tutorId is null ? null : "tutor";
+    referenceId ??= tutorId?.ToString();
+    var occurrences = await new ProfessionalPlannerService(dbContext).OccurrencesAsync(identity.Id, start, end, tag, taskId, cancellationToken, referenceType, referenceId);
+    var events = occurrences.Select(x => new CalendarEventDto(x.Id, x.Title, x.Description, x.OccurrenceStartAt, x.OccurrenceEndAt, x.Type, x.CreatedAt, x.UpdatedAt,
+        x.References.Select(r => new PlannerReferenceDto(r.ReferenceType, r.ReferenceId, r.ReferenceName, r.ConnectionRef, null, null, null)).ToArray())
+    {
+        OccurrenceStartAt = x.OccurrenceStartAt,
+        TimeZoneId = x.TimeZoneId, Location = x.Location, AvailabilityStatus = x.AvailabilityStatus, IsAllDay = x.IsAllDay,
+        RRule = x.RRule, Tags = x.Tags, Version = x.Version
+    }).ToList();
     return Results.Ok(new AppEnvelope<IReadOnlyList<CalendarEventDto>>(events, new(DateTimeOffset.UtcNow, null)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -758,13 +782,11 @@ app.MapGet("/api/agenda/export.ics", async (HttpContext context, ConnectorDbCont
     var end = to ?? start.AddDays(730);
     if (end <= start) return Results.BadRequest(new { error = new { code = "invalid_calendar_range", message = "O fim deve ser posterior ao início." } });
 
-    var eventEntities = await dbContext.CalendarEvents.AsNoTracking().Where(item => item.OwnerId == identity.Id && item.StartAt >= start && item.StartAt < end).OrderBy(item => item.StartAt).ToListAsync(cancellationToken);
+    var professionalEvents = await new ProfessionalPlannerService(dbContext).ExportEventsAsync(identity.Id, start, end, cancellationToken);
     var taskEntities = await dbContext.Tasks.AsNoTracking().Where(item => item.OwnerId == identity.Id && ((item.StartAt != null && item.StartAt >= start && item.StartAt < end) || (item.DueAt != null && item.DueAt >= start && item.DueAt < end))).OrderBy(item => item.DueAt ?? item.StartAt).ToListAsync(cancellationToken);
-    var eventReferences = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, eventEntities.Select(item => item.Id).ToArray(), cancellationToken);
     var taskReferences = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, taskEntities.Select(item => item.Id).ToArray(), cancellationToken);
-    var events = eventEntities.Select(item => new CalendarEventDto(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt, eventReferences.GetValueOrDefault(item.Id, []))).ToArray();
     var tasks = taskEntities.Select(item => new TaskDto(item.Id, item.Title, item.Description, item.Status, item.Priority, item.StartAt, item.DueAt, item.CreatedAt, item.UpdatedAt, taskReferences.GetValueOrDefault(item.Id, []), item.ActionType, item.ScheduleHint)).ToArray();
-    var content = PlannerIcsService.Export(events, tasks);
+    var content = PlannerIcsService.ExportProfessional(professionalEvents.Events, tasks, professionalEvents.Dates);
     return Results.File(Encoding.UTF8.GetBytes(content), "text/calendar; charset=utf-8", "moodle-connector-agenda.ics");
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
@@ -792,15 +814,13 @@ app.MapPost("/api/agenda/import", async (HttpContext context, ConnectorDbContext
                 if (task is null) { task = new TaskEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, ExternalSource = "ical", ExternalUid = item.Uid, CreatedAt = DateTimeOffset.UtcNow }; dbContext.Tasks.Add(task); created++; }
                 else updated++;
                 task.Title = item.Title[..Math.Min(item.Title.Length, 240)]; task.Description = item.Description?[..Math.Min(item.Description.Length, 4000)]; task.Status = NormalizeTaskStatus(item.Status); task.Priority = NormalizeTaskPriority(item.Priority); task.StartAt = item.StartAt; task.DueAt = item.EndAt ?? item.StartAt; task.ActionType = NormalizePlannerAction(item.ActionType); task.ScheduleHint = NormalizePlannerSchedule(item.ScheduleHint); task.UpdatedAt = DateTimeOffset.UtcNow;
+                if (!await dbContext.TaskParticipants.AnyAsync(p => p.TaskId == task.Id && p.Role == "owner", cancellationToken)) dbContext.TaskParticipants.Add(new TaskParticipantEntity { Id = Guid.NewGuid(), TaskId = task.Id, UserId = identity.Id, Role = "owner", AssignedAt = DateTimeOffset.UtcNow, AssignedBy = identity.Id });
                 await PlannerReferenceStore.ReplaceForTaskAsync(dbContext, identity.Id, task.Id, item.References, cancellationToken);
             }
             else
             {
-                var calendarEvent = await dbContext.CalendarEvents.SingleOrDefaultAsync(existing => existing.OwnerId == identity.Id && existing.ExternalSource == "ical" && existing.ExternalUid == item.Uid, cancellationToken);
-                if (calendarEvent is null) { calendarEvent = new CalendarEventEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, ExternalSource = "ical", ExternalUid = item.Uid, CreatedAt = DateTimeOffset.UtcNow }; dbContext.CalendarEvents.Add(calendarEvent); created++; }
-                else updated++;
-                calendarEvent.Title = item.Title[..Math.Min(item.Title.Length, 240)]; calendarEvent.Description = item.Description?[..Math.Min(item.Description.Length, 4000)]; calendarEvent.StartAt = item.StartAt.Value; calendarEvent.EndAt = item.EndAt; calendarEvent.Type = "other"; calendarEvent.UpdatedAt = DateTimeOffset.UtcNow;
-                await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, calendarEvent.Id, item.References, cancellationToken);
+                var importedEvent = await new ProfessionalPlannerService(dbContext).ImportEventAsync(identity.Id, identity.Id, item, cancellationToken);
+                if (importedEvent.Created) created++; else updated++;
             }
         }
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1198,14 +1218,16 @@ app.MapPost("/api/agenda", async (HttpContext context, ConnectorDbContext dbCont
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
-    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
-    var now = DateTimeOffset.UtcNow;
-    var item = new CalendarEventEntity { Id = Guid.NewGuid(), OwnerId = identity.Id, Title = input.Title.Trim(), Description = input.Description?.Trim(), StartAt = input.StartAt, EndAt = input.EndAt, Type = NormalizeCalendarEventType(input.Type), CreatedAt = now, UpdatedAt = now };
-    dbContext.CalendarEvents.Add(item);
-    if (input.References is not null) await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, item.Id, input.References, cancellationToken);
-    await dbContext.SaveChangesAsync(cancellationToken);
-    var eventReferences = input.References is null ? Array.Empty<PlannerReferenceDto>() : PlannerReferenceStore.Normalize(input.References).Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, reference.ParentReferenceType, reference.ParentReferenceId, reference.ParentReferenceName)).ToArray();
-    return Results.Created($"/api/agenda/{item.Id}", new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt, eventReferences), new(now, null)));
+    try
+    {
+        var references = input.References?.Select(r => new TaskReferenceV2Input(r.ReferenceType, r.ReferenceId, r.ReferenceName, r.ConnectionRef)).ToArray();
+        var result = await new ProfessionalPlannerService(dbContext).CreateEventAsync(identity.Id, identity.Id, new EventProfessionalInput(input.Title, input.Description, input.StartAt, input.EndAt, input.TimeZoneId, input.Location, input.AvailabilityStatus, input.IsAllDay, input.Tags, references, input.Recurrence, input.ExpectedVersion, input.Type), cancellationToken);
+        return Results.Created($"/api/agenda/{result.Id}", new AppEnvelope<EventDto>(result, new(result.CreatedAt, null)));
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = new { code = "invalid_event", message = exception.Message } });
+    }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapDelete("/api/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CancellationToken cancellationToken) =>
@@ -1214,10 +1236,12 @@ app.MapDelete("/api/agenda/{id:guid}", async (Guid id, HttpContext context, Conn
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
-    var item = await dbContext.CalendarEvents.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
-    if (item is null) return Results.NotFound();
-    dbContext.PlannerLinks.RemoveRange(await dbContext.PlannerLinks.Where(link => link.OwnerId == identity.Id && link.CalendarEventId == id).ToListAsync(cancellationToken));
-    dbContext.CalendarEvents.Remove(item); await dbContext.SaveChangesAsync(cancellationToken); return Results.NoContent();
+    try
+    {
+        await new ProfessionalPlannerService(dbContext).DeleteEventAsync(identity.Id, id, cancellationToken);
+        return Results.NoContent();
+    }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapPatch("/api/agenda/{id:guid}", async (Guid id, HttpContext context, ConnectorDbContext dbContext, IAntiforgery antiforgery, CalendarEventUpdateInput input, CancellationToken cancellationToken) =>
@@ -1226,22 +1250,21 @@ app.MapPatch("/api/agenda/{id:guid}", async (Guid id, HttpContext context, Conne
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     await antiforgery.ValidateRequestAsync(context);
-    if (string.IsNullOrWhiteSpace(input.Title)) return Results.BadRequest(new { error = new { code = "invalid_title", message = "Título é obrigatório." } });
-    var item = await dbContext.CalendarEvents.SingleOrDefaultAsync(x => x.Id == id && x.OwnerId == identity.Id, cancellationToken);
-    if (item is null) return Results.NotFound();
-    item.Title = input.Title.Trim();
-    item.Description = input.Description?.Trim();
-    item.StartAt = input.StartAt;
-    item.EndAt = input.EndAt;
-    item.Type = NormalizeCalendarEventType(input.Type);
-    if (input.References is not null) await PlannerReferenceStore.ReplaceForEventAsync(dbContext, identity.Id, item.Id, input.References, cancellationToken);
-    item.UpdatedAt = DateTimeOffset.UtcNow;
-    await dbContext.SaveChangesAsync(cancellationToken);
-    var eventReferences = await PlannerReferenceStore.ForEventsAsync(dbContext, identity.Id, [item.Id], cancellationToken);
-    return Results.Ok(new AppEnvelope<CalendarEventDto>(new(item.Id, item.Title, item.Description, item.StartAt, item.EndAt, item.Type, item.CreatedAt, item.UpdatedAt, eventReferences.GetValueOrDefault(item.Id, [])), new(item.UpdatedAt, null)));
+    try
+    {
+        var references = input.References?.Select(r => new TaskReferenceV2Input(r.ReferenceType, r.ReferenceId, r.ReferenceName, r.ConnectionRef)).ToArray();
+        var result = await new ProfessionalPlannerService(dbContext).UpdateEventAsync(identity.Id, identity.Id, id, new EventProfessionalInput(input.Title, input.Description, input.StartAt, input.EndAt, input.TimeZoneId, input.Location, input.AvailabilityStatus, input.IsAllDay, input.Tags, references, input.Recurrence, input.ExpectedVersion, input.Type, input.ClearEndAt), cancellationToken);
+        return Results.Ok(new AppEnvelope<EventDto>(result, new(result.UpdatedAt, null)));
+    }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = new { code = "optimistic_conflict", message = exception.Message } }); }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = new { code = "invalid_event", message = exception.Message } }); }
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 PortalSessionAndConnectionEndpoints.MapSessionAndConnections(app, AppAuthRateLimitPolicy);
+// Correction queues remain Moodle-first and synchronous. Snapshots are useful
+// for dashboards, but must not make an instructor wait for background hydration
+// or see an empty queue while a snapshot is missing.
 app.MapGet("/api/pending", async (
     string? connectionRef,
     string? courseId,
@@ -1255,10 +1278,7 @@ app.MapGet("/api/pending", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
-    IMoodleSnapshotStore snapshotStore,
-    IMoodleSnapshotSyncQueue snapshotSyncQueue,
-    IDashboardOverviewRefreshQueue dashboardRefreshQueue,
-    DashboardCourseScopeResolver dashboardCourseScopeResolver,
+    IMediator mediator,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
@@ -1287,66 +1307,24 @@ app.MapGet("/api/pending", async (
                 ["Selecione um curso para consultar pendências; nenhuma consulta agregada foi executada."])));
     }
 
-    var userId = identity.Id.ToString();
-    var courseSnapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
-    if (courseSnapshot is null && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-    {
-        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-            identity.Id, identity.ConnectorClientId, resolved.Alias, userId,
-            Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: refresh == true), cancellationToken);
-    }
-    var resolvedCourseId = courseSnapshot?.Data.FirstOrDefault(item =>
-        string.Equals(item.CourseId, courseId, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(item.ShortName, courseId, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(item.IdNumber, courseId, StringComparison.OrdinalIgnoreCase))?.CourseId ?? courseId;
-    var participantsSnapshot = await snapshotStore.GetStudentsAsync(identity.Id, resolved.Alias, resolvedCourseId, cancellationToken);
-    if (participantsSnapshot is null && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-    {
-        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-            identity.Id, identity.ConnectorClientId, resolved.Alias, userId,
-            CourseId: resolvedCourseId, Dataset: MoodleSnapshotDatasets.Students, Priority: 10, Force: refresh == true), cancellationToken);
-    }
-    var pendingSnapshot = await snapshotStore.GetAsync<AppDashboardPendingMetricDto>(
-        identity.Id, resolved.Alias, MoodleSnapshotDatasets.DashboardPending, cancellationToken: cancellationToken);
-    var dashboardCourses = courseSnapshot is null
-        ? []
-        : await dashboardCourseScopeResolver.FilterAsync(identity.Id, resolved.Alias, courseSnapshot.Data, cancellationToken);
-    var pendingItemCoverageMissing = pendingSnapshot is not null &&
-        pendingSnapshot.Data.CourseSummaries.Any(item =>
-            string.Equals(item.CourseId, resolvedCourseId, StringComparison.OrdinalIgnoreCase) &&
-            item.PendingSubmissions > 0) &&
-        !pendingSnapshot.Data.PendingItems.Any(item => string.Equals(item.CourseId, resolvedCourseId, StringComparison.OrdinalIgnoreCase));
-    var pendingScopeMatches = pendingSnapshot is not null &&
-        pendingSnapshot.Data.CoursesInScope == dashboardCourses.Count &&
-        !pendingItemCoverageMissing;
-    var pendingRefreshQueued = false;
-    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
-        dashboardCourses.Count > 0 &&
-        (refresh == true || pendingSnapshot is null || !pendingSnapshot.IsComplete || !pendingScopeMatches))
-    {
-        pendingRefreshQueued = await dashboardRefreshQueue.EnqueueAsync(new DashboardOverviewRefreshRequest(
-            identity.Id,
-            identity.ConnectorClientId,
-            resolved.Alias,
-            dashboardCourses,
-            Force: refresh == true || pendingSnapshot?.IsComplete == false || !pendingScopeMatches), cancellationToken);
-    }
-
+    var participants = await mediator.Send(new ListCourseParticipantsQuery(
+        identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, 1, 100, true, false), cancellationToken);
+    if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
+    var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(courseId, 0, 100), cancellationToken);
     var inactivityDays = Math.Clamp(periodDays ?? 14, 1, 3650);
     var cutoff = generatedAt.AddDays(-inactivityDays);
-    var accessRows = (participantsSnapshot?.Data.Participants ?? [])
+    var accessRows = participants.Participants
         .Where(student => string.IsNullOrWhiteSpace(studentId) || student.UserId == studentId)
         .Where(student => student.LastCourseAccessAt is null || student.LastCourseAccessAt < cutoff)
         .Select(student => new AppPendingAccessRow(student.UserId, student.FullName, student.LastCourseAccessAt));
-    var submissionRows = (pendingSnapshot?.Data.PendingItems ?? [])
-        .Where(item => string.Equals(item.CourseId, resolvedCourseId, StringComparison.OrdinalIgnoreCase))
-        .Where(item => string.IsNullOrWhiteSpace(studentId) || item.StudentId == studentId)
-        .Select(item => new AppPendingSourceRow(
-            item.StudentId, item.StudentName, item.LastCourseAccessAt,
-            item.AssignmentId, item.AssignmentName, "pending_submission", item.DueAt,
-            item.IsOverdue, false));
+    var submissionRows = pending.Students
+        .Where(student => string.IsNullOrWhiteSpace(studentId) || student.StudentId == studentId)
+        .SelectMany(student => student.PendingAssignments.Select(activity => new AppPendingSourceRow(
+            student.StudentId, student.FullName, student.LastCourseAccessAt,
+            activity.AssignmentId, activity.AssignmentName, "pending_submission", activity.DueDate,
+            activity.IsOverdue, false)));
 
-    var allItems = AppPendingContractMapper.Build(effectiveConnectionRef, resolvedCourseId, submissionRows, accessRows, generatedAt);
+    var allItems = AppPendingContractMapper.Build(effectiveConnectionRef, courseId, submissionRows, accessRows, generatedAt);
     var requestedLevel = level?.Trim().ToLowerInvariant();
     var requestedType = type?.Trim().ToLowerInvariant();
     var filtered = allItems
@@ -1354,27 +1332,9 @@ app.MapGet("/api/pending", async (
         .Where(item => string.IsNullOrWhiteSpace(requestedLevel) || item.Level == requestedLevel)
         .ToArray();
     var items = filtered.Skip((currentPage - 1) * size).Take(size).ToArray();
-    var warnings = new List<string>();
-    if (participantsSnapshot is null) warnings.Add("A lista de alunos está sendo preparada em segundo plano.");
-    if (pendingSnapshot is null || pendingItemCoverageMissing) warnings.Add("As pendências do curso estão sendo preparadas em segundo plano.");
-    if (pendingRefreshQueued) warnings.Add("Atualização solicitada; a lista será atualizada assim que o Moodle responder.");
-    if (pendingSnapshot is not null)
-    {
-        warnings.AddRange(pendingSnapshot.Data.Warnings.Where(warning => warning.StartsWith($"[{resolvedCourseId}]", StringComparison.OrdinalIgnoreCase)));
-    }
-    var pendingSource = participantsSnapshot is null || pendingSnapshot is null || pendingItemCoverageMissing
-        ? "background"
-        : "snapshot";
-    var pendingSnapshotAt = pendingSnapshot?.UpdatedAt ?? participantsSnapshot?.UpdatedAt;
-    long? pendingAgeSeconds = pendingSnapshotAt is null
-        ? null
-        : Math.Max(0, (long)(DateTimeOffset.UtcNow - pendingSnapshotAt.Value).TotalSeconds);
-    var pendingStale = participantsSnapshot?.IsStale == true || pendingSnapshot?.IsStale == true;
-    var pendingComplete = participantsSnapshot?.IsComplete == true && pendingSnapshot?.IsComplete == true && !pendingItemCoverageMissing;
     return Results.Ok(new AppListEnvelope<AppPendingDto>(
         items, new(currentPage, size, items.Length, currentPage * size < filtered.Length, generatedAt, effectiveConnectionRef,
-            warnings.Count > 0 ? warnings : null, filtered.Length,
-            pendingSource, pendingSnapshotAt, pendingAgeSeconds, pendingStale, pendingRefreshQueued, pendingComplete)));
+            pending.Warning is null ? null : [pending.Warning], filtered.Length)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/submissions", async (
@@ -1392,8 +1352,6 @@ app.MapGet("/api/submissions", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
-    IMoodleSnapshotStore snapshotStore,
-    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMediator mediator,
     CancellationToken cancellationToken) =>
@@ -1406,99 +1364,14 @@ app.MapGet("/api/submissions", async (
     if (string.IsNullOrWhiteSpace(courseId) || string.IsNullOrWhiteSpace(assignmentId))
         return Results.BadRequest(new { error = new { code = "invalid_submission_scope", message = "Curso e atividade são obrigatórios." } });
 
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
     var currentPage = Math.Max(page ?? 1, 1);
     var size = Math.Clamp(pageSize ?? 25, 1, 100);
     var filter = ParseAssignmentSubmissionFilter(status);
-    var normalizedCourseId = courseId.Trim();
-    var normalizedAssignmentId = assignmentId.Trim();
-    var snapshot = await snapshotStore.GetAsync<CourseAssignmentSubmissionsSnapshot>(
-        identity.Id,
-        resolved.Alias,
-        MoodleSnapshotDatasets.Submissions,
-        normalizedCourseId,
-        cancellationToken);
-    var snapshotAssignment = snapshot is null
-        ? null
-        : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, normalizedAssignmentId);
-
-    if (snapshot is not null && snapshotAssignment is not null)
-    {
-        var snapshotForResponse = snapshot;
-        var refreshQueued = false;
-        if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
-            (refresh == true || snapshotForResponse.IsStale || !snapshotForResponse.IsComplete || !snapshotAssignment.IsComplete))
-        {
-            refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-                identity.Id,
-                identity.ConnectorClientId,
-                resolved.Alias,
-                identity.Id.ToString(),
-                Force: refresh == true,
-                Dataset: MoodleSnapshotDatasets.Submissions,
-                CourseId: normalizedCourseId,
-                Priority: 10), cancellationToken);
-        }
-
-        var snapshotPage = AssignmentSubmissionSnapshotProjector.ToPage(
-            snapshotAssignment,
-            normalizedCourseId,
-            filter,
-            currentPage,
-            size,
-            since,
-            before,
-            includeLate ?? true,
-            includeUngraded ?? true);
-        return Results.Ok(new AppEnvelope<AppSubmissionsPageDto>(
-            AppSubmissionContractMapper.ToPage(snapshotPage),
-            new(
-                snapshotForResponse.UpdatedAt,
-                connectionRef ?? resolved.Alias,
-                "snapshot",
-                snapshotForResponse.UpdatedAt,
-                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshotForResponse.UpdatedAt).TotalSeconds),
-                snapshotForResponse.IsStale,
-                refreshQueued,
-                snapshotForResponse.IsComplete && snapshotAssignment.IsComplete)));
-    }
-
-    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-    {
-        var refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-            identity.Id,
-            identity.ConnectorClientId,
-            resolved.Alias,
-            identity.Id.ToString(),
-            Force: refresh == true,
-            Dataset: MoodleSnapshotDatasets.Submissions,
-            CourseId: normalizedCourseId,
-            Priority: 10), cancellationToken);
-        var preparingPage = new AppSubmissionsPageDto(
-            normalizedCourseId,
-            normalizedAssignmentId,
-            null,
-            "Atividade selecionada",
-            currentPage,
-            size,
-            filter.ToString(),
-            includeLate ?? true,
-            includeUngraded ?? true,
-            since,
-            before,
-            0,
-            false,
-            []);
-        return Results.Ok(new AppEnvelope<AppSubmissionsPageDto>(
-            preparingPage,
-            new(DateTimeOffset.UtcNow, connectionRef ?? resolved.Alias, "background", null, null, false, refreshQueued, false)));
-    }
-
-    // Legacy connections without a connector client retain the previous synchronous path.
-    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
     var result = await mediator.Send(new ListAssignmentSubmissionsQuery(
         currentUserId.ToString(),
-        normalizedCourseId,
-        normalizedAssignmentId,
+        courseId.Trim(),
+        assignmentId.Trim(),
         filter,
         currentPage,
         size,
@@ -1522,8 +1395,6 @@ app.MapGet("/api/submissions/{courseId}/{assignmentId}/{studentId}", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
-    IMoodleSnapshotStore snapshotStore,
-    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMoodleAssignmentGradeReadGateway gradeReadGateway,
     IMoodleCourseContentsGateway contentsGateway,
@@ -1535,70 +1406,9 @@ app.MapGet("/api/submissions/{courseId}/{assignmentId}/{studentId}", async (
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var normalizedCourseId = courseId.Trim();
-    var normalizedAssignmentId = assignmentId.Trim();
-    var normalizedStudentId = studentId.Trim();
-    var snapshot = await snapshotStore.GetAsync<CourseAssignmentSubmissionsSnapshot>(
-        identity.Id,
-        resolved.Alias,
-        MoodleSnapshotDatasets.Submissions,
-        normalizedCourseId,
-        cancellationToken);
-    var snapshotAssignment = snapshot is null
-        ? null
-        : AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, normalizedAssignmentId);
-    var snapshotSubmission = snapshotAssignment is null
-        ? null
-        : AssignmentSubmissionSnapshotProjector.FindStudent(snapshotAssignment, normalizedStudentId);
-    if (snapshotSubmission is not null)
-    {
-        if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
-            (snapshot!.IsStale || !snapshot.IsComplete || !snapshotAssignment!.IsComplete))
-        {
-            await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-                identity.Id,
-                identity.ConnectorClientId,
-                resolved.Alias,
-                identity.Id.ToString(),
-                Dataset: MoodleSnapshotDatasets.Submissions,
-                CourseId: normalizedCourseId,
-                Priority: 10), cancellationToken);
-        }
-
-        // The current grade is re-read by the write preparation flow. Do not make
-        // opening a correction dialog wait on another Moodle round trip.
-        return Results.Ok(new AppEnvelope<AppSubmissionDto>(
-            AppSubmissionContractMapper.ToDto(snapshotSubmission),
-            new(
-                snapshot!.UpdatedAt,
-                connectionRef ?? resolved.Alias,
-                "snapshot",
-                snapshot.UpdatedAt,
-                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
-                snapshot.IsStale,
-                false,
-                snapshot.IsComplete && snapshotAssignment!.IsComplete)));
-    }
-
-    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-    {
-        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-            identity.Id,
-            identity.ConnectorClientId,
-            resolved.Alias,
-            identity.Id.ToString(),
-            Dataset: MoodleSnapshotDatasets.Submissions,
-            CourseId: normalizedCourseId,
-            Priority: 10), cancellationToken);
-        return Results.Json(
-            new { error = new { code = "submission_preparing", message = "Os dados da atividade ainda estão sendo preparados. Tente novamente em instantes." } },
-            statusCode: StatusCodes.Status409Conflict);
-    }
-
-    // Legacy connections without a connector client retain the previous synchronous path.
     var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
     var result = await mediator.Send(new GetStudentSubmissionQuery(
-        currentUserId.ToString(), normalizedCourseId, normalizedAssignmentId, normalizedStudentId), cancellationToken);
+        currentUserId.ToString(), courseId.Trim(), assignmentId.Trim(), studentId.Trim()), cancellationToken);
     var gradeAssignmentId = assignmentId;
     try
     {
@@ -1745,6 +1555,37 @@ app.MapGet("/api/dashboard/{metric}", async (
         } ?? (IResult)AppErrorResults.NotFound("dashboard_metric_not_found", "Métrica de dashboard não encontrada.");
     }
 
+    if (normalizedMetric == "summary")
+    {
+        // The weekly overview must remain a local, low-cost read. Course
+        // hydration happens elsewhere; do not fall back to Moodle pagination.
+        var courseSnapshot = await snapshotStore.GetCoursesAsync(identity.Id, effectiveConnectionRef, cancellationToken);
+        IReadOnlyList<CourseSummary> summaryCourses = courseSnapshot is null
+            ? []
+            : await dashboardCourseScopeResolver.FilterAsync(identity.Id, effectiveConnectionRef, courseSnapshot.Data, cancellationToken);
+        var todayStart = GetBrazilTodayStart(generatedAt);
+        var todayEnd = todayStart.AddDays(1);
+        var todayEvents = await dbContext.CalendarEvents.AsNoTracking()
+            .CountAsync(item => item.OwnerId == identity.Id &&
+                                item.StartAt < todayEnd &&
+                                (!item.EndAt.HasValue || item.EndAt > todayStart), cancellationToken);
+        var todayTasks = await dbContext.Tasks.AsNoTracking()
+            .CountAsync(item => item.OwnerId == identity.Id && item.Status != "done" && item.DueAt >= todayStart && item.DueAt < todayEnd, cancellationToken);
+        var warnings = courseSnapshot is null
+            ? new[] { "A lista de cursos ainda está sendo sincronizada; nenhum Moodle foi consultado para este resumo." }
+            : summaryCourses.Count == 0
+                ? new[] { "Nenhum curso em andamento foi encontrado em Meus Cursos." }
+                : [];
+        var result = new AppDashboardSummaryMetricDto(
+            new AppDashboardSummaryDto(summaryCourses.Count, 0, 0, 0, 0)
+            {
+                TodayEvents = todayEvents,
+                TodayTasks = todayTasks,
+            },
+            warnings);
+        return (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
+    }
+
     IReadOnlyList<CourseSummary> courses;
     if (refresh == true)
     {
@@ -1766,26 +1607,6 @@ app.MapGet("/api/dashboard/{metric}", async (
             courses.Count == 0 ? ["Nenhum curso em andamento foi encontrado em Meus Cursos."] : []);
         memoryCache.Set(cacheKey, result, AppDashboardBudget.MetricCacheDuration);
         return (IResult)Results.Ok(new AppEnvelope<AppDashboardCoursesMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
-    }
-
-    if (normalizedMetric == "summary")
-    {
-        var todayStart = GetBrazilTodayStart(generatedAt);
-        var todayEnd = todayStart.AddDays(1);
-        var todayEvents = await dbContext.CalendarEvents.AsNoTracking()
-            .CountAsync(item => item.OwnerId == identity.Id &&
-                                item.StartAt < todayEnd &&
-                                (!item.EndAt.HasValue || item.EndAt > todayStart), cancellationToken);
-        var todayTasks = await dbContext.Tasks.AsNoTracking()
-            .CountAsync(item => item.OwnerId == identity.Id && item.Status != "done" && item.DueAt >= todayStart && item.DueAt < todayEnd, cancellationToken);
-        var result = new AppDashboardSummaryMetricDto(
-            new AppDashboardSummaryDto(courses.Count, 0, 0, 0, 0)
-            {
-                TodayEvents = todayEvents,
-                TodayTasks = todayTasks,
-            },
-            courses.Count == 0 ? ["Nenhum curso em andamento foi encontrado em Meus Cursos."] : []);
-        return (IResult)Results.Ok(new AppEnvelope<AppDashboardSummaryMetricDto>(result, new(generatedAt, effectiveConnectionRef)));
     }
 
     if (normalizedMetric == "pending")
@@ -1960,12 +1781,16 @@ app.MapGet("/api/dashboard", async (
     IMediator mediator,
     IMoodleSnapshotStore snapshotStore,
     IMoodleSnapshotSyncQueue snapshotSyncQueue,
-    IDashboardOverviewRefreshQueue dashboardRefreshQueue,
-    DashboardCourseScopeResolver dashboardCourseScopeResolver,
+    DashboardPendingSnapshotBuilder pendingSnapshotBuilder,
+    IConnectorExecutionContext executionContext,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        executionContext.Enter(identity.ConnectorClientId, identity.Id.ToString(), identity.Email);
+    }
 
     var generatedAt = DateTimeOffset.UtcNow;
     var selectedWeek = AppDashboardWeekFilter.Normalize(week);
@@ -2123,36 +1948,28 @@ app.MapGet("/api/dashboard", async (
             Priority: 10,
             Force: refresh == true), cancellationToken);
     }
-    var pendingSnapshot = await snapshotStore.GetAsync<AppDashboardPendingMetricDto>(
-        identity.Id,
-        resolved.Alias,
-        MoodleSnapshotDatasets.DashboardPending,
-        cancellationToken: cancellationToken);
-    var dashboardCourses = courseSnapshot is null
-        ? []
-        : await dashboardCourseScopeResolver.FilterAsync(identity.Id, resolved.Alias, courseSnapshot.Data, cancellationToken);
-    var pendingCoverageMissing = pendingSnapshot is not null &&
-        DashboardPendingCoveragePolicy.Evaluate(pendingSnapshot.Data, course.CourseId).HasMissingCoverage;
-    var pendingScopeMatches = pendingSnapshot is not null &&
-        pendingSnapshot.Data.CoursesInScope == dashboardCourses.Count &&
-        !pendingCoverageMissing;
-    var pendingRefreshQueued = false;
-    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
-        dashboardCourses.Count > 0 &&
-        (refresh == true || pendingSnapshot is null || !pendingSnapshot.IsComplete || !pendingScopeMatches))
+    var submissionsRefreshQueued = false;
+    if (refresh == true && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
     {
-        pendingRefreshQueued = await dashboardRefreshQueue.EnqueueAsync(new DashboardOverviewRefreshRequest(
+        submissionsRefreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
             identity.Id,
-            identity.ConnectorClientId,
+            identity.ConnectorClientId!,
             resolved.Alias,
-            dashboardCourses,
-            Force: refresh == true || pendingSnapshot?.IsComplete == false || !pendingScopeMatches), cancellationToken);
+            userId,
+            CourseId: course.CourseId,
+            Dataset: MoodleSnapshotDatasets.Submissions,
+            Priority: 10,
+            Force: true), cancellationToken);
     }
+
+    // Pending work is intentionally calculated for the opened course only.
+    // This avoids the weekly overview fanning out across every tracked course.
+    var pendingSnapshot = await pendingSnapshotBuilder.BuildAsync(identity.Id, [course], cancellationToken);
 
     var courseDashboard = CourseDashboardSnapshotMapper.Create(
         course,
         participantSnapshot?.Data,
-        pendingSnapshot?.Data,
+        pendingSnapshot,
         effectiveConnectionRef,
         todayEvents,
         todayTasks,
@@ -2160,7 +1977,7 @@ app.MapGet("/api/dashboard", async (
         selectedWeek,
         weekPeriod.Start,
         weekPeriod.End,
-        participantRefreshQueued || activityRefreshQueued || pendingRefreshQueued);
+        participantRefreshQueued || activityRefreshQueued || submissionsRefreshQueued);
     return Results.Ok(new AppEnvelope<AppDashboardDto>(
         courseDashboard,
         new(generatedAt, effectiveConnectionRef)));
@@ -2172,6 +1989,8 @@ app.MapGet("/api/schools", async (
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
     IMoodleCoursesGateway coursesGateway,
+    IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
@@ -2209,6 +2028,29 @@ app.MapGet("/api/schools", async (
         });
     }
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var snapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
+    if (snapshot is not null)
+    {
+        var categoriesMissing = snapshot.Data.Any(course => course.CategoryId is > 0 && string.IsNullOrWhiteSpace(course.CategoryName));
+        var refreshQueued = (!snapshot.IsComplete || categoriesMissing) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
+            await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
+                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: categoriesMissing), cancellationToken);
+        var snapshotNodes = BuildCourseHierarchy(snapshot.Data);
+        return Results.Ok(new
+        {
+            data = snapshotNodes,
+            meta = new
+            {
+                generatedAt = snapshot.UpdatedAt,
+                connectionRef = resolved.Alias,
+                source = "snapshot",
+                refreshQueued,
+                complete = snapshot.IsComplete,
+            }
+        });
+    }
+
     var nodes = await coursesGateway.GetMyCourseHierarchyAsync(identity.Id.ToString(), cancellationToken);
     return Results.Ok(new { data = nodes, meta = new { generatedAt = DateTimeOffset.UtcNow, connectionRef = resolved.Alias } });
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
@@ -2267,7 +2109,15 @@ app.MapGet("/api/courses", async (
     var snapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
     if (snapshot is not null)
     {
-        var refreshQueued = false;
+        // A course snapshot can be published before all Moodle pages finish.
+        // Keep serving the usable portion, but make sure the worker is nudged
+        // and the client can poll until the category-bearing catalogue is
+        // complete instead of treating a partial tree as final.
+        var categoriesMissing = snapshot.Data.Any(course => course.CategoryId is > 0 && string.IsNullOrWhiteSpace(course.CategoryName));
+        var refreshQueued = (!snapshot.IsComplete || categoriesMissing) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
+            await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
+                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: categoriesMissing), cancellationToken);
         var snapshotItems = snapshot.Data.Skip((currentPage - 1) * size).Take(size).ToArray();
         return Results.Ok(new AppListEnvelope<AppCourseDto>(
             snapshotItems.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray(),
@@ -2494,52 +2344,45 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}", async (
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
     string connectionRef, string courseId, int? page, int? pageSize, bool? includeActionSummary, bool? refresh, HttpContext context,
-    ConnectorDbContext dbContext, IConnectionRegistry connectionRegistry,
-    IMoodleSnapshotStore snapshotStore, IMoodleSnapshotSyncQueue snapshotSyncQueue,
+    ConnectorDbContext dbContext, IMediator mediator, IConnectionRegistry connectionRegistry,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var snapshot = await snapshotStore.GetActivitiesAsync(identity.Id, resolved.Alias, courseId, cancellationToken);
-    var cachedActivities = snapshot is null ? null : ToCourseActivitiesSummary(snapshot.Data);
-    if (cachedActivities is not null)
+    var result = await mediator.Send(new ListCourseActivitiesQuery(
+        identity.Id.ToString(), courseId, CourseActivityModuleTypes.All, false), cancellationToken);
+    if (result is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
+    var currentPage = Math.Max(page ?? 1, 1);
+    var size = Math.Clamp(pageSize ?? 20, 1, 100);
+    var pageActivities = result.Activities.Skip((currentPage - 1) * size).Take(size).ToArray();
+    var submissionCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    var gradingCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    if (includeActionSummary == true)
     {
-        var refreshQueued = false;
-        if (refresh == true && !string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-        {
-            refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-                identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(),
-                CourseId: courseId, Dataset: MoodleSnapshotDatasets.Activities, Priority: 10, Force: true), cancellationToken);
-        }
-        var cachedPage = cachedActivities.Activities.Skip((Math.Max(page ?? 1, 1) - 1) * Math.Clamp(pageSize ?? 20, 1, 100)).Take(Math.Clamp(pageSize ?? 20, 1, 100)).ToArray();
-        var cachedPageNumber = Math.Max(page ?? 1, 1); var cachedPageSize = Math.Clamp(pageSize ?? 20, 1, 100);
-        var warnings = new List<string>();
-        if (snapshot!.IsStale) warnings.Add("Dados locais podem estar desatualizados; use Atualizar para consultar agora.");
-        if (refreshQueued) warnings.Add("Atualização solicitada; a lista será atualizada assim que o Moodle responder.");
-        if (includeActionSummary == true) warnings.Add("Contadores de entrega e correção foram removidos desta lista para preservar o desempenho.");
-        return Results.Ok(new AppListEnvelope<AppActivityDto>(cachedPage.Select(activity => AppCourseContractMapper.ToDto(activity, connectionRef, courseId)).ToArray(),
-            new(cachedPageNumber, cachedPageSize, cachedPage.Length, cachedPageNumber * cachedPageSize < cachedActivities.Total, snapshot!.UpdatedAt,
-                connectionRef, warnings.Count > 0 ? warnings : null, cachedActivities.Total,
-                "snapshot", snapshot.UpdatedAt,
-                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
-                snapshot.IsStale, refreshQueued, snapshot.IsComplete)));
+        var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+            courseId, 0, AppDashboardBudget.MaxParticipantsRead, IncludeAwaitingGrading: true,
+            MaxAssignmentsToAnalyze: AppDashboardBudget.MaxAssignmentsRead), cancellationToken);
+        foreach (var item in pending.Students.SelectMany(student => student.PendingAssignments))
+            submissionCounts[item.AssignmentId] = submissionCounts.GetValueOrDefault(item.AssignmentId) + 1;
+        foreach (var item in pending.AwaitingGrading)
+            gradingCounts[item.Item.AssignmentId] = gradingCounts.GetValueOrDefault(item.Item.AssignmentId) + 1;
     }
-    var refreshQueuedWithoutSnapshot = !string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
-        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
-            identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
-            CourseId: courseId, Dataset: MoodleSnapshotDatasets.Activities, Priority: 10, Force: refresh == true), cancellationToken);
-    var pendingPage = Math.Max(page ?? 1, 1);
-    var pendingSize = Math.Clamp(pageSize ?? 20, 1, 100);
-    var pendingWarnings = new List<string>
+    var data = pageActivities.Select(activity =>
     {
-        "A lista de atividades está sendo preparada em segundo plano. Tente novamente em instantes."
-    };
-    if (includeActionSummary == true) pendingWarnings.Add("Contadores de entrega e correção foram removidos desta lista para preservar o desempenho.");
-    return Results.Ok(new AppListEnvelope<AppActivityDto>([],
-        new(pendingPage, pendingSize, 0, false, DateTimeOffset.UtcNow, connectionRef, pendingWarnings, 0,
-            "background", null, null, false, refreshQueuedWithoutSnapshot, false)));
+        var dto = AppCourseContractMapper.ToDto(activity, connectionRef, courseId);
+        var keys = new[] { activity.InstanceId, activity.ActivityId }
+            .Where(key => !string.IsNullOrWhiteSpace(key)).Cast<string>();
+        return dto with
+        {
+            PendingSubmissionCount = keys.Select(key => submissionCounts.GetValueOrDefault(key)).FirstOrDefault(value => value > 0),
+            AwaitingGradingCount = keys.Select(key => gradingCounts.GetValueOrDefault(key)).FirstOrDefault(value => value > 0),
+        };
+    }).ToArray();
+    return Results.Ok(new AppListEnvelope<AppActivityDto>(data,
+        new(currentPage, size, data.Length, currentPage * size < result.Total,
+            DateTimeOffset.UtcNow, connectionRef, null, result.Total)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
@@ -2697,6 +2540,27 @@ PortalShellEndpoints.MapSinglePageApplicationShell(app, appV2Enabled);
 
 app.Run();
 
+static IReadOnlyList<CourseHierarchyNode> BuildCourseHierarchy(IReadOnlyList<CourseSummary> courses)
+{
+    var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    foreach (var course in courses)
+    {
+        var parts = (course.CategoryName ?? "Sem categoria")
+            .Split('>', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0) parts = ["Sem categoria"];
+        for (var length = 1; length <= parts.Length; length++)
+        {
+            var path = string.Join(" > ", parts.Take(length));
+            counts[path] = counts.TryGetValue(path, out var count) ? count + 1 : 1;
+        }
+    }
+
+    return counts
+        .Select(item => new CourseHierarchyNode(item.Key, item.Key.Split('>').Last().Trim(), item.Key.Count(character => character == '>'), item.Value))
+        .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+}
+
 static DateTimeOffset GetBrazilTodayStart(DateTimeOffset value)
 {
     var saoPaulo = TimeZoneInfo.FindSystemTimeZoneById("America/Sao_Paulo");
@@ -2720,7 +2584,9 @@ static (DateTimeOffset Start, DateTimeOffset End) GetBrazilWeekPeriod(DateTimeOf
 static string NormalizeTaskStatus(string? value) => value switch
 {
     "in_progress" => "in_progress",
+    "blocked" => "blocked",
     "done" => "done",
+    "cancelled" => "cancelled",
     _ => "todo"
 };
 
@@ -2745,12 +2611,6 @@ static string? NormalizePlannerSchedule(string? value)
     var normalized = value.Trim();
     return normalized.Length > 240 ? normalized[..240] : normalized;
 }
-
-static string NormalizeCalendarEventType(string? value) => value switch
-{
-    "meeting" or "alignment" or "delivery" or "training" or "webclass" => value,
-    _ => "other"
-};
 
 static string NormalizeFollowupKind(string? value) => value switch
 {
@@ -3154,47 +3014,6 @@ static async Task SeedChatGptOAuthClientAsync(
     }
 
     await manager.UpdateAsync(existing, descriptor);
-}
-
-static CourseActivitiesSummary ToCourseActivitiesSummary(CourseContentsSummary contents)
-{
-    var activities = contents.Sections
-        .SelectMany(section => section.Modules)
-        .Where(module => CourseActivityModuleTypes.All.Contains(module.ModuleType, StringComparer.OrdinalIgnoreCase))
-        .Select(module =>
-        {
-            var dates = module.Dates ?? [];
-            DateTimeOffset? FindDate(params string[] labels) => dates.FirstOrDefault(item => labels.Any(label => item.Label.Contains(label, StringComparison.OrdinalIgnoreCase))) is { } match ? match.Date : null;
-            var openAt = FindDate("open", "abertura", "start", "início");
-            var dueAt = FindDate("due", "deadline", "entrega", "prazo");
-            var closeAt = FindDate("close", "encerramento", "end", "fim");
-            return new CourseActivitySummary(
-                module.ModuleId,
-                module.InstanceId,
-                module.ModuleType,
-                module.Name,
-                module.Url,
-                module.Visible,
-                module.UserVisible,
-                module.Description,
-                module.AvailabilityInfo,
-                dates.Count > 0,
-                dueAt is not null,
-                openAt,
-                dueAt,
-                closeAt,
-                dates,
-                module.Files.Count);
-        })
-        .ToArray();
-    return new CourseActivitiesSummary(
-        contents.CourseId,
-        contents.ModuleTypeFilters,
-        contents.IncludeHidden,
-        activities.Length,
-        activities.Count(item => !item.HasDates),
-        activities.Count(item => !item.HasDeadline),
-        activities);
 }
 
 static bool HasAppPermission(HttpContext context, string permission) =>

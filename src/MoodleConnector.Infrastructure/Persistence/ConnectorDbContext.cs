@@ -19,8 +19,20 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<PermissionGroupMembershipEntity> PermissionGroupMemberships => Set<PermissionGroupMembershipEntity>();
     public DbSet<UserPermissionOverrideEntity> UserPermissionOverrides => Set<UserPermissionOverrideEntity>();
     public DbSet<TaskEntity> Tasks => Set<TaskEntity>();
+    public DbSet<TaskParticipantEntity> TaskParticipants => Set<TaskParticipantEntity>();
+    public DbSet<TaskReferenceEntity> TaskReferences => Set<TaskReferenceEntity>();
+    public DbSet<TaskTagEntity> TaskTags => Set<TaskTagEntity>();
+    public DbSet<TaskCommentEntity> TaskComments => Set<TaskCommentEntity>();
+    public DbSet<TaskActivityEntity> TaskActivities => Set<TaskActivityEntity>();
+    public DbSet<TaskDependencyEntity> TaskDependencies => Set<TaskDependencyEntity>();
     public DbSet<ReportJobEntity> ReportJobs => Set<ReportJobEntity>();
     public DbSet<CalendarEventEntity> CalendarEvents => Set<CalendarEventEntity>();
+    public DbSet<EventRecurrenceEntity> EventRecurrences => Set<EventRecurrenceEntity>();
+    public DbSet<EventRecurrenceDateEntity> EventRecurrenceDates => Set<EventRecurrenceDateEntity>();
+    public DbSet<EventOccurrenceOverrideEntity> EventOccurrenceOverrides => Set<EventOccurrenceOverrideEntity>();
+    public DbSet<EventReferenceEntity> EventReferences => Set<EventReferenceEntity>();
+    public DbSet<EventTagEntity> EventTags => Set<EventTagEntity>();
+    public DbSet<TaskEventLinkEntity> TaskEventLinks => Set<TaskEventLinkEntity>();
     public DbSet<FollowupEntity> Followups => Set<FollowupEntity>();
     public DbSet<PortalEvidenceEntity> PortalEvidence => Set<PortalEvidenceEntity>();
     public DbSet<DashboardAccessSnapshotEntity> DashboardAccessSnapshots => Set<DashboardAccessSnapshotEntity>();
@@ -163,8 +175,25 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         appTask.Property(x => x.ScheduleHint).HasMaxLength(240);
         appTask.Property(x => x.ExternalUid).HasMaxLength(240);
         appTask.Property(x => x.ExternalSource).HasMaxLength(80);
+        appTask.Property(x => x.Version).IsConcurrencyToken();
+        appTask.HasOne<TaskEntity>().WithMany().HasForeignKey(x => x.ParentTaskId).OnDelete(DeleteBehavior.Cascade);
         appTask.HasIndex(x => new { x.OwnerId, x.Status, x.DueAt });
         appTask.HasIndex(x => new { x.OwnerId, x.ExternalSource, x.ExternalUid }).IsUnique();
+
+        var participant = modelBuilder.Entity<TaskParticipantEntity>();
+        participant.ToTable("task_participants"); participant.HasKey(x => x.Id);
+        participant.Property(x => x.Role).HasMaxLength(16).IsRequired();
+        participant.HasIndex(x => new { x.TaskId, x.UserId }).IsUnique();
+        participant.HasIndex(x => x.TaskId).IsUnique().HasFilter("\"Role\" = 'owner'");
+        var taskReference = modelBuilder.Entity<TaskReferenceEntity>();
+        taskReference.ToTable("task_references"); taskReference.HasKey(x => x.Id);
+        taskReference.Property(x => x.ReferenceType).HasMaxLength(32).IsRequired(); taskReference.Property(x => x.ReferenceId).HasMaxLength(200).IsRequired(); taskReference.Property(x => x.ReferenceName).HasMaxLength(240); taskReference.Property(x => x.ConnectionRef).HasMaxLength(64); taskReference.Property(x => x.Relation).HasMaxLength(64);
+        taskReference.HasIndex(x => new { x.TaskId, x.ReferenceType, x.ReferenceId, x.ConnectionRef }).IsUnique();
+        var taskTag = modelBuilder.Entity<TaskTagEntity>();
+        taskTag.ToTable("task_tags"); taskTag.HasKey(x => new { x.TaskId, x.NormalizedValue }); taskTag.Property(x => x.Value).HasMaxLength(64); taskTag.Property(x => x.NormalizedValue).HasMaxLength(64);
+        var comment = modelBuilder.Entity<TaskCommentEntity>(); comment.ToTable("task_comments"); comment.HasKey(x => x.Id); comment.Property(x => x.Content).HasMaxLength(4000).IsRequired();
+        var activity = modelBuilder.Entity<TaskActivityEntity>(); activity.ToTable("task_activities"); activity.HasKey(x => x.Id); activity.Property(x => x.EventType).HasMaxLength(80).IsRequired(); activity.Property(x => x.Data).HasColumnType("jsonb");
+        var dependency = modelBuilder.Entity<TaskDependencyEntity>(); dependency.ToTable("task_dependencies"); dependency.HasKey(x => new { x.TaskId, x.DependsOnTaskId });
 
         var reportJob = modelBuilder.Entity<ReportJobEntity>();
         reportJob.ToTable("report_jobs");
@@ -200,8 +229,17 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         calendarEvent.Property(x => x.UpdatedAt).IsRequired();
         calendarEvent.Property(x => x.ExternalUid).HasMaxLength(240);
         calendarEvent.Property(x => x.ExternalSource).HasMaxLength(80);
+        calendarEvent.Property(x => x.TimeZoneId).HasMaxLength(80).IsRequired(); calendarEvent.Property(x => x.Location).HasMaxLength(500); calendarEvent.Property(x => x.AvailabilityStatus).HasMaxLength(16).IsRequired(); calendarEvent.Property(x => x.Source).HasMaxLength(80).IsRequired(); calendarEvent.Property(x => x.Version).IsConcurrencyToken();
         calendarEvent.HasIndex(x => new { x.OwnerId, x.StartAt });
+        calendarEvent.HasIndex(x => new { x.OwnerId, x.TimeZoneId });
         calendarEvent.HasIndex(x => new { x.OwnerId, x.ExternalSource, x.ExternalUid }).IsUnique();
+
+        var recurrence = modelBuilder.Entity<EventRecurrenceEntity>(); recurrence.ToTable("event_recurrences"); recurrence.HasKey(x => x.EventId); recurrence.Property(x => x.RRule).HasMaxLength(1000).IsRequired();
+        var recurrenceDate = modelBuilder.Entity<EventRecurrenceDateEntity>(); recurrenceDate.ToTable("event_recurrence_dates"); recurrenceDate.HasKey(x => new { x.EventId, x.OccurrenceStartAt, x.Kind }); recurrenceDate.Property(x => x.Kind).HasMaxLength(8);
+        var occurrenceOverride = modelBuilder.Entity<EventOccurrenceOverrideEntity>(); occurrenceOverride.ToTable("event_occurrence_overrides"); occurrenceOverride.HasKey(x => new { x.EventId, x.OriginalStartAt }); occurrenceOverride.Property(x => x.Title).HasMaxLength(240); occurrenceOverride.Property(x => x.Description).HasMaxLength(4000);
+        var eventReference = modelBuilder.Entity<EventReferenceEntity>(); eventReference.ToTable("event_references"); eventReference.HasKey(x => x.Id); eventReference.Property(x => x.ReferenceType).HasMaxLength(32); eventReference.Property(x => x.ReferenceId).HasMaxLength(200); eventReference.Property(x => x.ReferenceName).HasMaxLength(240); eventReference.Property(x => x.ConnectionRef).HasMaxLength(64); eventReference.Property(x => x.Relation).HasMaxLength(64); eventReference.HasIndex(x => new { x.EventId, x.ReferenceType, x.ReferenceId, x.ConnectionRef }).IsUnique();
+        var eventTag = modelBuilder.Entity<EventTagEntity>(); eventTag.ToTable("event_tags"); eventTag.HasKey(x => new { x.EventId, x.NormalizedValue }); eventTag.Property(x => x.Value).HasMaxLength(64); eventTag.Property(x => x.NormalizedValue).HasMaxLength(64);
+        var taskEvent = modelBuilder.Entity<TaskEventLinkEntity>(); taskEvent.ToTable("task_event_links"); taskEvent.HasKey(x => x.Id); taskEvent.Property(x => x.Relation).HasMaxLength(32); taskEvent.HasIndex(x => new { x.TaskId, x.EventId, x.OccurrenceStartAt }).IsUnique();
 
         var plannerLink = modelBuilder.Entity<PlannerLinkEntity>();
         plannerLink.ToTable("planner_links");

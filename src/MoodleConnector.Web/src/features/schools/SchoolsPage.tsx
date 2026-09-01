@@ -62,7 +62,7 @@ function TreeBranch({ node, courseGroups, courseCounts, coursesPending, coursesE
 }
 
 export function SchoolsPage() {
-  const { connectionRef } = useConnectionScope();
+  const { connectionRef, connections } = useConnectionScope();
   const { editMode } = useEditMode();
   const { ignoredCourseIds, restoreCourse } = useIgnoredCourses(connectionRef);
   const { trackedCourseIds, trackCourse, untrackCourse } = useTrackedCourses(connectionRef);
@@ -70,11 +70,24 @@ export function SchoolsPage() {
   const [selectedStatuses, setSelectedStatuses] = useState<CourseLifecycle[]>([]);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedCourseIds, setSelectedCourseIds] = useState<Set<string>>(new Set());
-  const query = useQuery({ queryKey: ['app', 'schools', 'hierarchy', connectionRef], queryFn: () => coursesGateway.hierarchy(connectionRef), staleTime: 60_000 });
-  const coursesQuery = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
+  const query = useQuery({
+    queryKey: ['app', 'schools', 'hierarchy', connectionRef],
+    queryFn: () => coursesGateway.hierarchy(connectionRef),
+    enabled: Boolean(connectionRef),
+    staleTime: 60_000,
+    refetchInterval: (currentQuery) => currentQuery.state.data?.meta.complete === false || currentQuery.state.data?.meta.refreshQueued ? 15_000 : false,
+  });
+  const coursesQuery = useQuery({
+    queryKey: ['app', 'courses', 'all-pages', connectionRef],
+    queryFn: () => coursesGateway.listAll(connectionRef, 100),
+    enabled: Boolean(connectionRef),
+    staleTime: 60_000,
+    refetchInterval: (currentQuery) => currentQuery.state.data?.meta.complete === false || currentQuery.state.data?.meta.refreshQueued ? 15_000 : false,
+  });
   const allCourses = useMemo(() => normalizeCourseEndDatesBySequence(coursesQuery.data?.data ?? []), [coursesQuery.data?.data]);
   const visibleCourses = useMemo(() => filterCoursesByLifecycle(allCourses, selectedStatuses).filter((course) => matchesCourseSearch(course, search)), [allCourses, search, selectedStatuses]);
   const courseGroups = useMemo(() => groupCoursesByCategory(visibleCourses), [visibleCourses]);
+  const coursesPreparing = coursesQuery.data?.meta.complete === false || coursesQuery.data?.meta.refreshQueued === true;
   const courseCounts = useMemo(() => countCoursesByCategory(visibleCourses), [visibleCourses]);
   const tree = useMemo(() => {
     const items = query.data?.data ?? [];
@@ -125,11 +138,12 @@ export function SchoolsPage() {
           setSelectionMode(false);
         }}
       />}
-      {query.isPending && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
+      {(connections.isPending || query.isPending) && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
       {query.isError && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar as categorias.</p></CardContent></Card>}
-      {coursesQuery.isError && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar os cursos para aplicar o filtro.</p></CardContent></Card>}
+      {coursesQuery.isError && !coursesQuery.data && <Card><CardContent className="p-6"><p role="alert">Não foi possível carregar os cursos para aplicar o filtro.</p></CardContent></Card>}
       {query.isSuccess && tree.children.size === 0 && <Card><CardContent className="flex flex-col items-center gap-2 p-12 text-center"><Building2 className="h-10 w-10 text-muted-foreground/50" /><h2 className="font-medium">Nenhuma categoria encontrada</h2></CardContent></Card>}
-      {query.isSuccess && tree.children.size > 0 && <div className="space-y-3">{[...tree.children.values()].map((node) => <TreeBranch key={node.path} node={node} courseGroups={courseGroups} courseCounts={courseCounts} coursesPending={coursesQuery.isPending} coursesError={coursesQuery.isError} editMode={editMode} ignoredCourseIds={ignoredCourseIds} trackedCourseIds={trackedCourseIds} onRestore={restoreCourse} onTrack={trackCourse} onUntrack={untrackCourse} selectionMode={selectionMode} selectedCourseIds={selectedCourseIds} onToggleCourse={toggleCourse} onToggleCategory={toggleCategory} />)}</div>}
+      {coursesPreparing && <p className="text-sm text-muted-foreground" role="status">Preparando cursos e categorias do Moodle…</p>}
+      {query.isSuccess && tree.children.size > 0 && <div className="space-y-3">{[...tree.children.values()].map((node) => <TreeBranch key={node.path} node={node} courseGroups={courseGroups} courseCounts={courseCounts} coursesPending={coursesQuery.isPending || coursesPreparing} coursesError={coursesQuery.isError} editMode={editMode} ignoredCourseIds={ignoredCourseIds} trackedCourseIds={trackedCourseIds} onRestore={restoreCourse} onTrack={trackCourse} onUntrack={untrackCourse} selectionMode={selectionMode} selectedCourseIds={selectedCourseIds} onToggleCourse={toggleCourse} onToggleCategory={toggleCategory} />)}</div>}
     </main>
   );
 }

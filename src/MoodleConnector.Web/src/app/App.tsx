@@ -9,10 +9,8 @@ import { AuthGate } from '../features/auth/AuthGate';
 const MyCoursesPage = lazy(() => import('../features/courses/MyCoursesPage').then(({ MyCoursesPage }) => ({ default: MyCoursesPage })));
 const CoursePanelPage = lazy(() => import('../features/courses/CoursePanelPage').then(({ CoursePanelPage }) => ({ default: CoursePanelPage })));
 const StudentProfilePage = lazy(() => import('../features/students/StudentProfilePage').then(({ StudentProfilePage }) => ({ default: StudentProfilePage })));
-const DashboardPage = lazy(() => import('../features/dashboard/DashboardPage').then(({ DashboardPage }) => ({ default: DashboardPage })));
 const TasksPage = lazy(() => import('../features/tasks/TasksPage').then(({ TasksPage }) => ({ default: TasksPage })));
 const AgendaPage = lazy(() => import('../features/agenda/AgendaPage').then(({ AgendaPage }) => ({ default: AgendaPage })));
-const MessagesPage = lazy(() => import('../features/messages/MessagesPage').then(({ MessagesPage }) => ({ default: MessagesPage })));
 const SettingsPage = lazy(() => import('../features/settings/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })));
 const AdministrationPage = lazy(() => import('../features/settings/AdministrationPage').then(({ AdministrationPage }) => ({ default: AdministrationPage })));
 const SchoolsPage = lazy(() => import('../features/schools/SchoolsPage').then(({ SchoolsPage }) => ({ default: SchoolsPage })));
@@ -25,7 +23,7 @@ export function App() {
         <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Spinner className="h-8 w-8" /></div>}>
           <Routes>
             <Route element={<AppLayout />}>
-              <Route path="/" element={<DashboardPage />} />
+              <Route path="/" element={<Navigate to="/meus-cursos" replace />} />
               {/* Keep the former standalone URL readable after connections moved into Settings. */}
               <Route path="/conexoes" element={<Navigate to="/configuracoes?tab=conexoes" replace />} />
               <Route path="/meus-cursos" element={<MyCoursesPage />} />
@@ -39,7 +37,8 @@ export function App() {
               <Route path="/tarefas" element={<TasksPage />} />
               <Route path="/agenda" element={<AgendaPage />} />
               <Route path="/followup" element={<Navigate to="/meus-cursos" replace />} />
-              <Route path="/mensagens" element={<MessagesPage />} />
+              {/* The message API remains available for future campaigns. */}
+              <Route path="/mensagens" element={<Navigate to="/" replace />} />
               <Route path="/pendencias" element={<Navigate to="/meus-cursos" replace />} />
               <Route path="/foruns" element={<Navigate to="/meus-cursos" replace />} />
               {/* Reports are generated from course and school selections; this page tracks their progress and files. */}

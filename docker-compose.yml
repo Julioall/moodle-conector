@@ -11,11 +11,18 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
+      # Allow local development to provide a valid protector key without
+      # editing the versioned environment file.
+      ConnectorSecrets__EncryptionKeyBase64: ${CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64:-replace-with-32-byte-base64-key}
+      MoodleApi__UseStubData: ${MOODLE_API_USE_STUB_DATA:-false}
       # Write capabilities are controlled by explicit deployment environment
       # variables, rather than by the versioned application defaults.
       Features__MessagesWriteEnabled: ${FEATURES_MESSAGES_WRITE_ENABLED:-false}
       Features__AssignmentFeedbackWriteEnabled: ${FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED:-false}
       Features__AssignmentGradeWriteEnabled: ${FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED:-false}
+      # Professional planner surfaces are enabled progressively per environment.
+      Features__ProfessionalAgendaEnabled: ${FEATURES_PROFESSIONAL_AGENDA_ENABLED:-false}
+      Features__ProfessionalTasksEnabled: ${FEATURES_PROFESSIONAL_TASKS_ENABLED:-false}
     ports:
       # The reverse proxy is the only public entry point. Keep direct ASP.NET
       # access on loopback for host health checks and local diagnostics.

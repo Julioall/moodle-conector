@@ -210,7 +210,9 @@ internal static class PortalTaskEndpoints
     private static string NormalizeTaskStatus(string? value) => value switch
     {
         "in_progress" => "in_progress",
+        "blocked" => "blocked",
         "done" => "done",
+        "cancelled" => "cancelled",
         _ => "todo"
     };
 

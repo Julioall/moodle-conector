@@ -4,37 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../features/courses/courses-gateway', () => ({
-  coursesGateway: {
-    get: vi.fn(),
-    activities: vi.fn(),
-  },
-}));
-
-vi.mock('../features/students/students-gateway', () => ({
-  studentsGateway: {
-    byCourse: vi.fn(),
-  },
-}));
-
-vi.mock('../features/dashboard/dashboard-gateway', () => ({
-  dashboardGateway: {
-    get: vi.fn(),
-  },
-}));
-
-vi.mock('../features/followup/followup-gateway', () => ({
-  followupGateway: {
-    list: vi.fn(),
-    create: vi.fn(),
-  },
-}));
+vi.mock('../features/courses/courses-gateway', () => ({ coursesGateway: { get: vi.fn() } }));
+vi.mock('../features/students/students-gateway', () => ({ studentsGateway: { byCourse: vi.fn() } }));
+vi.mock('../features/corrections/PendingCorrectionsPage', () => ({ PendingCorrectionsPage: () => <section><h2>Correções pendentes</h2><p>Fila rápida de correções</p></section> }));
 
 import { CoursePanelPage } from '../features/courses/CoursePanelPage';
 import { coursesGateway } from '../features/courses/courses-gateway';
 import { studentsGateway } from '../features/students/students-gateway';
-import { dashboardGateway } from '../features/dashboard/dashboard-gateway';
-import { followupGateway } from '../features/followup/followup-gateway';
 
 describe('CoursePanelPage', () => {
   afterEach(cleanup);
@@ -42,226 +18,47 @@ describe('CoursePanelPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(coursesGateway.get).mockResolvedValue({
-      data: {
-        connectionRef: 'demo',
-        courseId: '42',
-        fullName: 'Curso de demonstração',
-        displayName: 'Curso de demonstração',
-      },
+      data: { connectionRef: 'demo', courseId: '42', fullName: 'Curso de demonstração', displayName: 'Curso de demonstração' },
       meta: { generatedAt: '2026-08-14T00:00:00Z' },
-    });
-    vi.mocked(coursesGateway.activities).mockResolvedValue({
-      data: [],
-      meta: { page: 1, pageSize: 20, returned: 0, total: 0, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
     });
     vi.mocked(studentsGateway.byCourse).mockResolvedValue({
-      data: [],
-      meta: { page: 1, pageSize: 25, returned: 0, total: 0, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
-    });
-    vi.mocked(dashboardGateway.get).mockResolvedValue({
-      data: {
-        summary: { activeCourses: 1, pendingDeliveries: 0, awaitingGrading: 2, studentsAtRisk: 0, studentsNeedingAttention: 0, activitiesToReview: 2, pendingCorrectionAssignments: 2 },
-        priorities: [],
-        activitiesToReview: [],
-        recentActivity: [],
-        warnings: [],
-      },
-      meta: { generatedAt: '2026-08-14T00:00:00Z' },
-    });
-    vi.mocked(followupGateway.list).mockResolvedValue({
-      data: [],
-      meta: { page: 1, pageSize: 20, returned: 0, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
+      data: [{ connectionRef: 'demo', studentId: 'student-1', name: 'Aluno teste', lastCourseAccessAt: '2026-08-14T08:00:00Z', risk: 'normal', riskFactors: [], studentRef: { connectionRef: 'demo', studentId: 'student-1' }, courses: [] }],
+      meta: { page: 1, pageSize: 25, returned: 1, total: 1, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
     });
   });
 
   function renderPage(initialEntry = '/cursos/demo/42') {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={[initialEntry]}>
-          <Routes>
-            <Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} /></Routes></MemoryRouter></QueryClientProvider>);
   }
 
-  it('does not request the course roster until the Alunos tab is opened', async () => {
+  it('opens directly on the quick corrections view without priorities', async () => {
     renderPage();
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Curso de demonstração' })).toBeInTheDocument());
+    await screen.findByRole('heading', { name: 'Curso de demonstração' });
+    expect(screen.getByRole('tab', { name: 'Correções' })).toHaveAttribute('data-state', 'active');
+    expect(screen.getByText('Fila rápida de correções')).toBeInTheDocument();
+    expect(screen.queryByText('Prioridades')).not.toBeInTheDocument();
+  });
+
+  it('loads the student list only when its tab is opened', async () => {
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Curso de demonstração' });
     expect(studentsGateway.byCourse).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole('tab', { name: 'Alunos' }));
 
     await waitFor(() => expect(studentsGateway.byCourse).toHaveBeenCalledWith('demo', '42', 1, 25));
+    expect(screen.getByText('Aluno teste')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ver notas' })).toHaveAttribute('href', '/cursos/demo/42/alunos/student-1');
   });
 
-  it('shows the activity list without expensive correction counters', async () => {
-    renderPage('/cursos/demo/42?tab=activities');
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Atividades' })).toBeInTheDocument());
-    expect(screen.getByRole('heading', { name: 'Pendências e correções do curso' })).toBeInTheDocument();
-
-    expect(screen.queryByText('2 para corrigir')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Com pendência' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Pendências e correções' })).not.toBeInTheDocument();
-    expect(dashboardGateway.get).toHaveBeenCalledWith('demo', '42');
-  });
-
-  it('counts pending submission priorities in the overview badge', async () => {
-    vi.mocked(dashboardGateway.get).mockResolvedValue({
-      data: {
-        summary: {
-          activeCourses: 1,
-          pendingDeliveries: 1,
-          awaitingGrading: 0,
-          studentsAtRisk: 0,
-          studentsNeedingAttention: 1,
-          pendingSubmissionAssignments: 1,
-          pendingCorrectionAssignments: 0,
-        },
-        priorities: [
-          {
-            key: 'demo:42:student-1:assign-1',
-            title: 'Entrega pendente',
-            detail: 'Aluno teste · Atividade 1',
-            level: 'attention',
-            courseId: '42',
-            studentId: 'student-1',
-          },
-        ],
-        activitiesToReview: [],
-        recentActivity: [],
-        warnings: [],
-      },
-      meta: { generatedAt: '2026-08-14T00:00:00Z' },
-    });
-
+  it('refreshes the selected course and the compact correction data', async () => {
     renderPage();
 
-    await waitFor(() => expect(screen.getByText('1 ação sugerida')).toBeInTheDocument());
-    expect(screen.queryByText('0 ações sugeridas')).not.toBeInTheDocument();
-  });
+    await userEvent.click(await screen.findByRole('button', { name: 'Atualizar' }));
 
-  it('refreshes the course data manually', async () => {
-    renderPage('/cursos/demo/42?tab=activities');
-
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Atualizar' })).toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Atualizar' }));
-
-    await waitFor(() => expect(coursesGateway.activities).toHaveBeenLastCalledWith('demo', '42', 1, 20, false, true));
-    expect(dashboardGateway.get).toHaveBeenLastCalledWith('demo', '42', false, 'current', true);
-    expect(coursesGateway.get).toHaveBeenLastCalledWith('demo', '42', true);
-  });
-
-  it('explains when the activity snapshot is still being prepared', async () => {
-    vi.mocked(coursesGateway.activities).mockResolvedValue({
-      data: [],
-      meta: {
-        page: 1, pageSize: 20, returned: 0, total: 0, hasMore: false,
-        generatedAt: '2026-08-14T00:00:00Z',
-        warnings: ['A lista de atividades está sendo preparada em segundo plano. Tente novamente em instantes.'],
-        source: 'background', complete: false,
-      },
-    });
-
-    renderPage('/cursos/demo/42?tab=activities');
-
-    await waitFor(() => expect(screen.getByText('A lista será exibida assim que a atualização terminar.')).toBeInTheDocument());
-    expect(screen.queryByText('Nenhuma atividade encontrada nesta página.')).not.toBeInTheDocument();
-  });
-
-  it('explains when course priorities are still being prepared', async () => {
-    vi.mocked(dashboardGateway.get).mockResolvedValue({
-      data: {
-        summary: {
-          activeCourses: 1,
-          pendingDeliveries: 2,
-          awaitingGrading: 0,
-          studentsAtRisk: 0,
-          studentsNeedingAttention: 1,
-          pendingSubmissionAssignments: 2,
-          pendingCorrectionAssignments: 0,
-        },
-        priorities: [],
-        activitiesToReview: [],
-        recentActivity: [],
-        warnings: ['As prioridades do curso estão sendo preparadas em segundo plano.'],
-      },
-      meta: { generatedAt: '2026-08-14T00:00:00Z' },
-    });
-
-    renderPage();
-
-    await waitFor(() => expect(screen.getByText('As prioridades serão exibidas assim que a atualização terminar.')).toBeInTheDocument());
-    expect(screen.queryByText('Nenhuma prioridade operacional identificada.')).not.toBeInTheDocument();
-  });
-
-  it('keeps the course workspace focused and opens contextual follow-up', async () => {
-    renderPage();
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Estado da turma' })).toBeInTheDocument());
-
-    expect(screen.getAllByRole('tab')).toHaveLength(3);
-    expect(screen.queryByRole('tab', { name: 'Follow-up' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Fóruns' })).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Registrar acompanhamento' }));
-
-    expect(screen.getByRole('dialog', { name: 'Registrar acompanhamento' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Aluno' })).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: 'Referência do aluno' })).not.toBeInTheDocument();
-  });
-
-  it('shows the shared intervention history in the overview', async () => {
-    vi.mocked(followupGateway.list).mockResolvedValue({
-      data: [{
-        id: 'followup-1',
-        studentRef: 'demo:7',
-        studentName: 'Aluno acompanhado',
-        courseRef: 'demo:42',
-        kind: 'acompanhamento',
-        reason: 'atividade_pendente',
-        action: 'mensagem',
-        status: 'em_acompanhamento',
-        actorName: 'Tutor de teste',
-        notes: 'Orientação enviada pelo tutor.',
-        occurredAt: '2026-08-14T12:00:00Z',
-        createdAt: '2026-08-14T12:00:00Z',
-      }],
-      meta: { page: 1, pageSize: 20, returned: 1, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
-    });
-
-    renderPage();
-
-    await waitFor(() => expect(screen.getByText('Histórico de acompanhamento')).toBeInTheDocument());
-    expect(screen.getByText('Aluno acompanhado')).toBeInTheDocument();
-    expect(screen.getByText(/por Tutor de teste/)).toBeInTheDocument();
-    expect(screen.getByText('Mensagem')).toBeInTheDocument();
-    expect(screen.queryByText('Atividades que precisam de ação')).not.toBeInTheDocument();
-  });
-
-  it('does not expose the technical student reference for legacy history records', async () => {
-    vi.mocked(followupGateway.list).mockResolvedValue({
-      data: [{
-        id: 'followup-legacy',
-        studentRef: 'demo:440754',
-        courseRef: 'demo:42',
-        kind: 'acompanhamento',
-        action: 'mensagem',
-        status: 'em_acompanhamento',
-        notes: 'Mensagem registrada antes da persistência do nome.',
-        occurredAt: '2026-08-14T12:00:00Z',
-        createdAt: '2026-08-14T12:00:00Z',
-      }],
-      meta: { page: 1, pageSize: 20, returned: 1, hasMore: false, generatedAt: '2026-08-14T00:00:00Z' },
-    });
-
-    renderPage();
-
-    await waitFor(() => expect(screen.getByText('Aluno 440754')).toBeInTheDocument());
-    expect(screen.queryByText('demo:440754')).not.toBeInTheDocument();
+    await waitFor(() => expect(coursesGateway.get).toHaveBeenLastCalledWith('demo', '42', true));
   });
 });

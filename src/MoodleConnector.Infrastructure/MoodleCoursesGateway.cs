@@ -232,51 +232,80 @@ internal sealed class MoodleCoursesGateway(
         }
 
         var cacheKey = $"moodle:course-categories:{credentials.ConnectionId}";
-        return await cache.GetOrCreateAsync(cacheKey, async entry =>
+        if (cache.TryGetValue(cacheKey, out IReadOnlyDictionary<long, string>? cached) && cached is not null)
         {
-            entry.AbsoluteExpirationRelativeToNow = CategoryCacheDuration;
-            JsonElement payload;
-            try
-            {
-                payload = await restClient.CallAsync(credentials, "core_course_get_categories", new Dictionary<string, object?>(), cancellationToken);
-            }
-            catch (MoodleApiException exception)
-            {
-                _logger.LogWarning(exception, "Moodle categories unavailable; courses will remain without category paths.");
-                return new Dictionary<long, string>();
-            }
-            var categories = JsonSerializer.Deserialize<IReadOnlyList<CategoryDto>>(payload.GetRawText()) ?? [];
-            _logger.LogInformation("Moodle categories loaded: {CategoryCount}", categories.Count);
-            var byId = categories.ToDictionary(category => category.Id);
-            var paths = new Dictionary<long, string>();
-            string BuildPath(long id)
-            {
-                if (paths.TryGetValue(id, out var cached)) return cached;
-                if (!byId.TryGetValue(id, out var category)) return string.Empty;
+            return cached;
+        }
 
-                if (!string.IsNullOrWhiteSpace(category.Path))
+        JsonElement payload;
+        try
+        {
+            payload = await restClient.CallAsync(credentials, "core_course_get_categories", new Dictionary<string, object?>(), cancellationToken);
+        }
+        catch (MoodleApiException exception)
+        {
+            // Do not cache a transient Moodle failure. Caching an empty map here
+            // made every course fall back to "Sem categoria" for 30 minutes.
+            _logger.LogWarning(exception, "Moodle categories unavailable; courses will remain without category paths for this attempt.");
+            return new Dictionary<long, string>();
+        }
+
+        var categories = JsonSerializer.Deserialize<IReadOnlyList<CategoryDto>>(payload.GetRawText()) ?? [];
+        if (categories.Count == 0)
+        {
+            // An empty response is also commonly caused by a temporary Moodle
+            // response or capability issue. Leave the cache untouched so the
+            // next request can recover the category tree.
+            _logger.LogWarning("Moodle returned no categories; courses will remain without category paths for this attempt. ConnectionId={ConnectionId}", credentials.ConnectionId);
+            return new Dictionary<long, string>();
+        }
+
+        _logger.LogInformation("Moodle categories loaded: {CategoryCount}", categories.Count);
+        var byId = categories
+            .GroupBy(category => category.Id)
+            .ToDictionary(group => group.Key, group => group.Last());
+        var paths = new Dictionary<long, string>();
+        var visiting = new HashSet<long>();
+        string BuildPath(long id)
+        {
+            if (paths.TryGetValue(id, out var cachedPath)) return cachedPath;
+            if (!byId.TryGetValue(id, out var category)) return string.Empty;
+            if (!visiting.Add(id)) return category.Name.Trim();
+
+            if (!string.IsNullOrWhiteSpace(category.Path))
+            {
+                var pathNames = category.Path
+                    .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(value => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pathId) && byId.TryGetValue(pathId, out var pathCategory) ? pathCategory.Name.Trim() : string.Empty)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .ToArray();
+                if (pathNames.Length > 0)
                 {
-                    var pathNames = category.Path
-                        .Split('/', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(value => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pathId) && byId.TryGetValue(pathId, out var pathCategory) ? pathCategory.Name.Trim() : string.Empty)
-                        .Where(name => !string.IsNullOrWhiteSpace(name))
-                        .ToArray();
-                    if (pathNames.Length > 0)
-                    {
-                        var resolvedPath = string.Join(" > ", pathNames);
-                        paths[id] = resolvedPath;
-                        return resolvedPath;
-                    }
+                    var resolvedPath = string.Join(" > ", pathNames);
+                    visiting.Remove(id);
+                    paths[id] = resolvedPath;
+                    return resolvedPath;
                 }
-
-                var parent = category.Parent > 0 ? BuildPath(category.Parent) : string.Empty;
-                var path = string.IsNullOrWhiteSpace(parent) ? category.Name : $"{parent} > {category.Name}";
-                paths[id] = path;
-                return path;
             }
-            foreach (var category in categories) _ = BuildPath(category.Id);
-            return paths;
-        }) ?? new Dictionary<long, string>();
+
+            var parent = category.Parent > 0 ? BuildPath(category.Parent) : string.Empty;
+            var path = string.IsNullOrWhiteSpace(parent) ? category.Name.Trim() : $"{parent} > {category.Name.Trim()}";
+            visiting.Remove(id);
+            paths[id] = path;
+            return path;
+        }
+        foreach (var category in categories) _ = BuildPath(category.Id);
+
+        if (paths.Count == 0)
+        {
+            return new Dictionary<long, string>();
+        }
+
+        cache.Set(cacheKey, paths, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = CategoryCacheDuration,
+        });
+        return paths;
     }
 
     private async Task<IReadOnlyList<CourseDto>> GetCoursesAsync(

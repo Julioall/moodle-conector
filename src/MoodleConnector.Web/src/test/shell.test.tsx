@@ -16,7 +16,6 @@ const renderWithProviders = (ui: React.ReactElement) => render(
 describe('Claris-first shell', () => {
   it('renders the foundation navigation', () => {
     renderWithProviders(<AppSidebar />);
-    expect(screen.getByText('Resumo da Semana')).toBeInTheDocument();
     expect(screen.getByText('Meus Cursos')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Alunos' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Conexões Moodle' })).not.toBeInTheDocument();
@@ -28,7 +27,6 @@ describe('Claris-first shell', () => {
     const link = (name: string, href: string) => expect(screen.getAllByRole('link', { name }).find(item => item.getAttribute('href') === href)).toBeTruthy();
     link('Tarefas', '/tarefas');
     link('Agenda', '/agenda');
-    link('Mensagens', '/mensagens');
     link('Relatórios', '/relatorios');
   });
 });

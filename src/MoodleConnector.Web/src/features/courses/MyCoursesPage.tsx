@@ -66,12 +66,21 @@ function CategoryBranch({ node, editMode, onIgnore, onIgnoreCategory, level = 0 
 }
 
 export function MyCoursesPage() {
-  const { connectionRef } = useConnectionScope();
+  const { connectionRef, connections } = useConnectionScope();
   const { editMode } = useEditMode();
   const { ignoredCourseIds, ignoreCourse, ignoreCourses } = useIgnoredCourses(connectionRef);
   const { trackedCourseIds, isLoading: trackedCoursesLoading } = useTrackedCourses(connectionRef);
   const [search, setSearch] = useState('');
-  const query = useQuery({ queryKey: ['app', 'courses', 'all-pages', connectionRef], queryFn: () => coursesGateway.listAll(connectionRef, 100), staleTime: 60_000 });
+  const query = useQuery({
+    queryKey: ['app', 'courses', 'all-pages', connectionRef],
+    queryFn: () => coursesGateway.listAll(connectionRef, 100),
+    enabled: Boolean(connectionRef),
+    staleTime: 60_000,
+    // The first response may be a partial snapshot while Moodle pagination is
+    // still running. Poll only in that state so categories do not remain
+    // permanently incomplete after a cold load.
+    refetchInterval: (currentQuery) => currentQuery.state.data?.meta.complete === false || currentQuery.state.data?.meta.refreshQueued ? 15_000 : false,
+  });
   const visibleCourses = useMemo(() => {
     const allCourses = normalizeCourseEndDatesBySequence(query.data?.data ?? []);
     return allCourses
@@ -80,15 +89,17 @@ export function MyCoursesPage() {
       .filter((course) => matchesCourseSearch(course, search));
   }, [ignoredCourseIds, query.data?.data, search, trackedCourseIds]);
   const tree = useMemo(() => buildCategoryTree(visibleCourses), [visibleCourses]);
-  const scopeLoading = query.isPending || trackedCoursesLoading;
+  const catalogRefreshing = query.data?.meta.complete === false || query.data?.meta.refreshQueued === true;
+  const scopeLoading = connections.isPending || Boolean(connectionRef && (query.isPending || trackedCoursesLoading));
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="courses-title">
       <header className="page-heading"><div><p className="eyebrow">OPERACIONAL</p><h1 id="courses-title">Meus Cursos</h1><p>{scopeLoading ? 'Carregando cursos…' : `${visibleCourses.length} ${visibleCourses.length === 1 ? 'curso' : 'cursos'} em acompanhamento`}</p></div><div className="relative w-full sm:w-72"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" placeholder="Buscar curso..." value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" /></div></header>
       {scopeLoading && <div className="space-y-3"><Skeleton className="h-16 rounded-lg" /><Skeleton className="h-16 rounded-lg" /></div>}
-      {query.isError && <Card><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar os cursos.</CardContent></Card>}
-      {!scopeLoading && query.isSuccess && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">Não há cursos em acompanhamento no momento.</p></CardContent></Card>}
-      {!scopeLoading && query.isSuccess && tree.children.size > 0 && <section className="space-y-4" aria-label="Cursos agrupados por categoria">{[...tree.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((node) => <CategoryBranch key={node.path} node={node} editMode={editMode} onIgnore={ignoreCourse} onIgnoreCategory={ignoreCourses} />)}</section>}
+      {catalogRefreshing && !scopeLoading && <p className="text-sm text-muted-foreground" role="status">Atualizando categorias e cursos do Moodle…</p>}
+      {query.isError && !query.data && <Card><CardContent className="p-6 text-sm text-destructive" role="alert">Não foi possível carregar os cursos.</CardContent></Card>}
+      {!scopeLoading && query.data && !catalogRefreshing && tree.children.size === 0 && <Card className="border-dashed"><CardContent className="flex flex-col items-center gap-3 p-12 text-center"><BookOpen className="h-10 w-10 text-muted-foreground/40" /><h2 className="font-medium">Nenhum curso encontrado</h2><p className="text-sm text-muted-foreground">Não há cursos em acompanhamento no momento.</p></CardContent></Card>}
+      {!scopeLoading && query.data && tree.children.size > 0 && <section className="space-y-4" aria-label="Cursos agrupados por categoria">{[...tree.children.values()].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')).map((node) => <CategoryBranch key={node.path} node={node} editMode={editMode} onIgnore={ignoreCourse} onIgnoreCategory={ignoreCourses} />)}</section>}
     </main>
   );
 }

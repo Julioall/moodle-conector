@@ -1,12 +1,11 @@
 import { useState } from 'react';
-import { KeyRound, MailPlus, Plug, ShieldCheck, UserRound } from 'lucide-react';
+import { KeyRound, Plug, ShieldCheck, UserRound } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 
 import { Badge } from '../../components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
 import { useSession } from '../auth/useSession';
-import { MessagePreferencesCard } from './MessagePreferencesCard';
 import { ThemeCard } from './ThemeCard';
 import { APP_PERMISSIONS } from '../../lib/access-control';
 import { ConnectionsPage } from '../connections/ConnectionsPage';
@@ -16,19 +15,18 @@ export function SettingsPage() {
   const { user, isAdmin, can } = useSession();
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(['mensagens', 'conexoes', 'senha'].includes(requestedTab ?? '') ? requestedTab! : 'geral');
+  const [activeTab, setActiveTab] = useState(['conexoes', 'senha'].includes(requestedTab ?? '') ? requestedTab! : 'geral');
   const initials = user?.name?.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'CL';
   const canManageConnections = can(APP_PERMISSIONS.SERVICES_VIEW);
 
   return (
     <main className="space-y-6 animate-fade-in" aria-labelledby="settings-title">
-      <header className="page-heading"><div><p className="eyebrow">ADMINISTRAÇÃO</p><h1 id="settings-title">Configurações</h1><p>Gerencie sua conta, mensagens e conexões Moodle.</p></div>{isAdmin && <Badge variant="outline" className="w-fit gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-status-success" />Administrador</Badge>}</header>
+      <header className="page-heading"><div><p className="eyebrow">ADMINISTRAÇÃO</p><h1 id="settings-title">Configurações</h1><p>Gerencie sua conta e conexões Moodle.</p></div>{isAdmin && <Badge variant="outline" className="w-fit gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-status-success" />Administrador</Badge>}</header>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
         <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto">
           <TabsTrigger value="geral" className="gap-2"><UserRound className="h-4 w-4" />Geral</TabsTrigger>
           <TabsTrigger value="senha" className="gap-2"><KeyRound className="h-4 w-4" />Senha</TabsTrigger>
-          <TabsTrigger value="mensagens" className="gap-2"><MailPlus className="h-4 w-4" />Mensagens</TabsTrigger>
           {canManageConnections && <TabsTrigger value="conexoes" className="gap-2"><Plug className="h-4 w-4" />Conexões Moodle</TabsTrigger>}
         </TabsList>
 
@@ -42,8 +40,6 @@ export function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="senha" className="mt-0"><ChangePasswordCard /></TabsContent>
-
-        <TabsContent value="mensagens" className="mt-0 space-y-6"><MessagePreferencesCard /></TabsContent>
 
         {canManageConnections && <TabsContent value="conexoes" className="mt-0"><ConnectionsPage embedded /></TabsContent>}
 

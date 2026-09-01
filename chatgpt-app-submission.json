@@ -8,6 +8,76 @@
     "category": "EDUCATION"
   },
   "tools": {
+    "add_task_collaborator": {
+      "annotations": {
+        "title": "Adicionar participante \u00E0 tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "add_task_comment": {
+      "annotations": {
+        "title": "Comentar em tarefa",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "add_task_dependency": {
+      "annotations": {
+        "title": "Adicionar depend\u00EAncia da tarefa",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "add_task_reference": {
+      "annotations": {
+        "title": "Adicionar refer\u00EAncia estruturada \u00E0 tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "add_task_tag": {
+      "annotations": {
+        "title": "Adicionar tag \u00E0 tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "audit_course_structure": {
       "annotations": {
         "title": "Audit Course Structure",
@@ -36,6 +106,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "cancel_agenda_occurrence": {
+      "annotations": {
+        "title": "Cancelar ocorr\u00EAncia do evento",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "cancel_assisted_grading_batch": {
       "annotations": {
         "title": "Cancel Assisted Grading Batch",
@@ -48,6 +132,34 @@
         "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
         "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
+      }
+    },
+    "complete_task": {
+      "annotations": {
+        "title": "Concluir tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "complete_task_subtask": {
+      "annotations": {
+        "title": "Concluir subtarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
     "confirm_access_reminder": {
@@ -218,6 +330,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "create_event_from_task": {
+      "annotations": {
+        "title": "Criar Event a partir de Task",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "create_forum_post_preview": {
       "annotations": {
         "title": "Create Forum Post Preview",
@@ -246,6 +372,34 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "create_task_from_event": {
+      "annotations": {
+        "title": "Criar Task a partir de Event",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "create_task_subtask": {
+      "annotations": {
+        "title": "Criar subtarefa",
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "create_tasks_for_references": {
       "annotations": {
         "title": "Criar tarefas por curso ou turma",
@@ -258,6 +412,20 @@
         "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
         "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "edit_task_comment": {
+      "annotations": {
+        "title": "Editar coment\u00E1rio de tarefa",
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
       }
     },
     "export_course_grades_excel": {
@@ -652,6 +820,34 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "get_task_detail": {
+      "annotations": {
+        "title": "Consultar detalhe de tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "link_task_event": {
+      "annotations": {
+        "title": "Vincular tarefa e Event",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "list_activity_deadlines": {
       "annotations": {
         "title": "List Activity Deadlines",
@@ -669,6 +865,20 @@
     "list_agenda_events": {
       "annotations": {
         "title": "Consultar agenda do portal",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "list_agenda_occurrences": {
+      "annotations": {
+        "title": "Listar ocorr\u00EAncias da agenda",
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
@@ -876,6 +1086,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "list_event_tasks": {
+      "annotations": {
+        "title": "Listar Tasks do Event",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "list_late_submissions": {
       "annotations": {
         "title": "List Late Submissions",
@@ -988,6 +1212,34 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "list_task_activity": {
+      "annotations": {
+        "title": "Ler hist\u00F3rico de tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "list_task_events": {
+      "annotations": {
+        "title": "Listar Events da tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "list_tasks": {
       "annotations": {
         "title": "Listar tarefas do portal",
@@ -1089,6 +1341,20 @@
     "moodle_reconcile_write": {
       "annotations": {
         "title": "Reconciliar Escrita Moodle",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "override_agenda_occurrence": {
+      "annotations": {
+        "title": "Editar ocorr\u00EAncia do evento",
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
@@ -1282,6 +1548,48 @@
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
       }
     },
+    "remove_task_dependency": {
+      "annotations": {
+        "title": "Remover depend\u00EAncia da tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "remove_task_reference": {
+      "annotations": {
+        "title": "Remover refer\u00EAncia da tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "remove_task_tag": {
+      "annotations": {
+        "title": "Remover tag da tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "remove_user_memory_document": {
       "annotations": {
         "title": "Remove User Memory Document",
@@ -1294,6 +1602,20 @@
         "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
         "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
+      }
+    },
+    "reopen_task": {
+      "annotations": {
+        "title": "Reabrir tarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
     "report_students_at_risk": {
@@ -1408,6 +1730,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "unlink_task_event": {
+      "annotations": {
+        "title": "Desvincular tarefa e Event",
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
+      }
+    },
     "update_agenda_event": {
       "annotations": {
         "title": "Editar evento da agenda",
@@ -1462,6 +1798,20 @@
         "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
         "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
+      }
+    },
+    "update_task_subtask": {
+      "annotations": {
+        "title": "Editar subtarefa",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     }
   },

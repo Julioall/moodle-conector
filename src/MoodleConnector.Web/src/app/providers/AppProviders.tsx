@@ -18,7 +18,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
   }));
   return (
     <QueryClientProvider client={client}>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
         <TooltipProvider>
           <Toaster />
           <Sonner />

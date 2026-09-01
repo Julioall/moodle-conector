@@ -49,7 +49,7 @@ export const createCoursesGateway = (client = createAppClient()) => {
   };
 
   return {
-  hierarchy: (connectionRef?: string) => client.get<{ data: CourseHierarchyNode[]; meta: { generatedAt: string; connectionRef?: string } }>(`/api/schools?${new URLSearchParams(connectionRef ? { connectionRef } : {})}`),
+  hierarchy: (connectionRef?: string) => client.get<{ data: CourseHierarchyNode[]; meta: { generatedAt: string; connectionRef?: string; source?: string; refreshQueued?: boolean; complete?: boolean } }>(`/api/schools?${new URLSearchParams(connectionRef ? { connectionRef } : {})}`),
   byCategory,
   listAllByCategory,
   list,

@@ -15,7 +15,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4"><ClarisLogo className="w-60 animate-pulse text-primary" /></div>;
   }
 
-  if (session.error && !(session.error instanceof AppHttpError && session.error.status === 401)) {
+  const sessionStatus = session.error instanceof AppHttpError
+    ? session.error.status
+    : typeof session.error === 'object' && session.error !== null && 'status' in session.error
+      ? Number((session.error as { status?: unknown }).status)
+      : undefined;
+
+  if (session.error && sessionStatus !== 401) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4">
         <Card className="w-full max-w-md">

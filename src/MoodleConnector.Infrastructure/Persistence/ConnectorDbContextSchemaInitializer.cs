@@ -56,6 +56,8 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "049_platform_request_metrics.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "050_grading_batch_idempotency.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "051_grading_display_metadata.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "052_professional_tasks_and_agenda.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "053_professional_reference_null_uniqueness.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

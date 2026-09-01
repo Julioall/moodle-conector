@@ -10,6 +10,10 @@ public sealed class TaskEntity
     public string Priority { get; set; } = "medium";
     public DateTimeOffset? StartAt { get; set; }
     public DateTimeOffset? DueAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public Guid? ParentTaskId { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public long Version { get; set; } = 1;
     public string? ActionType { get; set; }
     public string? ScheduleHint { get; set; }
     public string? ExternalUid { get; set; }

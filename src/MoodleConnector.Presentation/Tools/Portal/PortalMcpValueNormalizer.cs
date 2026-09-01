@@ -5,7 +5,9 @@ internal static class PortalMcpValueNormalizer
     public static string NormalizeTaskStatus(string? value) => value?.Trim().ToLowerInvariant() switch
     {
         "in_progress" => "in_progress",
+        "blocked" => "blocked",
         "done" => "done",
+        "cancelled" => "cancelled",
         _ => "todo"
     };
 

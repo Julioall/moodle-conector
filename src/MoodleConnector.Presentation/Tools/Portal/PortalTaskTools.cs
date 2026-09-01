@@ -39,6 +39,11 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
         [Description("Quantidade por página, entre 1 e 100.")] int pageSize = 50,
         [Description("Status opcional: todo, in_progress ou done.")] string? status = null,
         [Description("Prioridade opcional: low, medium, high ou urgent.")] string? priority = null,
+        [Description("Busca por título ou descrição.")] string? search = null,
+        [Description("Filtra pelo participante responsável ou colaborador.")] Guid? participantId = null,
+        [Description("Filtra por tag.")] string? tag = null,
+        [Description("Tipo de referência estruturada.")] string? referenceType = null,
+        [Description("Identificador da referência estruturada.")] string? referenceId = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -46,22 +51,13 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
             var identity = await identityResolver.ResolveAsync(cancellationToken);
             page = Math.Max(1, page);
             pageSize = Math.Clamp(pageSize, 1, 100);
-            var query = dbContext.Tasks.AsNoTracking().Where(task => task.OwnerId == identity.Id);
-
-            if (!string.IsNullOrWhiteSpace(status))
-                query = query.Where(task => task.Status == status.Trim().ToLowerInvariant());
-            if (!string.IsNullOrWhiteSpace(priority))
-                query = query.Where(task => task.Priority == priority.Trim().ToLowerInvariant());
-
-            var total = await query.CountAsync(cancellationToken);
-            var taskEntities = await query
-                .OrderBy(task => task.DueAt)
-                .ThenByDescending(task => task.UpdatedAt)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .ToListAsync(cancellationToken);
-            var links = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, taskEntities.Select(task => task.Id).ToArray(), cancellationToken);
-            var tasks = taskEntities.Select(task => ToDto(task, links.GetValueOrDefault(task.Id, []))).ToArray();
+            var result = await new ProfessionalPlannerService(dbContext).ListTasksAsync(identity.Id, page, pageSize, search, status, priority, participantId, tag, referenceType, referenceId, cancellationToken);
+            var tasks = result.Items.Select(item => new TaskDto(item.Id, item.Title, item.Summary, item.Status, item.Priority, item.StartAt, item.DueAt, item.CreatedAt ?? DateTimeOffset.UtcNow, item.UpdatedAt ?? DateTimeOffset.UtcNow,
+                item.References.Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, null, null, null)).ToArray(), item.ActionType, item.ScheduleHint)
+            {
+                Tags = item.Tags, Version = item.Version, Participants = item.Owner is null ? [] : [item.Owner]
+            }).ToArray();
+            var total = result.Total;
 
             return Success(new PortalTaskListResponse(tasks, total, page, pageSize, page * pageSize < total),
                 $"{tasks.Length} tarefa(s) retornada(s).");
@@ -97,6 +93,11 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
         [Description("Data/hora opcional de início em ISO 8601.")] DateTimeOffset? startAt = null,
         [Description("Data/hora opcional de vencimento em ISO 8601.")] DateTimeOffset? dueAt = null,
         [Description("Vínculos com objetos Moodle: course, student, class ou school. Para turmas, informe parentReferenceId com o curso.")] IReadOnlyList<PlannerReferenceInput>? references = null,
+        [Description("Tags livres da tarefa, até 20.")] IReadOnlyList<string>? tags = null,
+        [Description("Participantes, com role owner, collaborator ou watcher.")] IReadOnlyList<TaskParticipantInput>? participants = null,
+        [Description("UUID da Task pai para criar uma subtarefa.")] Guid? parentTaskId = null,
+        [Description("Subtarefas inline; use somente na criação de uma Task-raiz.")] IReadOnlyList<TaskSubtaskInput>? subtasks = null,
+        [Description("UUIDs das Tasks que bloqueiam esta Task.")] IReadOnlyList<Guid>? dependsOnTaskIds = null,
         [Description("Tipo de ação planejada, por exemplo grade_report ou send_to_coordination.")] string? actionType = null,
         [Description("Descrição da programação, por exemplo mensal ou toda sexta-feira.")] string? scheduleHint = null,
         CancellationToken cancellationToken = default)
@@ -104,28 +105,9 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
         try
         {
             var identity = await identityResolver.ResolveAsync(cancellationToken);
-            var now = DateTimeOffset.UtcNow;
-            var task = new TaskEntity
-            {
-                Id = Guid.NewGuid(),
-                OwnerId = identity.Id,
-                Title = PortalMcpValueNormalizer.RequireTitle(title),
-                Description = PortalMcpValueNormalizer.NormalizeDescription(description),
-                Status = PortalMcpValueNormalizer.NormalizeTaskStatus(status),
-                Priority = PortalMcpValueNormalizer.NormalizeTaskPriority(priority),
-                StartAt = startAt,
-                DueAt = dueAt,
-                ActionType = NormalizePlannerAction(actionType),
-                ScheduleHint = NormalizePlannerSchedule(scheduleHint),
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-
-            dbContext.Tasks.Add(task);
-            if (references is not null) await PlannerReferenceStore.ReplaceForTaskAsync(dbContext, identity.Id, task.Id, references, cancellationToken);
-            await dbContext.SaveChangesAsync(cancellationToken);
-            var links = references is null ? Array.Empty<PlannerReferenceDto>() : PlannerReferenceStore.Normalize(references).Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, reference.ParentReferenceType, reference.ParentReferenceId, reference.ParentReferenceName)).ToArray();
-            return Success(new PortalTaskWriteResponse("created", ToDto(task, links)), "Tarefa criada.");
+            var refs = references?.Select(r => new TaskReferenceV2Input(r.ReferenceType, r.ReferenceId, r.ReferenceName, r.ConnectionRef)).ToArray();
+            var result = await new ProfessionalPlannerService(dbContext).CreateTaskAsync(identity.Id, identity.Id, new TaskProfessionalInput(title, description, status, priority, startAt, dueAt, parentTaskId, participants, refs, tags, ActionType: actionType, ScheduleHint: scheduleHint, Subtasks: subtasks, DependsOnTaskIds: dependsOnTaskIds), cancellationToken);
+            return Success(new PortalTaskWriteResponse("created", ToDto(result)), "Tarefa criada.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -167,25 +149,19 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
             var identity = await identityResolver.ResolveAsync(cancellationToken);
             var normalizedReferences = PlannerReferenceStore.Normalize(references);
             if (normalizedReferences.Count == 0) throw new ArgumentException("Informe ao menos um vínculo.", nameof(references));
-            var now = DateTimeOffset.UtcNow;
-            var tasks = new List<TaskEntity>(normalizedReferences.Count);
+            var service = new ProfessionalPlannerService(dbContext);
+            var tasks = new List<TaskDetailDto>(normalizedReferences.Count);
             foreach (var reference in normalizedReferences)
             {
-                var task = new TaskEntity
-                {
-                    Id = Guid.NewGuid(), OwnerId = identity.Id,
-                    Title = PortalMcpValueNormalizer.RequireTitle(titleTemplate.Replace("{name}", reference.ReferenceName ?? reference.ReferenceId, StringComparison.OrdinalIgnoreCase)),
-                    Description = PortalMcpValueNormalizer.NormalizeDescription(description),
-                    Status = PortalMcpValueNormalizer.NormalizeTaskStatus(status), Priority = PortalMcpValueNormalizer.NormalizeTaskPriority(priority),
-                    StartAt = startAt, DueAt = dueAt, ActionType = NormalizePlannerAction(actionType), ScheduleHint = NormalizePlannerSchedule(scheduleHint), CreatedAt = now, UpdatedAt = now
-                };
+                var task = await service.CreateTaskAsync(identity.Id, identity.Id, new TaskProfessionalInput(
+                    PortalMcpValueNormalizer.RequireTitle(titleTemplate.Replace("{name}", reference.ReferenceName ?? reference.ReferenceId, StringComparison.OrdinalIgnoreCase)),
+                    PortalMcpValueNormalizer.NormalizeDescription(description),
+                    PortalMcpValueNormalizer.NormalizeTaskStatus(status), PortalMcpValueNormalizer.NormalizeTaskPriority(priority),
+                    startAt, dueAt, References: [new(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef)],
+                    ActionType: NormalizePlannerAction(actionType), ScheduleHint: NormalizePlannerSchedule(scheduleHint)), cancellationToken);
                 tasks.Add(task);
-                dbContext.Tasks.Add(task);
-                await PlannerReferenceStore.ReplaceForTaskAsync(dbContext, identity.Id, task.Id, [reference], cancellationToken);
             }
-            await dbContext.SaveChangesAsync(cancellationToken);
-            var links = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, tasks.Select(task => task.Id).ToArray(), cancellationToken);
-            return Success(new PortalTaskBatchWriteResponse("created", tasks.Select(task => ToDto(task, links.GetValueOrDefault(task.Id, []))).ToArray()), $"{tasks.Count} tarefa(s) criada(s).");
+            return Success(new PortalTaskBatchWriteResponse("created", tasks.Select(ToDto).ToArray()), $"{tasks.Count} tarefa(s) criada(s).");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -221,6 +197,9 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
         [Description("Limpa a data de início quando true.")] bool clearStartAt = false,
         [Description("Limpa a data de vencimento quando true.")] bool clearDueAt = false,
         [Description("Substitui os vínculos quando informado: course, student, class ou school.")] IReadOnlyList<PlannerReferenceInput>? references = null,
+        [Description("Substitui as tags quando informado.")] IReadOnlyList<string>? tags = null,
+        [Description("Substitui os participantes quando informado.")] IReadOnlyList<TaskParticipantInput>? participants = null,
+        [Description("Versão esperada para concorrência otimista.")] long? expectedVersion = null,
         [Description("Novo tipo de ação planejada.")] string? actionType = null,
         [Description("Nova descrição da programação.")] string? scheduleHint = null,
         CancellationToken cancellationToken = default)
@@ -231,37 +210,10 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
                 throw new ArgumentException("Informe um taskId UUID válido.", nameof(taskId));
 
             var identity = await identityResolver.ResolveAsync(cancellationToken);
-            var task = await dbContext.Tasks.SingleOrDefaultAsync(item => item.Id == taskId && item.OwnerId == identity.Id, cancellationToken);
-            if (task is null)
-                return ToolResultHelper.Error<PortalTaskWriteResponse>("Tarefa não encontrada.", errorCode: "portal_task_not_found");
-
-            if (title is not null)
-                task.Title = PortalMcpValueNormalizer.RequireTitle(title);
-            if (description is not null)
-                task.Description = PortalMcpValueNormalizer.NormalizeDescription(description);
-            if (status is not null)
-                task.Status = PortalMcpValueNormalizer.NormalizeTaskStatus(status);
-            if (priority is not null)
-                task.Priority = PortalMcpValueNormalizer.NormalizeTaskPriority(priority);
-            if (clearStartAt)
-                task.StartAt = null;
-            else if (startAt is not null)
-                task.StartAt = startAt;
-            if (clearDueAt)
-                task.DueAt = null;
-            else if (dueAt is not null)
-                task.DueAt = dueAt;
-            if (actionType is not null)
-                task.ActionType = NormalizePlannerAction(actionType);
-            if (scheduleHint is not null)
-                task.ScheduleHint = NormalizePlannerSchedule(scheduleHint);
-            if (references is not null)
-                await PlannerReferenceStore.ReplaceForTaskAsync(dbContext, identity.Id, task.Id, references, cancellationToken);
-
-            task.UpdatedAt = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-            var links = await PlannerReferenceStore.ForTasksAsync(dbContext, identity.Id, [task.Id], cancellationToken);
-            return Success(new PortalTaskWriteResponse("updated", ToDto(task, links.GetValueOrDefault(task.Id, []))), "Tarefa atualizada.");
+            var refs = references?.Select(r => new TaskReferenceV2Input(r.ReferenceType, r.ReferenceId, r.ReferenceName, r.ConnectionRef)).ToArray();
+            var result = await new ProfessionalPlannerService(dbContext).UpdateTaskAsync(identity.Id, identity.Id, taskId,
+                new TaskProfessionalInput(title, description, status, priority, startAt, dueAt, Participants: participants, References: refs, Tags: tags, ExpectedVersion: expectedVersion, ActionType: actionType, ScheduleHint: scheduleHint, ClearStartAt: clearStartAt, ClearDueAt: clearDueAt), cancellationToken);
+            return Success(new PortalTaskWriteResponse("updated", ToDto(result)), "Tarefa atualizada.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
@@ -296,12 +248,14 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
                 throw new ArgumentException("Informe um taskId UUID válido.", nameof(taskId));
 
             var identity = await identityResolver.ResolveAsync(cancellationToken);
-            var task = await dbContext.Tasks.SingleOrDefaultAsync(item => item.Id == taskId && item.OwnerId == identity.Id, cancellationToken);
-            if (task is null)
+            try
+            {
+                await new ProfessionalPlannerService(dbContext).DeleteTaskAsync(identity.Id, taskId, cancellationToken);
+            }
+            catch (KeyNotFoundException)
+            {
                 return ToolResultHelper.Error<PortalTaskRemovalResponse>("Tarefa não encontrada.", errorCode: "portal_task_not_found");
-
-            dbContext.Tasks.Remove(task);
-            await dbContext.SaveChangesAsync(cancellationToken);
+            }
             return Success(new PortalTaskRemovalResponse(taskId, true), "Tarefa removida.");
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
@@ -312,6 +266,12 @@ public sealed class PortalTaskTools(ConnectorDbContext dbContext, PortalMcpIdent
 
     private static TaskDto ToDto(TaskEntity task, IReadOnlyList<PlannerReferenceDto>? references = null) =>
         new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt, references ?? [], task.ActionType, task.ScheduleHint);
+
+    private static TaskDto ToDto(TaskDetailDto task) => new(task.Id, task.Title, task.Description, task.Status, task.Priority, task.StartAt, task.DueAt, task.CreatedAt, task.UpdatedAt,
+        task.References.Select(reference => new PlannerReferenceDto(reference.ReferenceType, reference.ReferenceId, reference.ReferenceName, reference.ConnectionRef, null, null, null)).ToArray(), task.ActionType, task.ScheduleHint)
+    {
+        Tags = task.Tags, Participants = task.Participants, CompletedAt = task.CompletedAt, Version = task.Version
+    };
 
     private static string? NormalizePlannerAction(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 80)];
     private static string? NormalizePlannerSchedule(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 240)];

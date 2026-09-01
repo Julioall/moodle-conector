@@ -89,7 +89,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var tools = await GetToolsListAsync(_factory, "Production");
 
-        Assert.True(tools.Count <= 104, $"A exposição de produção não pode exceder o catálogo cognitivo: {tools.Count}.");
+        Assert.True(tools.Count <= 129, $"A exposição de produção não pode exceder o catálogo cognitivo: {tools.Count}.");
         Assert.Contains("moodle_execute_read", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_prepare_write", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_confirm_write", tools, StringComparer.OrdinalIgnoreCase);
@@ -178,7 +178,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                                exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
 
-        Assert.Equal(104, contracts.Count);
+        Assert.Equal(129, contracts.Count);
         Assert.Equal(
             contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
             submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));

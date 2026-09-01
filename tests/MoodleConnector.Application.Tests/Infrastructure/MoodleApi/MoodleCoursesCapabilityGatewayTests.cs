@@ -154,6 +154,38 @@ public sealed class MoodleCoursesCapabilityGatewayTests
     }
 
     [Fact]
+    public async Task GetMyCoursesAsync_NaoMantemRespostaVaziaDeCategoriasNoCache()
+    {
+        var restClient = new FakeRestClient { UseNestedCategory = true, EmptyCategoriesFirst = true };
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var firstGateway = new MoodleCoursesGateway(
+            Options.Create(new MoodleApiOptions()),
+            cache,
+            new FakeCredentialsProvider(),
+            restClient,
+            new FakeCatalog(Profile("core_enrol_get_users_courses", "core_course_get_categories")),
+            new FakeCurrentUserIdGateway(7),
+            new MoodleBusinessFlowRegistry(),
+            new MoodleResourceResolver());
+        var secondGateway = new MoodleCoursesGateway(
+            Options.Create(new MoodleApiOptions()),
+            cache,
+            new FakeCredentialsProvider(),
+            restClient,
+            new FakeCatalog(Profile("core_enrol_get_users_courses", "core_course_get_categories")),
+            new FakeCurrentUserIdGateway(8),
+            new MoodleBusinessFlowRegistry(),
+            new MoodleResourceResolver());
+
+        var firstPage = await firstGateway.GetMyCoursesAsync("7", 20, 1, CancellationToken.None);
+        var secondPage = await secondGateway.GetMyCoursesAsync("8", 20, 1, CancellationToken.None);
+
+        Assert.Equal("CTM/ DR-GO", Assert.Single(firstPage.Items).CategoryName);
+        Assert.Equal("CTM/ DR-GO > DR-MT", Assert.Single(secondPage.Items).CategoryName);
+        Assert.Equal(2, restClient.CountCalls("core_course_get_categories"));
+    }
+
+    [Fact]
     public async Task GetMyCourseAsync_ConsultaCursoExatoEValidaMatriculaSemListarTodosOsCursos()
     {
         var restClient = new FakeRestClient();
@@ -211,9 +243,9 @@ public sealed class MoodleCoursesCapabilityGatewayTests
             Task.FromResult(new MoodleConnectorCredentials("client", "connection", "goias", "https://moodle.example", "user", "password", "goias", false));
     }
 
-    private sealed class FakeCurrentUserIdGateway : IMoodleCurrentUserIdGateway
+    private sealed class FakeCurrentUserIdGateway(long moodleUserId = 7) : IMoodleCurrentUserIdGateway
     {
-        public Task<long> GetCurrentUserIdAsync(CancellationToken cancellationToken) => Task.FromResult(7L);
+        public Task<long> GetCurrentUserIdAsync(CancellationToken cancellationToken) => Task.FromResult(moodleUserId);
     }
 
     private sealed class FakeRestClient : IMoodleRestClient
@@ -221,8 +253,10 @@ public sealed class MoodleCoursesCapabilityGatewayTests
         public List<string> Calls { get; } = [];
         public int EnrolledUserId { get; init; } = 7;
         public bool UseNestedCategory { get; init; }
+        public bool EmptyCategoriesFirst { get; init; }
         public bool EnrolledMissingCategoryId { get; init; }
         public TimeSpan ResponseDelay { get; init; }
+        private int categoryCallCount;
 
         public int CountCalls(string functionName)
         {
@@ -258,7 +292,9 @@ public sealed class MoodleCoursesCapabilityGatewayTests
                     : "[{\"id\":42,\"fullname\":\"Curso ativo\"}]",
                 "core_course_get_courses_by_field" => "{\"courses\":[{\"id\":42,\"fullname\":\"Curso ativo\"}]}",
                 "core_enrol_get_enrolled_users" => $"[{{\"id\":{EnrolledUserId}}}]",
-                "core_course_get_categories" => UseNestedCategory
+                "core_course_get_categories" => EmptyCategoriesFirst && Interlocked.Increment(ref categoryCallCount) == 1
+                    ? "[]"
+                    : UseNestedCategory
                     ? "[{\"id\":1,\"name\":\"CTM/ DR-GO\",\"parent\":0},{\"id\":2,\"name\":\"DR-MT\",\"parent\":1,\"path\":\"/1/2\"}]"
                     : "[{\"id\":42,\"name\":\"Curso\",\"parent\":0}]",
                 _ => "[{\"id\":42,\"fullname\":\"Curso ativo\"}]"

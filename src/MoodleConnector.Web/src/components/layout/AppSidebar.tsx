@@ -4,9 +4,7 @@ import {
   CalendarDays,
   CheckSquare,
   FileSpreadsheet,
-  LayoutDashboard,
   LogOut,
-  MessageSquare,
   Settings,
   ShieldAlert,
   type LucideIcon,
@@ -40,12 +38,10 @@ type SidebarNavItem = {
 };
 
 const mainNavItems: SidebarNavItem[] = [
-  { title: 'Resumo da Semana', url: '/', icon: LayoutDashboard, permission: APP_PERMISSIONS.DASHBOARD_VIEW },
   { title: 'Meus Cursos', url: '/meus-cursos', icon: BookOpen, permission: APP_PERMISSIONS.COURSES_CATALOG_VIEW },
   { title: 'Escolas', url: '/escolas', icon: Building2, permission: APP_PERMISSIONS.SCHOOLS_VIEW },
   { title: 'Tarefas', url: '/tarefas', icon: CheckSquare, permission: APP_PERMISSIONS.TASKS_VIEW },
   { title: 'Agenda', url: '/agenda', icon: CalendarDays, permission: APP_PERMISSIONS.AGENDA_VIEW },
-  { title: 'Mensagens', url: '/mensagens', icon: MessageSquare, permission: APP_PERMISSIONS.MESSAGES_VIEW },
   { title: 'Relatórios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
 ];
 
