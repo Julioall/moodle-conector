@@ -119,6 +119,7 @@ public static class DependencyInjection
             .AddHttpClient<IMoodleRestClient, MoodleRestClient>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
         services.AddScoped<IMoodleFunctionCatalog, MoodleFunctionCatalog>();
+        services.AddScoped<IMoodleScormReader, Scorm.MoodleScormReader>();
         services.AddScoped<IMoodleFunctionExecutor, MoodleFunctionExecutor>();
         services.AddScoped<IMoodleUniversalWriteService, MoodleUniversalWriteService>();
         services.AddScoped<IMoodleWriteReconciliationService, MoodleWriteReconciliationService>();

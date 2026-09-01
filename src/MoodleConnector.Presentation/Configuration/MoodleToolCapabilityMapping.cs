@@ -28,6 +28,7 @@ internal static class MoodleToolCapabilityMapping
             ["list_course_quizzes"] = "core_course_get_contents",
             ["get_quiz"] = "core_course_get_contents",
             ["list_course_scorms"] = "core_course_get_contents",
+            ["ler_scorm"] = "mod_scorm_get_scorms_by_courses",
             ["list_activity_deadlines"] = "core_course_get_contents",
             ["list_assignment_submissions"] = "mod_assign_get_submissions",
             ["get_student_submission"] = "mod_assign_get_submissions",

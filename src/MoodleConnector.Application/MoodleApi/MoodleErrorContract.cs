@@ -24,6 +24,14 @@ public static class MoodleErrorContract
     public const string NetworkError = "moodle_network_error";
     public const string InvalidResponse = "moodle_invalid_response";
     public const string ApiError = "moodle_api_error";
+    public const string ScormNotFound = "scorm_not_found";
+    public const string ScormSelectionRequired = "scorm_selection_required";
+    public const string ScormPackageUnavailable = "scorm_package_unavailable";
+    public const string ScormPackageTooLarge = "scorm_package_too_large";
+    public const string ScormManifestMissing = "scorm_manifest_missing";
+    public const string InvalidScormPackage = "invalid_scorm_package";
+    public const string InvalidScormManifest = "invalid_scorm_manifest";
+    public const string InvalidScormResponse = "invalid_scorm_response";
     public const string CourseNotFound = "moodle_course_not_found";
     public const string SnapshotUnavailable = "snapshot_unavailable";
     public const string Unexpected = "unexpected_connector_error";
@@ -71,6 +79,14 @@ public static class MoodleErrorContract
             CourseNotFound or "invalidcourseid" or "course_not_found" => CourseNotFound,
             SnapshotUnavailable => SnapshotUnavailable,
             ApiError or "moodle_error" or "invalidparameter" or "invalid_parameter" => ApiError,
+            ScormNotFound => ScormNotFound,
+            ScormSelectionRequired => ScormSelectionRequired,
+            ScormPackageUnavailable => ScormPackageUnavailable,
+            ScormPackageTooLarge => ScormPackageTooLarge,
+            ScormManifestMissing => ScormManifestMissing,
+            InvalidScormPackage => InvalidScormPackage,
+            InvalidScormManifest => InvalidScormManifest,
+            InvalidScormResponse => InvalidScormResponse,
             Unexpected => Unexpected,
             _ => ApiError
         };
@@ -93,6 +109,14 @@ public static class MoodleErrorContract
         CourseNotFound => "O curso nao foi encontrado ou nao esta acessivel para o usuario autenticado.",
         SnapshotUnavailable => "O snapshot solicitado ainda nao esta disponivel ou esta incompleto.",
         ApiError => "O Moodle recusou ou nao conseguiu concluir a chamada solicitada.",
+        ScormNotFound => "Nenhum pacote SCORM correspondente foi encontrado no curso.",
+        ScormSelectionRequired => "O curso possui mais de um pacote SCORM; informe o identificador do pacote.",
+        ScormPackageUnavailable => "O Moodle nao forneceu um pacote SCORM baixavel para esta atividade.",
+        ScormPackageTooLarge => "O pacote SCORM excede o limite configurado para leitura.",
+        ScormManifestMissing => "O pacote SCORM nao contem imsmanifest.xml.",
+        InvalidScormPackage => "O pacote baixado nao e um ZIP SCORM valido.",
+        InvalidScormManifest => "O imsmanifest.xml nao pode ser lido com seguranca.",
+        InvalidScormResponse => "O Moodle retornou uma resposta de SCORM invalida.",
         _ => "O conector encontrou um erro inesperado ao consultar o Moodle."
     };
 }

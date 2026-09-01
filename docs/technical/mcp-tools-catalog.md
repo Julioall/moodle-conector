@@ -1,6 +1,6 @@
 # Catálogo de Tools MCP
 
-Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`. O catálogo completo possui 111 tools; `Production` expõe 104 com flags condicionais de escrita habilitadas, ocultando cinco tools de diagnóstico técnico por `ExposureStatus=Diagnostic`. O perfil `Full` mantém todas as tools registradas para suporte e migração.
+Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`. O catálogo completo possui 136 tools; `Production` expõe 130 com flags condicionais de escrita habilitadas, ocultando cinco tools de diagnóstico técnico por `ExposureStatus=Diagnostic`. O perfil `Full` mantém todas as tools registradas para suporte e migração.
 
 ## Memória e orientações pedagógicas
 
@@ -144,6 +144,7 @@ humana e minimização de dados.
 | `get_quiz` | Get Quiz | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_scorms` | Listar SCORMs Curso | `ReadOnly` | Sim | Não | Implementada |
 | `list_course_scorms` | List Course SCORMs | `ReadOnly` | Sim | Não | Implementada |
+| `ler_scorm` | Ler pacote SCORM | `SensitiveRead` | Sim | Não | Implementada |
 | `list_activity_deadlines` | Consultar Prazos Atividades | `ReadOnly` | Sim | Não | Implementada |
 | `list_activity_deadlines` | List Activity Deadlines | `ReadOnly` | Sim | Não | Implementada |
 | `list_assignment_submissions` | Listar Entregas Atividade | `SensitiveRead` | Sim | Não | Implementada |
@@ -639,6 +640,26 @@ Descrição:
 
 - Lista módulos `scorm` do curso.
 - Não consulta tentativas ou notas.
+
+## `ler_scorm`
+
+Lê o pacote SCORM da atividade no Moodle selecionado. A tool resolve o curso e o
+SCORM pela função `mod_scorm_get_scorms_by_courses`, baixa somente a URL
+`pluginfile.php` emitida pelo Moodle com a autenticação da conexão ativa, valida
+o ZIP, bloqueia caminhos inseguros e interpreta `imsmanifest.xml` sem DTD ou
+resolução externa.
+
+| Argumento | Uso |
+| --- | --- |
+| `courseId` | Obrigatório; aceita courseId, shortName ou idnumber. |
+| `scormId` | Opcional quando há apenas um pacote; obrigatório para escolher entre vários. |
+| `moodleAlias` | Alias da conexão Moodle. |
+
+A resposta segue `ToolResponse<ScormReadResult>` e inclui metadados do pacote,
+identificador/lançamento de cada SCO, HTML sanitizado, texto normalizado e os
+arquivos HTML/textuais encontrados. Tokens, credenciais e bytes do ZIP não são
+incluídos nos logs nem no envelope JSON. Os limites configurados protegem o
+download, a descompactação e o tamanho do texto retornado.
 
 ## `list_activity_deadlines` / `list_activity_deadlines`
 
