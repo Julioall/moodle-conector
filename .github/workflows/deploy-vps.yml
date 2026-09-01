@@ -447,6 +447,9 @@ jobs:
             printf 'POSTGRES_USER=%s\n' "$POSTGRES_USER"
             printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD"
             printf 'Postgres__ConnectionString=%s\n' "$CONNECTION_STRING"
+            # docker-compose interpolation reads this uppercase key before it
+            # loads env_file; keep it aligned with the service environment map.
+            printf 'CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64=%s\n' "$CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64"
             printf 'ConnectorSecrets__EncryptionKeyBase64=%s\n' "$CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64"
             printf 'AdminApi__ApiKey=%s\n' "$ADMIN_API_KEY"
             printf 'MEDIATR_LICENSE_KEY=%s\n' "$MEDIATR_LICENSE_KEY"
