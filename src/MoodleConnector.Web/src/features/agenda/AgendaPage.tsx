@@ -744,7 +744,10 @@ export function AgendaPage() {
   const [referencesInput, setReferencesInput] = useState("");
   const [recurrenceEditScope, setRecurrenceEditScope] =
     useState<RecurrenceEditScope>("series");
-  const courseItems = coursesQuery.data?.data ?? [];
+  const courseItems = useMemo(
+    () => coursesQuery.data?.data ?? [],
+    [coursesQuery.data?.data],
+  );
   const studentCourse = courseItems[0];
   const studentsQuery = useQuery({
     queryKey: ["app", "agenda", "tag-students", studentCourse?.connectionRef, studentCourse?.courseId],

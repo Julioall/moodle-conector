@@ -9,7 +9,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Calendar,
   CalendarRange,
   Archive,
   ArrowRight,
@@ -25,7 +24,6 @@ import {
   MoreHorizontal,
   Plus,
   Trash2,
-  X,
 } from "lucide-react";
 
 import {
@@ -157,14 +155,6 @@ function formatDueDate(value?: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? "Sem prazo"
-    : date.toLocaleDateString("pt-BR");
-}
-
-function formatStartDate(value?: string) {
-  if (!value) return "Sem início";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "Sem início"
     : date.toLocaleDateString("pt-BR");
 }
 
@@ -832,11 +822,6 @@ export function TasksPage() {
   function clearTaskSelection() {
     setSelectedTaskIds(new Set());
     setSelectionMode(false);
-  }
-
-  function completeSelectedTasks() {
-    if (selectedTaskIds.size === 0) return;
-    bulkUpdate.mutate({ ids: Array.from(selectedTaskIds), status: "done" });
   }
 
   function updateColumnTasks(tasksOnColumn: Task[], status: TaskStatus) {
