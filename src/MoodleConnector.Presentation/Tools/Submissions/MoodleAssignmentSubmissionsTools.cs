@@ -364,9 +364,9 @@ public sealed class MoodleAssignmentSubmissionsTools(
         {
             return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(ex);
         }
-        catch
+        catch (Exception ex)
         {
-            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Nao foi possivel listar entregas no Moodle neste momento.");
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(ex);
         }
 
         if (submissionsPage is null)
@@ -476,9 +476,13 @@ public sealed class MoodleAssignmentSubmissionsTools(
         {
             throw;
         }
-        catch
+        catch (MoodleApiException ex)
         {
-            return ToolResultHelper.Error<StudentSubmissionResponse>("Nao foi possivel consultar a entrega no Moodle neste momento.");
+            return ToolResultHelper.Error<StudentSubmissionResponse>(ex);
+        }
+        catch (Exception ex)
+        {
+            return ToolResultHelper.Error<StudentSubmissionResponse>(ex);
         }
 
         if (submission is null)

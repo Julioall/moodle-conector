@@ -27,7 +27,8 @@ public sealed record StartPendingGradingRunCommand(
     bool UseSubmissionSnapshots = false,
     Guid? SnapshotOwnerId = null,
     string? SnapshotClientId = null,
-    string? SnapshotConnectionAlias = null) : IRequest<StartPendingGradingRunResult>;
+    string? SnapshotConnectionAlias = null,
+    string? CourseId = null) : IRequest<StartPendingGradingRunResult>;
 
 public sealed record StartPendingGradingRunResult(
     [property: JsonPropertyName("coursesDiscovered")] int CoursesDiscovered,
@@ -84,14 +85,32 @@ public sealed class StartPendingGradingRunCommandHandler(
             !string.IsNullOrWhiteSpace(request.SnapshotClientId) &&
             !string.IsNullOrWhiteSpace(request.SnapshotConnectionAlias) &&
             snapshotStore is not null;
-        IReadOnlyList<CourseSummary> courses = useSnapshots
-            ? []
-            : await LoadCoursesAsync(request.UserExternalId, maxCourses, cancellationToken);
+        var requestedCourseId = string.IsNullOrWhiteSpace(request.CourseId)
+            ? null
+            : request.CourseId.Trim();
+        IReadOnlyList<CourseSummary> courses;
+        if (requestedCourseId is not null)
+        {
+            var course = await mediator.Send(
+                new GetCourseQuery(request.UserExternalId, requestedCourseId),
+                cancellationToken);
+            courses = course is null ? [] : [course];
+        }
+        else
+        {
+            courses = useSnapshots
+                ? []
+                : await LoadCoursesAsync(request.UserExternalId, maxCourses, cancellationToken);
+        }
         var batches = new List<PendingGradingRunBatch>();
         var courseResults = new List<PendingGradingRunCourse>();
         var warnings = new List<string>();
 
-        if (useSnapshots)
+        if (requestedCourseId is not null && courses.Count == 0)
+        {
+            warnings.Add($"Curso {requestedCourseId} nao foi encontrado ou nao esta acessivel para o usuario atual.");
+        }
+        else if (useSnapshots && requestedCourseId is null)
         {
             courses = await LoadCoursesFromSnapshotAsync(request, maxCourses, warnings, cancellationToken);
         }

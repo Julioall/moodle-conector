@@ -452,9 +452,13 @@ public sealed class MoodleCourseContentsTools(
         {
             throw;
         }
-        catch
+        catch (MoodleApiException exception)
         {
-            return ToolResultHelper.Error<CourseStructureAuditResponse>("Nao foi possivel auditar a estrutura do curso no Moodle neste momento.");
+            return ToolResultHelper.Error<CourseStructureAuditResponse>(exception);
+        }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<CourseStructureAuditResponse>(exception);
         }
 
         if (audit is null)

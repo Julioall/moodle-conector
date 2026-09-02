@@ -6,6 +6,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Forums;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
 
@@ -203,12 +204,13 @@ public sealed class MoodleForumTools(
         {
             return ToolResultHelper.Error<ReadForumResponse>(ex.Message);
         }
-        catch
+        catch (MoodleApiException exception)
         {
-            return ToolResultHelper.Error<ReadForumResponse>(
-                language == "pt"
-                    ? "Nao foi possivel ler o forum no Moodle neste momento."
-                    : "Could not read the Moodle forum at this time.");
+            return ToolResultHelper.Error<ReadForumResponse>(exception);
+        }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<ReadForumResponse>(exception);
         }
 
         if (forumPage is null)

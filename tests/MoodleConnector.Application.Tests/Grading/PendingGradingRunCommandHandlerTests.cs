@@ -56,6 +56,30 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task StartRun_ComCursoInformado_NaoVarreOsDemaisCursos()
+    {
+        var mediator = new RunMediator();
+        var sut = new StartPendingGradingRunCommandHandler(
+            mediator,
+            new RunCourseContentsGateway());
+
+        var result = await sut.Handle(
+            new StartPendingGradingRunCommand(
+                "321",
+                MaxCourses: 0,
+                MaxItemsPerBatch: 100,
+                CourseId: "10"),
+            CancellationToken.None);
+
+        Assert.Equal(["10"], mediator.RequestedCourseIds);
+        Assert.Equal(1, result.CoursesDiscovered);
+        Assert.Equal(1, result.CoursesScanned);
+        Assert.DoesNotContain(result.Courses, course => course.CourseId == "20");
+        Assert.Single(mediator.CreateBatchRequests);
+        Assert.Equal("10", mediator.CreateBatchRequests[0].CourseId);
+    }
+
+    [Fact]
     public async Task StartRun_UsaSnapshotsSemLerCursosOuEntregasNoMoodle()
     {
         var mediator = new RunMediator(pendingSubmissionCount: 99);
@@ -577,6 +601,7 @@ public sealed class PendingGradingRunCommandHandlerTests
     private sealed class RunMediator(int pendingSubmissionCount = 2) : IMediator
     {
         public List<CreateAssistedGradingBatchCommand> CreateBatchRequests { get; } = [];
+        public List<string> RequestedCourseIds { get; } = [];
 
         public Task Publish(object notification, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task Publish<TNotification>(TNotification notification, CancellationToken cancellationToken = default)
@@ -593,6 +618,15 @@ public sealed class PendingGradingRunCommandHandlerTests
                     TotalCount: 2,
                     Page: 1,
                     PageSize: 10));
+            }
+
+            if (request is GetCourseQuery getCourse)
+            {
+                RequestedCourseIds.Add(getCourse.CourseId);
+                CourseSummary? course = getCourse.CourseId == "10"
+                    ? Course("10", "Curso valido")
+                    : null;
+                return Task.FromResult((TResponse)(object?)course!);
             }
 
             if (request is CreateAssistedGradingBatchCommand create)

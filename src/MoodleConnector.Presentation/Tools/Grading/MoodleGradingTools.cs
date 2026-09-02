@@ -216,8 +216,10 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<StartPendingGradingRunResult>))]
-    [Description("Inicia o fluxo de correcao de todas as entregas pendentes em todos os cursos acessiveis. Percorre os cursos, cria um sublote por curso com entregas aguardando correcao e continua quando um curso ou uma atividade falhar. Nao gera nota nem escreve no Moodle. Para cada batchJobId retornado, prepare a IA, salve rascunhos, revise com o professor e confirme o lancamento. Ao final use export_pending_grading_run_report com todos os batchJobIds.")]
+    [Description("Inicia o fluxo de correcao de entregas pendentes. Quando courseId for informado, limita toda a descoberta e os sublotes a esse curso; quando omitido, percorre os cursos acessiveis. Nao gera nota nem escreve no Moodle. Para cada batchJobId retornado, prepare a IA, salve rascunhos, revise com o professor e confirme o lancamento. Ao final use export_pending_grading_run_report com todos os batchJobIds.")]
     public Task<CallToolResult> IniciarFluxoCorrecaoPendentesAsync(
+        [Description("Identificador opcional do curso a processar. Quando informado, nenhum outro curso e consultado.")]
+        string? courseId = null,
         [Description("Numero maximo de cursos a percorrer. Use 0 para todos os cursos acessiveis.")]
         int maxCourses = 0,
         [Description("Numero maximo de entregas por sublote, de 1 a 400. A ferramenta cria sublotes adicionais ate percorrer todas as entregas pendentes.")]
@@ -237,6 +239,7 @@ public sealed class MoodleGradingTools(
         CancellationToken cancellationToken = default)
     {
         return StartPendingGradingRunCoreAsync(
+            courseId,
             maxCourses,
             maxItemsPerBatch,
             includeRubric,
@@ -924,6 +927,7 @@ public sealed class MoodleGradingTools(
     }
 
     private async Task<CallToolResult> StartPendingGradingRunCoreAsync(
+        string? courseId,
         int maxCourses,
         int maxItemsPerBatch,
         bool includeRubric,
@@ -979,7 +983,8 @@ public sealed class MoodleGradingTools(
                     UseSubmissionSnapshots: snapshotOwnerId is not null,
                     SnapshotOwnerId: snapshotOwnerId,
                     SnapshotClientId: snapshotClientId,
-                    SnapshotConnectionAlias: snapshotConnectionAlias),
+                    SnapshotConnectionAlias: snapshotConnectionAlias,
+                    CourseId: courseId),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -990,9 +995,9 @@ public sealed class MoodleGradingTools(
         {
             return ToolResultHelper.Error<StartPendingGradingRunResult>(ex.Message);
         }
-        catch
+        catch (Exception exception)
         {
-            return ToolResultHelper.Error<StartPendingGradingRunResult>("Nao foi possivel iniciar o fluxo de correcao de pendencias neste momento.");
+            return ToolResultHelper.Error<StartPendingGradingRunResult>(exception);
         }
 
         var response = new ToolResponse<StartPendingGradingRunResult>(

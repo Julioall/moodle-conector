@@ -76,9 +76,9 @@ public sealed class MoodleCompletionTools(
         {
             return ToolResultHelper.Error<CourseCompletionStatus>(exception);
         }
-        catch
+        catch (Exception exception)
         {
-            return ToolResultHelper.Error<CourseCompletionStatus>("Nao foi possivel consultar o progresso do aluno neste momento.");
+            return ToolResultHelper.Error<CourseCompletionStatus>(exception);
         }
 
         var response = new ToolResponse<CourseCompletionStatus>(

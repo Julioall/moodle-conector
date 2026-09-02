@@ -45,6 +45,10 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
         {
             return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
         }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception);
+        }
     }
 
     [McpServerTool(
@@ -76,6 +80,10 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
         {
             return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
         }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception);
+        }
     }
 
     [McpServerTool(
@@ -100,6 +108,10 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
         {
             return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
         }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception);
+        }
     }
 
     [McpServerTool(
@@ -123,6 +135,10 @@ public sealed class MoodleMemoryDocumentTools(IUserMemoryDocumentService documen
         catch (ArgumentException exception)
         {
             return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception.Message);
+        }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<MemoryDocumentToolResponse>(exception);
         }
     }
 

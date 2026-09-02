@@ -119,7 +119,7 @@ public sealed class MoodleForumToolsTests
 
         Assert.True(result.IsError ?? false);
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
-        Assert.Equal("Nao foi possivel ler o forum no Moodle neste momento.", structured.GetProperty("warnings")[0].GetString());
+        Assert.Equal("unexpected_connector_error", structured.GetProperty("errorCode").GetString());
     }
 
     private sealed class FakeMoodleConnectionSelection : IMoodleConnectionSelection

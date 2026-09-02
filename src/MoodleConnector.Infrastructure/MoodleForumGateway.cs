@@ -39,7 +39,10 @@ internal sealed partial class MoodleForumGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var payload = await restClient.CallAsync(
             credentials,
-            "mod_forum_get_forum_discussions",
+            // The paginated endpoint accepts page/perpage.  Calling the
+            // legacy endpoint with those arguments is rejected by some
+            // Moodle versions, even though posting to the same forum works.
+            "mod_forum_get_forum_discussions_paginated",
             new Dictionary<string, string>
             {
                 ["forumid"] = normalizedForumId.ToString(CultureInfo.InvariantCulture),

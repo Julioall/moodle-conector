@@ -4,6 +4,7 @@ using MediatR;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions.Queries;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -132,9 +133,13 @@ public sealed class MoodlePendingSubmissionsTools(
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
-        catch
+        catch (MoodleApiException exception)
         {
-            return ToolResultHelper.Error<GetStudentsWithPendingSubmissionsResult>("Não foi possível listar os alunos com atividades pendentes neste momento.");
+            return ToolResultHelper.Error<GetStudentsWithPendingSubmissionsResult>(exception);
+        }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<GetStudentsWithPendingSubmissionsResult>(exception);
         }
 
         var response = new ToolResponse<GetStudentsWithPendingSubmissionsResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);

@@ -5,6 +5,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Gradebook.Queries;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Gradebook;
@@ -67,9 +68,13 @@ public sealed class MoodleStudentPerformanceTools(
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
-        catch
+        catch (MoodleApiException exception)
         {
-            return ToolResultHelper.Error<StudentGradeItemsResult>("Não foi possível consultar o desempenho do estudante neste momento.");
+            return ToolResultHelper.Error<StudentGradeItemsResult>(exception);
+        }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<StudentGradeItemsResult>(exception);
         }
 
         var response = new ToolResponse<StudentGradeItemsResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
@@ -133,9 +138,13 @@ public sealed class MoodleStudentPerformanceTools(
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
-        catch
+        catch (MoodleApiException exception)
         {
-            return ToolResultHelper.Error<GetStudentsBelowMinGradeResult>("Não foi possível listar os alunos abaixo do mínimo neste momento.");
+            return ToolResultHelper.Error<GetStudentsBelowMinGradeResult>(exception);
+        }
+        catch (Exception exception)
+        {
+            return ToolResultHelper.Error<GetStudentsBelowMinGradeResult>(exception);
         }
 
         var response = new ToolResponse<GetStudentsBelowMinGradeResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
