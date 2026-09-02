@@ -405,12 +405,12 @@ Tools universais de leitura:
 | `moodle_list_functions` | Lista as funções Web Service habilitadas para o token. | Implementada; diagnóstico técnico oculto em `Production` |
 | `moodle_check_function` | Verifica disponibilidade e classificação de risco local. | Implementada; diagnóstico técnico oculto em `Production` |
 | `moodle_list_available_flows` | Mostra estratégias selecionadas e funções ausentes por fluxo. | Implementada; exposta em `Production` |
-| `moodle_execute_read` | Executa somente funções explicitamente classificadas como leitura segura. | Implementada |
+| `moodle_execute_read` | Executa consultas habilitadas para o token da conexão. | Implementada |
 | `moodle_download_file` | Baixa arquivo Moodle emitido pela conexão ativa, com host/path/MIME/tamanho validados e conteúdo como recurso MCP. | Implementada; depende de `UniversalMoodleFileDownloadEnabled=true` |
 | `moodle_prepare_write` | Cria prévia de escrita controlada sem chamar o Moodle. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
 | `moodle_confirm_write` | Executa uma prévia confirmada uma única vez. | Implementada; depende de `UniversalMoodleWriteEnabled=true` |
 
-As chamadas universais usam `POST /webservice/rest/server.php`, serializam arrays e objetos no formato nativo do Moodle e nunca inserem o token na URL. Uma função descoberta, mas ainda não classificada no catálogo local, é tratada como `Unknown` e recusada pela tool de execução. `moodle_prepare_write` e `moodle_confirm_write` só permitem funções explicitamente classificadas como escrita controlada, com `UniversalMoodleWriteEnabled=true`, `CanWrite`, confirmação literal, auditoria e execução única; funções destrutivas continuam bloqueadas. O diagnóstico técnico continua callable por nome e no perfil `Full`, mas não é anunciado ao modelo em `Production`.
+As chamadas universais usam `POST /webservice/rest/server.php`, serializam arrays e objetos no formato nativo do Moodle e nunca inserem o token na URL. A função só é executável se aparecer nas capabilities descobertas para o token atual. Consultas, identificadas por verbos de consulta no nome canônico Moodle, podem ser executadas por `moodle_execute_read`; qualquer outra função — inclusive remoção — passa por `moodle_prepare_write` e `moodle_confirm_write`, com `UniversalMoodleWriteEnabled=true`, `CanWrite`, escopo de escrita, confirmação literal, auditoria e execução única. O diagnóstico técnico continua callable por nome e no perfil `Full`, mas não é anunciado ao modelo em `Production`.
 
 Leitura:
 

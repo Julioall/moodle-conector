@@ -1,0 +1,50 @@
+namespace MoodleConnector.Application.MoodleApi;
+
+/// <summary>
+/// Classifies a discovered Moodle web-service function without maintaining a
+/// per-function allowlist. Moodle's site-info response exposes the functions
+/// enabled by the current token, but not their HTTP semantics. We therefore
+/// allow only conventional query verbs to execute immediately; every other
+/// discovered function is conservatively routed through the write
+/// prepare/confirm workflow.
+/// </summary>
+public static class MoodleFunctionClassifier
+{
+    private static readonly string[] ReadVerbs =
+    [
+        "get", "list", "search", "find", "fetch", "view", "check", "can", "count", "export"
+    ];
+
+    private static readonly string[] MutationVerbs =
+    [
+        "add", "create", "update", "set", "save", "send", "mark", "mute", "unmute", "lock", "unlock",
+        "toggle", "submit", "confirm", "decline", "block", "unblock", "delete", "remove", "purge",
+        "reset", "unenrol", "enrol", "revert", "restore", "import", "move", "copy", "assign"
+    ];
+
+    public static MoodleFunctionRisk Classify(string? functionName)
+    {
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            return MoodleFunctionRisk.Unknown;
+        }
+
+        var words = functionName.Trim().Split('_', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length == 0)
+        {
+            return MoodleFunctionRisk.Unknown;
+        }
+
+        // A mutating term anywhere in the canonical Moodle function name wins.
+        // This includes removal/destructive actions: they are not executed by
+        // the read path, but can proceed through explicit confirmation.
+        if (words.Any(word => MutationVerbs.Any(verb => word.Equals(verb, StringComparison.OrdinalIgnoreCase))))
+        {
+            return MoodleFunctionRisk.ControlledWrite;
+        }
+
+        return words.Any(word => ReadVerbs.Any(verb => word.Equals(verb, StringComparison.OrdinalIgnoreCase)))
+            ? MoodleFunctionRisk.Read
+            : MoodleFunctionRisk.ControlledWrite;
+    }
+}

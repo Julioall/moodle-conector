@@ -9,17 +9,17 @@ namespace MoodleConnector.Application.Tests.Infrastructure.MoodleApi;
 public sealed class MoodleFunctionExecutorTests
 {
     [Fact]
-    public async Task ExecuteReadAsync_RecusaFuncaoDesconhecidaMesmoQuandoDescoberta()
+    public async Task ExecuteReadAsync_ExecutaConsultaDePluginQuandoDescobertaPeloToken()
     {
-        var profile = Profile(new MoodleFunctionDescriptor("local_plugin_get_data", MoodleFunctionRisk.Unknown, true));
+        var profile = Profile(new MoodleFunctionDescriptor("local_plugin_get_data", MoodleFunctionRisk.Read, true));
         var restClient = new FakeRestClient();
         var sut = new MoodleFunctionExecutor(new FakeCatalog(profile), restClient, new FakeCredentialsProvider());
 
-        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.ExecuteReadAsync(
-            "local_plugin_get_data", new Dictionary<string, object?>(), CancellationToken.None));
+        var result = await sut.ExecuteReadAsync(
+            "local_plugin_get_data", new Dictionary<string, object?>(), CancellationToken.None);
 
-        Assert.Equal("function_not_read_safe", error.ErrorCode);
-        Assert.Equal(0, restClient.Calls);
+        Assert.Equal("local_plugin_get_data", result.Function);
+        Assert.Equal(1, restClient.Calls);
     }
 
     [Fact]

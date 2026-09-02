@@ -17,9 +17,9 @@ public sealed class MoodleUniversalWriteTools(
     [McpServerTool(Name = "moodle_prepare_write", Title = "Preparar Escrita Moodle",
         ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleWritePreview>))]
-    [Description("Cria uma prévia de uma escrita Moodle explicitamente classificada como controlada. Não chama o Moodle. Exige Features:UniversalMoodleWriteEnabled=true, conexão CanWrite e confirmação literal posterior.")]
+    [Description("Cria uma prévia de uma escrita Moodle habilitada para o token atual. Não chama o Moodle. Exige Features:UniversalMoodleWriteEnabled=true, conexão CanWrite e confirmação literal posterior.")]
     public async Task<CallToolResult> PrepareWriteAsync(
-        [Description("Nome exato da função Web Service Moodle classificada como escrita controlada.")] string functionName,
+        [Description("Nome exato da função Web Service Moodle que exige confirmação de escrita.")] string functionName,
         [Description("Objeto JSON com os parâmetros da função Moodle.")] JsonElement parameters,
         [Description("Alias opcional da conexão Moodle.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)

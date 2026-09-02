@@ -32,7 +32,7 @@ public static class MoodleFunctionProfileParser
                 .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
                 .Select(name => new MoodleFunctionDescriptor(
                     name,
-                    MoodleReadFunctionPolicy.Classify(name),
+                    MoodleFunctionClassifier.Classify(name),
                     true))
                 .ToArray()
             : [];

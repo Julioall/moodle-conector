@@ -6,7 +6,7 @@ namespace MoodleConnector.Application.Tests.Registry;
 public sealed class OperationRegistryTests
 {
     [Fact]
-    public void RegistersAllKnownReadFunctionsAndControlledWrites()
+    public void ClassifiesReadAndWriteFunctionsWithoutAStaticInventory()
     {
         var registry = new OperationRegistry();
 
@@ -22,20 +22,25 @@ public sealed class OperationRegistryTests
     }
 
     [Fact]
-    public void DoesNotInventUnknownOperations()
+    public void RoutesAnUnrecognizedFunctionToConfirmedWrite()
     {
         var registry = new OperationRegistry();
 
-        Assert.Null(registry.GetOperation("local_plugin_unknown_function"));
+        var operation = registry.GetOperation("local_plugin_unknown_function");
+
+        Assert.NotNull(operation);
+        Assert.Equal(OperationType.ControlledWrite, operation!.Type);
     }
 
     [Fact]
-    public void Marks_only_explicitly_shadow_validated_operations_as_live_validated()
+    public void TreatsPaginatedForumQueriesAsReads()
     {
         var registry = new OperationRegistry();
 
-        Assert.Equal(ValidationStatus.LiveValidated, registry.GetOperation("core_webservice_get_site_info")!.Status);
-        Assert.Equal(ValidationStatus.LiveValidated, registry.GetOperation("mod_assign_get_submissions")!.Status);
-        Assert.Equal(ValidationStatus.Registered, registry.GetOperation("core_course_search_courses")!.Status);
+        var operation = registry.GetOperation("mod_forum_get_forum_discussions_paginated");
+
+        Assert.NotNull(operation);
+        Assert.Equal(OperationType.Read, operation!.Type);
+        Assert.Equal("forum", operation.Category);
     }
 }

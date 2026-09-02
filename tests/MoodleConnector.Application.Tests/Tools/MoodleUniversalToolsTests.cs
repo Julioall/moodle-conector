@@ -88,7 +88,7 @@ public sealed class MoodleUniversalToolsTests
     }
 
     [Fact]
-    public async Task ListFunctionsAsync_NaoExponeFuncoesControladasOuDesconhecidas()
+    public async Task ListFunctionsAsync_ExpoeTodasAsFuncoesDoToken()
     {
         var sut = CreateSut(
             new FakeCredentialsProvider(Connection()),
@@ -103,12 +103,14 @@ public sealed class MoodleUniversalToolsTests
 
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         Assert.True(structured.TryGetProperty("data", out var data), structured.GetRawText());
-        Assert.Equal(1, data.GetArrayLength());
-        Assert.Equal("core_course_get_courses_by_field", data[0].GetProperty("Name").GetString());
+        Assert.Equal(3, data.GetArrayLength());
+        Assert.Contains(data.EnumerateArray(), item => item.GetProperty("Name").GetString() == "core_course_get_courses_by_field");
+        Assert.Contains(data.EnumerateArray(), item => item.GetProperty("Name").GetString() == "mod_assign_save_grade");
+        Assert.Contains(data.EnumerateArray(), item => item.GetProperty("Name").GetString() == "local_plugin_secret");
     }
 
     [Fact]
-    public async Task CheckFunctionAsync_ReturnsUnavailableForControlledFunction()
+    public async Task CheckFunctionAsync_ReturnsControlledFunctionWhenEnabledForToken()
     {
         var sut = CreateSut(
             new FakeCredentialsProvider(Connection()),
@@ -119,8 +121,8 @@ public sealed class MoodleUniversalToolsTests
 
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         Assert.True(structured.TryGetProperty("data", out var data), structured.GetRawText());
-        Assert.Equal((int)MoodleFunctionRisk.Unknown, data.GetProperty("Risk").GetInt32());
-        Assert.False(data.GetProperty("IsAvailable").GetBoolean());
+        Assert.Equal((int)MoodleFunctionRisk.ControlledWrite, data.GetProperty("Risk").GetInt32());
+        Assert.True(data.GetProperty("IsAvailable").GetBoolean());
     }
 
     private static MoodleUniversalTools CreateSut(

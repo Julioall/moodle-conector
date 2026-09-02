@@ -19,14 +19,14 @@ O registro de capabilities informa disponibilidade tecnica, nao prova permissao 
 
 ## Execucao
 
-- Para uma leitura generica, use `moodle_execute_read` somente com funcao conhecida no Operation Registry, classificada como leitura, permitida pelo PolicyEngine e disponivel para o token atual.
+- Para uma leitura generica, use `moodle_execute_read` somente com uma funcao descoberta como disponivel para o token atual e classificada como consulta pelo nome canonico. Se a funcao nao for claramente uma consulta, use o fluxo de escrita confirmado.
 - Prefira tools especializadas quando elas fazem paginacao, joins, normalizacao ou regras de dominio. Elas continuam sujeitas a conexao, capability e autorizacao.
-- Funcoes desconhecidas, destrutivas e escritas controladas nao passam pelo executor generico.
+- Funcoes de escrita, remocao e qualquer funcao que nao seja claramente uma consulta nao passam pelo executor generico; todas seguem o fluxo de confirmacao.
 - A normalizacao padrao e `Agent`; respostas grandes podem conter `truncated=true`. Preserve essa informacao e nao afirme censo completo sem exaurir paginas ou usar uma estrategia que controle a continuacao.
 
 ## Escritas
 
-Nunca execute escrita por `moodle_execute_read`. Use `moodle_prepare_write`/`moodle_confirm_write` ou o par especializado do dominio, conforme o fluxo. A confirmacao exige a mesma identidade e conexao, escopo aplicavel, `CanWrite`, capability Moodle, feature flag, pending action vigente, texto literal e auditoria.
+Nunca execute escrita por `moodle_execute_read`. Use `moodle_prepare_write`/`moodle_confirm_write` ou o par especializado do dominio, conforme o fluxo. A confirmacao exige a mesma identidade e conexao, escopo aplicavel (incluindo `moodle.write` para funcoes sem familia especifica), `CanWrite`, capability Moodle, feature flag, pending action vigente, texto literal e auditoria.
 
 Os pares especializados atuais incluem mensagens, publicacao em forum e notas individuais/em lote. Uma funcao listada no Moodle nao autoriza por si so a escrita.
 

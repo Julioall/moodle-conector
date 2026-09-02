@@ -51,13 +51,6 @@ internal sealed class MoodleUniversalWriteService(
             {
                 throw new MoodleApiException("write_not_allowed", "A conexao Moodle selecionada nao permite escrita.");
             }
-            if (!HasSemanticPreviewBuilder(descriptor.Name))
-            {
-                throw new MoodleApiException(
-                    "write_preview_schema_missing",
-                    "A função Moodle está classificada como escrita, mas ainda não possui schema/prévia semântica aprovada.");
-            }
-
             var parameterHash = CreateParameterHash(parameters);
             var confirmationText = $"CONFIRMAR ESCRITA MOODLE {descriptor.Name.ToUpperInvariant()} {parameterHash[..12].ToUpperInvariant()}";
             var semanticPreview = await BuildSemanticPreviewAsync(
@@ -258,13 +251,9 @@ internal sealed class MoodleUniversalWriteService(
         {
             throw new MoodleApiException("function_not_available", "A funcao solicitada nao esta habilitada para a conexao Moodle selecionada.");
         }
-        if (descriptor.Risk == MoodleFunctionRisk.Destructive)
+        if (descriptor.Risk is not (MoodleFunctionRisk.ControlledWrite or MoodleFunctionRisk.Destructive))
         {
-            throw new MoodleApiException("destructive_function_blocked", "Funcoes Moodle destrutivas permanecem bloqueadas por padrao.");
-        }
-        if (descriptor.Risk != MoodleFunctionRisk.ControlledWrite)
-        {
-            throw new MoodleApiException("function_not_write_allowed", "A funcao solicitada nao esta classificada explicitamente como escrita controlada.");
+            throw new MoodleApiException("function_not_write_allowed", "A funcao solicitada nao requer o fluxo de escrita confirmado.");
         }
 
         return descriptor;
@@ -450,16 +439,6 @@ internal sealed class MoodleUniversalWriteService(
 
         return new SemanticWritePreview(summary, changes, affectedResources, estimatedRecords, warnings);
     }
-
-    private static bool HasSemanticPreviewBuilder(string functionName) => functionName.Trim().ToLowerInvariant() switch
-    {
-        "mod_assign_save_grade" or
-        "mod_assign_save_grades" or
-        "core_message_send_instant_messages" or
-        "core_message_send_messages_to_conversation" or
-        "core_calendar_create_calendar_events" => true,
-        _ => false,
-    };
 
     private static string BuildGradeSummary(IReadOnlyDictionary<string, object?> parameters, List<string> warnings)
     {

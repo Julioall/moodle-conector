@@ -174,7 +174,7 @@ public sealed class MoodleUniversalTools(
         ExposureStatus = "Diagnostic",
         ExposureReason = "Lista tecnica de funcoes Moodle para suporte e troubleshooting; fluxos de negocio usam capabilities internamente.",
         Evidence = "Implementacao MoodleUniversalTools.ListFunctionsAsync; preservada em Full e callable por compatibilidade.")]
-    [Description("Lista as funcoes Web Service habilitadas para a conexao Moodle atual. Funcoes desconhecidas permanecem classificadas como Unknown e nao podem ser executadas pela tool de leitura.")]
+    [Description("Lista todas as funcoes Web Service habilitadas para o token da conexao Moodle atual. Funcoes de consulta executam diretamente; as demais usam a confirmacao de escrita.")]
     public async Task<CallToolResult> ListFunctionsAsync(
         [Description("Termo opcional para filtrar o nome da funcao.")] string? search = null,
         [Description("Alias opcional da conexao Moodle.")] string? moodleAlias = null,
@@ -189,12 +189,7 @@ public sealed class MoodleUniversalTools(
             var functions = string.IsNullOrWhiteSpace(search)
                 ? profile.Functions
                 : profile.Functions.Where(function => function.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
-            functions = functions
-                .Where(function => function.IsAvailable &&
-                    function.Risk == MoodleFunctionRisk.Read &&
-                    operationRegistry.GetOperation(function.Name) is { } operation &&
-                    policyEngine.Evaluate(operation).Decision == PolicyDecision.Allow)
-                .ToArray();
+            functions = functions.Where(function => function.IsAvailable).ToArray();
             return Success<IReadOnlyList<MoodleFunctionDescriptor>>(functions, $"{functions.Count} funcao(oes) encontrada(s).");
         }
         catch (OperationCanceledException) { throw; }
@@ -214,7 +209,7 @@ public sealed class MoodleUniversalTools(
         ExposureStatus = "Diagnostic",
         ExposureReason = "Verificacao tecnica de uma funcao remota para suporte; nao representa uma intencao academica distinta.",
         Evidence = "Implementacao MoodleUniversalTools.CheckFunctionAsync; preservada em Full e callable por compatibilidade.")]
-    [Description("Confirma se uma funcao Moodle esta disponivel para o token atual e informa sua classificacao de risco local.")]
+    [Description("Confirma se uma funcao Moodle esta disponivel para o token atual e informa se ela executa como consulta ou exige confirmacao de escrita.")]
     public async Task<CallToolResult> CheckFunctionAsync(
         [Description("Nome exato da funcao Web Service Moodle.")] string functionName,
         [Description("Alias opcional da conexao Moodle.")] string? moodleAlias = null,
@@ -233,14 +228,7 @@ public sealed class MoodleUniversalTools(
             var discovered = profile.Functions.FirstOrDefault(function =>
                 string.Equals(function.Name, functionName.Trim(), StringComparison.OrdinalIgnoreCase))
                 ?? new MoodleFunctionDescriptor(functionName.Trim(), MoodleFunctionRisk.Unknown, false);
-            var operation = operationRegistry.GetOperation(discovered.Name);
-            var isSafeRead = discovered.IsAvailable &&
-                discovered.Risk == MoodleFunctionRisk.Read &&
-                operation is not null &&
-                policyEngine.Evaluate(operation).Decision == PolicyDecision.Allow;
-            var descriptor = isSafeRead
-                ? discovered
-                : new MoodleFunctionDescriptor(discovered.Name, MoodleFunctionRisk.Unknown, false);
+            var descriptor = discovered;
             return Success(descriptor, descriptor.IsAvailable ? "Funcao Moodle disponivel." : "Funcao Moodle nao esta disponivel para esta conexao.");
         }
         catch (OperationCanceledException) { throw; }
@@ -282,7 +270,7 @@ public sealed class MoodleUniversalTools(
     [McpServerTool(Name = "moodle_execute_read", Title = "Executar Leitura Moodle",
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true, OutputSchemaType = typeof(ToolResponse<MoodleFunctionResult>))]
-    [Description("Executa uma funcao Moodle explicitamente classificada como leitura, desde que esteja habilitada para o token da conexao atual. Escritas, funcoes destrutivas e funcoes desconhecidas sao recusadas.")]
+    [Description("Executa uma funcao Moodle de consulta habilitada para o token da conexao atual. Qualquer funcao que possa alterar estado, inclusive remocao, e redirecionada para moodle_prepare_write e confirmacao literal.")]
     public async Task<CallToolResult> ExecuteReadAsync(
         [Description("Nome exato da funcao Web Service Moodle.")] string functionName,
         [Description("Objeto JSON com os parametros da funcao Moodle.")] JsonElement parameters,

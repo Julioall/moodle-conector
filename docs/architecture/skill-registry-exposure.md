@@ -18,15 +18,15 @@ prompt
   -> IResponseNormalizer
 ```
 
-`moodle_execute_read` usa `ISafeReadExecutor`. Operações desconhecidas são recusadas; operações `ControlledWrite` são bloqueadas no executor genérico e seguem o fluxo de confirmação. Capabilities são consultadas por conexão/credencial e invalidadas uma vez quando o Moodle responde access denied.
+`moodle_execute_read` usa `ISafeReadExecutor`. A operação é classificada pelo verbo de seu nome canônico e só é executada quando também aparece nas capabilities do token atual. Operações que não sejam consulta são redirecionadas ao fluxo de confirmação. Capabilities são consultadas por conexão/credencial e invalidadas uma vez quando o Moodle responde access denied.
 
 ## Inventário atual
 
 - 111 métodos MCP são descobertos nas classes de tools; o catálogo completo com flags condicionais habilitadas contém 111 entradas. O perfil `Production` expõe 104: dois tools de demonstração são feature-gated e cinco diagnósticos técnicos são ocultados cognitivamente. Os tools de lançamento de nota seguem a configuração `AssignmentGradeWriteEnabled`.
 - Cada entrada do `ToolMetadataRegistry` possui `TechnicalClassification`, `ExposureStatus`, `ExposureReason`, `Evidence` e, quando aplicável, `CompatibilityAliasOf`. O alias `get_submission_status` aponta para `get_student_submission` sem alterar o nome registrado.
 - O catálogo de containers é declarado em `RegisteredMcpToolContainers`; não existe varredura global de assemblies. Reflection é usada somente uma vez, sobre tipos explicitamente registrados durante o startup.
-- As funções de leitura conhecidas pela `MoodleReadFunctionPolicy` são registradas no `OperationRegistry`; funções não registradas não são executáveis pelo `SafeReadExecutor`.
-- As funções de escrita controlada são registradas como `ControlledWrite` e não passam pelo executor genérico.
+- O `OperationRegistry` deriva o risco de qualquer nome de função; não mantém um inventário fixo. A capability descoberta para a conexão continua sendo a autorização final.
+- Funções que possam alterar estado são classificadas como `ControlledWrite` e não passam pelo executor genérico.
 - O perfil padrão é `Production`: apenas metadata registrada é exposta, itens `Deprecated`/`ApprovedForHide`/`Diagnostic`/`Internal` são ocultados e metadata ausente falha fechado. `Full` e os perfis incrementais são ferramentas de diagnóstico/benchmark; o inventário schema-only habilita explicitamente flags condicionais em Full para medir as 111 entradas do catálogo, enquanto Production mede as 104 expostas.
 - `list_my_courses`, `search_courses` e `get_course` permanecem expostas nesta release. A evidência histórica é preservada, mas nenhuma delas é `ApprovedForHide` ou `Deprecated`.
 

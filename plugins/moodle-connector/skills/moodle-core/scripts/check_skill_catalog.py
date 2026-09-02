@@ -20,6 +20,10 @@ NON_CONNECTOR_REFS = {
     "sem_permissao",
     "zero_observado",
 }
+# External Moodle components use component_function names. Availability is
+# resolved at runtime from the token, so a skill may cite an extension
+# function that is not present in this connector's source tree.
+DYNAMIC_MOODLE_FUNCTION_RE = re.compile(r"^[a-z][a-z0-9]+(?:_[a-z0-9]+)+$")
 
 
 def find_repo_root(script_path: Path) -> Path:
@@ -88,10 +92,14 @@ def main() -> int:
 
     known_names = collect_names(source_root)
     references = collect_skill_references(skills_root)
+    # Moodle functions are discovered per token at runtime. They no longer
+    # need a source-code allowlist merely to be valid references in a skill.
     unknown_references = sorted(
         reference
         for reference in references
-        if reference not in known_names and reference not in NON_CONNECTOR_REFS
+        if reference not in known_names
+        and reference not in NON_CONNECTOR_REFS
+        and not DYNAMIC_MOODLE_FUNCTION_RE.fullmatch(reference)
     )
     if unknown_references:
         errors.extend(f"unknown connector name referenced by skills: {name}" for name in unknown_references)

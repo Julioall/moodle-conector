@@ -23,15 +23,18 @@ public sealed class MoodleWriteScopePolicyTests
     [InlineData("mod_assign_set_user_flags")]
     [InlineData("future_moodle_write_function")]
     [InlineData("")]
-    public void ForFunction_BloqueiaFuncaoSemEscopoRegistrado(string functionName)
+    public void ForFunction_UsaEscopoGenericoParaFuncaoSemFamiliaEspecializada(string functionName)
     {
         Assert.False(MoodleWriteScopePolicy.TryGetScope(functionName, out var scope));
         Assert.Empty(scope);
 
-        var error = Assert.Throws<MoodleApiException>(() => MoodleWriteScopePolicy.ForFunction(functionName));
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            Assert.Throws<ArgumentException>(() => MoodleWriteScopePolicy.ForFunction(functionName));
+            return;
+        }
 
-        Assert.Equal(MoodleErrorContract.WriteScopeNotRegistered, error.ErrorCode);
-        Assert.DoesNotContain("moodle.write", error.Message, StringComparison.Ordinal);
+        Assert.Equal("moodle.write", MoodleWriteScopePolicy.ForFunction(functionName));
     }
 
     [Fact]

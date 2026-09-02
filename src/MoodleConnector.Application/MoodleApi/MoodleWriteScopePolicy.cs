@@ -2,8 +2,9 @@ namespace MoodleConnector.Application.MoodleApi;
 
 /// <summary>
 /// Canonical mapping between a controlled Moodle write family and the OAuth
-/// scope that authorizes it. Keeping this mapping in one place prevents a
-/// specialized handler and the universal executor from drifting apart.
+/// scope that authorizes it. Functions outside a specialized family use the
+/// generic <c>moodle.write</c> scope, so token-enabled Moodle extensions do
+/// not need to be added to this source file before they can be confirmed.
 /// </summary>
 public static class MoodleWriteScopePolicy
 {
@@ -32,9 +33,12 @@ public static class MoodleWriteScopePolicy
             return scope;
         }
 
-        throw new MoodleApiException(
-            MoodleErrorContract.WriteScopeNotRegistered,
-            "A função Moodle não possui um escopo de escrita explicitamente registrado.");
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            throw new ArgumentException("A função Moodle é obrigatória.", nameof(functionName));
+        }
+
+        return "moodle.write";
     }
 }
 
