@@ -55,7 +55,7 @@ public sealed record AppReportJobsMeta(
 public sealed record AppCourseOverviewReportDto(
     string ConnectionRef, string CourseId, DateTimeOffset GeneratedAt, int TotalActiveStudents,
     int StudentsWhoAccessed, int StudentsNeverAccessed, int StudentsInactiveDays,
-    int InactiveDaysThreshold, int TotalGradedItems, decimal AverageBelowMinimumPerStudent,
+    int InactiveDaysThreshold, int? TotalGradedItems, decimal? AverageBelowMinimumPerStudent,
     IReadOnlyList<string> SuggestedActionsForTutor, string? Warning);
 
 public sealed record AppWeeklyReportDto(

@@ -141,7 +141,7 @@ public sealed class MoodleGradingToolsTests
     }
 
     [Fact]
-    public async Task Leitura_snapshot_only_nao_faz_fallback_para_moodle_live()
+    public async Task Lista_todas_entregas_retorna_snapshot_unavailable_quando_nenhuma_fonte_live_esta_disponivel()
     {
         var mediator = new FakeMediator();
         var sut = new MoodleGradingTools(
@@ -157,6 +157,29 @@ public sealed class MoodleGradingToolsTests
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         Assert.Equal("snapshot_unavailable", structured.GetProperty("errorCode").GetString());
         Assert.Null(mediator.LastQuery);
+    }
+
+    [Fact]
+    public async Task Lista_todas_entregas_faz_fallback_live_quando_snapshot_nao_esta_disponivel()
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleGradingTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(321),
+            courseContentsGateway: new FakeCourseContentsGateway());
+
+        var result = await sut.ListarEntregasCorrigiveisDoSnapshotAsync(
+            "10",
+            status: "awaiting_grading");
+
+        Assert.False(result.IsError ?? false);
+        Assert.NotNull(mediator.LastListAssignmentSubmissions);
+        Assert.Equal("501", mediator.LastListAssignmentSubmissions!.AssignmentId);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("live", structured.GetProperty("freshness").GetProperty("source").GetString());
+        Assert.Equal(1, structured.GetProperty("data").GetProperty("totalItems").GetInt32());
     }
 
     [Fact]
@@ -506,6 +529,40 @@ public sealed class MoodleGradingToolsTests
         }
     }
 
+    private sealed class FakeCourseContentsGateway : IMoodleCourseContentsGateway
+    {
+        public Task<CourseContentsSummary> GetCourseContentsAsync(
+            string userExternalId,
+            string courseId,
+            IReadOnlyCollection<string> moduleTypes,
+            bool includeHidden,
+            bool onlyWithFiles,
+            CancellationToken cancellationToken)
+        {
+            IReadOnlyList<CourseModuleSummary> modules =
+            [
+                new CourseModuleSummary(
+                    "42",
+                    "501",
+                    "assign",
+                    "Tarefa de teste",
+                    null,
+                    true,
+                    true,
+                    null,
+                    null,
+                    [],
+                    [])
+            ];
+            return Task.FromResult(new CourseContentsSummary(
+                courseId,
+                moduleTypes.ToArray(),
+                includeHidden,
+                onlyWithFiles,
+                [new CourseSectionSummary("1", 1, "Secao", null, true, modules.Count, false, modules)]));
+        }
+    }
+
     private sealed class FakeMediator : IMediator
     {
         public bool ThrowOnListAssignmentSubmissions { get; init; }
@@ -539,6 +596,8 @@ public sealed class MoodleGradingToolsTests
         public GetGradingBatchAuditQuery? LastBatchAuditQuery { get; private set; }
 
         public BatchDraftUpdateResultDto? BatchDraftUpdateResult { get; init; }
+
+        public ListAssignmentSubmissionsQuery? LastListAssignmentSubmissions { get; private set; }
 
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
@@ -581,6 +640,7 @@ public sealed class MoodleGradingToolsTests
 
             if (request is ListAssignmentSubmissionsQuery submissionQuery)
             {
+                LastListAssignmentSubmissions = submissionQuery;
                 if (ThrowOnListAssignmentSubmissions || FailingAssignmentIds.Contains(submissionQuery.AssignmentId))
                 {
                     throw new InvalidOperationException("simulated submission lookup failure");

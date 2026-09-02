@@ -15,8 +15,8 @@ public sealed record CourseOverviewResult(
     int StudentsNeverAccessed,
     int StudentsInactiveDays,
     int InactiveDaysThreshold,
-    int TotalGradedItems,
-    decimal AverageBelowMinimumPerStudent,
+    int? TotalGradedItems,
+    decimal? AverageBelowMinimumPerStudent,
     IReadOnlyList<string> SuggestedActionsForTutor,
     string? Warning);
 
@@ -64,9 +64,9 @@ public sealed class GenerateCourseOverviewQueryHandler(
                 TotalActiveStudents: 0, StudentsWhoAccessed: 0,
                 StudentsNeverAccessed: 0, StudentsInactiveDays: 0,
                 InactiveDaysThreshold: request.InactiveDaysThreshold,
-                TotalGradedItems: 0, AverageBelowMinimumPerStudent: 0,
+                TotalGradedItems: null, AverageBelowMinimumPerStudent: null,
                 SuggestedActionsForTutor: ["Nenhum estudante ativo encontrado. Verificar matrículas."],
-                Warning: "Nenhum estudante ativo encontrado no curso.");
+                Warning: "Nenhum estudante ativo encontrado no curso. O resumo rápido não calcula métricas de nota.");
         }
 
         int neverAccessed = students.Count(s => !s.LastCourseAccessAt.HasValue);
@@ -96,12 +96,15 @@ public sealed class GenerateCourseOverviewQueryHandler(
             StudentsNeverAccessed: neverAccessed,
             StudentsInactiveDays: inactiveDays,
             InactiveDaysThreshold: request.InactiveDaysThreshold,
-            TotalGradedItems: 0, // gradebook not fetched for perf — use weekly report for detail
-            AverageBelowMinimumPerStudent: 0,
+            // This fast overview intentionally does not call each student's
+            // gradebook. Null means not calculated; returning zero made an
+            // unavailable metric indistinguishable from a real zero.
+            TotalGradedItems: null,
+            AverageBelowMinimumPerStudent: null,
             SuggestedActionsForTutor: actions,
             Warning: !students.Any(s => s.LastCourseAccessAt.HasValue)
-                ? "O campo de último acesso ao curso (lastcourseaccess) pode não estar disponível para esta configuração de Moodle."
-                : null);
+                ? "O campo de último acesso ao curso (lastcourseaccess) pode não estar disponível para esta configuração de Moodle. O resumo rápido não calcula métricas de nota; use o relatório de notas do curso."
+                : "O resumo rápido não calcula métricas de nota; use o relatório de notas do curso.");
     }
 }
 

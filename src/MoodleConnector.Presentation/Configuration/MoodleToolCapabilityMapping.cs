@@ -35,10 +35,11 @@ internal static class MoodleToolCapabilityMapping
             ["list_pending_submissions"] = "mod_assign_get_submissions",
             ["list_late_submissions"] = "mod_assign_get_submissions",
             ["list_submissions_awaiting_grading"] = "mod_assign_get_submissions",
-            // The compatibility alias delegates to the same normalized
-            // submission query as get_student_submission, which calls
-            // mod_assign_get_submissions in the gateway.
-            ["get_submission_status"] = "mod_assign_get_submissions",
+            // This tool reads the current attempt and feedback state through
+            // its dedicated gateway. Exposing it only because the bulk
+            // submissions function exists caused a runtime failure whenever
+            // mod_assign_get_submission_status was disabled for a connection.
+            ["get_submission_status"] = "mod_assign_get_submission_status",
             ["get_student_activity_grades"] = "gradereport_user_get_grade_items",
             ["list_students_below_min_grade"] = "gradereport_user_get_grade_items",
             ["get_student_gradebook"] = "gradereport_user_get_grade_items",

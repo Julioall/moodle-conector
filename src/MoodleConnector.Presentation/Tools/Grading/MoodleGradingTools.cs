@@ -24,7 +24,8 @@ public sealed class MoodleGradingTools(
     IMoodleConnectionSelection moodleSelection,
     IMoodleUserResolver moodleUserResolver,
     MoodleSnapshotToolContext? snapshotContext = null,
-    IOptions<GradingLimitsOptions>? gradingLimits = null)
+    IOptions<GradingLimitsOptions>? gradingLimits = null,
+    IMoodleCourseContentsGateway? courseContentsGateway = null)
 {
     private readonly GradingLimitsOptions _gradingLimits = gradingLimits?.Value ?? new GradingLimitsOptions();
     [McpServerTool(
@@ -121,11 +122,11 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ListarEntregasCorrigiveisResponse>))]
-    [Description("Lê as entregas aguardando correção diretamente do snapshot persistente do curso. Não consulta o Moodle nesta chamada; se o snapshot estiver ausente, incompleto ou desatualizado, agenda uma atualização assíncrona e informa a cobertura disponível." )]
+    [Description("Lista todas as entregas corrigíveis do curso. Usa o snapshot persistente quando ele estiver completo e atual; se estiver ausente, incompleto ou desatualizado, agenda sua atualização e consulta o Moodle diretamente, sem transformar indisponibilidade de cache em lista vazia.")]
     public Task<CallToolResult> ListarEntregasCorrigiveisDoSnapshotAsync(
         [Description("Identificador do curso Moodle. Pode ser courseId, shortName ou idnumber.")]
         string courseId,
-        [Description("Identificadores opcionais das tarefas. Quando vazio, lê todas as tarefas disponíveis no snapshot.")]
+        [Description("Identificadores opcionais das tarefas. Quando vazio, descobre todas as tarefas do curso na fonte disponível.")]
         string[]? assignmentIds = null,
         [Description("Filtro de status: all, submitted, pending, late ou awaiting_grading.")]
         string status = "awaiting_grading",
@@ -137,7 +138,7 @@ public sealed class MoodleGradingTools(
         int page = 1,
         [Description("Tamanho da página, de 1 a 100.")]
         int perPage = 25,
-        [Description("Alias do Moodle usado para localizar o snapshot. A chamada não consulta o Moodle.")]
+        [Description("Alias do Moodle usado para localizar o snapshot e, se necessário, realizar a leitura direta.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
@@ -1261,7 +1262,7 @@ public sealed class MoodleGradingTools(
                 refreshQueued,
                 submissionsSnapshot.IsComplete,
                 submissionsSnapshot.RecordCount)
-            : snapshotScope is not null
+            : usedLive
                 ? new ToolFreshness(
                     "live",
                     null,
@@ -1328,8 +1329,24 @@ public sealed class MoodleGradingTools(
 
         if (snapshotContext is null)
         {
+            var liveFallback = await TryListLiveSubmissionsFallbackAsync(
+                moodleUserId.Value.ToString(),
+                courseId,
+                assignmentIds,
+                status,
+                onlyAwaitingGrading,
+                includeLate,
+                safePage,
+                safePageSize,
+                moodleAlias,
+                cancellationToken);
+            if (liveFallback is not null)
+            {
+                return liveFallback;
+            }
+
             return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
-                "A leitura snapshot-only nao esta disponivel neste cliente.",
+                "A leitura de entregas nao esta disponivel neste cliente porque nem snapshot nem consulta direta puderam ser resolvidos.",
                 errorCode: MoodleErrorContract.SnapshotUnavailable);
         }
 
@@ -1345,8 +1362,24 @@ public sealed class MoodleGradingTools(
 
         if (scope is null)
         {
+            var liveFallback = await TryListLiveSubmissionsFallbackAsync(
+                moodleUserId.Value.ToString(),
+                courseId,
+                assignmentIds,
+                status,
+                onlyAwaitingGrading,
+                includeLate,
+                safePage,
+                safePageSize,
+                moodleAlias,
+                cancellationToken);
+            if (liveFallback is not null)
+            {
+                return liveFallback;
+            }
+
             return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
-                "Nao foi possivel resolver a identidade local para ler o snapshot de entregas.",
+                "Nao foi possivel resolver a identidade local nem a consulta direta de entregas.",
                 errorCode: MoodleErrorContract.SnapshotUnavailable);
         }
 
@@ -1370,11 +1403,27 @@ public sealed class MoodleGradingTools(
                 resolvedCourseId,
                 priority: 5,
                 cancellationToken: cancellationToken);
+            var liveFallback = await TryListLiveSubmissionsFallbackAsync(
+                moodleUserId.Value.ToString(),
+                resolvedCourseId,
+                assignmentIds,
+                status,
+                onlyAwaitingGrading,
+                includeLate,
+                safePage,
+                safePageSize,
+                moodleAlias,
+                cancellationToken);
+            if (liveFallback is not null)
+            {
+                return liveFallback;
+            }
+
             var queueMessage = queued
                 ? " Uma atualização assíncrona foi agendada."
                 : string.Empty;
             return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(
-                $"Ainda não existe snapshot de entregas para o curso {resolvedCourseId}. A leitura não consultou o Moodle.{queueMessage}",
+                $"Ainda não existe snapshot de entregas para o curso {resolvedCourseId} e a consulta direta não pôde ser iniciada.{queueMessage}",
                 errorCode: MoodleErrorContract.SnapshotUnavailable);
         }
 
@@ -1394,6 +1443,35 @@ public sealed class MoodleGradingTools(
             .Select(id => id.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+        var snapshotCoversRequest = snapshot.IsComplete && !snapshot.IsStale &&
+            (normalizedAssignmentIds.Length == 0
+                ? snapshot.Data.Assignments.All(item =>
+                    item.IsComplete &&
+                    (filter != AssignmentSubmissionFilter.NeedsGrading ||
+                     item.Coverage?.NeedsGradingComplete == true))
+                : normalizedAssignmentIds.All(id =>
+                    AssignmentSubmissionSnapshotProjector.FindAssignment(snapshot.Data, id) is { IsComplete: true } item &&
+                    (filter != AssignmentSubmissionFilter.NeedsGrading ||
+                     item.Coverage?.NeedsGradingComplete == true)));
+        if (!snapshotCoversRequest)
+        {
+            var liveFallback = await TryListLiveSubmissionsFallbackAsync(
+                moodleUserId.Value.ToString(),
+                resolvedCourseId,
+                normalizedAssignmentIds,
+                status,
+                onlyAwaitingGrading,
+                includeLate,
+                safePage,
+                safePageSize,
+                moodleAlias,
+                cancellationToken);
+            if (liveFallback is not null)
+            {
+                return liveFallback;
+            }
+        }
         var selectedAssignments = normalizedAssignmentIds.Length == 0
             ? snapshot.Data.Assignments
             : normalizedAssignmentIds
@@ -1522,6 +1600,106 @@ public sealed class MoodleGradingTools(
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
+    }
+
+    /// <summary>
+    /// A snapshot accelerates the common path but must never be a prerequisite
+    /// for discovering work that needs grading. When it cannot cover the
+    /// request, resolve the assignment instances from Moodle and reuse the
+    /// authoritative per-assignment reader.
+    /// </summary>
+    private async Task<CallToolResult?> TryListLiveSubmissionsFallbackAsync(
+        string moodleUserId,
+        string courseId,
+        IReadOnlyList<string> assignmentIds,
+        string status,
+        bool onlyAwaitingGrading,
+        bool includeLate,
+        int page,
+        int perPage,
+        string? moodleAlias,
+        CancellationToken cancellationToken)
+    {
+        var resolvedAssignmentIds = assignmentIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (resolvedAssignmentIds.Length == 0)
+        {
+            if (courseContentsGateway is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var contents = await courseContentsGateway.GetCourseContentsAsync(
+                    moodleUserId,
+                    courseId,
+                    CourseActivityModuleTypes.Assignments,
+                    includeHidden: true,
+                    onlyWithFiles: false,
+                    cancellationToken);
+                resolvedAssignmentIds = contents.Sections
+                    .SelectMany(section => section.Modules)
+                    .Where(module => string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase))
+                    .Select(module => module.InstanceId ?? module.ModuleId)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                return ToolResultHelper.Error<ListarEntregasCorrigiveisResponse>(exception);
+            }
+        }
+
+        if (resolvedAssignmentIds.Length == 0)
+        {
+            var empty = new ListarEntregasCorrigiveisResponse(
+                page,
+                perPage,
+                0,
+                HasMore: false,
+                new EntregaCorrigivelContadores(0, 0, 0, 0, 0),
+                new EntregaCorrigivelPermissoes(
+                    CanCreateBatch: true,
+                    CanCommitToMoodle: false,
+                    CommitStatus: "requires_sandbox_validation",
+                    CommitReason: "Nenhuma tarefa avaliável foi encontrada no curso."),
+                [],
+                []);
+            var response = new ToolResponse<ListarEntregasCorrigiveisResponse>(
+                "ok",
+                empty,
+                ["Nenhuma tarefa avaliável foi encontrada no curso."],
+                AuditId: null,
+                DateTimeOffset.UtcNow,
+                Freshness: new ToolFreshness("live", null, null, false, false, true, 0));
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = BuildListarEntregasCorrigiveisNarration(empty) }],
+                StructuredContent = JsonSerializer.SerializeToElement(response),
+                IsError = false
+            };
+        }
+
+        return await ListarEntregasCorrigiveisCoreAsync(
+            courseId,
+            resolvedAssignmentIds,
+            status,
+            onlyAwaitingGrading,
+            includeLate,
+            page,
+            perPage,
+            moodleAlias,
+            cancellationToken);
     }
 
     private async Task<CallToolResult> GetBatchStatusCoreAsync(

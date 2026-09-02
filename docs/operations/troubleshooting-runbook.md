@@ -44,6 +44,25 @@ curl -v https://<APP_DOMAIN>/health
 docker compose --env-file .env.production logs --tail=200 caddy
 ```
 
+## Portal exibe erros 404 em `/assets/index-*.js` ou `/assets/index-*.css`
+
+Os arquivos do portal são versionados pelo Vite a cada build. Esse erro indica que
+o navegador ainda possui o HTML de uma publicação anterior, que referencia hashes
+de arquivos já removidos na publicação atual.
+
+Atualize a página ignorando o cache (`Ctrl+F5`) ou limpe os dados do site. Em
+seguida, valide que o HTML e os arquivos que ele referencia retornam `200`:
+
+```bash
+curl -I https://<APP_DOMAIN>/
+curl -I https://<APP_DOMAIN>/assets/<hash-atual>.js
+curl -I https://<APP_DOMAIN>/assets/<hash-atual>.css
+```
+
+Após publicar a versão que inclui a política de cache do portal, `index.html`
+retorna `Cache-Control: no-cache, no-store, must-revalidate`, enquanto os recursos
+fingerprinted em `/assets` podem permanecer em cache por longo prazo com segurança.
+
 ## OAuth ChatGPT Falha
 
 Verificar:
