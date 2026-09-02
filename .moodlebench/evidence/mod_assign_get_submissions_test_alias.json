@@ -1,9 +1,9 @@
 {
   "OperationName": "mod_assign_get_submissions",
-  "ConnectionId": "8b2c1a74-d845-4306-b210-b629cf14885b",
+  "ConnectionId": "14ed781a-ca1a-4ee6-912e-90f2b93a8aea",
   "AliasAtValidation": "test_alias",
   "NormalizationProfile": "assignment-submissions",
   "MoodleVersion": "unknown",
   "SemanticParityPercent": 100,
-  "ValidatedAt": "2026-09-01T17:36:58.7639434+00:00"
+  "ValidatedAt": "2026-09-02T17:10:32.1645017+00:00"
 }

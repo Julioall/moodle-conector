@@ -292,7 +292,19 @@ jobs:
           sudo apt-get install -y rsync
 
           mkdir -p ~/.ssh
-          ssh-keyscan -p "$VPS_SSH_PORT" "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+          host_key_found=false
+          for attempt in 1 2 3; do
+            if ssh-keyscan -T 10 -p "$VPS_SSH_PORT" "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null; then
+              host_key_found=true
+              break
+            fi
+            echo "SSH host key lookup failed (attempt $attempt/3); retrying..."
+            sleep $((attempt * 5))
+          done
+          if [ "$host_key_found" != true ]; then
+            echo "::error::Unable to retrieve the VPS SSH host key after three attempts. Check VPS_HOST, VPS_SSH_PORT and network reachability."
+            exit 1
+          fi
 
           if printf '%s' "$VPS_AUTH_SECRET" | grep -q "BEGIN .*PRIVATE KEY"; then
             printf '%s\n' "$VPS_AUTH_SECRET" > ~/.ssh/deploy_key
