@@ -159,8 +159,6 @@ humana e minimização de dados.
 | `list_submissions_awaiting_grading` | List Submissions Awaiting Grading | `SensitiveRead` | Sim | Não | Implementada |
 | `get_submission_status` | Consultar Status Submissao | `SensitiveRead` | Sim | Não | Implementada |
 | `get_submission_status` | Get Submission Status | `SensitiveRead` | Sim | Não | Implementada |
-| `get_student_completion` | Consultar Progresso Aluno | `SensitiveRead` | Sim | Não | Implementada |
-| `get_student_completion` | Get Student Completion | `SensitiveRead` | Sim | Não | Implementada |
 | `get_student_gradebook` | Consultar Boletim Aluno | `SensitiveRead` | Sim | Não | Implementada |
 | `get_student_gradebook` | Get Student Gradebook | `SensitiveRead` | Sim | Não | Implementada |
 | `report_students_at_risk` | Gerar Relatorio Risco Estudantes | `SensitiveRead` | Sim | Não | Implementada |
@@ -1044,32 +1042,6 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `get_student_completion` / `get_student_completion`
-
-Descricao:
-
-- Consulta o progresso e conclusao de um estudante em um curso usando `core_completion_get_activities_completion_status`.
-- Retorna `completed`, `timecompleted` e lista de atividades com `state`, `timecompleted` e `tracking`.
-- O campo `state` segue os valores do Moodle: 0 = incompleto, 1 = completo, 2 = aprovado, 3 = reprovado.
-- Nao consulta notas, submissoes ou risco.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `courseId` | `string` | Identificador do curso Moodle. |
-| `studentId` | `string` | Identificador do estudante (ID do Moodle). |
-| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
 ## `get_student_gradebook` / `get_student_gradebook`
 
 Descricao:
@@ -1100,11 +1072,11 @@ Metadados MCP:
 Diagnostico do relatorio:
 
 - Reutiliza o fallback inclusivo de alunos quando o Moodle nao retorna roles, evitando relatorio falsamente vazio.
-- Emite warnings quando nenhum participante foi encontrado, nenhum fator de risco foi detectado apos a analise ou notas/conclusao ficaram parcialmente indisponiveis.
+- Emite warnings quando nenhum participante foi encontrado, nenhum fator de risco foi detectado apos a analise ou notas ficaram parcialmente indisponiveis.
 
 Descricao:
 
-- Gera um relatorio cruzando inatividade, notas baixas e progresso pendente para identificar estudantes em risco.
+- Gera um relatorio cruzando inatividade e notas baixas para identificar estudantes em risco. Completion detalhado nao e consultado.
 - Analisa ate `maxStudentsToAnalyze` estudantes ativos do curso.
 - Classifica cada estudante como risco `Alto`, `Medio` ou `Baixo` com base nos fatores detectados.
 - Retorna lista de `StudentRiskReport` com `studentId`, `studentName`, `riskLevel` e `riskFactors`.

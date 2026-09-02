@@ -11,20 +11,20 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
     {
         var participants = new FakeParticipantsGateway();
         var gradebook = new FakeGradebookGateway();
-        var completion = new FakeCompletionGateway();
         var currentUserId = new FakeCurrentUserIdGateway();
 
-        var sut = new GetStudentsAtRiskReportQueryHandler(participants, gradebook, completion, currentUserId);
+        var sut = new GetStudentsAtRiskReportQueryHandler(participants, gradebook, currentUserId);
 
         var result = await sut.Handle(new GetStudentsAtRiskReportQuery("10", 50, InactivityThresholdDays: 7, MinGradePercentage: 60m), CancellationToken.None);
 
         Assert.NotNull(result);
         Assert.Single(result.Reports);
         Assert.Equal("123", result.Reports[0].StudentId);
-        Assert.Equal(RiskLevel.Alto, result.Reports[0].RiskLevel); // Multiple factors: inactive, low grade, low completion
+        Assert.Equal(RiskLevel.Medio, result.Reports[0].RiskLevel); // Factors: inactive and low grade
         Assert.Equal(1, result.ParticipantsAnalyzedCount);
         Assert.Equal(1, result.ClassificationDiagnostics.IncludedByFallbackCount);
         Assert.Equal(50m, result.Reports[0].CurrentGrade);
+        Assert.Null(result.Reports[0].CompletionRate);
         Assert.Contains(result.Reports[0].Factors, factor => factor.Contains("Nota atual", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -34,7 +34,6 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
         var sut = new GetStudentsAtRiskReportQueryHandler(
             new FakeParticipantsGateway { ReturnEmpty = true },
             new FakeGradebookGateway(),
-            new FakeCompletionGateway(),
             new FakeCurrentUserIdGateway());
 
         var result = await sut.Handle(
@@ -50,14 +49,13 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
         var sut = new GetStudentsAtRiskReportQueryHandler(
             new FakeParticipantsGateway(),
             new ThrowingGradebookGateway(),
-            new ThrowingCompletionGateway(),
             new FakeCurrentUserIdGateway());
 
         var result = await sut.Handle(
             new GetStudentsAtRiskReportQuery("10", 50), CancellationToken.None);
 
         Assert.Equal(1, result.GradebookFailureCount);
-        Assert.Equal(1, result.CompletionFailureCount);
+        Assert.All(result.Reports, report => Assert.Null(report.CompletionRate));
     }
 
     private sealed class FakeParticipantsGateway : IMoodleParticipantsGateway
@@ -108,12 +106,6 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
             throw new InvalidOperationException("Falha simulada.");
     }
 
-    private sealed class ThrowingCompletionGateway : IMoodleCompletionGateway
-    {
-        public Task<CourseCompletionStatus> GetStudentCompletionAsync(string courseId, string studentId, CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("Falha simulada.");
-    }
-
     private sealed class FakeGradebookGateway : IMoodleGradebookGateway
     {
         public Task<CourseGradebook> GetStudentGradebookAsync(string courseId, string studentId, CancellationToken cancellationToken)
@@ -123,20 +115,6 @@ public sealed class GetStudentsAtRiskReportQueryHandlerTests
                 StudentId: studentId,
                 Items: [
                     new GradebookItem("1", "Course Total", "course", "", "", 50, "50,00", 0, 100, null, "", "", 0, 0, "")
-                ]));
-        }
-    }
-
-    private sealed class FakeCompletionGateway : IMoodleCompletionGateway
-    {
-        public Task<CourseCompletionStatus> GetStudentCompletionAsync(string courseId, string studentId, CancellationToken cancellationToken)
-        {
-            return Task.FromResult(new CourseCompletionStatus(
-                Completed: false,
-                Timecompleted: 0,
-                Activities: [
-                    new ActivityCompletionStatus("1", "assign", "2", 0, 0, 1, null, false), // State = 0 (Incomplete)
-                    new ActivityCompletionStatus("2", "quiz", "3", 0, 0, 1, null, false)    // State = 0 (Incomplete)
                 ]));
         }
     }

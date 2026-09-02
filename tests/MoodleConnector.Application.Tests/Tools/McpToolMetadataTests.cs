@@ -3,7 +3,6 @@ using System.Text.Json.Nodes;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Presentation.Tools;
-using MoodleConnector.Presentation.Tools.Completion;
 using MoodleConnector.Presentation.Tools.Grading;
 using MoodleConnector.Presentation.Tools.Gradebook;
 using MoodleConnector.Presentation.Tools.Memory;
@@ -217,7 +216,6 @@ public sealed class McpToolMetadataTests
             typeof(MoodleAssignmentSubmissionsTools),
             typeof(MoodleGradingTools),
             typeof(MoodleGradebookTools),
-            typeof(MoodleCompletionTools),
             typeof(MoodleRiskAnalysisTools),
             typeof(MoodleReportTools),
             typeof(MoodleGradingContextDiagnosticsTools),

@@ -8,7 +8,6 @@ namespace MoodleConnector.Application.Risk.Queries;
 public sealed class GetStudentsAtRiskReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleGradebookGateway gradebookGateway,
-    IMoodleCompletionGateway completionGateway,
     IMoodleCurrentUserIdGateway currentUserIdGateway)
     : IRequestHandler<GetStudentsAtRiskReportQuery, StudentsAtRiskReportResult>
 {
@@ -30,7 +29,6 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
 
         var reports = new List<StudentRiskReport>();
         var gradebookFailureCount = 0;
-        var completionFailureCount = 0;
 
         foreach (var student in participantsPage.Participants)
         {
@@ -80,31 +78,6 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
                 gradebookFailureCount++;
             }
 
-            // Fetch Completion
-            decimal? completionRate = null;
-            try
-            {
-                var completion = await completionGateway.GetStudentCompletionAsync(request.CourseId, student.UserId, cancellationToken);
-                var totalActivities = completion.Activities.Count;
-                if (totalActivities > 0)
-                {
-                    var completedActivities = completion.Activities.Count(a => a.State == 1 || a.State == 2);
-                    completionRate = (decimal)completedActivities / totalActivities * 100m;
-
-                    // If they have less than 50% completion, it's a risk (we don't know the course progress, but it's an indicator)
-                    if (completionRate < 50)
-                    {
-                        factors.Add($"Taxa de conclusao de atividades baixa ({completionRate:F1}%).");
-                        riskLevel = riskLevel < RiskLevel.Alto ? RiskLevel.Medio : riskLevel;
-                    }
-                }
-            }
-            catch (Exception)
-            {
-                // Completion tracking might be disabled
-                completionFailureCount++;
-            }
-
             // Calculate overall risk
             if (factors.Count >= 3)
             {
@@ -120,7 +93,10 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
                     Factors: factors,
                     LastCourseAccessAt: student.LastCourseAccessAt,
                     CurrentGrade: currentGrade,
-                    CompletionRate: completionRate));
+                    // Detailed Moodle completion is not part of this report's
+                    // evidence set because its dedicated endpoint is not
+                    // reliable across the supported connections.
+                    CompletionRate: null));
             }
         }
 
@@ -134,7 +110,6 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
             orderedReports,
             participantsPage.Participants.Count,
             participantsPage.ClassificationDiagnostics ?? ParticipantClassificationDiagnostics.Empty,
-            gradebookFailureCount,
-            completionFailureCount);
+            gradebookFailureCount);
     }
 }

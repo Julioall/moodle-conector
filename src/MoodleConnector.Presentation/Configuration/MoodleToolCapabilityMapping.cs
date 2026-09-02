@@ -43,7 +43,6 @@ internal static class MoodleToolCapabilityMapping
             ["get_student_activity_grades"] = "gradereport_user_get_grade_items",
             ["list_students_below_min_grade"] = "gradereport_user_get_grade_items",
             ["get_student_gradebook"] = "gradereport_user_get_grade_items",
-            ["get_student_completion"] = "core_completion_get_activities_completion_status core_completion_get_course_completion_status",
             ["list_students_without_forum_participation"] = "mod_forum_get_discussion_posts",
             ["read_forum"] = "mod_forum_get_forums_by_courses mod_forum_get_forum_discussions mod_forum_get_discussion_posts",
             ["create_forum_post_preview"] = "mod_forum_can_add_discussion",

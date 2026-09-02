@@ -48,20 +48,17 @@ public sealed class MoodleRiskAnalysisToolsTests
     }
 
     [Fact]
-    public async Task Alerta_sobre_fontes_parcialmente_indisponiveis()
+    public async Task Alerta_quando_notas_estao_parcialmente_indisponiveis()
     {
         var result = await CreateTool(CreateResult(
                 reports: [CreateReport()],
                 analyzed: 1,
-                gradebookFailures: 1,
-                completionFailures: 1))
+                gradebookFailures: 1))
             .GerarRelatorioRiscoEstudantesAsync("10");
 
         var warnings = Assert.IsType<JsonElement>(result.StructuredContent).GetProperty("warnings");
         Assert.Contains(warnings.EnumerateArray(), warning =>
             warning.GetString()!.Contains("notas", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(warnings.EnumerateArray(), warning =>
-            warning.GetString()!.Contains("conclusao", StringComparison.OrdinalIgnoreCase));
     }
 
     private static MoodleRiskAnalysisTools CreateTool(StudentsAtRiskReportResult result) =>
@@ -71,14 +68,12 @@ public sealed class MoodleRiskAnalysisToolsTests
         IReadOnlyList<StudentRiskReport>? reports = null,
         int analyzed = 0,
         ParticipantClassificationDiagnostics? diagnostics = null,
-        int gradebookFailures = 0,
-        int completionFailures = 0) =>
+        int gradebookFailures = 0) =>
         new(
             reports ?? [],
             analyzed,
             diagnostics ?? ParticipantClassificationDiagnostics.Empty,
-            gradebookFailures,
-            completionFailures);
+            gradebookFailures);
 
     private static StudentRiskReport CreateReport() =>
         new("123", "Aluno", RiskLevel.Alto, ["Inatividade"], null, null, null);
@@ -126,4 +121,3 @@ public sealed class MoodleRiskAnalysisToolsTests
             AsyncEnumerable.Empty<object?>();
     }
 }
-

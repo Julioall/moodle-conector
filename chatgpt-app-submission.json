@@ -554,20 +554,6 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
-    "get_student_completion": {
-      "annotations": {
-        "title": "Get Student Completion",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
     "get_student_gradebook": {
       "annotations": {
         "title": "Get Student Gradebook",

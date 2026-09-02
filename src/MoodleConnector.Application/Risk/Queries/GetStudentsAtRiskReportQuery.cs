@@ -23,8 +23,7 @@ public sealed record StudentsAtRiskReportResult(
     IReadOnlyList<StudentRiskReport> Reports,
     int ParticipantsAnalyzedCount,
     ParticipantClassificationDiagnostics ClassificationDiagnostics,
-    int GradebookFailureCount,
-    int CompletionFailureCount);
+    int GradebookFailureCount);
 
 public sealed record GetStudentsAtRiskReportQuery(
     string CourseId,

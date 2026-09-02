@@ -24,7 +24,7 @@ public sealed class MoodleRiskAnalysisTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<IReadOnlyList<StudentRiskReport>>))]
-    [Description("Gera um relatorio cruzando inatividade, notas baixas e progresso pendente para identificar estudantes em risco no curso.")]
+    [Description("Gera um relatorio cruzando inatividade e notas baixas para identificar estudantes em risco no curso. Completion detalhado nao e consultado.")]
     public Task<CallToolResult> GerarRelatorioRiscoEstudantesAsync(
         [Description("Identificador do curso Moodle.")]
         string courseId,
@@ -132,13 +132,6 @@ public sealed class MoodleRiskAnalysisTools(
         {
             warnings.Add(
                 $"Nao foi possivel consultar notas de {result.GradebookFailureCount} participante(s); " +
-                "o relatorio pode estar parcial.");
-        }
-
-        if (result.CompletionFailureCount > 0)
-        {
-            warnings.Add(
-                $"Nao foi possivel consultar a conclusao de {result.CompletionFailureCount} participante(s); " +
                 "o relatorio pode estar parcial.");
         }
 
