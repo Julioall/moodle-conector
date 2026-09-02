@@ -7,6 +7,8 @@ public sealed record PortalAccountListItemDto(Guid Id, string Name, string Email
 public sealed record ConnectMoodleAccountRequest(Guid UserId, string MoodleAlias, string MoodleBaseUrl, string MoodleUsername, string MoodlePassword, bool IsDefault, bool CanWrite);
 public sealed record UpdateMoodleAccountRequest(Guid UserId, string MoodleId, string MoodleAlias, string MoodleBaseUrl, string? MoodleUsername, string? MoodlePassword, bool IsDefault, bool CanWrite);
 public sealed record DeleteAccountRequest(Guid UserId, string Password, string ConfirmationText);
+public sealed record AdminDeleteAccountsRequest(Guid ActorUserId, IReadOnlyList<Guid> UserIds, string Password, string ConfirmationText);
+public sealed record AdminDeleteAccountsResultDto(int DeletedAccounts, int DeletedConnections, int DeletedTasks, int DeletedEvents, int DeletedReports);
 public sealed record AccountDto(Guid Id, string Name, string Email, bool HasMoodleConnected, string? ConnectorClientId);
 public sealed record MoodleConnectionDto(
     string Id,
@@ -36,4 +38,5 @@ public interface IAccountService
     Task DeleteMoodleAsync(Guid userId, string moodleId, CancellationToken cancellationToken);
     Task DeleteMoodleAsync(Guid userId, string moodleId, bool deleteLinkedData, string? confirmationText, CancellationToken cancellationToken);
     Task DeleteAccountAsync(DeleteAccountRequest request, CancellationToken cancellationToken);
+    Task<AdminDeleteAccountsResultDto> DeleteAccountsAsAdminAsync(AdminDeleteAccountsRequest request, CancellationToken cancellationToken);
 }

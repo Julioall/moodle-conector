@@ -86,6 +86,7 @@ internal static class PortalAccountEndpoints
         {
             if (await ResolveAppIdentityAsync(context, dbContext, cancellationToken) is null) return Results.Unauthorized();
             if (!PortalEndpointAuthorization.HasAppPermission(context, AppPermissionCatalog.AdminView)) return Results.Forbid();
+            context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(new { ok = true, accounts = await accountService.ListAccountsAsync(cancellationToken) });
         }).RequireRateLimiting(rateLimitPolicy);
 
@@ -107,6 +108,41 @@ internal static class PortalAccountEndpoints
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
             catch (InvalidOperationException ex) { return Results.BadRequest(new { ok = false, error = ex.Message }); }
+        }).RequireRateLimiting(rateLimitPolicy);
+
+        app.MapPost("/api/admin/accounts/delete", async (
+            AdminDeleteAccountsInput input,
+            HttpContext context,
+            ConnectorDbContext dbContext,
+            IAccountService accountService,
+            IAntiforgery antiforgery,
+            CancellationToken cancellationToken) =>
+        {
+            var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+            if (identity is null) return Results.Unauthorized();
+            if (!PortalEndpointAuthorization.HasAppPermission(context, AppPermissionCatalog.AdminView)) return Results.Forbid();
+            await antiforgery.ValidateRequestAsync(context);
+
+            try
+            {
+                var result = await accountService.DeleteAccountsAsAdminAsync(
+                    new AdminDeleteAccountsRequest(
+                        identity.Id,
+                        input.UserIds ?? [],
+                        input.Password,
+                        input.ConfirmationText),
+                    cancellationToken);
+                context.Response.Headers.CacheControl = "no-store";
+                return Results.Ok(new { ok = true, result });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ok = false, error = ex.Message });
+            }
         }).RequireRateLimiting(rateLimitPolicy);
 
         app.MapPost("/api/account/login", async (

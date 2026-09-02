@@ -71,4 +71,115 @@ public sealed class AccountDeletionTests
 
         Assert.NotNull(await dbContext.UserAccounts.FindAsync(userId));
     }
+
+    [Fact]
+    public async Task DeleteAccountsAsAdminAsync_RemovesSelectedAccountDataAndKeepsActor()
+    {
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new ConnectorDbContext(options);
+        var actorId = Guid.NewGuid();
+        var targetId = Guid.NewGuid();
+        var targetClientId = targetId.ToString();
+        dbContext.UserAccounts.AddRange(
+            new UserAccountEntity
+            {
+                Id = actorId,
+                Name = "Administrador",
+                Email = "admin@example.com",
+                PasswordHash = PasswordHasher.Hash("senha-admin-123")
+            },
+            new UserAccountEntity
+            {
+                Id = targetId,
+                Name = "Conta removida",
+                Email = "removida@example.com",
+                PasswordHash = PasswordHasher.Hash("senha-target-123"),
+                ConnectorClientId = targetClientId
+            });
+        dbContext.ConnectorClients.Add(new ConnectorClientCredentialEntity
+        {
+            Id = $"{targetClientId}:default",
+            ClientId = targetClientId,
+            MoodleAlias = "default",
+            MoodleBaseUrl = "https://moodle.example.com",
+            MoodleUsernameEncrypted = "user",
+            MoodlePasswordEncrypted = "password",
+            MoodleTarget = "default",
+            IsDefault = true,
+            IsActive = true
+        });
+        dbContext.Tasks.Add(new TaskEntity
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = targetId,
+            Title = "Tarefa privada",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        dbContext.CalendarEvents.Add(new CalendarEventEntity
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = targetId,
+            Title = "Evento privado",
+            StartAt = DateTimeOffset.UtcNow,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        dbContext.ReportJobs.Add(new ReportJobEntity
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = targetId,
+            ClientId = targetClientId,
+            ConnectionAlias = "default",
+            ReportType = "courses",
+            ScopeType = "all",
+            RequestedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+        await dbContext.SaveChangesAsync();
+
+        var service = new AccountService(dbContext, null!, null!, null!);
+        var result = await service.DeleteAccountsAsAdminAsync(
+            new AdminDeleteAccountsRequest(actorId, [targetId], "senha-admin-123", "APAGAR 1 CONTA"),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.DeletedAccounts);
+        Assert.Equal(1, result.DeletedConnections);
+        Assert.Equal(1, result.DeletedTasks);
+        Assert.Equal(1, result.DeletedEvents);
+        Assert.Equal(1, result.DeletedReports);
+        Assert.NotNull(await dbContext.UserAccounts.FindAsync(actorId));
+        Assert.Null(await dbContext.UserAccounts.FindAsync(targetId));
+        Assert.Empty(await dbContext.ConnectorClients.ToListAsync());
+        Assert.Empty(await dbContext.Tasks.ToListAsync());
+        Assert.Empty(await dbContext.CalendarEvents.ToListAsync());
+        Assert.Empty(await dbContext.ReportJobs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task DeleteAccountsAsAdminAsync_RejectsActorAndLeavesAllDataIntact()
+    {
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using var dbContext = new ConnectorDbContext(options);
+        var actorId = Guid.NewGuid();
+        dbContext.UserAccounts.Add(new UserAccountEntity
+        {
+            Id = actorId,
+            Name = "Administrador",
+            Email = "admin@example.com",
+            PasswordHash = PasswordHasher.Hash("senha-admin-123")
+        });
+        await dbContext.SaveChangesAsync();
+        var service = new AccountService(dbContext, null!, null!, null!);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteAccountsAsAdminAsync(
+            new AdminDeleteAccountsRequest(actorId, [actorId], "senha-admin-123", "APAGAR 1 CONTA"),
+            CancellationToken.None));
+
+        Assert.NotNull(await dbContext.UserAccounts.FindAsync(actorId));
+    }
 }

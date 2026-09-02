@@ -330,6 +330,8 @@ O app local usa cookie HttpOnly/SameSite, senha mínima de 8 caracteres, indicad
 
 Administradores podem redefinir senhas na aba **Administração** de Configurações. Defina a senha temporária no ambiente com `PasswordRecovery__DefaultPassword` (mínimo de 8 caracteres); ela não é enviada ao navegador e deve ser comunicada ao usuário por um canal seguro.
 
+Na mesma aba, é possível selecionar até 25 contas para exclusão definitiva. A operação exige a senha atual do administrador e a confirmação textual exata exibida para a quantidade selecionada; a conta em uso nunca pode ser selecionada. A exclusão remove a conta e os dados locais associados (conexões, snapshots, tarefas, agenda, relatórios, memórias e rascunhos de correção) em uma transação no PostgreSQL.
+
 ## Variaveis De Ambiente
 
 Use `.env.example` como base. Principais grupos:

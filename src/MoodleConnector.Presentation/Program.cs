@@ -3161,6 +3161,7 @@ public partial class Program;
 public sealed record RegisterAccountInput(string Name, string Email, string Password);
 public sealed record LoginInput(string Email, string Password);
 public sealed record DeleteAccountInput(string Password, string ConfirmationText);
+public sealed record AdminDeleteAccountsInput(Guid[]? UserIds, string Password, string ConfirmationText);
 public sealed record ConnectMoodleInput(string MoodleAlias, string MoodleBaseUrl, string MoodleUsername, string MoodlePassword, bool IsDefault = false, bool CanWrite = false);
 public sealed record UpdateMoodleInput(string MoodleAlias, string MoodleBaseUrl, string? MoodleUsername, string? MoodlePassword, bool IsDefault = false, bool CanWrite = false);
 public sealed record TeamInvitationInput(string Email, string Role, string[]? Scopes = null, int? ExpiresInHours = null);

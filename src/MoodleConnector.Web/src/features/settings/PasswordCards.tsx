@@ -1,9 +1,11 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { Activity, KeyRound, RotateCcw, ShieldAlert } from 'lucide-react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Activity, AlertTriangle, KeyRound, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
+import { useSession } from '../auth/useSession';
 import { passwordGateway, type AdminMetrics, type PortalAccount } from './password-gateway';
 
 export function ChangePasswordCard() {
@@ -13,10 +15,36 @@ export function ChangePasswordCard() {
 }
 
 export function AdminPasswordResetCard() {
+  const { user: currentUser } = useSession();
   const [accounts, setAccounts] = useState<PortalAccount[]>([]); const [message, setMessage] = useState(''); const [loading, setLoading] = useState(true); const [pendingId, setPendingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]); const [deleteOpen, setDeleteOpen] = useState(false); const [adminPassword, setAdminPassword] = useState(''); const [deleteConfirmation, setDeleteConfirmation] = useState(''); const [deleting, setDeleting] = useState(false);
   useEffect(() => { passwordGateway.listAccounts().then((result) => setAccounts(result.accounts)).catch((error) => setMessage(error instanceof Error ? error.message : 'Não foi possível carregar os usuários.')).finally(() => setLoading(false)); }, []);
   const reset = async (account: PortalAccount) => { if (!window.confirm(`Redefinir a senha de ${account.name} para a senha padrão configurada?`)) return; setMessage(''); setPendingId(account.id); try { const result = await passwordGateway.resetToDefault(account.id); setMessage(result.message ?? 'Senha redefinida.'); } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível redefinir a senha.'); } finally { setPendingId(null); } };
-  return <Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><ShieldAlert className="h-5 w-5" />Recuperação de senha</CardTitle><CardDescription>Redefina a senha de uma conta para a senha padrão configurada no servidor. Informe essa senha ao usuário por um canal seguro.</CardDescription></CardHeader><CardContent className="space-y-3">{message && <p className="text-sm" role="status">{message}</p>}{loading ? <p className="text-sm text-muted-foreground">Carregando usuários…</p> : <div className="divide-y rounded-md border">{accounts.map((account) => <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 p-3"><div><p className="font-medium">{account.name}</p><p className="text-sm text-muted-foreground">{account.email}</p></div><Button variant="outline" size="sm" disabled={pendingId === account.id} onClick={() => reset(account)}><RotateCcw className="mr-2 h-4 w-4" />{pendingId === account.id ? 'Redefinindo…' : 'Redefinir senha'}</Button></div>)}</div>}</CardContent></Card>;
+  const selectableAccounts = useMemo(() => accounts.filter((account) => account.id !== currentUser?.id), [accounts, currentUser?.id]);
+  const allSelectableSelected = selectableAccounts.length > 0 && selectableAccounts.every((account) => selectedIds.includes(account.id));
+  const confirmationText = `APAGAR ${selectedIds.length} ${selectedIds.length === 1 ? 'CONTA' : 'CONTAS'}`;
+  const toggleAccount = (accountId: string) => setSelectedIds((current) => current.includes(accountId) ? current.filter((id) => id !== accountId) : [...current, accountId]);
+  const toggleAll = () => setSelectedIds(allSelectableSelected ? [] : selectableAccounts.map((account) => account.id));
+  const closeDeleteDialog = () => { if (deleting) return; setDeleteOpen(false); setAdminPassword(''); setDeleteConfirmation(''); };
+  const deleteSelected = async () => {
+    if (selectedIds.length === 0 || deleteConfirmation !== confirmationText || !adminPassword) return;
+    setDeleting(true); setMessage('');
+    try {
+      const result = await passwordGateway.deleteAccounts(selectedIds, adminPassword, deleteConfirmation);
+      setAccounts((current) => current.filter((account) => !selectedIds.includes(account.id)));
+      setSelectedIds([]); setDeleteOpen(false); setAdminPassword(''); setDeleteConfirmation('');
+      setMessage(`${result.result.deletedAccounts} conta(s) excluída(s). Dados removidos: ${result.result.deletedConnections} conexão(ões), ${result.result.deletedTasks} tarefa(s), ${result.result.deletedEvents} evento(s) e ${result.result.deletedReports} relatório(s).`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível excluir as contas.'); }
+    finally { setDeleting(false); }
+  };
+  return <>
+    <Card><CardHeader><CardTitle className="flex items-center gap-2 text-lg"><ShieldAlert className="h-5 w-5" />Contas do portal</CardTitle><CardDescription>Redefina senhas ou exclua contas e os dados locais associados. A exclusão não pode ser desfeita e nunca inclui a sua própria conta administrativa.</CardDescription></CardHeader><CardContent className="space-y-4">{message && <p className="text-sm" role="status">{message}</p>}{loading ? <p className="text-sm text-muted-foreground">Carregando usuários…</p> : <>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/20 p-3"><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={allSelectableSelected} onChange={toggleAll} disabled={selectableAccounts.length === 0} className="h-4 w-4 accent-primary" />Selecionar contas para exclusão</label><Button variant="destructive" size="sm" disabled={selectedIds.length === 0} onClick={() => setDeleteOpen(true)}><Trash2 className="h-4 w-4" />Excluir selecionadas ({selectedIds.length})</Button></div>
+      <div className="divide-y rounded-md border">{accounts.map((account) => { const isCurrentUser = account.id === currentUser?.id; return <div key={account.id} className="flex flex-wrap items-center gap-3 p-3"><input type="checkbox" checked={selectedIds.includes(account.id)} onChange={() => toggleAccount(account.id)} disabled={isCurrentUser} aria-label={`Selecionar ${account.name} para exclusão`} className="h-4 w-4 shrink-0 accent-primary" /><div className="min-w-0 flex-1"><p className="font-medium">{account.name}{isCurrentUser && <span className="ml-2 text-xs font-normal text-muted-foreground">(sua conta)</span>}</p><p className="truncate text-sm text-muted-foreground">{account.email}</p></div><Button variant="outline" size="sm" disabled={pendingId === account.id} onClick={() => reset(account)}><RotateCcw className="h-4 w-4" />{pendingId === account.id ? 'Redefinindo…' : 'Redefinir senha'}</Button></div>; })}</div>
+      {selectableAccounts.length === 0 && <p className="text-sm text-muted-foreground">Não há outras contas disponíveis para exclusão.</p>}
+    </>}</CardContent></Card>
+    <Dialog open={deleteOpen} onOpenChange={(open) => { if (!open) closeDeleteDialog(); }}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-destructive" />Excluir contas definitivamente?</DialogTitle><DialogDescription>Esta ação remove as contas selecionadas e os dados locais associados, como conexões Moodle, snapshots, tarefas, agenda, relatórios, memórias e rascunhos de correção. Ela não pode ser desfeita.</DialogDescription></DialogHeader><div className="space-y-4"><div className="max-h-40 overflow-y-auto rounded-md border bg-muted/20 p-3 text-sm"><p className="mb-2 font-medium">Contas selecionadas</p><ul className="space-y-1 text-muted-foreground">{accounts.filter((account) => selectedIds.includes(account.id)).map((account) => <li key={account.id}>{account.name} · {account.email}</li>)}</ul></div><div className="space-y-2"><Label htmlFor="admin-delete-password">Sua senha de administrador</Label><Input id="admin-delete-password" type="password" value={adminPassword} onChange={(event) => setAdminPassword(event.target.value)} autoComplete="current-password" /></div><div className="space-y-2"><Label htmlFor="admin-delete-confirmation">Digite exatamente <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{confirmationText}</code></Label><Input id="admin-delete-confirmation" value={deleteConfirmation} onChange={(event) => setDeleteConfirmation(event.target.value)} autoComplete="off" /></div></div><DialogFooter><Button type="button" variant="outline" onClick={closeDeleteDialog} disabled={deleting}>Cancelar</Button><Button type="button" variant="destructive" onClick={deleteSelected} disabled={deleting || !adminPassword || deleteConfirmation !== confirmationText}><Trash2 className="h-4 w-4" />{deleting ? 'Excluindo…' : 'Excluir contas'}</Button></DialogFooter></DialogContent></Dialog>
+  </>;
 }
 
 export function AdminMetricsCard() {

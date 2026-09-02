@@ -18,6 +18,7 @@ internal sealed class AccountService(
 {
     private const int MinimumPasswordLength = 8;
     private const int MaximumPasswordLength = 256;
+    private const int MaximumAdminAccountDeletionCount = 25;
 
     public async Task<AccountDto> RegisterAsync(RegisterAccountRequest request, CancellationToken cancellationToken)
     {
@@ -449,19 +450,135 @@ internal sealed class AccountService(
         if (string.IsNullOrWhiteSpace(request.Password) || !PasswordHasher.Verify(request.Password, account.PasswordHash))
             throw new InvalidOperationException("Senha atual inválida.");
 
+        var transaction = await BeginDeletionTransactionAsync(cancellationToken);
+        try
+        {
+            await DeleteAccountDataAsync(account, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+    }
+
+    public async Task<AdminDeleteAccountsResultDto> DeleteAccountsAsAdminAsync(
+        AdminDeleteAccountsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var requestedIds = request.UserIds?.ToArray() ?? [];
+        if (requestedIds.Length == 0)
+            throw new ArgumentException("Selecione pelo menos uma conta para excluir.", nameof(request.UserIds));
+        if (requestedIds.Length > MaximumAdminAccountDeletionCount)
+            throw new ArgumentException($"É permitido excluir no máximo {MaximumAdminAccountDeletionCount} contas por operação.", nameof(request.UserIds));
+        if (requestedIds.Any(id => id == Guid.Empty) || requestedIds.Distinct().Count() != requestedIds.Length)
+            throw new ArgumentException("A seleção de contas contém identificadores inválidos ou repetidos.", nameof(request.UserIds));
+        if (requestedIds.Contains(request.ActorUserId))
+            throw new InvalidOperationException("A própria conta administrativa não pode ser excluída por este fluxo.");
+
+        var expectedConfirmation = BuildAdminDeleteConfirmation(requestedIds.Length);
+        if (!string.Equals(request.ConfirmationText?.Trim(), expectedConfirmation, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Digite {expectedConfirmation} para confirmar a exclusão definitiva.");
+
+        var actor = await dbContext.UserAccounts.FindAsync([request.ActorUserId], cancellationToken)
+            ?? throw new InvalidOperationException("Sessão administrativa inválida.");
+        if (string.IsNullOrWhiteSpace(request.Password) || !PasswordHasher.Verify(request.Password, actor.PasswordHash))
+            throw new InvalidOperationException("Senha atual do administrador inválida.");
+
+        var accounts = await dbContext.UserAccounts
+            .Where(account => requestedIds.Contains(account.Id))
+            .ToListAsync(cancellationToken);
+        if (accounts.Count != requestedIds.Length)
+            throw new InvalidOperationException("Uma ou mais contas selecionadas não existem mais. Atualize a lista e tente novamente.");
+
+        var transaction = await BeginDeletionTransactionAsync(cancellationToken);
+        var deletedConnections = 0;
+        var deletedTasks = 0;
+        var deletedEvents = 0;
+        var deletedReports = 0;
+        try
+        {
+            foreach (var account in accounts)
+            {
+                var summary = await DeleteAccountDataAsync(account, cancellationToken);
+                deletedConnections += summary.Connections;
+                deletedTasks += summary.Tasks;
+                deletedEvents += summary.Events;
+                deletedReports += summary.Reports;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            return new AdminDeleteAccountsResultDto(
+                accounts.Count,
+                deletedConnections,
+                deletedTasks,
+                deletedEvents,
+                deletedReports);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+    }
+
+    private async Task<AccountDeletionSummary> DeleteAccountDataAsync(
+        UserAccountEntity account,
+        CancellationToken cancellationToken)
+    {
         var clientId = account.ConnectorClientId ?? account.Id.ToString();
         var subjects = new[] { account.Id.ToString(), clientId }.Distinct().ToArray();
-        dbContext.MoodleSnapshots.RemoveRange(await dbContext.MoodleSnapshots
-            .Where(item => item.OwnerId == request.UserId)
-            .ToListAsync(cancellationToken));
-        dbContext.MoodleSyncStates.RemoveRange(await dbContext.MoodleSyncStates
-            .Where(item => item.OwnerId == request.UserId)
-            .ToListAsync(cancellationToken));
+
+        var taskIds = (await dbContext.Tasks.AsNoTracking()
+            .Where(task => task.OwnerId == account.Id)
+            .Select(task => task.Id)
+            .ToListAsync(cancellationToken)).ToHashSet();
+        var parentTaskIds = taskIds.ToArray();
+        while (parentTaskIds.Length > 0)
+        {
+            var childTaskIds = await dbContext.Tasks.AsNoTracking()
+                .Where(task => task.ParentTaskId != null && parentTaskIds.Contains(task.ParentTaskId.Value))
+                .Select(task => task.Id)
+                .ToListAsync(cancellationToken);
+            childTaskIds = childTaskIds.Where(taskId => taskIds.Add(taskId)).ToList();
+            parentTaskIds = childTaskIds.ToArray();
+        }
+
+        var eventIds = (await dbContext.CalendarEvents.AsNoTracking()
+            .Where(calendarEvent => calendarEvent.OwnerId == account.Id)
+            .Select(calendarEvent => calendarEvent.Id)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
+        var personalTeamIds = await dbContext.Teams.AsNoTracking()
+            .Where(team => team.CreatedByUserId == account.Id && team.IsPersonal)
+            .Select(team => team.Id)
+            .ToArrayAsync(cancellationToken);
+        var createdGroupIds = await dbContext.PermissionGroups.AsNoTracking()
+            .Where(group => group.CreatedByUserId == account.Id)
+            .Select(group => group.Id)
+            .ToArrayAsync(cancellationToken);
+        var sharedGroupIds = await dbContext.PermissionGroupMemberships.AsNoTracking()
+            .Where(member => createdGroupIds.Contains(member.GroupId) && member.UserId != account.Id)
+            .Select(member => member.GroupId)
+            .Distinct()
+            .ToArrayAsync(cancellationToken);
+        var removableGroupIds = createdGroupIds.Except(sharedGroupIds).ToArray();
+
         var pendingActions = await dbContext.PendingMoodleActions
             .Where(action => subjects.Contains(action.CreatedBySubject))
             .ToListAsync(cancellationToken);
         var pendingActionIds = pendingActions.Select(action => action.Id).ToArray();
-
         dbContext.ConfirmedMoodleActions.RemoveRange(await dbContext.ConfirmedMoodleActions
             .Where(action => subjects.Contains(action.ConfirmedBySubject) || pendingActionIds.Contains(action.PendingActionId))
             .ToListAsync(cancellationToken));
@@ -478,26 +595,170 @@ internal sealed class AccountService(
         dbContext.UserMemoryDocuments.RemoveRange(await dbContext.UserMemoryDocuments
             .Where(document => subjects.Contains(document.OwnerSubject))
             .ToListAsync(cancellationToken));
-        dbContext.GradingBatches.RemoveRange(await dbContext.GradingBatches
+
+        var gradingBatches = await dbContext.GradingBatches
             .Where(batch => subjects.Contains(batch.CreatedBySubject))
+            .ToListAsync(cancellationToken);
+        var gradingBatchIds = gradingBatches.Select(batch => batch.Id).ToArray();
+        var gradingItems = await dbContext.GradingItems
+            .Where(item => gradingBatchIds.Contains(item.BatchId))
+            .ToListAsync(cancellationToken);
+        var gradingItemIds = gradingItems.Select(item => item.Id).ToArray();
+        dbContext.GradingArtifacts.RemoveRange(await dbContext.GradingArtifacts
+            .Where(item => gradingItemIds.Contains(item.GradingItemId))
             .ToListAsync(cancellationToken));
-        dbContext.ConnectorClients.RemoveRange(await dbContext.ConnectorClients
+        dbContext.GradingEvidence.RemoveRange(await dbContext.GradingEvidence
+            .Where(item => gradingItemIds.Contains(item.GradingItemId))
+            .ToListAsync(cancellationToken));
+        dbContext.GradingContextSnapshots.RemoveRange(await dbContext.GradingContextSnapshots
+            .Where(item => gradingItemIds.Contains(item.GradingItemId))
+            .ToListAsync(cancellationToken));
+        dbContext.AiGradingProposals.RemoveRange(await dbContext.AiGradingProposals
+            .Where(item => gradingItemIds.Contains(item.GradingItemId))
+            .ToListAsync(cancellationToken));
+        dbContext.GradingItems.RemoveRange(gradingItems);
+        dbContext.GradingBatches.RemoveRange(gradingBatches);
+
+        var connections = await dbContext.ConnectorClients
             .Where(connection => connection.ClientId == clientId)
+            .ToListAsync(cancellationToken);
+        dbContext.ConnectorClients.RemoveRange(connections);
+        var reports = await dbContext.ReportJobs
+            .Where(report => report.OwnerId == account.Id || report.ClientId == clientId)
+            .ToListAsync(cancellationToken);
+        dbContext.ReportJobs.RemoveRange(reports);
+
+        dbContext.MoodleSnapshots.RemoveRange(await dbContext.MoodleSnapshots
+            .Where(item => item.OwnerId == account.Id)
             .ToListAsync(cancellationToken));
+        dbContext.MoodleSyncStates.RemoveRange(await dbContext.MoodleSyncStates
+            .Where(item => item.OwnerId == account.Id || item.ClientId == clientId)
+            .ToListAsync(cancellationToken));
+        var snapshotRuns = await dbContext.MoodleSnapshotRuns
+            .Where(item => item.OwnerId == account.Id)
+            .ToListAsync(cancellationToken);
+        var snapshotRunIds = snapshotRuns.Select(item => item.Id).ToArray();
+        dbContext.MoodleSnapshotRunItems.RemoveRange(await dbContext.MoodleSnapshotRunItems
+            .Where(item => snapshotRunIds.Contains(item.RunId))
+            .ToListAsync(cancellationToken));
+        dbContext.MoodleSnapshotRuns.RemoveRange(snapshotRuns);
+
+        dbContext.UserIgnoredCourses.RemoveRange(await dbContext.UserIgnoredCourses
+            .Where(item => item.OwnerId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.UserTrackedCourses.RemoveRange(await dbContext.UserTrackedCourses
+            .Where(item => item.OwnerId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.Followups.RemoveRange(await dbContext.Followups
+            .Where(item => item.OwnerId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.PortalEvidence.RemoveRange(await dbContext.PortalEvidence
+            .Where(item => item.OwnerId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.DashboardAccessSnapshots.RemoveRange(await dbContext.DashboardAccessSnapshots
+            .Where(item => item.OwnerId == account.Id)
+            .ToListAsync(cancellationToken));
+
+        dbContext.TaskEventLinks.RemoveRange(await dbContext.TaskEventLinks
+            .Where(item => taskIds.Contains(item.TaskId) || eventIds.Contains(item.EventId) || item.CreatedBy == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.TaskDependencies.RemoveRange(await dbContext.TaskDependencies
+            .Where(item => taskIds.Contains(item.TaskId) || taskIds.Contains(item.DependsOnTaskId) || item.CreatedBy == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.TaskParticipants.RemoveRange(await dbContext.TaskParticipants
+            .Where(item => taskIds.Contains(item.TaskId) || item.UserId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.TaskReferences.RemoveRange(await dbContext.TaskReferences
+            .Where(item => taskIds.Contains(item.TaskId))
+            .ToListAsync(cancellationToken));
+        dbContext.TaskTags.RemoveRange(await dbContext.TaskTags
+            .Where(item => taskIds.Contains(item.TaskId))
+            .ToListAsync(cancellationToken));
+        dbContext.TaskComments.RemoveRange(await dbContext.TaskComments
+            .Where(item => taskIds.Contains(item.TaskId) || item.AuthorId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.TaskActivities.RemoveRange(await dbContext.TaskActivities
+            .Where(item => taskIds.Contains(item.TaskId) || item.ActorId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.PlannerLinks.RemoveRange(await dbContext.PlannerLinks
+            .Where(item => item.OwnerId == account.Id ||
+                (item.TaskId != null && taskIds.Contains(item.TaskId.Value)) ||
+                (item.CalendarEventId != null && eventIds.Contains(item.CalendarEventId.Value)))
+            .ToListAsync(cancellationToken));
+        dbContext.Tasks.RemoveRange(await dbContext.Tasks
+            .Where(item => taskIds.Contains(item.Id))
+            .ToListAsync(cancellationToken));
+
+        dbContext.EventRecurrenceDates.RemoveRange(await dbContext.EventRecurrenceDates
+            .Where(item => eventIds.Contains(item.EventId))
+            .ToListAsync(cancellationToken));
+        dbContext.EventOccurrenceOverrides.RemoveRange(await dbContext.EventOccurrenceOverrides
+            .Where(item => eventIds.Contains(item.EventId))
+            .ToListAsync(cancellationToken));
+        dbContext.EventReferences.RemoveRange(await dbContext.EventReferences
+            .Where(item => eventIds.Contains(item.EventId))
+            .ToListAsync(cancellationToken));
+        dbContext.EventTags.RemoveRange(await dbContext.EventTags
+            .Where(item => eventIds.Contains(item.EventId))
+            .ToListAsync(cancellationToken));
+        dbContext.EventRecurrences.RemoveRange(await dbContext.EventRecurrences
+            .Where(item => eventIds.Contains(item.EventId))
+            .ToListAsync(cancellationToken));
+        dbContext.CalendarEvents.RemoveRange(await dbContext.CalendarEvents
+            .Where(item => eventIds.Contains(item.Id))
+            .ToListAsync(cancellationToken));
+
+        dbContext.TeamMemberships.RemoveRange(await dbContext.TeamMemberships
+            .Where(item => item.UserId == account.Id || personalTeamIds.Contains(item.TeamId))
+            .ToListAsync(cancellationToken));
+        dbContext.TeamInvitations.RemoveRange(await dbContext.TeamInvitations
+            .Where(item => personalTeamIds.Contains(item.TeamId) || item.InvitedByUserId == account.Id ||
+                item.AcceptedByUserId == account.Id || item.InviteeEmail == account.Email)
+            .ToListAsync(cancellationToken));
+        dbContext.Teams.RemoveRange(await dbContext.Teams
+            .Where(item => personalTeamIds.Contains(item.Id))
+            .ToListAsync(cancellationToken));
+
+        dbContext.UserPermissionOverrides.RemoveRange(await dbContext.UserPermissionOverrides
+            .Where(item => item.UserId == account.Id)
+            .ToListAsync(cancellationToken));
+        dbContext.PermissionGroupMemberships.RemoveRange(await dbContext.PermissionGroupMemberships
+            .Where(item => item.UserId == account.Id || removableGroupIds.Contains(item.GroupId))
+            .ToListAsync(cancellationToken));
+        dbContext.PermissionGroupPermissions.RemoveRange(await dbContext.PermissionGroupPermissions
+            .Where(item => removableGroupIds.Contains(item.GroupId))
+            .ToListAsync(cancellationToken));
+        dbContext.PermissionGroups.RemoveRange(await dbContext.PermissionGroups
+            .Where(item => removableGroupIds.Contains(item.Id))
+            .ToListAsync(cancellationToken));
+
         var oauthAuthorizations = await dbContext.OAuthAuthorizations
             .Where(authorization => authorization.Subject != null && subjects.Contains(authorization.Subject))
             .ToListAsync(cancellationToken);
         var oauthAuthorizationIds = oauthAuthorizations.Select(authorization => authorization.Id).ToArray();
         dbContext.OAuthTokens.RemoveRange(await dbContext.OAuthTokens
             .Where(token =>
-                EF.Property<string?>(token, "AuthorizationId") != null &&
-                oauthAuthorizationIds.Contains(EF.Property<string>(token, "AuthorizationId")))
+                (token.Subject != null && subjects.Contains(token.Subject)) ||
+                (EF.Property<string?>(token, "AuthorizationId") != null &&
+                    oauthAuthorizationIds.Contains(EF.Property<string>(token, "AuthorizationId"))))
             .ToListAsync(cancellationToken));
         dbContext.OAuthAuthorizations.RemoveRange(oauthAuthorizations);
         dbContext.UserAccounts.Remove(account);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+        return new AccountDeletionSummary(connections.Count, taskIds.Count, eventIds.Count, reports.Count);
     }
+
+    private async Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction?> BeginDeletionTransactionAsync(CancellationToken cancellationToken)
+    {
+        return dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+    }
+
+    private static string BuildAdminDeleteConfirmation(int count) =>
+        $"APAGAR {count} {(count == 1 ? "CONTA" : "CONTAS")}";
+
+    private sealed record AccountDeletionSummary(int Connections, int Tasks, int Events, int Reports);
 
     private static string NormalizeName(string name)
     {
