@@ -558,7 +558,7 @@ Descrição:
 
 - Lê discussões e posts de um fórum por `courseId` e `forumId`.
 - Resolve `forumId` como `cmid` ou `instanceId` usando `core_course_get_contents`.
-- Usa `mod_forum_get_forum_discussions` para listar discussões.
+- Consulta as funções anunciadas por `core_webservice_get_site_info` e prioriza `mod_forum_get_forum_discussions`; só usa `mod_forum_get_forum_discussions_paginated` quando essa for a única variante disponível.
 - Usa `mod_forum_get_discussion_posts` para carregar posts quando `incluirPosts` / `includePosts` estiver ativo.
 - Retorna texto limpo em `messageText`, sem HTML bruto, e sanitiza URLs de anexos.
 - É uma tool somente leitura.

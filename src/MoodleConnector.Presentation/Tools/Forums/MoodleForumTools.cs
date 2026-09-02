@@ -29,7 +29,7 @@ public sealed class MoodleForumTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ReadForumResponse>))]
-    [Description("Le discussoes e posts de um forum Moodle usando mod_forum_get_forum_discussions_paginated e mod_forum_get_discussion_posts.")]
+    [Description("Le discussoes e posts de um forum Moodle usando a funcao de discussoes anunciada pela conexao e mod_forum_get_discussion_posts.")]
     public Task<CallToolResult> LerForumAsync(
         [Description("Identificador do curso. Pode ser courseId, shortName ou idnumber.")]
         string courseId,

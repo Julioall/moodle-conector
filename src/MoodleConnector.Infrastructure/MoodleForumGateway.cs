@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Infrastructure;
@@ -12,11 +13,18 @@ namespace MoodleConnector.Infrastructure;
 internal sealed partial class MoodleForumGateway(
     IOptions<MoodleApiOptions> options,
     IMoodleConnectorCredentialsProvider credentialsProvider,
-    IMoodleRestClient restClient) : IMoodleForumGateway
+    IMoodleRestClient restClient,
+    IMoodleFunctionCatalog functionCatalog) : IMoodleForumGateway
 {
     private const string AddDiscussionFunction = "mod_forum_add_discussion";
     private const string AddDiscussionPostFunction = "mod_forum_add_discussion_post";
+    private const string LegacyDiscussionFunction = "mod_forum_get_forum_discussions";
+    private const string PaginatedDiscussionFunction = "mod_forum_get_forum_discussions_paginated";
     private const string HtmlMessageFormat = "1";
+    private const int LegacyLastPostDescSortOrder = 1;
+    private const int LegacyLastPostAscSortOrder = 2;
+    private const int LegacyCreatedDescSortOrder = 3;
+    private const int LegacyCreatedAscSortOrder = 4;
     private static readonly string[] DiscussionSortFields = ["id", "timemodified", "timestart", "timeend"];
     private static readonly string[] PostSortFields = ["id", "created", "modified"];
     private readonly MoodleApiOptions _options = options.Value;
@@ -37,27 +45,95 @@ internal sealed partial class MoodleForumGateway(
 
         var normalizedForumId = ParseMoodleId(forumId, "forumId");
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var payload = await restClient.CallAsync(
-            credentials,
-            // The paginated endpoint accepts page/perpage.  Calling the
-            // legacy endpoint with those arguments is rejected by some
-            // Moodle versions, even though posting to the same forum works.
-            "mod_forum_get_forum_discussions_paginated",
-            new Dictionary<string, string>
+        var profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
+        var discussionFunction = ResolveDiscussionFunction(profile);
+        var pageNumber = Math.Max(0, page - 1);
+        var normalizedPageSize = Math.Max(1, pageSize);
+        var parameters = discussionFunction == LegacyDiscussionFunction
+            ? new Dictionary<string, object?>
+            {
+                ["forumid"] = normalizedForumId.ToString(CultureInfo.InvariantCulture),
+                ["sortorder"] = ResolveLegacySortOrder(sortBy, sortDirection),
+                ["page"] = pageNumber,
+                ["perpage"] = normalizedPageSize
+            }
+            : new Dictionary<string, object?>
             {
                 ["forumid"] = normalizedForumId.ToString(CultureInfo.InvariantCulture),
                 ["sortby"] = NormalizeSortField(sortBy, DiscussionSortFields, "timemodified"),
                 ["sortdirection"] = NormalizeSortDirection(sortDirection),
-                ["page"] = Math.Max(0, page - 1).ToString(CultureInfo.InvariantCulture),
-                ["perpage"] = Math.Max(1, pageSize).ToString(CultureInfo.InvariantCulture)
-            }.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+                ["page"] = pageNumber,
+                ["perpage"] = normalizedPageSize
+            };
+        var payload = await restClient.CallAsync(
+            credentials,
+            discussionFunction,
+            parameters,
             cancellationToken);
 
-        var discussions = JsonSerializer.Deserialize<ForumDiscussionsResponseDto>(payload.GetRawText());
-        return (discussions?.Discussions ?? [])
+        return GetDiscussionElements(payload)
             .Select(ToDiscussion)
             .Where(discussion => !string.IsNullOrWhiteSpace(discussion.DiscussionId))
             .ToArray();
+    }
+
+    private static string ResolveDiscussionFunction(MoodleFunctionProfile profile)
+    {
+        var availableFunctions = profile.Functions
+            .Where(function => function.IsAvailable)
+            .Select(function => function.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Moodle 5.x and the FIEG service expose the non-paginated function,
+        // which already supports page/perpage. Keep the legacy endpoint as
+        // the preferred compatible route and use the paginated extension only
+        // for connections that advertise it instead.
+        if (availableFunctions.Contains(LegacyDiscussionFunction))
+        {
+            return LegacyDiscussionFunction;
+        }
+
+        if (availableFunctions.Contains(PaginatedDiscussionFunction))
+        {
+            return PaginatedDiscussionFunction;
+        }
+
+        throw new MoodleApiException(
+            MoodleErrorContract.FunctionNotAllowed,
+            "A conexão Moodle não oferece uma função compatível para listar discussões de fórum.",
+            functionName: LegacyDiscussionFunction);
+    }
+
+    private static int ResolveLegacySortOrder(string sortBy, string sortDirection)
+    {
+        var ascending = string.Equals(sortDirection?.Trim(), "ASC", StringComparison.OrdinalIgnoreCase);
+        var normalizedSortBy = string.IsNullOrWhiteSpace(sortBy)
+            ? "timemodified"
+            : sortBy.Trim().ToLowerInvariant();
+
+        // The legacy Moodle API exposes a numeric sort order rather than the
+        // sort field/direction pair accepted by the paginated extension.
+        // timemodified maps to last post; the remaining supported UI fields
+        // are closest to discussion creation order on that API.
+        return normalizedSortBy == "timemodified"
+            ? ascending ? LegacyLastPostAscSortOrder : LegacyLastPostDescSortOrder
+            : ascending ? LegacyCreatedAscSortOrder : LegacyCreatedDescSortOrder;
+    }
+
+    private static IReadOnlyList<JsonElement> GetDiscussionElements(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("discussions", out var discussions) &&
+            discussions.ValueKind == JsonValueKind.Array)
+        {
+            return discussions.EnumerateArray().ToArray();
+        }
+
+        // A few older Moodle proxies return the list directly instead of the
+        // documented { discussions, warnings } envelope.
+        return payload.ValueKind == JsonValueKind.Array
+            ? payload.EnumerateArray().ToArray()
+            : [];
     }
 
     public async Task<IReadOnlyList<ForumPostSummary>> GetDiscussionPostsAsync(
@@ -566,12 +642,6 @@ internal sealed partial class MoodleForumGateway(
 
     [GeneratedRegex("\\s+", RegexOptions.Compiled)]
     private static partial Regex WhitespaceRegex();
-
-    private sealed class ForumDiscussionsResponseDto
-    {
-        [JsonPropertyName("discussions")]
-        public IReadOnlyList<JsonElement>? Discussions { get; init; }
-    }
 
     private sealed class DiscussionPostsResponseDto
     {
