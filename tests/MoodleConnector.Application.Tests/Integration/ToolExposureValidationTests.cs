@@ -107,8 +107,10 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.Contains("get_submission_status", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("generate_course_grades_report", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("export_course_grades_excel", tools, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("resolve_planner_tags", tools, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("create_tasks_for_references", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("resolve_planner_tags", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("create_tasks_for_references", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("create_task", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("create_agenda_event", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("prepare_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("confirm_demo_action", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("future_unregistered_tool", tools, StringComparer.OrdinalIgnoreCase);
@@ -178,7 +180,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                                exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
 
-        Assert.Equal(130, contracts.Count);
+        Assert.Equal(95, contracts.Count);
         Assert.Equal(
             contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
             submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));

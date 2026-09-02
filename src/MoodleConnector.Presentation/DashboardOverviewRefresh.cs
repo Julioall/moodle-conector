@@ -920,9 +920,9 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     .ToArray();
                 var gradingRows = pending.AwaitingGrading
                     .Select(item => new AppDashboardPriorityDto(
-                        $"{course.CourseId}:{item.StudentId}:{item.Item.AssignmentId}:grading",
+                        $"{course.CourseId}:{item.StudentId}:{item.AssignmentId}:grading",
                         "Atividade para corrigir",
-                        $"{item.FullName} · {item.Item.AssignmentName}",
+                        $"{item.StudentName} · {item.AssignmentName}",
                         "attention",
                         course.CourseId,
                         item.StudentId))
@@ -933,7 +933,7 @@ internal sealed class DashboardPendingSnapshotBuilder(
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .Count();
                 var correctionActivities = pending.AwaitingGrading
-                    .Select(item => item.Item.AssignmentId)
+                    .Select(item => item.AssignmentId)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .Count();
                 var warnings = pending.Warning is null

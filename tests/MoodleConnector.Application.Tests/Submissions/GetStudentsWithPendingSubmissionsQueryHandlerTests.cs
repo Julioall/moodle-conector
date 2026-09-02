@@ -1,3 +1,4 @@
+using System.Text.Json;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Submissions.Queries;
@@ -106,6 +107,30 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         var pending = Assert.Single(result.AwaitingGrading);
         Assert.Equal("student-2", pending.StudentId);
         Assert.DoesNotContain(result.AwaitingGrading, item => item.StudentId == "student-1");
+    }
+
+    [Fact]
+    public async Task Returns_serializable_awaiting_grading_records_with_context()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(Module("assign-1", "assign")),
+            Submissions = [new AssignmentSubmissionsBatch(
+                "assign-1",
+                [new AssignmentSubmissionRecord("submission-1", "student-1", "submitted", "notgraded", DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow, 1, 0, false)])]
+        };
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery("course-1", IncludeAwaitingGrading: true),
+            CancellationToken.None);
+
+        var item = Assert.Single(result.AwaitingGrading);
+        Assert.Equal("course-1", item.CourseId);
+        Assert.Equal("assign-1", item.AssignmentId);
+        Assert.Equal("student-1", item.StudentId);
+        Assert.Equal("submitted", item.SubmissionStatus);
+        Assert.Equal("awaiting_grading", item.GradingStatus);
+        Assert.Contains("assignmentId", JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web)), StringComparison.Ordinal);
     }
 
     [Fact]

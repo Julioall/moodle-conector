@@ -270,9 +270,13 @@ public sealed class GeneratePostExecutionReportQueryHandler(
     private static string DetermineOutcome(bool neverAccessed, int belowMin, int pending, bool hasData)
     {
         if (!hasData) return "unknown";
-        if (neverAccessed && (belowMin > 0 || pending > 0)) return "at_risk";
+        if (neverAccessed && belowMin > 0) return "at_risk";
         if (belowMin > 0) return "pending_recovery";
-        if (pending > 0) return "pending_recovery";
+        // A null grade alone does not establish that the student missed an
+        // activity: it can be a submitted assignment awaiting teacher review.
+        // Keep the row visible, but require a confirmed below-minimum grade
+        // before recommending recovery.
+        if (pending > 0) return "unknown";
         return "likely_complete";
     }
 }

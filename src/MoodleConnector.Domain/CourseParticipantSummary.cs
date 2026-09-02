@@ -48,7 +48,8 @@ public sealed record CourseParticipantSummary(
     DateTimeOffset? LastAccessAt,
     DateTimeOffset? LastCourseAccessAt,
     IReadOnlyList<CourseParticipantRole> Roles,
-    IReadOnlyList<CourseParticipantGroup> Groups);
+    IReadOnlyList<CourseParticipantGroup> Groups,
+    string EnrollmentStatus = "unknown");
 
 public sealed record CourseParticipantRole(
     string RoleId,

@@ -1066,7 +1066,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
     }
 
     [Fact]
-    public async Task Deve_reportar_apenas_itens_criados_na_importacao_da_agenda()
+    public async Task Agenda_suspensa_retorna_404()
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -1100,16 +1100,11 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
             """), "file", "agenda.ics");
 
         var response = await client.PostAsync("/api/agenda/import", form);
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = body.GetProperty("data");
-        Assert.Equal(1, data.GetProperty("imported").GetInt32());
-        Assert.Equal(0, data.GetProperty("updated").GetInt32());
-        Assert.Equal(1, data.GetProperty("skipped").GetInt32());
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public async Task Tarefas_do_portal_preservam_contrato_e_exigem_csrf()
+    public async Task Tarefas_suspensas_retorna_404()
     {
         var client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
@@ -1135,23 +1130,9 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
             actionType = "review",
             scheduleHint = "Até sexta-feira"
         });
-        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
-        var created = await createResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("Conferir notas", created.GetProperty("data").GetProperty("title").GetString());
-        Assert.Equal("in_progress", created.GetProperty("data").GetProperty("status").GetString());
-
+        Assert.Equal(HttpStatusCode.NotFound, createResponse.StatusCode);
         var listResponse = await client.GetAsync("/api/tasks");
-        listResponse.EnsureSuccessStatusCode();
-        var list = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var item = Assert.Single(list.GetProperty("data").EnumerateArray());
-        Assert.Equal("Conferir notas", item.GetProperty("title").GetString());
-        Assert.Equal("high", item.GetProperty("priority").GetString());
-
-        client.DefaultRequestHeaders.Remove("X-CSRF-TOKEN");
-        var missingTokenResponse = await client.PostAsJsonAsync("/api/tasks", new { title = "Não deve criar" });
-        Assert.Equal(HttpStatusCode.BadRequest, missingTokenResponse.StatusCode);
-        var missingToken = await missingTokenResponse.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("csrf_invalid", missingToken.GetProperty("error").GetProperty("code").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, listResponse.StatusCode);
     }
 
     private static async Task RefreshCsrfTokenAsync(HttpClient client)

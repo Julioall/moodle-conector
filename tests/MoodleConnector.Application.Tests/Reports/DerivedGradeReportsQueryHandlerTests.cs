@@ -44,6 +44,22 @@ public sealed class DerivedGradeReportsQueryHandlerTests
     }
 
     [Fact]
+    public async Task PostExecution_DoesNotRecommendRecoveryForOnlyUngradedActivities()
+    {
+        var sut = new GeneratePostExecutionReportQueryHandler(
+            new FakeParticipantsGateway(),
+            new UngradedOnlyGradebookGateway(),
+            new FakeCurrentUserGateway());
+
+        var result = await sut.Handle(new GeneratePostExecutionReportQuery("10"), CancellationToken.None);
+
+        var row = Assert.Single(result.Students);
+        Assert.Equal(1, row.PendingCount);
+        Assert.Equal("unknown", row.OutcomeIndicator);
+        Assert.Equal(0, result.PendingRecovery);
+    }
+
+    [Fact]
     public async Task StudentsBelowMinimum_IncludesCourseTotalAndZeroGrade()
     {
         var sut = new GetStudentsBelowMinGradeQueryHandler(
@@ -98,6 +114,14 @@ public sealed class DerivedGradeReportsQueryHandlerTests
         public Task<CourseGradebook> GetStudentGradebookAsync(
             string courseId, string studentId, CancellationToken cancellationToken) =>
             Task.FromResult(new CourseGradebook(courseId, studentId, GradebookItems));
+    }
+
+    private sealed class UngradedOnlyGradebookGateway : IMoodleGradebookGateway
+    {
+        public Task<CourseGradebook> GetStudentGradebookAsync(string courseId, string studentId, CancellationToken cancellationToken) =>
+            Task.FromResult(new CourseGradebook(courseId, studentId,
+            [new GradebookItem("assignment", "Atividade entregue", "assign", "activity", null,
+                null, null, 0m, 100m, null, null, null, null, null, null)]));
     }
 
     private sealed class FakeCurrentUserGateway : IMoodleCurrentUserIdGateway

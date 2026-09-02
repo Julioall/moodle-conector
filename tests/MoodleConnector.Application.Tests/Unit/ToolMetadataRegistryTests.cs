@@ -147,7 +147,7 @@ public class ToolMetadataRegistryTests
     {
         var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
 
-        Assert.Equal(136, reg.Entries.Count);
+        Assert.Equal(101, reg.Entries.Count);
         Assert.All(reg.Entries, entry =>
         {
             Assert.False(string.IsNullOrWhiteSpace(entry.Key));
@@ -181,7 +181,7 @@ public class ToolMetadataRegistryTests
         Assert.Equal(canonicalSubmission.RequiredMoodleCapabilities, submissionAlias.RequiredMoodleCapabilities);
 
         var inventory = new ToolSurfaceInventory(reg);
-        Assert.Equal(136, inventory.Total);
+        Assert.Equal(101, inventory.Total);
         Assert.Equal(9, inventory.StructuralCount);
         Assert.Equal(51, inventory.SpecializedCount);
         Assert.Equal(27, inventory.ControlledWriteCount);
@@ -206,6 +206,17 @@ public class ToolMetadataRegistryTests
             RegisteredMcpToolContainers.AlwaysOn
                 .Concat(RegisteredMcpToolContainers.Conditional.Select(container => container.ContainerType))
                 .ToArray());
+    }
+
+    [Fact]
+    public void Suspended_planner_tools_are_not_registered_in_the_mcp_catalog()
+    {
+        var registry = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
+
+        Assert.False(registry.TryGet("list_tasks", out _));
+        Assert.False(registry.TryGet("list_agenda_events", out _));
+        Assert.False(registry.TryGet("create_task", out _));
+        Assert.False(registry.TryGet("create_agenda_event", out _));
     }
 
     [Fact]

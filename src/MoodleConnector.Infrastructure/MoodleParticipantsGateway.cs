@@ -66,13 +66,8 @@ internal sealed class MoodleParticipantsGateway(
                 break;
             }
 
-            foreach (var participant in moodleParticipants.Select(dto => ToParticipant(dto, includeEmail)))
+            foreach (var participant in moodleParticipants.Select(dto => ToParticipant(dto, includeEmail, statusFilter)))
             {
-                if (!MatchesStatus(participant, statusFilter))
-                {
-                    continue;
-                }
-
                 evaluatedCount++;
                 hasEmptyRoles |= participant.Roles.Count == 0;
                 hasEmptyGroups |= participant.Groups.Count == 0;
@@ -195,9 +190,17 @@ internal sealed class MoodleParticipantsGateway(
             ("userfields", BuildUserFields(includeEmail))
         };
 
-        // Do not send onlyactive=1 here. The SENAI service exposes
-        // core_enrol_get_enrolled_users but denies this option for the current
-        // role. The suspended flag is already requested and filtered locally.
+        // Enrolment suspension is course-specific. The `suspended` field in a
+        // user record may be absent (or represent account suspension), so the
+        // Moodle enrolment filter is the authoritative source for this query.
+        if (statusFilter == ParticipantStatusFilter.Active)
+        {
+            options.Add(("onlyactive", "1"));
+        }
+        else if (statusFilter == ParticipantStatusFilter.Suspended)
+        {
+            options.Add(("onlysuspended", "1"));
+        }
 
         if (groupId is not null)
         {
@@ -290,7 +293,10 @@ internal sealed class MoodleParticipantsGateway(
         MoodleErrorContract.NormalizeCode(exception.ErrorCode) == MoodleErrorContract.PermissionDenied ||
         MoodleErrorContract.NormalizeCode(exception.RemoteErrorCode) == MoodleErrorContract.PermissionDenied;
 
-    private static CourseParticipantSummary ToParticipant(ParticipantDto dto, bool includeEmail)
+    private static CourseParticipantSummary ToParticipant(
+        ParticipantDto dto,
+        bool includeEmail,
+        ParticipantStatusFilter requestedStatus)
     {
         return new CourseParticipantSummary(
             ToIdString(dto.Id),
@@ -310,18 +316,13 @@ internal sealed class MoodleParticipantsGateway(
                 .Select(group => new CourseParticipantGroup(
                     ToIdString(group.Id),
                     group.Name ?? string.Empty))
-                .ToArray());
-    }
-
-    private static bool MatchesStatus(CourseParticipantSummary participant, ParticipantStatusFilter statusFilter)
-    {
-        return statusFilter switch
-        {
-            ParticipantStatusFilter.Active => participant.Suspended is not true,
-            ParticipantStatusFilter.Suspended => participant.Suspended is true,
-            ParticipantStatusFilter.All => true,
-            _ => true
-        };
+                .ToArray(),
+            requestedStatus switch
+            {
+                ParticipantStatusFilter.Active => "active",
+                ParticipantStatusFilter.Suspended => "suspended",
+                _ => "unknown"
+            });
     }
 
     private static ParticipantClassificationMode ResolveClassificationMode(

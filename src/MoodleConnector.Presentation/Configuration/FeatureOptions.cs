@@ -13,8 +13,8 @@ public sealed class FeatureOptions
     public bool UniversalMoodleFileDownloadEnabled { get; init; }
     public bool AppV2Enabled { get; init; }
     /// <summary>Controls rollout of the professional agenda routes and MCP surface.</summary>
-    public bool ProfessionalAgendaEnabled { get; init; } = true;
+    public bool ProfessionalAgendaEnabled { get; init; }
     /// <summary>Controls rollout of the professional Tasks routes and MCP surface.</summary>
-    public bool ProfessionalTasksEnabled { get; init; } = true;
+    public bool ProfessionalTasksEnabled { get; init; }
 }
 

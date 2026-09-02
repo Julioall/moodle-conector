@@ -59,11 +59,26 @@ public sealed class MoodleSnapshotToolContext(
         CancellationToken cancellationToken = default) =>
         snapshotStore.GetActivitiesAsync(scope.Identity.Id, scope.ConnectionAlias, courseId, cancellationToken);
 
-    public Task<MoodleSnapshotEnvelope<CourseParticipantsPage>?> GetStudentsAsync(
+    public async Task<MoodleSnapshotEnvelope<CourseParticipantsPage>?> GetStudentsAsync(
         MoodleSnapshotToolScope scope,
         string courseId,
-        CancellationToken cancellationToken = default) =>
-        snapshotStore.GetStudentsAsync(scope.Identity.Id, scope.ConnectionAlias, courseId, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await snapshotStore.GetStudentsAsync(
+            scope.Identity.Id,
+            scope.ConnectionAlias,
+            courseId,
+            cancellationToken);
+
+        // Snapshots created before enrolment status was explicit may have
+        // classified `suspended: null` users as active. Refuse those records
+        // so callers take the live, Moodle-filtered path and queue a refresh.
+        return snapshot?.Data is { StatusFilter: ParticipantStatusFilter.Active } page &&
+               page.Participants.All(participant =>
+                   string.Equals(participant.EnrollmentStatus, "active", StringComparison.OrdinalIgnoreCase))
+            ? snapshot
+            : null;
+    }
 
     public Task<MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>?> GetGroupsAsync(
         MoodleSnapshotToolScope scope,

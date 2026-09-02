@@ -30,7 +30,7 @@ public sealed class MoodleParticipantsGatewayTests
     }
 
     [Fact]
-    public async Task Filtra_ativos_localmente_sem_enviar_opcao_onlyactive()
+    public async Task Usa_onlyactive_do_Moodle_para_consultar_matriculas_ativas()
     {
         var handler = new JsonHandler(
             "[{\"id\":123,\"fullname\":\"Aluno\",\"suspended\":false,\"roles\":[],\"groups\":[]}]" );
@@ -40,8 +40,26 @@ public sealed class MoodleParticipantsGatewayTests
             "42", "10", ParticipantStatusFilter.Active, 1, 20, false, false, null, CancellationToken.None);
 
         var body = Uri.UnescapeDataString(handler.LastRequestBody);
-        Assert.DoesNotContain("onlyactive", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("onlyactive", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("[value]=1", body, StringComparison.OrdinalIgnoreCase);
         Assert.Single(result.Participants);
+        Assert.Equal("active", result.Participants[0].EnrollmentStatus);
+    }
+
+    [Fact]
+    public async Task Usa_onlysuspended_do_Moodle_mesmo_quando_campo_suspended_nao_esta_disponivel()
+    {
+        var handler = new JsonHandler("[{\"id\":123,\"fullname\":\"Aluno suspenso\",\"roles\":[],\"groups\":[]}]");
+        var sut = CreateGateway(handler);
+
+        var result = await sut.GetCourseParticipantsAsync(
+            "42", "10", ParticipantStatusFilter.Suspended, 1, 20, false, false, null, CancellationToken.None);
+
+        var body = Uri.UnescapeDataString(handler.LastRequestBody);
+        Assert.Contains("onlysuspended", body, StringComparison.OrdinalIgnoreCase);
+        var participant = Assert.Single(result.Participants);
+        Assert.Null(participant.Suspended);
+        Assert.Equal("suspended", participant.EnrollmentStatus);
     }
 
     [Fact]

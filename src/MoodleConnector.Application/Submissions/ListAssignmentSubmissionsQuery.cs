@@ -293,9 +293,6 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
                     .ThenByDescending(submission => submission.ModifiedAt ?? submission.CreatedAt ?? DateTimeOffset.MinValue)
                     .First(),
                 StringComparer.OrdinalIgnoreCase);
-        var participantIds = participants
-            .Select(participant => participant.UserId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var rows = new List<AssignmentSubmissionSummary>();
 
         foreach (var participant in participants)
@@ -304,10 +301,9 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable, existingGrades));
         }
 
-        foreach (var submission in latestSubmissionByUser.Values.Where(submission => !participantIds.Contains(submission.UserId)))
-        {
-            rows.Add(ToSummary(submission.UserId, fullName: null, submission, dueAt, isGradable, existingGrades));
-        }
+        // `mod_assign_get_submissions` can include teachers and other course
+        // staff. This is a student-facing report, so submissions without a
+        // matching student participant must never be added as anonymous rows.
 
         return rows
             .Where(row => MatchesFilter(row, filter))

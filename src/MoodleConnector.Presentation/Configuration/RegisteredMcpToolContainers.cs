@@ -7,7 +7,6 @@ using MoodleConnector.Presentation.Tools.Memory;
 using MoodleConnector.Presentation.Tools.Messages;
 using MoodleConnector.Presentation.Tools.Monitor;
 using MoodleConnector.Presentation.Tools.Pedagogy;
-using MoodleConnector.Presentation.Tools.Portal;
 using MoodleConnector.Presentation.Tools.Reports;
 using MoodleConnector.Presentation.Tools.Risk;
 using MoodleConnector.Presentation.Tools.Submissions;
@@ -49,10 +48,7 @@ public static class RegisteredMcpToolContainers
         typeof(MoodleMonitorTools),
         typeof(MoodleMemoryTools),
         typeof(MoodleMemoryDocumentTools),
-        typeof(MoodlePedagogyTools),
-        typeof(PortalTaskTools),
-        typeof(PortalAgendaTools),
-        typeof(PortalPlannerTagTools)
+        typeof(MoodlePedagogyTools)
     ];
 
     public static IReadOnlyList<ConditionalMcpToolContainer> Conditional { get; } =
@@ -60,8 +56,7 @@ public static class RegisteredMcpToolContainers
         new(typeof(MoodleIndividualGradeTools), "AssignmentGradeWriteEnabled"),
         new(typeof(MoodleTutorMessageTools), "MessagesWriteEnabled"),
         new(typeof(MoodleUniversalWriteTools), "UniversalMoodleWriteEnabled"),
-        new(typeof(MoodleDownloadFileTools), "UniversalMoodleFileDownloadEnabled"),
-        new(typeof(ProfessionalPlannerTools), "ProfessionalPlannerEnabled")
+        new(typeof(MoodleDownloadFileTools), "UniversalMoodleFileDownloadEnabled")
     ];
 
     public static IReadOnlyList<Type> All { get; } =
@@ -106,7 +101,6 @@ public sealed record ConditionalMcpToolContainer(Type ContainerType, string Feat
             "MessagesWriteEnabled" => featureOptions.MessagesWriteEnabled,
             "UniversalMoodleWriteEnabled" => featureOptions.UniversalMoodleWriteEnabled,
             "UniversalMoodleFileDownloadEnabled" => featureOptions.UniversalMoodleFileDownloadEnabled,
-            "ProfessionalPlannerEnabled" => featureOptions.ProfessionalAgendaEnabled && featureOptions.ProfessionalTasksEnabled,
             _ => false
         };
 }

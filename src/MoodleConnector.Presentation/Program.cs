@@ -2383,7 +2383,7 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/activities", async (
         foreach (var item in pending.Students.SelectMany(student => student.PendingAssignments))
             submissionCounts[item.AssignmentId] = submissionCounts.GetValueOrDefault(item.AssignmentId) + 1;
         foreach (var item in pending.AwaitingGrading)
-            gradingCounts[item.Item.AssignmentId] = gradingCounts.GetValueOrDefault(item.Item.AssignmentId) + 1;
+            gradingCounts[item.AssignmentId] = gradingCounts.GetValueOrDefault(item.AssignmentId) + 1;
     }
     var data = pageActivities.Select(activity =>
     {
@@ -2428,7 +2428,7 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
         var cachedItems = cached.Participants.ToArray();
         var cachedPage = cachedItems.Skip((currentPage - 1) * size).Take(size).ToArray();
         var cachedData = cachedPage.Select(participant => StudentContractMapper.ToDto(connectionRef, participant,
-            new[] { new StudentCourseDto(connectionRef, courseId, courseId, null, participant.Suspended == true ? "suspenso" : "ativo", null, participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) })).ToArray();
+            new[] { new StudentCourseDto(connectionRef, courseId, courseId, null, participant.EnrollmentStatus, null, participant.LastCourseAccessAt, Array.Empty<StudentGradeDto>()) })).ToArray();
         var warnings = new List<string>();
         if (snapshot.IsStale) warnings.Add("Dados locais podem estar desatualizados; use Atualizar para consultar agora.");
         if (refreshQueued) warnings.Add("Atualização solicitada; a lista será atualizada assim que o Moodle responder.");
@@ -2472,7 +2472,7 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/students/{studentId}", async
     if (participant is null) return AppErrorResults.NotFound("student_not_found", "Aluno não encontrado neste curso.");
     var gradeItems = await mediator.Send(new GetStudentGradeItemsQuery(courseId, studentId), cancellationToken);
     var courseDtos = new[] { new StudentCourseDto(connectionRef, courseId, courseId, null,
-        participant.Suspended == true ? "suspenso" : "ativo", null,
+        participant.EnrollmentStatus, null,
         participant.LastCourseAccessAt,
         gradeItems?.Items.Select(StudentContractMapper.ToGradeDto).ToArray() ?? Array.Empty<StudentGradeDto>()) };
     var studentDto = StudentContractMapper.ToDto(connectionRef, participant, courseDtos);

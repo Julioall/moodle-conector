@@ -1,12 +1,9 @@
 import {
   BookOpen,
   Building2,
-  CalendarDays,
-  CheckSquare,
   FileSpreadsheet,
   LogOut,
   Settings,
-  ShieldAlert,
   type LucideIcon,
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
@@ -40,14 +37,11 @@ type SidebarNavItem = {
 const mainNavItems: SidebarNavItem[] = [
   { title: 'Meus Cursos', url: '/meus-cursos', icon: BookOpen, permission: APP_PERMISSIONS.COURSES_CATALOG_VIEW },
   { title: 'Escolas', url: '/escolas', icon: Building2, permission: APP_PERMISSIONS.SCHOOLS_VIEW },
-  { title: 'Tarefas', url: '/tarefas', icon: CheckSquare, permission: APP_PERMISSIONS.TASKS_VIEW },
-  { title: 'Agenda', url: '/agenda', icon: CalendarDays, permission: APP_PERMISSIONS.AGENDA_VIEW },
   { title: 'Relatórios', url: '/relatorios', icon: FileSpreadsheet, permission: APP_PERMISSIONS.REPORTS_VIEW },
 ];
 
 const settingsItems: SidebarNavItem[] = [
   { title: 'Configurações', url: '/configuracoes', icon: Settings, permission: APP_PERMISSIONS.SETTINGS_VIEW },
-  { title: 'Administração', url: '/administracao', icon: ShieldAlert, permission: APP_PERMISSIONS.ADMIN_VIEW },
 ];
 
 export function AppSidebar() {
@@ -56,7 +50,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const isCollapsed = state === 'collapsed';
   const scopedUrl = (url: string) => {
-    if (!connectionRef || url === '/configuracoes' || url === '/administracao') return url;
+    if (!connectionRef || url === '/configuracoes') return url;
     return `${url}${url.includes('?') ? '&' : '?'}connectionRef=${encodeURIComponent(connectionRef)}`;
   };
 

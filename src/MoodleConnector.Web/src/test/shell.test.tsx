@@ -22,11 +22,11 @@ describe('Claris-first shell', () => {
     expect(screen.getByRole('link', { name: 'Configurações' })).toBeInTheDocument();
   });
 
-  it('exposes the v2 operational smoke path', () => {
+  it('hides suspended planner and administration surfaces', () => {
     renderWithProviders(<AppSidebar />);
-    const link = (name: string, href: string) => expect(screen.getAllByRole('link', { name }).find(item => item.getAttribute('href') === href)).toBeTruthy();
-    link('Tarefas', '/tarefas');
-    link('Agenda', '/agenda');
-    link('Relatórios', '/relatorios');
+    expect(screen.queryByRole('link', { name: 'Tarefas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Agenda' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Administração' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Relatórios' }).length).toBeGreaterThan(0);
   });
 });

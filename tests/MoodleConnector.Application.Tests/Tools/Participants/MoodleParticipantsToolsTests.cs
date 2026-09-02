@@ -39,6 +39,7 @@ public class MoodleParticipantsToolsTests
         Assert.Equal("777", participant.GetProperty("userId").GetString());
         Assert.Equal("Aluno Teste", participant.GetProperty("fullName").GetString());
         Assert.Equal(JsonValueKind.Null, participant.GetProperty("email").ValueKind);
+        Assert.Equal("unknown", participant.GetProperty("enrollmentStatus").GetString());
         Assert.Equal("student", participant.GetProperty("roles")[0].GetProperty("shortName").GetString());
         Assert.Equal("Grupo A", participant.GetProperty("groups")[0].GetProperty("name").GetString());
     }
@@ -384,7 +385,7 @@ public class MoodleParticipantsToolsTests
                 studentsOnly,
                 includeEmail,
                 HasMore: false,
-                empty ? [] : [CreateParticipant(includeEmail)],
+                empty ? [] : [CreateParticipant(includeEmail, statusFilter)],
                 fallbackDiagnostics
                     ? new ParticipantClassificationDiagnostics(
                         1, 0, 1, 0, HasEmptyRoles: true, HasEmptyGroups: true,
@@ -392,7 +393,7 @@ public class MoodleParticipantsToolsTests
                     : null);
         }
 
-        private static CourseParticipantSummary CreateParticipant(bool includeEmail)
+        private static CourseParticipantSummary CreateParticipant(bool includeEmail, ParticipantStatusFilter statusFilter)
         {
             return new CourseParticipantSummary(
                 "777",
@@ -403,7 +404,13 @@ public class MoodleParticipantsToolsTests
                 new DateTimeOffset(2026, 5, 31, 12, 0, 0, TimeSpan.Zero),
                 new DateTimeOffset(2026, 5, 31, 13, 0, 0, TimeSpan.Zero),
                 [new CourseParticipantRole("5", "student", "Estudante")],
-                [new CourseParticipantGroup("99", "Grupo A")]);
+                [new CourseParticipantGroup("99", "Grupo A")],
+                statusFilter switch
+                {
+                    ParticipantStatusFilter.Active => "active",
+                    ParticipantStatusFilter.Suspended => "suspended",
+                    _ => "unknown"
+                });
         }
     }
 }

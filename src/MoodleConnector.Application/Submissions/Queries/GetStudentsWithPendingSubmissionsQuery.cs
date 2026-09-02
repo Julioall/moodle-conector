@@ -21,6 +21,21 @@ public sealed record AwaitingGradingItem(
     DateTimeOffset? SubmittedAt);
 
 /// <summary>
+/// A serializable, self-contained record for a delivered assignment that is
+/// awaiting grading. Value tuples serialize as empty objects in System.Text.Json.
+/// </summary>
+public sealed record AwaitingGradingSubmission(
+    string CourseId,
+    string AssignmentId,
+    string AssignmentName,
+    string StudentId,
+    string StudentName,
+    DateTimeOffset? LastCourseAccessAt,
+    string SubmissionStatus,
+    DateTimeOffset? SubmittedAt,
+    string GradingStatus);
+
+/// <summary>
 /// Resumo de estudante com pelo menos uma SA pendente.
 /// </summary>
 public sealed record StudentPendingSubmissionSummary(
@@ -37,7 +52,7 @@ public sealed record GetStudentsWithPendingSubmissionsResult(
     IReadOnlyList<string> SuggestedRecipientIds,
     string? Warning)
 {
-    public IReadOnlyList<(string StudentId, string FullName, DateTimeOffset? LastCourseAccessAt, AwaitingGradingItem Item)> AwaitingGrading { get; init; } = [];
+    public IReadOnlyList<AwaitingGradingSubmission> AwaitingGrading { get; init; } = [];
     public bool IsComplete { get; init; } = true;
 }
 
@@ -427,7 +442,16 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             .SelectMany(kv => kv.Value.Select(item =>
             {
                 var student = studentMap[kv.Key];
-                return (kv.Key, student.FullName, student.LastCourseAccessAt, item);
+                return new AwaitingGradingSubmission(
+                    request.CourseId,
+                    item.AssignmentId,
+                    item.AssignmentName,
+                    kv.Key,
+                    student.FullName,
+                    student.LastCourseAccessAt,
+                    "submitted",
+                    item.SubmittedAt,
+                    "awaiting_grading");
             }))
             .ToArray();
 

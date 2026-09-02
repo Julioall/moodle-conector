@@ -78,6 +78,28 @@ public class ListAssignmentSubmissionsQueryHandlerTests
     }
 
     [Fact]
+    public async Task Nao_inclui_submissao_de_usuario_fora_da_lista_de_estudantes()
+    {
+        var sut = CreateHandler(submissionsGateway: new FakeSubmissionsGateway
+        {
+            Records =
+            [
+                Submitted("9001", "101", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "graded"),
+                Submitted("9002", "teacher-1", new DateTimeOffset(2026, 6, 10, 10, 0, 0, TimeSpan.Zero), "notgraded")
+            ]
+        });
+
+        var result = await sut.Handle(
+            new ListAssignmentSubmissionsQuery("usuario-42", "CURSO-1", "11", AssignmentSubmissionFilter.All,
+                Page: 1, PageSize: 20, Since: null, Before: null, IncludeLate: true, IncludeUngraded: true),
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.DoesNotContain(result!.Submissions, submission => submission.UserId == "teacher-1");
+        Assert.All(result.Submissions, submission => Assert.NotNull(submission.FullName));
+    }
+
+    [Fact]
     public async Task Deve_identificar_entrega_atrasada()
     {
         var sut = CreateHandler(
