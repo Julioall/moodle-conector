@@ -148,6 +148,33 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ExcludesScormFromPendingAndSeparatesAwaitingGrading()
+    {
+        var students = new[] { MakeStudent("5", "Pedro", DateTimeOffset.UtcNow.AddDays(-1)) };
+        var grades = new Dictionary<string, IReadOnlyList<GradebookItem>>
+        {
+            ["5"] =
+            [
+                new GradebookItem("scorm", "Conteúdo do Curso", "mod", "scorm", null,
+                    null, null, 0m, null, null, null, null, null, null, null),
+                new GradebookItem("assign", "SA aguardando correção", "mod", "assign", null,
+                    null, null, 0m, 100m, null, null, null,
+                    DateTimeOffset.UtcNow.ToUnixTimeSeconds(), null, null)
+            ]
+        };
+
+        var result = await CreateHandler(students, grades).Handle(
+            new GenerateWeeklyPerformanceReportQuery("course1"), CancellationToken.None);
+
+        var row = Assert.Single(result.Students);
+        Assert.Equal(1, row.TotalAssignments);
+        Assert.Equal(0, row.PendingCount);
+        Assert.Equal(1, row.AwaitingGradingCount);
+        Assert.Equal("SA aguardando correção", Assert.Single(row.AwaitingGradingAssignmentNames));
+        Assert.Empty(result.SuggestedRecipientIdsForPending);
+    }
+
+    [Fact]
     public async Task Handle_RiskStudentSortedBeforeOkStudent()
     {
         var now = DateTimeOffset.UtcNow;

@@ -74,9 +74,13 @@ public sealed class MoodleForumParticipationTools(
             return ToolResultHelper.Error<GetStudentsWithoutForumParticipationResult>("Não foi possível analisar a participação no fórum neste momento.");
         }
 
-        var response = new ToolResponse<GetStudentsWithoutForumParticipationResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
-        var narration = $"Participação no fórum {forumId} — curso {courseId}: {data.TotalStudentsAnalyzed} estudante(s) analisado(s). " +
-                        $"{data.StudentsWithoutParticipation.Count} ainda não participaram.";
+        var responseStatus = data.ParticipationStatus == "known" ? "ok" : "partial";
+        var response = new ToolResponse<GetStudentsWithoutForumParticipationResult>(responseStatus, data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var narration = data.ParticipationStatus == "known"
+            ? $"Participação no fórum {forumId} — curso {courseId}: {data.TotalStudentsAnalyzed} estudante(s) analisado(s). " +
+              $"{data.StudentsWithoutParticipation.Count} ainda não participaram."
+            : $"Não foi possível determinar com segurança a participação no fórum {forumId} — curso {courseId}. " +
+              $"Estado: {data.ParticipationStatus}. Consulte o aviso retornado antes de enviar cobranças.";
 
         return new CallToolResult
         {

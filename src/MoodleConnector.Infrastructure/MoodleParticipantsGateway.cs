@@ -79,6 +79,20 @@ internal sealed class MoodleParticipantsGateway(
                     continue;
                 }
 
+                // Moodle integrations occasionally return a role-less record
+                // with no display name (for example, an inaccessible staff
+                // account or an anonymised service user).  It cannot be
+                // safely attributed to a student, so do not leak it into
+                // student-facing reports and submission joins.  Keep the
+                // named role-less fallback for installations that omit roles
+                // from otherwise valid student records.
+                if (studentsOnly &&
+                    classification == ParticipantClassificationKind.UncertainFallback &&
+                    string.IsNullOrWhiteSpace(participant.FullName))
+                {
+                    continue;
+                }
+
                 if (classification == ParticipantClassificationKind.Student)
                 {
                     includedByStudentRoleCount++;
@@ -298,11 +312,21 @@ internal sealed class MoodleParticipantsGateway(
         bool includeEmail,
         ParticipantStatusFilter requestedStatus)
     {
+        var reportedSuspended = ToBool(dto.Suspended);
+        // onlyactive/onlysuspended are course-enrolment filters and therefore
+        // are authoritative even when Moodle omits the `suspended` field.
+        var suspended = requestedStatus switch
+        {
+            ParticipantStatusFilter.Active => reportedSuspended ?? false,
+            ParticipantStatusFilter.Suspended => reportedSuspended ?? true,
+            _ => reportedSuspended
+        };
+
         return new CourseParticipantSummary(
             ToIdString(dto.Id),
             dto.FullName ?? string.Empty,
             includeEmail && !string.IsNullOrWhiteSpace(dto.Email) ? dto.Email : null,
-            ToBool(dto.Suspended),
+            suspended,
             ToDateTimeOffset(dto.FirstAccess),
             ToDateTimeOffset(dto.LastAccess),
             ToDateTimeOffset(dto.LastCourseAccess),
@@ -317,10 +341,10 @@ internal sealed class MoodleParticipantsGateway(
                     ToIdString(group.Id),
                     group.Name ?? string.Empty))
                 .ToArray(),
-            requestedStatus switch
+            suspended switch
             {
-                ParticipantStatusFilter.Active => "active",
-                ParticipantStatusFilter.Suspended => "suspended",
+                true => "suspended",
+                false => "active",
                 _ => "unknown"
             });
     }

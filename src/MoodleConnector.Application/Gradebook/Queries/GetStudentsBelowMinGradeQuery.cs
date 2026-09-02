@@ -62,7 +62,8 @@ public sealed class GetStudentsBelowMinGradeQueryHandler(
                     request.CourseId, student.UserId, cancellationToken);
 
                 belowMinimumItems = gradebook.Items
-                    .Where(GradebookMappingHelper.IsDerivedReportItem)
+                    .Where(item => GradebookMappingHelper.IsCourseTotalItem(item) ||
+                                   GradebookMappingHelper.IsEvaluativeReportActivityItem(item))
                     .Select(i => GradebookMappingHelper.ToStudentGradeItem(i, request.MinGradePercent))
                     .Where(i => i.BelowMinimum)
                     .ToList();

@@ -46,7 +46,7 @@ MoodleApi__LoginService=moodle_mobile_app
 | `mod_forum_get_forum_discussions` | Ler discussões paginadas de um fórum autorizado. | Implementado |
 | `mod_forum_get_discussion_posts` | Ler posts de uma discussão de fórum autorizada. | Implementado |
 
-> **Nota:** A função `mod_forum_get_forum_discussions_paginated` foi deprecada e removida no Moodle 5.0. O conector consulta as funções anunciadas por `core_webservice_get_site_info`, prioriza `mod_forum_get_forum_discussions` e só usa a variante paginada quando ela for a única disponível na conexão.
+> **Nota:** A função `mod_forum_get_forum_discussions_paginated` foi deprecada e removida no Moodle 5.0. Nas conexões FIEG e Nacional, o conector consulta as funções anunciadas por `core_webservice_get_site_info` e usa `mod_forum_get_forum_discussions`; só recorre à variante paginada quando ela for a única disponível na conexão.
 
 ### Leitura — Tarefas e submissões
 

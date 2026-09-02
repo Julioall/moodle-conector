@@ -323,8 +323,14 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 IsOverdue: isOverdue);
             var isNoGradeActivity = canClassifyNoGradeActivities &&
                 IsNoGradeActivity(module, assignmentSettings);
+            var returnedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var record in batch.Submissions)
             {
+                if (!string.IsNullOrWhiteSpace(record.UserId))
+                {
+                    returnedUserIds.Add(record.UserId);
+                }
+
                 if (string.Equals(record.Status, "notsubmitted", StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(record.Status, "not_submitted", StringComparison.OrdinalIgnoreCase))
                 {
@@ -372,6 +378,28 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                             dueDate,
                             record.ModifiedAt ?? record.CreatedAt));
                     }
+                }
+            }
+
+            // `mod_assign_get_submissions` is allowed to omit users who have
+            // no submission (especially when a status filter is supplied).
+            // The assignment was read successfully, so an omitted active
+            // student is an explicit not-submitted signal for this
+            // student-facing query.  Do not apply this inference to
+            // non-gradable activities, which are tracked through feedback
+            // instead of delivery.
+            if (!isNoGradeActivity)
+            {
+                foreach (var studentId in studentMap.Keys)
+                {
+                    if (returnedUserIds.Contains(studentId) ||
+                        !pendingByStudent.TryGetValue(studentId, out var pendingList) ||
+                        pendingList.Any(item => string.Equals(item.AssignmentId, module.InstanceId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    pendingList.Add(pendingItem);
                 }
             }
         }

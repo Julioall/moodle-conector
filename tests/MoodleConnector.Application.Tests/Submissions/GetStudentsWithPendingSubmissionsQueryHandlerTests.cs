@@ -134,6 +134,27 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
     }
 
     [Fact]
+    public async Task Infers_missing_students_as_pending_when_assignment_batch_is_successfully_empty()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(Module("assign-1", "assign")),
+            IncludeStudent2 = true,
+            // Moodle can return a successful assignment entry with no
+            // submission records for students who have not submitted.
+            Submissions = [new AssignmentSubmissionsBatch("assign-1", [])]
+        };
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery("course-1"),
+            CancellationToken.None);
+
+        Assert.Equal(2, result.Students.Count);
+        Assert.All(result.Students, student => Assert.Equal("assign-1", Assert.Single(student.PendingAssignments).AssignmentId));
+        Assert.True(result.IsComplete);
+    }
+
+    [Fact]
     public async Task Reads_feedback_in_parallel_by_assignment_with_bounded_gateway_calls()
     {
         var fixture = new Fixture

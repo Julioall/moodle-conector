@@ -21,7 +21,10 @@ public sealed record StudentClassCouncilRow(
     int PendingItemsCount,
     IReadOnlyList<StudentGradeItem> BelowMinimumItems,
     string SituationFlag,   // "regular" | "attention" | "recovery_needed" | "at_risk"
-    IReadOnlyList<string> Recommendations);
+    IReadOnlyList<string> Recommendations)
+{
+    public int AwaitingGradingItemsCount { get; init; }
+}
 
 public sealed record GenerateClassCouncilReportResult(
     string CourseId,
@@ -113,13 +116,14 @@ public sealed class GenerateClassCouncilReportQueryHandler(
             IReadOnlyList<StudentGradeItem> belowMinimumItems = [];
             int totalGradedItems = 0;
             int pendingItemsCount = 0;
+            int awaitingGradingItemsCount = 0;
             try
             {
                 var gradebook = await gradebookGateway.GetStudentGradebookAsync(
                     request.CourseId, student.UserId, cancellationToken);
 
                 var activityItems = gradebook.Items
-                    .Where(GradebookMappingHelper.IsDerivedReportActivityItem)
+                    .Where(GradebookMappingHelper.IsEvaluativeReportActivityItem)
                     .ToList();
                 totalGradedItems = activityItems.Count;
 
@@ -137,7 +141,8 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                         belowMinimumItems = [courseTotalItem, ..belowMinimumItems];
                     }
                 }
-                pendingItemsCount = gradeItems.Count(i => !i.GradeRaw.HasValue);
+                pendingItemsCount = activityItems.Count(GradebookMappingHelper.IsConfirmedPending);
+                awaitingGradingItemsCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
             }
             catch { /* partial data */ }
 
@@ -167,7 +172,10 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                 PendingItemsCount: pendingItemsCount,
                 BelowMinimumItems: belowMinimumItems,
                 SituationFlag: situationFlag,
-                Recommendations: recommendations));
+                Recommendations: recommendations)
+            {
+                AwaitingGradingItemsCount = awaitingGradingItemsCount
+            });
         }
 
         var sorted = rows

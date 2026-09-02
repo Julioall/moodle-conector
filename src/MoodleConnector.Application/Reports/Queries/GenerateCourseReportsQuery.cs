@@ -118,7 +118,10 @@ public sealed record PostExecutionStudentRow(
     int TotalGradedItems,
     int BelowMinimumCount,
     int PendingCount,
-    string OutcomeIndicator);  // "likely_complete" | "pending_recovery" | "at_risk" | "unknown"
+    string OutcomeIndicator)  // "likely_complete" | "pending_recovery" | "at_risk" | "unknown"
+{
+    public int AwaitingGradingCount { get; init; }
+}
 
 public sealed record GeneratePostExecutionReportResult(
     string CourseId,
@@ -199,7 +202,7 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                 ? (int)(now - student.LastCourseAccessAt.Value).TotalDays
                 : null;
 
-            int totalGradedItems = 0, belowMinimumCount = 0, pendingCount = 0;
+            int totalGradedItems = 0, belowMinimumCount = 0, pendingCount = 0, awaitingGradingCount = 0;
             bool hasGradebookData = false;
 
             try
@@ -208,11 +211,12 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                     request.CourseId, student.UserId, cancellationToken);
 
                 var activityItems = gradebook.Items
-                    .Where(GradebookMappingHelper.IsDerivedReportActivityItem)
+                    .Where(GradebookMappingHelper.IsEvaluativeReportActivityItem)
                     .ToList();
 
                 totalGradedItems = activityItems.Count;
-                hasGradebookData = gradebook.Items.Any(GradebookMappingHelper.IsDerivedReportItem);
+                hasGradebookData = activityItems.Count > 0 ||
+                    gradebook.Items.Any(GradebookMappingHelper.IsCourseTotalItem);
 
                 var gradeItems = activityItems
                     .Select(i => GradebookMappingHelper.ToStudentGradeItem(i, request.MinGradePercent))
@@ -228,7 +232,8 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                         belowMinimumCount++;
                     }
                 }
-                pendingCount = gradeItems.Count(i => !i.GradeRaw.HasValue);
+                pendingCount = activityItems.Count(GradebookMappingHelper.IsConfirmedPending);
+                awaitingGradingCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
             }
             catch { /* partial data */ }
 
@@ -242,7 +247,10 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                 TotalGradedItems: totalGradedItems,
                 BelowMinimumCount: belowMinimumCount,
                 PendingCount: pendingCount,
-                OutcomeIndicator: outcome));
+                OutcomeIndicator: outcome)
+            {
+                AwaitingGradingCount = awaitingGradingCount
+            });
         }
 
         var sorted = rows.OrderBy(r => r.OutcomeIndicator switch

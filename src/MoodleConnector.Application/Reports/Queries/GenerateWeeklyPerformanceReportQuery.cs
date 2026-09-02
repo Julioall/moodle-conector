@@ -22,7 +22,11 @@ public sealed record StudentWeeklyPerformanceRow(
     int BelowMinimumCount,
     IReadOnlyList<StudentGradeItem> BelowMinimumItems,
     IReadOnlyList<string> PendingAssignmentNames,
-    string AttentionLevel);  // "ok" | "attention" | "risk"
+    string AttentionLevel)  // "ok" | "attention" | "risk"
+{
+    public int AwaitingGradingCount { get; init; }
+    public IReadOnlyList<string> AwaitingGradingAssignmentNames { get; init; } = [];
+}
 
 public sealed record GenerateWeeklyPerformanceReportResult(
     string CourseId,
@@ -51,7 +55,8 @@ public sealed record GenerateWeeklyPerformanceReportResult(
 /// 4. Calcula nível de atenção: "ok", "attention" (1 indicador), "risk" (2+ indicadores).
 ///
 /// Limitações declaradas:
-/// - Contagem de SAs pendentes é estimada a partir do total de itens avaliativos sem nota.
+/// - Uma SA só entra como pendente quando não há nota nem metadado de envio;
+///   entregas aguardando correção são expostas separadamente.
 /// - Dados de acesso dependem do campo lastcourseaccess da API Moodle.
 /// - Pode ser lento para turmas grandes (uma chamada por estudante ao gradebook).
 /// </summary>
@@ -69,7 +74,7 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
 {
     private const string LimitationMessage =
         "Relatório gerado com base nos dados disponíveis na API Moodle. " +
-        "Notas sem lançamento aparecem como 'sem nota'. " +
+        "Notas sem lançamento aparecem como 'sem nota'; entregas identificadas como aguardando correção não entram como pendência. " +
         "Acesso ao AVA depende do campo lastcourseaccess disponível no Moodle. " +
         "Atividades cujo nome indica recuperação não são tratadas como pendência geral. " +
         "Para turmas grandes o relatório pode ser lento (uma consulta de boletim por estudante).";
@@ -141,6 +146,7 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
             int totalAssignments = 0;
             int pendingCount = 0;
             var pendingNames = new List<string>();
+            var awaitingGradingNames = new List<string>();
 
             try
             {
@@ -148,7 +154,7 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                     request.CourseId, student.UserId, cancellationToken);
 
                 var activityItems = gradebook.Items
-                    .Where(GradebookMappingHelper.IsDerivedReportActivityItem)
+                    .Where(GradebookMappingHelper.IsEvaluativeReportActivityItem)
                     .ToList();
 
                 totalAssignments = activityItems.Count;
@@ -169,10 +175,18 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                     }
                 }
 
-                // Items with no grade = pending (estimation)
-                var pending = gradeItems.Where(i => !i.GradeRaw.HasValue).ToList();
+                // Only an evaluative item with no grade and no submission
+                // metadata is treated as a confirmed non-delivery. A
+                // submitted item awaiting grading is reported separately.
+                var pending = activityItems
+                    .Where(GradebookMappingHelper.IsConfirmedPending)
+                    .ToList();
                 pendingCount = pending.Count;
                 pendingNames = pending.Select(i => i.ItemName).ToList();
+                awaitingGradingNames = activityItems
+                    .Where(GradebookMappingHelper.IsAwaitingGrading)
+                    .Select(i => i.ItemName)
+                    .ToList();
             }
             catch
             {
@@ -206,7 +220,11 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                 BelowMinimumCount: belowMinimumItems.Count,
                 BelowMinimumItems: belowMinimumItems,
                 PendingAssignmentNames: pendingNames,
-                AttentionLevel: attentionLevel));
+                AttentionLevel: attentionLevel)
+            {
+                AwaitingGradingCount = awaitingGradingNames.Count,
+                AwaitingGradingAssignmentNames = awaitingGradingNames
+            });
 
             if (isInactive) recipientsForAccess.Add(student.UserId);
             if (belowMinimumItems.Count > 0) recipientsForGrade.Add(student.UserId);

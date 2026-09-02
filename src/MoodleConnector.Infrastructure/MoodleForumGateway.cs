@@ -84,7 +84,7 @@ internal sealed partial class MoodleForumGateway(
             .Select(function => function.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Moodle 5.x and the FIEG service expose the non-paginated function,
+        // Moodle 5.x and the FIEG/Nacional services expose the non-paginated function,
         // which already supports page/perpage. Keep the legacy endpoint as
         // the preferred compatible route and use the paginated extension only
         // for connections that advertise it instead.

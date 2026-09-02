@@ -15,7 +15,8 @@ public sealed record StudentForumParticipationStatus(
     string StudentId,
     string FullName,
     bool Participated,
-    DateTimeOffset? LastCourseAccessAt);
+    DateTimeOffset? LastCourseAccessAt,
+    string ParticipationStatus = "known"); // "known" | "partial" | "unknown"
 
 public sealed record GetStudentsWithoutForumParticipationResult(
     string CourseId,
@@ -24,7 +25,11 @@ public sealed record GetStudentsWithoutForumParticipationResult(
     IReadOnlyList<StudentForumParticipationStatus> StudentsWithoutParticipation,
     IReadOnlyList<string> SuggestedRecipientIds,
     string Limitation,
-    string? Warning);
+    string? Warning)
+{
+    public string ParticipationStatus { get; init; } = "known"; // "known" | "partial" | "unknown"
+    public bool IsComplete { get; init; } = true;
+}
 
 public sealed record GetStudentsWithoutForumParticipationQuery(
     string CourseId,
@@ -64,6 +69,8 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
         var participatedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string? warning = null;
         var postErrors = 0;
+        var discussionReadFailed = false;
+        var discussionsTruncated = false;
 
         try
         {
@@ -108,14 +115,17 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
                 }
             }
 
-            if (discussions.Count >= request.MaxDiscussionsToScan)
+            var discussionLimit = request.MaxDiscussionsToScan > 0 ? request.MaxDiscussionsToScan : 20;
+            if (discussions.Count >= discussionLimit)
             {
-                warning = AppendWarning(warning, $"O fórum pode ter mais discussões além das {request.MaxDiscussionsToScan} analisadas. " +
+                discussionsTruncated = true;
+                warning = AppendWarning(warning, $"O fórum pode ter mais discussões além das {discussionLimit} analisadas. " +
                           "Considere aumentar MaxDiscussionsToScan para uma análise mais completa.");
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            discussionReadFailed = true;
             warning = $"Não foi possível carregar as discussões do fórum {request.ForumId}. " +
                       "Verifique se o ID do fórum está correto e se o usuário tem acesso.";
         }
@@ -129,13 +139,39 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
             ? AppendWarning(warning, "A lista de estudantes foi limitada pelo maximo solicitado; a analise de participacao e parcial.")
             : warning;
 
+        // A failed forum read cannot prove that a student did not participate.
+        // Return an explicit unavailable/partial state instead of classifying
+        // every active student as a non-participant.
+        var participationStatus = discussionReadFailed
+            ? "unknown"
+            : postErrors > 0 || participantsPage.HasMore || discussionsTruncated
+                ? "partial"
+                : "known";
+
+        if (discussionReadFailed || postErrors > 0)
+        {
+            return new GetStudentsWithoutForumParticipationResult(
+                CourseId: request.CourseId,
+                ForumId: request.ForumId,
+                TotalStudentsAnalyzed: participantsPage.Participants.Count,
+                StudentsWithoutParticipation: [],
+                SuggestedRecipientIds: [],
+                Limitation: LimitationMessage,
+                Warning: warning)
+            {
+                ParticipationStatus = participationStatus,
+                IsComplete = false
+            };
+        }
+
         // 3. Find students who have NOT posted
         var studentsWithoutParticipation = participantsPage.Participants
             .Select(student => new StudentForumParticipationStatus(
                 StudentId: student.UserId,
                 FullName: student.FullName,
                 Participated: participatedUserIds.Contains(student.UserId),
-                LastCourseAccessAt: student.LastCourseAccessAt))
+                LastCourseAccessAt: student.LastCourseAccessAt,
+                ParticipationStatus: participationStatus))
             .Where(s => !s.Participated)
             .ToList();
 
@@ -148,7 +184,11 @@ public sealed class GetStudentsWithoutForumParticipationQueryHandler(
             StudentsWithoutParticipation: studentsWithoutParticipation,
             SuggestedRecipientIds: suggestedRecipients,
             Limitation: LimitationMessage,
-            Warning: warning);
+            Warning: warning)
+        {
+            ParticipationStatus = participationStatus,
+            IsComplete = participationStatus == "known"
+        };
     }
 
     private static string AppendWarning(string? current, string additional) =>

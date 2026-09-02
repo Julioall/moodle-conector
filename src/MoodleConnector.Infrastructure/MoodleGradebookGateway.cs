@@ -73,9 +73,9 @@ internal sealed class MoodleGradebookGateway(
                         CategoryId: ReadStringProperty(item, "categoryid"),
                         GradeRaw: ReadDecimalProperty(item, "graderaw"),
                         GradeFormatted: ReadStringProperty(item, "gradeformatted"),
-                        GradeMin: ReadDecimalProperty(item, "grademin"),
-                        GradeMax: ReadDecimalProperty(item, "grademax"),
-                        PercentageFormatted: ReadDecimalProperty(item, "percentageformatted"),
+                        GradeMin: ReadDecimalProperty(item, "grademin", "min", "mingrade"),
+                        GradeMax: ReadDecimalProperty(item, "grademax", "max", "maxgrade", "grade_max"),
+                        PercentageFormatted: ReadDecimalProperty(item, "percentageformatted", "percentage", "percent"),
                         Feedback: ReadStringProperty(item, "feedback"),
                         FeedbackFormat: ReadStringProperty(item, "feedbackformat"),
                         GradedDateSubmitted: ReadLongProperty(item, "gradeddatesubmitted"),
@@ -101,14 +101,31 @@ internal sealed class MoodleGradebookGateway(
         return null;
     }
 
-    private static decimal? ReadDecimalProperty(JsonElement element, string propertyName)
+    private static decimal? ReadDecimalProperty(JsonElement element, params string[] propertyNames)
     {
-        if (element.TryGetProperty(propertyName, out var value))
+        foreach (var propertyName in propertyNames)
         {
+            if (!element.TryGetProperty(propertyName, out var value))
+            {
+                continue;
+            }
+
             if (value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var d))
                 return d;
-            if (value.ValueKind == JsonValueKind.String && decimal.TryParse(value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var ds))
-                return ds;
+            if (value.ValueKind == JsonValueKind.String)
+            {
+                var text = value.GetString()?.Trim().TrimEnd('%').Trim();
+                var ptBrFirst = text?.Contains(',', StringComparison.Ordinal) == true &&
+                    text.Contains('.', StringComparison.Ordinal) == false;
+                if (ptBrFirst
+                    ? decimal.TryParse(text, NumberStyles.Any, CultureInfo.GetCultureInfo("pt-BR"), out var ds) ||
+                      decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out ds)
+                    : decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out ds) ||
+                      decimal.TryParse(text, NumberStyles.Any, CultureInfo.GetCultureInfo("pt-BR"), out ds))
+                {
+                    return ds;
+                }
+            }
         }
         return null;
     }

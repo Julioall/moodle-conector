@@ -58,7 +58,7 @@ public sealed class MoodleParticipantsGatewayTests
         var body = Uri.UnescapeDataString(handler.LastRequestBody);
         Assert.Contains("onlysuspended", body, StringComparison.OrdinalIgnoreCase);
         var participant = Assert.Single(result.Participants);
-        Assert.Null(participant.Suspended);
+        Assert.True(participant.Suspended);
         Assert.Equal("suspended", participant.EnrollmentStatus);
     }
 
@@ -93,6 +93,23 @@ public sealed class MoodleParticipantsGatewayTests
         Assert.Equal(1, result.ClassificationDiagnostics.IncludedByFallbackCount);
         Assert.True(result.ClassificationDiagnostics.HasEmptyRoles);
         Assert.Equal(ParticipantClassificationMode.Fallback, result.ClassificationDiagnostics.Mode);
+    }
+
+    [Fact]
+    public async Task Exclui_registro_roleless_sem_nome_da_lista_de_alunos()
+    {
+        var sut = CreateGateway(new JsonHandler("""
+            [
+              {"id":245956,"fullname":null,"suspended":false,"roles":[],"groups":[]},
+              {"id":123,"fullname":"Aluno sem role","suspended":false,"roles":[],"groups":[]}
+            ]
+            """));
+
+        var result = await sut.GetCourseParticipantsAsync(
+            "42", "10", ParticipantStatusFilter.Active, 1, 20, true, false, null, CancellationToken.None);
+
+        var participant = Assert.Single(result.Participants);
+        Assert.Equal("123", participant.UserId);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Gradebook.Queries;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Application.Reports.Queries;
@@ -135,22 +136,10 @@ public sealed class GenerateCourseGradesReportQueryHandler(
             FullName: participant.FullName,
             LastAccessAt: participant.LastAccessAt,
             TotalGrade: item.GradeRaw,
-            TotalGradeMax: item.GradeMax,
-            TotalGradePercentage: ResolvePercentage(item),
+            TotalGradeMax: GradebookMappingHelper.ResolveGradeMax(item),
+            TotalGradePercentage: GradebookMappingHelper.ResolvePercentage(item),
             TotalGradeFormatted: item.GradeFormatted,
             Status: item.GradeRaw.HasValue ? "com_nota" : "sem_nota");
-
-    private static decimal? ResolvePercentage(GradebookItem item)
-    {
-        if (item.PercentageFormatted.HasValue)
-        {
-            return item.PercentageFormatted;
-        }
-
-        return item.GradeRaw.HasValue && item.GradeMax is > 0m
-            ? Math.Round(item.GradeRaw.Value / item.GradeMax.Value * 100m, 2, MidpointRounding.AwayFromZero)
-            : null;
-    }
 
     private static CourseGradeReportStudentRow WithoutGrade(CourseParticipantSummary participant) => new(
         StudentId: participant.UserId,

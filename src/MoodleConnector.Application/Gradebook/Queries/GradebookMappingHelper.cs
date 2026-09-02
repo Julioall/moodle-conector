@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using MoodleConnector.Application.Abstractions;
 
 namespace MoodleConnector.Application.Gradebook.Queries;
@@ -22,7 +24,7 @@ internal static class GradebookMappingHelper
             ItemType: item.ItemType,
             ItemModule: item.ItemModule,
             GradeRaw: item.GradeRaw,
-            GradeMax: item.GradeMax,
+            GradeMax: ResolveGradeMax(item),
             PercentageFormatted: percentage,
             BelowMinimum: belowMinimum,
             Feedback: item.Feedback);
@@ -40,7 +42,7 @@ internal static class GradebookMappingHelper
         }
 
         var gradeMin = item.GradeMin ?? 0m;
-        var gradeMax = item.GradeMax;
+        var gradeMax = ResolveGradeMax(item);
         if (!item.GradeRaw.HasValue || !gradeMax.HasValue || gradeMax.Value <= gradeMin)
         {
             return null;
@@ -77,4 +79,94 @@ internal static class GradebookMappingHelper
 
     internal static bool IsDerivedReportActivityItem(GradebookItem item) =>
         IsActivityItem(item) && !IsOptionalRecoveryItem(item);
+
+    /// <summary>
+    /// Activities such as SCORM and course materials can have gradebook
+    /// entries without representing an assignment that a student must submit.
+    /// Only known evaluative modules participate in pending/grade indicators.
+    /// Unknown activity types are intentionally excluded rather than guessed.
+    /// </summary>
+    internal static bool IsEvaluativeReportActivityItem(GradebookItem item)
+    {
+        if (!IsDerivedReportActivityItem(item))
+        {
+            return false;
+        }
+
+        return IsAssignmentModule(item.ItemModule) ||
+            IsAssignmentModule(item.ItemType) ||
+            IsKnownEvaluativeModule(item.ItemModule) ||
+            IsKnownEvaluativeModule(item.ItemType);
+    }
+
+    internal static bool IsConfirmedPending(GradebookItem item) =>
+        IsEvaluativeReportActivityItem(item) &&
+        !item.GradeRaw.HasValue &&
+        !item.GradedDateSubmitted.HasValue &&
+        !item.GradedDateGraded.HasValue;
+
+    internal static bool IsAwaitingGrading(GradebookItem item) =>
+        IsEvaluativeReportActivityItem(item) &&
+        !item.GradeRaw.HasValue &&
+        (item.GradedDateSubmitted.HasValue || item.GradedDateGraded.HasValue);
+
+    /// <summary>
+    /// Moodle normally returns grademax, but scale/older Moodle responses can
+    /// omit it while still exposing a percentage or a formatted "raw / max".
+    /// Preserve the supplied value and derive a numeric maximum only when the
+    /// payload contains enough information to do so.
+    /// </summary>
+    internal static decimal? ResolveGradeMax(GradebookItem item)
+    {
+        if (item.GradeMax is { } explicitMax && explicitMax > 0m)
+        {
+            return explicitMax;
+        }
+
+        if (item.GradeRaw is { } raw && item.PercentageFormatted is { } percentage &&
+            percentage > 0m)
+        {
+            var gradeMin = item.GradeMin ?? 0m;
+            var inferred = gradeMin + (raw - gradeMin) * 100m / percentage;
+            if (inferred > gradeMin)
+            {
+                return Math.Round(inferred, 4, MidpointRounding.AwayFromZero);
+            }
+        }
+
+        var formatted = item.GradeFormatted;
+        if (!string.IsNullOrWhiteSpace(formatted))
+        {
+            var parts = Regex.Split(formatted, @"\s*(?:/|\\|\bde\b)\s*", RegexOptions.IgnoreCase);
+            if (parts.Length >= 2 &&
+                TryParseDecimal(parts[^1], out var parsedMax) && parsedMax > 0m)
+            {
+                return parsedMax;
+            }
+        }
+
+        return item.GradeMax is > 0m ? item.GradeMax : null;
+    }
+
+    private static bool IsAssignmentModule(string? value) =>
+        string.Equals(value, "assign", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value, "assignment", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsKnownEvaluativeModule(string? value) => value?.Trim().ToLowerInvariant() switch
+    {
+        "quiz" or "lesson" or "workshop" or "forum" or "choice" or "feedback" or "survey" or "data" or "database" or "glossary" => true,
+        _ => false
+    };
+
+    private static bool TryParseDecimal(string value, out decimal result)
+    {
+        var text = value.Trim();
+        var ptBrFirst = text.Contains(',', StringComparison.Ordinal) &&
+            !text.Contains('.', StringComparison.Ordinal);
+        return ptBrFirst
+            ? decimal.TryParse(text, NumberStyles.Any, CultureInfo.GetCultureInfo("pt-BR"), out result) ||
+              decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out result)
+            : decimal.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out result) ||
+              decimal.TryParse(text, NumberStyles.Any, CultureInfo.GetCultureInfo("pt-BR"), out result);
+    }
 }
