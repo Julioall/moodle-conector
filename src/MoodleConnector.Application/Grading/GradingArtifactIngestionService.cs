@@ -74,7 +74,8 @@ public sealed class GradingArtifactIngestionService(
             }
 
             var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
-            var deferSubmissionExtraction = resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true;
+            var deferSubmissionExtraction = resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true ||
+                resourceFeatures?.Value.LegacySubmissionExtractionEnabled != true;
             var pendingArtifacts = artifacts
                 .Where(artifact => IsPendingDownload(artifact) &&
                     (!deferSubmissionExtraction ||

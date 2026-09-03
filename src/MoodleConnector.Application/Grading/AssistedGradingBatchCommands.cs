@@ -2290,8 +2290,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
     IMoodleAssignmentSettingsGateway settingsGateway,
     IGradingOperationTelemetry? telemetry = null,
     IMoodleResourceGateway? resourceGateway = null,
-    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null,
-    IGradingArtifactIngestionService? artifactIngestionService = null)
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
     : IRequestHandler<PrepareAiGradingBatchQuery, AiGradingBatchPackageResult>
 {
     private const int MaxTextLength = 3000;
@@ -2358,21 +2357,9 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     resourceLinks.Clear();
-                    itemWarnings.Add($"legacy_fallback: resource_failure ({exception.GetType().Name}).");
-
-                    // O worker MCP não extrai anexos antecipadamente. Só faz o
-                    // download legado depois de uma falha real ao registrar o
-                    // resource, mantendo o custo do caminho principal linear.
-                    if (resourceFeatures?.Value.LegacySubmissionExtractionEnabled == true &&
-                        artifactIngestionService is not null)
-                    {
-                        await artifactIngestionService.MaterializeLegacySubmissionFallbackAsync(
-                            batch,
-                            item,
-                            cancellationToken);
-                        artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
-                        itemWarnings.Add("legacy_fallback: extração sob demanda acionada após falha de resource.");
-                    }
+                    throw new InvalidOperationException(
+                        $"Nao foi possivel registrar os anexos da submissao como MCP Resource ({exception.GetType().Name}).",
+                        exception);
                 }
             }
             else

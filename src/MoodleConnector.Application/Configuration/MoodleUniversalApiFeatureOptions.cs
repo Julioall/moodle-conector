@@ -12,7 +12,7 @@ public sealed class MoodleUniversalApiFeatureOptions
     // the resource gateway is enabled for an explicitly approved rollout.
     public bool McpResourceSubmissionDeliveryEnabled { get; init; }
 
-    public bool LegacySubmissionExtractionEnabled { get; init; } = true;
+    public bool LegacySubmissionExtractionEnabled { get; init; }
 
     public bool McpResourceZipEnabled { get; init; }
 

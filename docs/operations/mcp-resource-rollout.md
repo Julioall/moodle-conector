@@ -15,7 +15,7 @@
 4. Depois de uma leitura bem-sucedida de resources e revisão humana, ativar `McpGradingDraftEnabled` para a mesma coorte.
 5. Ativar `McpGradingWriteEnabled` somente depois de confirmar preview, hash, confirmação humana e readback no ambiente de teste.
 
-Nunca habilitar as três flags para toda a base no mesmo deploy. `LegacySubmissionExtractionEnabled` deve permanecer `true` durante toda a estabilização.
+O fluxo direto por MCP Resource é o padrão. `LegacySubmissionExtractionEnabled` deve permanecer `false`; habilite-o apenas como exceção operacional temporária e explicitamente controlada.
 
 ## Métricas e alertas
 
