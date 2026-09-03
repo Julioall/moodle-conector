@@ -1,6 +1,8 @@
 using System.Text.Json;
 using MediatR;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
@@ -279,6 +281,49 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("mod_assign_save_grade", auditLog.MoodleFunction);
         Assert.Equal("audit-1", auditLog.CorrelationId);
         Assert.Contains(item.Id.ToString(), auditLog.RequestSanitizedJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_BloqueiaQuandoHashDaSubmissaoMudouAposRevisao()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var resourceId = new string('a', 32);
+        item.RecordSubmissionIntegrity(new string('a', 64), [resourceId]);
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var resources = new FakeMoodleResourceRepository([
+            new MoodleResource
+            {
+                ResourceId = resourceId,
+                ClientId = "client",
+                ConnectionId = "connection",
+                MoodleAlias = "default",
+                SubmissionId = item.SubmissionId,
+                Filename = "entrega.pdf",
+                MimeType = "application/pdf",
+                Sha256 = new string('c', 64),
+                RemoteFileReference = "https://moodle.example/pluginfile.php/entrega.pdf",
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30)
+            }
+        ]);
+        var resolver = new FakeSubmissionContentHashResolver(new string('b', 64));
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository, fixture.GradingRepository, fixture.Confirmations, fixture.Capabilities,
+            fixture.ExistingGrades, fixture.SubmissionStatuses, fixture.EnrollmentGateway, fixture.AuditLogs,
+            fixture.Mediator, resources, resolver,
+            Options.Create(new MoodleUniversalApiFeatureOptions { McpGradingWriteEnabled = true }));
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.SentItems);
+        Assert.Equal(1, result.FailedItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
+        Assert.Equal("submission_changed_since_review", auditLog.ErrorCode);
     }
 
     [Fact]
@@ -1277,6 +1322,25 @@ public sealed class GradingLaunchCommandHandlerTests
                 status.AssignmentId == assignmentId &&
                 status.StudentId == studentId));
         }
+    }
+
+    private sealed class FakeMoodleResourceRepository(IReadOnlyList<MoodleResource> resources) : IMoodleResourceRepository
+    {
+        public Task RegisterAsync(MoodleResource resource, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<MoodleResource?> FindAsync(string resourceId, CancellationToken cancellationToken) =>
+            Task.FromResult(resources.SingleOrDefault(resource => resource.ResourceId == resourceId));
+        public Task<IReadOnlyList<MoodleResource>> ListBySubmissionAsync(string clientId, string connectionId, long submissionId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MoodleResource>>(resources.Where(resource => resource.SubmissionId == submissionId).ToArray());
+        public Task<bool> ExistsAndNotExpiredAsync(string resourceId, DateTimeOffset now, CancellationToken cancellationToken) =>
+            Task.FromResult(resources.Any(resource => resource.ResourceId == resourceId && resource.RevokedAt is null && resource.ExpiresAt > now));
+        public Task<int> RemoveExpiredAsync(DateTimeOffset now, CancellationToken cancellationToken) => Task.FromResult(0);
+        public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FakeSubmissionContentHashResolver(string hash) : ISubmissionContentHashResolver
+    {
+        public Task<SubmissionContentHashSnapshot> ResolveAsync(string userExternalId, string assignmentId, string studentId, long submissionId, IReadOnlyCollection<string> attachmentHashes, CancellationToken cancellationToken) =>
+            Task.FromResult(new SubmissionContentHashSnapshot(hash, 0, DateTimeOffset.UtcNow, attachmentHashes.Count));
     }
 
     private sealed class FakeAuditLogRepository : IMoodleAuditLogRepository

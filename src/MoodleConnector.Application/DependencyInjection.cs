@@ -38,6 +38,7 @@ public static class DependencyInjection
         services.AddSingleton<GradingBatchChannel>();
         services.AddScoped<GradingItemProcessor>();
         services.AddScoped<IGradingArtifactIngestionService, GradingArtifactIngestionService>();
+        services.AddScoped<ISubmissionContentHashResolver, MoodleSubmissionContentHashResolver>();
         services.AddScoped<IGradingBatchOrchestrator, BackgroundGradingBatchOrchestrator>();
         services.AddScoped<IGradingContextBuilder, GradingContextBuilder>();
         services.AddHostedService<GradingBatchWorkerService>();

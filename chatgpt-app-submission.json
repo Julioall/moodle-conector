@@ -582,6 +582,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "get_submission_grading_package": {
+      "annotations": {
+        "title": "Get Submission Grading Package",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "get_submission_status": {
       "annotations": {
         "title": "Get Submission Status",

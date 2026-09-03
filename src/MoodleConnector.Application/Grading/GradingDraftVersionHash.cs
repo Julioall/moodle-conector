@@ -17,6 +17,7 @@ public static class GradingDraftVersionHash
             item.FinalFeedback ?? string.Empty,
             item.TeacherDecision ?? string.Empty,
             item.ReviewNotes ?? string.Empty,
+            item.SubmissionContentHash ?? string.Empty,
             item.ReviewStatus.ToString(),
             item.CommitStatus.ToString(),
             item.UpdatedAt.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));

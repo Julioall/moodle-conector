@@ -1,5 +1,7 @@
 using MediatR;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Courses;
 using MoodleConnector.Application.Grading;
 using MoodleConnector.Application.Submissions;
@@ -343,6 +345,7 @@ public sealed class PendingGradingRunCommandHandlerTests
                         [new AiGradingCriterionInput("C1", "Criterio", 10m, 8m, AiGradingCriterionSource.FormalRubric, "Evidencia", null, false, false, [])],
                         [],
                         [],
+                        [],
                         .9m,
                         new GradingExtractionSummary("succeeded", 1, false, 5, 5, null),
                         new GradingEvidenceCoverage(1, 1, 1, 1, 5, 5, false)))]),
@@ -448,6 +451,26 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Null(Assert.Single(saved.UpdatedItems!).SuggestedGrade);
     }
 
+    [Fact]
+    public async Task PrepareAiBatch_UsesMcpResourcesWithoutLeakingExtractedText()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(new GradingArtifact(Guid.NewGuid(), item.Id, "submission_file", "entrega.pdf", "application/pdf", "aa", 12, "succeeded", "texto legado que nao deve vazar", null, DateTimeOffset.UtcNow, "https://moodle.example/pluginfile.php/1/entrega.pdf"), CancellationToken.None);
+        var sut = new PrepareAiGradingBatchQueryHandler(repository, new RunCurrentUserContext("teacher-1"), new RunAssignmentSettingsGateway(), resourceGateway: new RunResourceGateway(), resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions { McpResourceSubmissionDeliveryEnabled = true }));
+
+        var package = await sut.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None);
+
+        var result = Assert.Single(package.Items);
+        Assert.Equal("mcp_resource", result.ResourceDeliveryMode);
+        Assert.Null(result.ExtractedText);
+        Assert.Equal("moodle://resource/0123456789abcdef0123456789abcdef", Assert.Single(result.Resources!).Uri);
+    }
+
     private sealed class RunCurrentUserContext(string subject) : ICurrentUserContext
     {
         public string Subject { get; } = subject;
@@ -481,6 +504,13 @@ public sealed class PendingGradingRunCommandHandlerTests
             string assignmentId,
             CancellationToken cancellationToken) =>
             Task.FromResult<AssignmentSettingsSummary?>(new AssignmentSettingsSummary(assignmentId, maxGrade, "Atividade avaliativa"));
+    }
+
+    private sealed class RunResourceGateway : IMoodleResourceGateway
+    {
+        public Task<MoodleResourceDescriptor> RegisterAsync(MoodleResourceRegistration request, CancellationToken cancellationToken) => Task.FromResult(new MoodleResourceDescriptor("moodle://resource/0123456789abcdef0123456789abcdef", request.Filename, request.MimeType, request.SizeBytes, request.Sha256));
+        public Task<MoodleResourceReadResult> ReadAsync(string uri, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MoodleResourceDescriptor>> ExpandZipAsync(string uri, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MoodleResourceDescriptor>>([]);
     }
 
     private sealed class RunCourseContentsGateway : IMoodleCourseContentsGateway
@@ -715,6 +745,7 @@ public sealed class PendingGradingRunCommandHandlerTests
         private readonly List<AssistedGradingBatch> _batches = [];
         private readonly List<AssistedGradingItem> _items = [];
         private readonly List<GradingContextSnapshotDocument> _snapshots = [];
+        private readonly List<GradingArtifact> _artifacts = [];
 
         public void AddSnapshot(GradingContextSnapshot snapshot) =>
             _snapshots.Add(GradingContextSnapshotDocument.FromSnapshot(snapshot));
@@ -734,7 +765,7 @@ public sealed class PendingGradingRunCommandHandlerTests
             return Task.CompletedTask;
         }
 
-        public Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task AddArtifactAsync(GradingArtifact artifact, CancellationToken cancellationToken) { _artifacts.Add(artifact); return Task.CompletedTask; }
         public Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken) =>
             Task.FromResult(_items.SingleOrDefault(item => item.Id == id));
@@ -753,7 +784,7 @@ public sealed class PendingGradingRunCommandHandlerTests
         public Task<int> CountItemsByBatchAsync(Guid batchId, CancellationToken cancellationToken) =>
             Task.FromResult(_items.Count(item => item.BatchId == batchId));
         public Task<IReadOnlyList<GradingArtifact>> ListArtifactsByItemAsync(Guid gradingItemId, CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<GradingArtifact>>([]);
+            Task.FromResult<IReadOnlyList<GradingArtifact>>(_artifacts.Where(artifact => artifact.GradingItemId == gradingItemId).ToArray());
         public Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(Guid gradingItemId, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<GradingEvidence>>([]);
         public Task<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>> ListLatestContextSnapshotsByItemsAsync(

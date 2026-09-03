@@ -140,6 +140,36 @@ public sealed class AiGradingProposalTests
     }
 
     [Fact]
+    public void Create_IncluiHashDaSubmissaoNaIdentidadeCanonica()
+    {
+        var common = new
+        {
+            ItemId = Guid.NewGuid(),
+            BatchId = Guid.NewGuid(),
+            Scale = new GradingScaleSnapshot(10m, "points", "moodle"),
+            Extraction = CompleteExtraction(),
+            Coverage = CompleteCoverage(),
+            Confidence = new AiGradingConfidenceResult(.9m, [], true)
+        };
+
+        var first = AiGradingProposal.Create(
+            common.ItemId, common.BatchId, 1, "context", 8m, "Feedback", [], [], [], common.Scale,
+            common.Extraction, common.Coverage, common.Confidence, true,
+            submissionContentHash: new string('a', 64));
+        var changed = AiGradingProposal.Create(
+            common.ItemId, common.BatchId, 1, "context", 8m, "Feedback", [], [], [], common.Scale,
+            common.Extraction, common.Coverage, common.Confidence, true,
+            submissionContentHash: new string('b', 64));
+
+        Assert.Equal(new string('a', 64), first.SubmissionContentHash);
+        Assert.NotEqual(first.ProposalHash, changed.ProposalHash);
+        Assert.Throws<ArgumentException>(() => AiGradingProposal.Create(
+            common.ItemId, common.BatchId, 1, "context", 8m, "Feedback", [], [], [], common.Scale,
+            common.Extraction, common.Coverage, common.Confidence, true,
+            submissionContentHash: "not-a-hash"));
+    }
+
+    [Fact]
     public void ConfidenceDiminuiComCoberturaParcialEEscalaDesconhecida()
     {
         var full = AiGradingConfidenceCalculator.Calculate(

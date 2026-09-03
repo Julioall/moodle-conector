@@ -34,7 +34,8 @@ public sealed record AiGradingCriterionProposal(
 public sealed record AiGradingEvidenceReference(
     Guid ArtifactId,
     string? Reference,
-    string? QuoteHash);
+    string? QuoteHash,
+    string? ResourceUri = null);
 
 public sealed record AiGradingConfidenceResult(
     decimal Confidence,
@@ -60,6 +61,7 @@ public sealed class AiGradingProposal
         Guid batchId,
         int version,
         string? contextHash,
+        string? submissionContentHash,
         decimal? suggestedGrade,
         string? feedback,
         IReadOnlyList<AiGradingCriterionProposal> criteria,
@@ -78,6 +80,7 @@ public sealed class AiGradingProposal
         BatchId = batchId;
         Version = version;
         ContextHash = contextHash;
+        SubmissionContentHash = submissionContentHash;
         SuggestedGrade = suggestedGrade;
         Feedback = feedback;
         Criteria = criteria;
@@ -103,6 +106,9 @@ public sealed class AiGradingProposal
     public string SchemaVersion => CurrentSchemaVersion;
 
     public string? ContextHash { get; }
+
+    /// <summary>Identidade da submissão Moodle revisada por esta proposta.</summary>
+    public string? SubmissionContentHash { get; }
 
     public decimal? SuggestedGrade { get; }
 
@@ -148,7 +154,8 @@ public sealed class AiGradingProposal
         AiGradingConfidenceResult confidence,
         bool reviewRequired,
         string status = "ready_for_review",
-        DateTimeOffset? createdAt = null)
+        DateTimeOffset? createdAt = null,
+        string? submissionContentHash = null)
     {
         ArgumentNullException.ThrowIfNull(extraction);
         ArgumentNullException.ThrowIfNull(coverage);
@@ -196,6 +203,7 @@ public sealed class AiGradingProposal
             80,
             nameof(status))!;
         var normalizedContextHash = NormalizeBounded(contextHash, 64, nameof(contextHash));
+        var normalizedSubmissionContentHash = NormalizeSha256(submissionContentHash, nameof(submissionContentHash));
         var normalizedFeedback = NormalizeBounded(feedback, 12000, nameof(feedback));
         if (gradingScale?.MaximumGrade is < 0)
         {
@@ -221,6 +229,7 @@ public sealed class AiGradingProposal
             batchId,
             version,
             normalizedContextHash,
+            normalizedSubmissionContentHash,
             suggestedGrade,
             normalizedFeedback,
             normalizedCriteria,
@@ -269,7 +278,8 @@ public sealed class AiGradingProposal
             batchId,
             version,
             Normalize(contextHash),
-            suggestedGrade: null,
+            null,
+            null,
             NormalizeBounded(feedback, 12000, nameof(feedback)),
             [],
             [],
@@ -301,6 +311,7 @@ public sealed class AiGradingProposal
                 proposal.ItemId,
                 proposal.BatchId,
                 proposal.ContextHash,
+                proposal.SubmissionContentHash,
                 proposal.SuggestedGrade,
                 proposal.Feedback,
                 proposal.Criteria,
@@ -388,7 +399,8 @@ public sealed class AiGradingProposal
                 return new AiGradingEvidenceReference(
                     value.ArtifactId,
                     NormalizeBounded(value.Reference, 500, "reference"),
-                    NormalizeBounded(value.QuoteHash, 128, "quoteHash"));
+                    NormalizeBounded(value.QuoteHash, 128, "quoteHash"),
+                    NormalizeBounded(value.ResourceUri, 512, "resourceUri"));
             })
             .ToArray());
 
@@ -416,6 +428,15 @@ public sealed class AiGradingProposal
     private static string? Normalize(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    private static string? NormalizeSha256(string? value, string parameterName)
+    {
+        var normalized = Normalize(value);
+        if (normalized is null) return null;
+        if (normalized.Length != 64 || !normalized.All(Uri.IsHexDigit))
+            throw new ArgumentException("O hash deve ser SHA-256 hexadecimal.", parameterName);
+        return normalized.ToLowerInvariant();
+    }
+
     private static string NormalizeRequired(string value, string parameterName) =>
         Normalize(value) ?? throw new ArgumentException("O valor e obrigatorio.", parameterName);
 
@@ -425,6 +446,7 @@ public sealed class AiGradingProposal
         Guid ItemId,
         Guid BatchId,
         string? ContextHash,
+        string? SubmissionContentHash,
         decimal? SuggestedGrade,
         string? Feedback,
         IReadOnlyList<AiGradingCriterionProposal> Criteria,

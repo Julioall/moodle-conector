@@ -13,4 +13,13 @@ public interface IGradingArtifactIngestionService
         AssistedGradingBatch batch,
         AssistedGradingItem item,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Materializa apenas os anexos da submissão quando o caminho MCP não pode
+    /// ser usado. Não deve ser chamado no caminho normal de MCP Resources.
+    /// </summary>
+    Task MaterializeLegacySubmissionFallbackAsync(
+        AssistedGradingBatch batch,
+        AssistedGradingItem item,
+        CancellationToken cancellationToken);
 }

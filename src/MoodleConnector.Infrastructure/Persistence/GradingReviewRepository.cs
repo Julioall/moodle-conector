@@ -242,6 +242,10 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         return dbContext.GradingItems.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
     }
 
+    public Task<AssistedGradingItem?> FindItemBySubmissionAsync(long submissionId, CancellationToken cancellationToken) =>
+        dbContext.GradingItems.OrderByDescending(item => item.UpdatedAt)
+            .FirstOrDefaultAsync(item => item.SubmissionId == submissionId, cancellationToken);
+
     public async Task<IReadOnlyDictionary<Guid, AssistedGradingItem>> GetItemsAsync(
         IReadOnlyCollection<Guid> ids,
         CancellationToken cancellationToken)

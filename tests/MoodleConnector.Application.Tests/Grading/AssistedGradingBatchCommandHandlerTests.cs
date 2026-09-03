@@ -399,6 +399,62 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task IngestionService_ComMcpAtivo_AdiaExtracaoAteFallbackExplicito()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var fileGateway = new FakeSubmissionFileGateway();
+        var extraction = new FakeDocumentExtractionService();
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            includeRubric: false,
+            includeSubmissionFiles: true,
+            includeCourseMaterials: false);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(), item.Id, "submission_file", "entrega.txt", "text/plain",
+                Sha256: null, SizeBytes: 31, ExtractionStatus.Pending, ExtractedTextRef: null,
+                SummaryRef: "pending_ingestion", DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/entrega.txt"),
+            CancellationToken.None);
+
+        var sut = new GradingArtifactIngestionService(
+            repository,
+            new FakeAssignmentSubmissionsGateway(),
+            new FakeCourseContentsGateway(),
+            fileGateway,
+            extraction,
+            Options.Create(new GradingLimitsOptions()),
+            NullLogger<GradingArtifactIngestionService>.Instance,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
+
+        await sut.IngestPendingAsync(batch, item, CancellationToken.None);
+
+        var deferred = Assert.Single(repository.Artifacts);
+        Assert.Equal(ExtractionStatus.Pending, deferred.ExtractionStatus);
+        Assert.Null(deferred.ExtractedTextRef);
+        Assert.NotNull(deferred.SourceUrl);
+        Assert.Empty(fileGateway.DownloadedFileUrls);
+        Assert.Empty(extraction.Filenames);
+
+        await sut.MaterializeLegacySubmissionFallbackAsync(batch, item, CancellationToken.None);
+
+        var materialized = Assert.Single(repository.Artifacts);
+        Assert.Equal(ExtractionStatus.Succeeded, materialized.ExtractionStatus);
+        Assert.Equal("Texto extraido real da submissao.", materialized.ExtractedTextRef);
+        Assert.NotEmpty(fileGateway.DownloadedFileUrls);
+    }
+
+    [Fact]
     public async Task IngestionService_RetentaLeituraDeContextoTransitóriaAntesDeCriarArtifacts()
     {
         var repository = new FakeGradingReviewRepository();

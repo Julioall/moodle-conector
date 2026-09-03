@@ -46,6 +46,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<PendingMoodleAction> PendingMoodleActions => Set<PendingMoodleAction>();
     public DbSet<ConfirmedMoodleAction> ConfirmedMoodleActions => Set<ConfirmedMoodleAction>();
     public DbSet<MoodleAuditLog> MoodleAuditLogs => Set<MoodleAuditLog>();
+    public DbSet<MoodleResource> MoodleResources => Set<MoodleResource>();
     public DbSet<PlatformRequestMetricEntity> PlatformRequestMetrics => Set<PlatformRequestMetricEntity>();
     public DbSet<MoodleUserLink> MoodleUserLinks => Set<MoodleUserLink>();
     public DbSet<AssistedGradingBatch> GradingBatches => Set<AssistedGradingBatch>();
@@ -547,6 +548,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         item.Property(x => x.IdempotencyKey).HasMaxLength(64);
         item.Property(x => x.ContextHash).HasMaxLength(64);
         item.Property(x => x.ContextStatus).HasMaxLength(32);
+        item.Property(x => x.SubmissionContentHash).HasMaxLength(64);
+        item.Property(x => x.SubmissionResourceIdsJson).HasColumnType("jsonb");
         item.Property(x => x.LeaseOwner).HasMaxLength(200);
         item.Property(x => x.LastErrorCode).HasMaxLength(120);
         item.HasOne<AssistedGradingBatch>()
@@ -577,6 +580,29 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         artifact.HasIndex(x => x.GradingItemId);
         artifact.HasIndex(x => x.Sha256).HasFilter("\"Sha256\" IS NOT NULL");
 
+        var moodleResource = modelBuilder.Entity<MoodleResource>();
+        moodleResource.ToTable("moodle_resource");
+        moodleResource.HasKey(x => x.ResourceId);
+        moodleResource.Property(x => x.ResourceId).HasMaxLength(32);
+        moodleResource.Property(x => x.ClientId).HasMaxLength(64).IsRequired();
+        moodleResource.Property(x => x.ConnectionId).HasMaxLength(64).IsRequired();
+        moodleResource.Property(x => x.MoodleAlias).HasMaxLength(64).IsRequired();
+        moodleResource.Property(x => x.OwnerSubject).HasMaxLength(200).IsRequired();
+        moodleResource.Property(x => x.ResourceType).HasMaxLength(80).IsRequired();
+        moodleResource.Property(x => x.ContextId).HasMaxLength(128);
+        moodleResource.Property(x => x.Component).HasMaxLength(128);
+        moodleResource.Property(x => x.FileArea).HasMaxLength(128);
+        moodleResource.Property(x => x.ItemId).HasMaxLength(128);
+        moodleResource.Property(x => x.Filename).HasMaxLength(512).IsRequired();
+        moodleResource.Property(x => x.MimeType).HasMaxLength(160).IsRequired();
+        moodleResource.Property(x => x.Sha256).HasMaxLength(64);
+        moodleResource.Property(x => x.RemoteFileReference).HasMaxLength(2000).IsRequired();
+        moodleResource.Property(x => x.ParentResourceId).HasMaxLength(32);
+        moodleResource.Property(x => x.InlineContent).HasColumnType("bytea");
+        moodleResource.HasIndex(x => new { x.ClientId, x.ConnectionId, x.ExpiresAt });
+        moodleResource.HasIndex(x => x.ExpiresAt);
+        moodleResource.HasIndex(x => x.ParentResourceId).HasFilter("\"ParentResourceId\" IS NOT NULL");
+
         var evidence = modelBuilder.Entity<GradingEvidence>();
         evidence.ToTable("grading_evidence");
         evidence.HasKey(x => x.Id);
@@ -606,6 +632,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         proposal.HasKey(x => x.Id);
         proposal.Property(x => x.SchemaVersion).HasMaxLength(32).IsRequired();
         proposal.Property(x => x.ContextHash).HasMaxLength(64);
+        proposal.Property(x => x.SubmissionContentHash).HasMaxLength(64);
         proposal.Property(x => x.ProposalHash).HasMaxLength(64).IsRequired();
         proposal.Property(x => x.Status).HasMaxLength(80).IsRequired();
         proposal.Property(x => x.Confidence).HasPrecision(5, 4).IsRequired();

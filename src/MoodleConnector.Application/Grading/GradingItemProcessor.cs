@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Application.Grading;
@@ -13,7 +15,8 @@ public sealed class GradingItemProcessor(
     IGradingContextBuilder contextBuilder,
     IGradingAnalysisService analysisService,
     ILogger<GradingItemProcessor> logger,
-    IGradingContextSnapshotStore? snapshotStore = null)
+    IGradingContextSnapshotStore? snapshotStore = null,
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
 {
     public async Task ProcessItemAsync(
         AssistedGradingItem item,
@@ -71,6 +74,24 @@ public sealed class GradingItemProcessor(
         var readableText = FirstReadableText(context);
         if (string.IsNullOrWhiteSpace(readableText))
         {
+            if (resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true)
+            {
+                var hasDeferredSubmissionResource = (await repository.ListArtifactsByItemAsync(item.Id, cancellationToken))
+                    .Any(artifact =>
+                        string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase) &&
+                        artifact.ExtractionStatus == ExtractionStatus.Pending &&
+                        !string.IsNullOrWhiteSpace(artifact.SourceUrl));
+                if (hasDeferredSubmissionResource)
+                {
+                    // A pré-validação local não interpreta a entrega quando o
+                    // modo MCP está ativo. O modelo fará isso a partir do
+                    // arquivo original, através do resource_link.
+                    item.MarkAwaitingAiAnalysis(
+                        "Entrega pendente de leitura via MCP Resource; extração textual legado não foi executada.");
+                    return;
+                }
+            }
+
             var blockerReason = context.Blockers.FirstOrDefault(b =>
                 b.Contains("Submissão sem conteúdo legível", StringComparison.OrdinalIgnoreCase) ||
                 b.Contains("Submissão não disponível", StringComparison.OrdinalIgnoreCase))

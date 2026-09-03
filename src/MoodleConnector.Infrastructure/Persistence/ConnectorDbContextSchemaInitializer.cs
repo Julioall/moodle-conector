@@ -58,6 +58,10 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "051_grading_display_metadata.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "052_professional_tasks_and_agenda.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "053_professional_reference_null_uniqueness.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "054_moodle_resources.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "055_moodle_resource_zip_children.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "056_grading_submission_integrity.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "057_moodle_resource_owner_subject.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

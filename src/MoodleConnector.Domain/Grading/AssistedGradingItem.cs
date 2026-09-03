@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace MoodleConnector.Domain.Grading;
 
 public sealed class AssistedGradingItem
@@ -73,6 +75,16 @@ public sealed class AssistedGradingItem
     public string? ContextHash { get; private set; }
 
     public string? ContextStatus { get; private set; }
+
+    /// <summary>
+    /// Hash determinístico da entrega Moodle efetivamente revisada. Ele não
+    /// contém o conteúdo do aluno; é calculado com hashes dos anexos,
+    /// texto online, tentativa e data de modificação.
+    /// </summary>
+    public string? SubmissionContentHash { get; private set; }
+
+    /// <summary>IDs opacos dos resources que compõem o hash da submissão.</summary>
+    public string? SubmissionResourceIdsJson { get; private set; }
 
     /// <summary>
     /// Identificador efêmero do worker que está processando este item.
@@ -184,6 +196,55 @@ public sealed class AssistedGradingItem
         Status = GradingItemStatus.AwaitingAiAnalysis;
         CommitStatus = GradingCommitStatus.NotReady;
         UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void RecordSubmissionIntegrity(
+        string submissionContentHash,
+        IReadOnlyCollection<string> resourceIds)
+    {
+        if (string.IsNullOrWhiteSpace(submissionContentHash) ||
+            submissionContentHash.Trim().Length != 64 ||
+            !submissionContentHash.Trim().All(Uri.IsHexDigit))
+        {
+            throw new ArgumentException("O hash da submissao deve ser SHA-256 hexadecimal.", nameof(submissionContentHash));
+        }
+
+        var normalizedIds = resourceIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim().ToLowerInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedIds.Length > 100 ||
+            normalizedIds.Any(id => id.Length != 32 || !id.All(Uri.IsHexDigit)))
+        {
+            throw new ArgumentException("Os resources da submissao devem ser IDs opacos validos.", nameof(resourceIds));
+        }
+
+        SubmissionContentHash = submissionContentHash.Trim().ToLowerInvariant();
+        SubmissionResourceIdsJson = JsonSerializer.Serialize(normalizedIds);
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public IReadOnlyList<string> GetSubmissionResourceIds()
+    {
+        if (string.IsNullOrWhiteSpace(SubmissionResourceIdsJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            return (JsonSerializer.Deserialize<string[]>(SubmissionResourceIdsJson) ?? [])
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim().ToLowerInvariant())
+                .Where(id => id.Length == 32 && id.All(Uri.IsHexDigit))
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     public void MarkAnalysisFailed(string error)

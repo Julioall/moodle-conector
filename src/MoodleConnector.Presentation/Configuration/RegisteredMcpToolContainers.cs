@@ -37,6 +37,7 @@ public static class RegisteredMcpToolContainers
         typeof(MoodleAssignmentSubmissionsTools),
         typeof(MoodlePendingSubmissionsTools),
         typeof(MoodleGradingTools),
+        typeof(MoodleSubmissionGradingPackageTools),
         typeof(MoodleGradebookTools),
         typeof(MoodleStudentPerformanceTools),
         typeof(MoodleAccessMonitoringTools),

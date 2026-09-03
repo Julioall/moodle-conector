@@ -4,8 +4,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using MediatR;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.PendingActions;
 using MoodleConnector.Application.Tools;
@@ -37,7 +39,8 @@ public sealed record GradingLaunchPreviewItem(
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("grade")] decimal? Grade,
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
-    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null,
+    [property: JsonPropertyName("submissionContentHash")] string? SubmissionContentHash = null);
 
 public sealed record ConfirmMoodleBatchLaunchCommand(
     Guid PendingActionId,
@@ -69,7 +72,8 @@ public sealed record GradingLaunchPayloadItem(
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
     [property: JsonPropertyName("attemptNumber")] int? AttemptNumber,
     [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
-    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null,
+    [property: JsonPropertyName("submissionContentHash")] string? SubmissionContentHash = null);
 
 public sealed record AssignmentExistingGrade(
     string AssignmentId,
@@ -326,7 +330,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.FinalFeedback ?? string.Empty,
             item.AttemptNumber,
             GradingDraftVersionHash.Compute(item),
-            item.ContextHash);
+            item.ContextHash,
+            item.SubmissionContentHash);
     }
 
     private static GradingLaunchPreviewItem ToPreviewItem(AssistedGradingItem item)
@@ -337,7 +342,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             item.FinalGrade,
             item.FinalFeedback ?? string.Empty,
-            item.ContextHash);
+            item.ContextHash,
+            item.SubmissionContentHash);
     }
 
     private static bool HasVersionedContext(AssistedGradingItem item) =>
@@ -363,7 +369,10 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     IMoodleAssignmentSubmissionStatusGateway submissionStatusGateway,
     IMoodleParticipantsGateway participantsGateway,
     IMoodleAuditLogRepository auditLogs,
-    IMediator mediator)
+    IMediator mediator,
+    IMoodleResourceRepository? resourceRepository = null,
+    ISubmissionContentHashResolver? submissionContentHashResolver = null,
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
     : IRequestHandler<ConfirmMoodleBatchLaunchCommand, ConfirmMoodleBatchLaunchResult>
 {
     private const string CommitToolName = "confirmar_lancamento_lote_moodle";
@@ -496,6 +505,27 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     },
                     errorCode: "grading_draft_version_mismatch",
                     errorMessage: message,
+                    cancellationToken);
+                continue;
+            }
+
+            var integrityFailure = await ValidateSubmissionIntegrityAsync(
+                userExternalId,
+                item,
+                payloadItem,
+                cancellationToken);
+            if (integrityFailure is not null)
+            {
+                item.MarkCommitFailed(integrityFailure.Message);
+                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, integrityFailure.Message));
+                await RecordCommitAuditAsync(
+                    action,
+                    payload.BatchJobId,
+                    payloadItem,
+                    "commit_blocked",
+                    responseSummary: new { item.CommitStatus, item.SubmissionContentHash },
+                    errorCode: integrityFailure.ErrorCode,
+                    errorMessage: integrityFailure.Message,
                     cancellationToken);
                 continue;
             }
@@ -766,6 +796,72 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         !string.IsNullOrWhiteSpace(item.ContextStatus) &&
         !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) &&
         !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<CapabilityValidationFailure?> ValidateSubmissionIntegrityAsync(
+        string userExternalId,
+        AssistedGradingItem item,
+        GradingLaunchPayloadItem payloadItem,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(item.SubmissionContentHash))
+        {
+            // Lotes legados não possuem um hash de submissão. O caminho MCP
+            // sempre o sela no draft e, portanto, não alcança esta exceção.
+            return null;
+        }
+
+        if (resourceFeatures?.Value.McpGradingWriteEnabled != true)
+        {
+            return new CapabilityValidationFailure(
+                "O lancamento Moodle para drafts MCP esta desabilitado pela configuracao de rollout.",
+                "mcp_grading_write_disabled");
+        }
+
+        if (item.SubmissionId is not long submissionId ||
+            resourceRepository is null ||
+            submissionContentHashResolver is null)
+        {
+            return new CapabilityValidationFailure(
+                "A integridade da submissao revisada nao pode ser revalidada antes do lancamento.",
+                "submission_integrity_validation_unavailable");
+        }
+
+        try
+        {
+            var hashes = new List<string>();
+            foreach (var resourceId in item.GetSubmissionResourceIds())
+            {
+                var resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
+                if (resource is null || resource.IsExpired(DateTimeOffset.UtcNow) ||
+                    resource.SubmissionId != submissionId || string.IsNullOrWhiteSpace(resource.Sha256))
+                {
+                    return new CapabilityValidationFailure(
+                        "Um resource usado na revisao expirou ou nao pode ser validado. Gere um novo draft antes de lancar.",
+                        "submission_integrity_resource_unavailable");
+                }
+                hashes.Add(resource.Sha256);
+            }
+
+            var current = await submissionContentHashResolver.ResolveAsync(
+                userExternalId,
+                payloadItem.AssignmentId,
+                payloadItem.StudentId,
+                submissionId,
+                hashes,
+                cancellationToken);
+            return string.Equals(current.Hash, item.SubmissionContentHash, StringComparison.Ordinal)
+                ? null
+                : new CapabilityValidationFailure(
+                    "A submissao foi alterada desde a revisao. Gere um novo draft e uma nova previa antes de lancar.",
+                    "submission_changed_since_review");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new CapabilityValidationFailure(
+                "Nao foi possivel revalidar a integridade atual da submissao antes do lancamento.",
+                "submission_integrity_validation_failed");
+        }
+    }
 
     private async Task<ExistingGradeValidationResult> GetExistingGradeValidationAsync(
         string userExternalId,

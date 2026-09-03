@@ -428,7 +428,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
             CurrentFeedback: existingGrade?.Feedback,
             GradeMax: gradebookItem?.GradeMax ?? existingGrade?.GradeMax,
-            EvaluationState: state);
+            EvaluationState: state,
+            OnlineText: submission.OnlineText);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter)

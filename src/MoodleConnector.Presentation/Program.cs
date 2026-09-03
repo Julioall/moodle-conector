@@ -582,7 +582,8 @@ var mcpServerBuilder = builder.Services
 // The same explicit catalog drives MCP registration and metadata registration.
 mcpServerBuilder
     .WithTools((IEnumerable<Type>)RegisteredMcpToolContainers.All, JsonSerializerOptions.Default)
-    .WithResources<MoodleGradingReviewAppResources>();
+    .WithResources<MoodleGradingReviewAppResources>()
+    .WithResources<MoodleSubmissionResources>();
 
 // ToolMetadataRegistry was pre-populated and registered above; do not build temporary providers here.
 

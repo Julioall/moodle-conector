@@ -639,9 +639,11 @@ public sealed class MoodleGradingTools(
             AuditId: null,
             DateTimeOffset.UtcNow);
 
+        var content = new List<ContentBlock> { new TextContentBlock { Text = BuildPrepareAiBatchNarration(data) } };
+        content.AddRange(data.Items.SelectMany(item => item.Resources ?? []).Select(link => new ResourceLinkBlock { Uri = link.Uri, Name = link.Name, MimeType = link.MimeType, Size = link.Size }));
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = BuildPrepareAiBatchNarration(data) }],
+            Content = content,
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };

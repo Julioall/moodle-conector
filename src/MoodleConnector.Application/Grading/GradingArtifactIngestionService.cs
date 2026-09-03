@@ -22,7 +22,8 @@ public sealed class GradingArtifactIngestionService(
     IDocumentExtractionService extractionService,
     IOptions<GradingLimitsOptions> limits,
     ILogger<GradingArtifactIngestionService> logger,
-    IGradingOperationTelemetry? telemetry = null) : IGradingArtifactIngestionService
+    IGradingOperationTelemetry? telemetry = null,
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null) : IGradingArtifactIngestionService
 {
     private static readonly HashSet<string> AllowedExtractionMimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -73,7 +74,12 @@ public sealed class GradingArtifactIngestionService(
             }
 
             var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
-            var pendingArtifacts = artifacts.Where(IsPendingDownload).ToArray();
+            var deferSubmissionExtraction = resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true;
+            var pendingArtifacts = artifacts
+                .Where(artifact => IsPendingDownload(artifact) &&
+                    (!deferSubmissionExtraction ||
+                     !string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
             if (pendingArtifacts.Length > 1)
             {
                 await MaterializeConcurrentlyAsync(
@@ -105,6 +111,42 @@ public sealed class GradingArtifactIngestionService(
                 itemCount: 1,
                 bytes: 0);
         }
+    }
+
+    public async Task MaterializeLegacySubmissionFallbackAsync(
+        AssistedGradingBatch batch,
+        AssistedGradingItem item,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(item);
+
+        var userExternalId = batch.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture)
+            ?? batch.CreatedBySubject;
+        var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+        var pendingSubmissionArtifacts = artifacts
+            .Where(artifact =>
+                string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase) &&
+                IsPendingDownload(artifact))
+            .ToArray();
+
+        if (pendingSubmissionArtifacts.Length == 0)
+        {
+            return;
+        }
+
+        logger.LogInformation(
+            "Ativando fallback legado sob demanda para {ArtifactCount} arquivo(s) da submissao {SubmissionId}.",
+            pendingSubmissionArtifacts.Length,
+            item.SubmissionId);
+
+        if (pendingSubmissionArtifacts.Length > 1)
+        {
+            await MaterializeConcurrentlyAsync(pendingSubmissionArtifacts, userExternalId, cancellationToken);
+            return;
+        }
+
+        await MaterializeAsync(pendingSubmissionArtifacts[0], userExternalId, cancellationToken);
     }
 
     private async Task MaterializeConcurrentlyAsync(

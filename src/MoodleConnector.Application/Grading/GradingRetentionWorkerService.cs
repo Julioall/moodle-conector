@@ -49,11 +49,16 @@ public sealed class GradingRetentionWorkerService(
             }
 
             var redacted = await store.RedactExpiredArtifactTextAsync(cutoff, cancellationToken);
-            if (redacted > 0)
+            var resources = scope.ServiceProvider.GetService<IMoodleResourceRepository>();
+            var expiredResources = resources is null
+                ? 0
+                : await resources.RemoveExpiredAsync(DateTimeOffset.UtcNow, cancellationToken);
+            if (redacted > 0 || expiredResources > 0)
             {
                 logger.LogInformation(
-                    "Retenção de correção assistida aplicada a {Count} artifact(s); cutoff={Cutoff}.",
+                    "Retenção de correção assistida aplicada a {Count} artifact(s) e {ResourceCount} resource(s); cutoff={Cutoff}.",
                     redacted,
+                    expiredResources,
                     cutoff);
             }
         }

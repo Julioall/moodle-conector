@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Application.Grading;
@@ -14,6 +15,7 @@ public sealed record AiGradingProposalInput(
     [property: JsonPropertyName("feedback")] string? Feedback,
     [property: JsonPropertyName("criteria")] IReadOnlyList<AiGradingCriterionInput>? Criteria,
     [property: JsonPropertyName("evidence")] IReadOnlyList<AiGradingEvidenceInput>? Evidence,
+    [property: JsonPropertyName("resourceUris")] IReadOnlyList<string>? ResourceUris,
     [property: JsonPropertyName("gaps")] IReadOnlyList<string>? Gaps,
     [property: JsonPropertyName("modelConfidence")] decimal? ModelConfidence,
     [property: JsonPropertyName("extraction")] GradingExtractionSummary? Extraction,
@@ -35,7 +37,8 @@ public sealed record AiGradingCriterionInput(
 public sealed record AiGradingEvidenceInput(
     [property: JsonPropertyName("artifactId")] Guid ArtifactId,
     [property: JsonPropertyName("reference")] string? Reference,
-    [property: JsonPropertyName("quoteHash")] string? QuoteHash);
+    [property: JsonPropertyName("quoteHash")] string? QuoteHash,
+    [property: JsonPropertyName("resourceUri")] string? ResourceUri = null);
 
 public static class AiGradingProposalFactory
 {
@@ -44,7 +47,8 @@ public static class AiGradingProposalFactory
         AiGradingProposalInput input,
         decimal? authoritativeMaxGrade,
         int version,
-        string? fallbackFeedback = null)
+        string? fallbackFeedback = null,
+        string? submissionContentHash = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentNullException.ThrowIfNull(input);
@@ -84,7 +88,12 @@ public static class AiGradingProposalFactory
                 criterion.ArtifactIds ?? []))
             .ToArray();
         var evidence = (input.Evidence ?? [])
-            .Select(value => new AiGradingEvidenceReference(value.ArtifactId, value.Reference, value.QuoteHash))
+            .Select(value =>
+            {
+                if (!string.IsNullOrWhiteSpace(value.ResourceUri) && !MoodleResourceUri.TryParse(value.ResourceUri, out _))
+                    throw new InvalidOperationException("A evidencia aponta para uma URI de resource invalida.");
+                return new AiGradingEvidenceReference(value.ArtifactId, value.Reference, value.QuoteHash, value.ResourceUri);
+            })
             .ToArray();
 
         var confidence = AiGradingConfidenceCalculator.Calculate(
@@ -117,6 +126,7 @@ public static class AiGradingProposalFactory
             coverage,
             confidence,
             reviewRequired: true,
-            status: string.IsNullOrWhiteSpace(input.Status) ? "ready_for_review" : input.Status!);
+            status: string.IsNullOrWhiteSpace(input.Status) ? "ready_for_review" : input.Status!,
+            submissionContentHash: submissionContentHash);
     }
 }

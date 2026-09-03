@@ -109,6 +109,8 @@ public static class DependencyInjection
         services.AddScoped<IGradingProposalStore>(sp => sp.GetRequiredService<GradingReviewRepository>());
         services.AddScoped<IGradingRetentionStore>(sp => sp.GetRequiredService<GradingReviewRepository>());
         services.AddScoped<IMoodleAuditLogRepository, MoodleAuditLogRepository>();
+        services.AddScoped<IMoodleResourceRepository, MoodleResourceRepository>();
+        services.AddScoped<IMoodleResourceGateway, MoodleResourceGateway>();
         services.AddScoped<IUserMemoryRepository, UserMemoryRepository>();
         services.AddScoped<IUserMemoryDocumentRepository, UserMemoryDocumentRepository>();
         services.AddScoped<IAuthorizationAuditService, AuthorizationAuditService>();

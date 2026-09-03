@@ -8,6 +8,17 @@ public sealed class GradingLimitsOptions
 
     public int MaxFileSizeMb { get; init; } = 25;
 
+    /// <summary>Maximum binary size returned by a single MCP resource read.</summary>
+    public int MaxResourceBytes { get; init; } = 25 * 1024 * 1024;
+
+    public int ResourceExpirationMinutes { get; init; } = 30;
+
+    public int MaxConcurrentResourceDownloads { get; init; } = 4;
+
+    public int MaxZipEntries { get; init; } = 100;
+
+    public long MaxExtractedZipBytes { get; init; } = 100 * 1024 * 1024;
+
     public int MaxFilesPerSubmission { get; init; } = 10;
 
     public int MaxTextCharsPerSubmission { get; init; } = 120_000;

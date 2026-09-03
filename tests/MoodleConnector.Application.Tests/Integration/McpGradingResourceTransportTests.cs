@@ -40,6 +40,12 @@ public sealed class McpGradingResourceTransportTests : IClassFixture<McpTestWebA
         Assert.DoesNotContain(resources!, resource =>
             resource?["uri"]?.GetValue<string>() == "ui://grading-review/app.html");
 
+        var templates = await SendAsync(client, "resources/templates/list", new JsonObject(), "resource-templates", sessionId);
+        var resourceTemplates = templates.Body?["result"]?["resourceTemplates"]?.AsArray();
+        Assert.NotNull(resourceTemplates);
+        Assert.Contains(resourceTemplates!, template =>
+            template?["uriTemplate"]?.GetValue<string>() == "moodle://resource/{resourceId}");
+
         var read = await SendAsync(client, "resources/read", new JsonObject
         {
             ["uri"] = "ui://grading-review/v2/app.html"

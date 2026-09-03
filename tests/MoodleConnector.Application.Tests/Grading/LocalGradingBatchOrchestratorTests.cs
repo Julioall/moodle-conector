@@ -132,6 +132,34 @@ public sealed class LocalGradingBatchOrchestratorTests
     }
 
     [Fact]
+    public async Task ProcessItem_ComResourcePendenteEMcpAtivo_AguardaIaSemExtrairTexto()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(new GradingArtifact(
+            Guid.NewGuid(), item.Id, "submission_file", "entrega.pdf", "application/pdf", null, 120,
+            ExtractionStatus.Pending, null, "pending_ingestion", DateTimeOffset.UtcNow,
+            "https://moodle.example/pluginfile.php/entrega.pdf"), CancellationToken.None);
+
+        var processor = new GradingItemProcessor(
+            new FakeGradingContextBuilder(repository),
+            new FakeGradingAnalysisService(),
+            NullLogger<GradingItemProcessor>.Instance,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
+
+        await processor.ProcessItemAsync(item, repository, CancellationToken.None);
+
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, item.Status);
+        Assert.Contains("MCP Resource", item.PrivateNotesToTeacher, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EnqueueAsync_ComSubmissaoCriteriosEValor_MarcaAwaitingAi()
     {
         var repository = new FakeGradingReviewRepository();

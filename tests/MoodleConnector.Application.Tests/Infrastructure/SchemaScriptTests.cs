@@ -402,4 +402,47 @@ public sealed class SchemaScriptTests
         Assert.Contains("VALUES (48, 'deferred grading artifact source references'", sql, StringComparison.Ordinal);
         Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task MoodleResourceScript_DeveCriarRegistroOpacoComExpiracao()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "054_moodle_resources.sql");
+        Assert.True(File.Exists(scriptPath));
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("CREATE TABLE IF NOT EXISTS moodle_resource", sql, StringComparison.Ordinal);
+        Assert.Contains("\"RemoteFileReference\" character varying(2000) NOT NULL", sql, StringComparison.Ordinal);
+        Assert.Contains("CK_moodle_resource_expiry", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_moodle_resource_Client_Connection_Expiry", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (54, 'opaque Moodle MCP resource registry'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SubmissionIntegrityScript_DevePersistirHashEResourcesDoDraft()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "056_grading_submission_integrity.sql");
+        Assert.True(File.Exists(scriptPath));
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("SubmissionContentHash", sql, StringComparison.Ordinal);
+        Assert.Contains("SubmissionResourceIdsJson", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_ai_proposal_SubmissionContentHash", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MoodleResourceOwnerScript_DeveVincularResourceAoUsuarioCriador()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var sql = await File.ReadAllTextAsync(Path.Combine(
+            assemblyDirectory, "Database", "Scripts", "057_moodle_resource_owner_subject.sql"));
+
+        Assert.Contains("OwnerSubject", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_moodle_resource_OwnerSubject_Expiry", sql, StringComparison.Ordinal);
+    }
 }

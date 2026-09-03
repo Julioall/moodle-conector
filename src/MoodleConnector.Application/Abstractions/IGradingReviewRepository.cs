@@ -25,6 +25,9 @@ public interface IGradingReviewRepository
 
     Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken);
 
+    Task<AssistedGradingItem?> FindItemBySubmissionAsync(long submissionId, CancellationToken cancellationToken) =>
+        Task.FromResult<AssistedGradingItem?>(null);
+
     async Task<IReadOnlyDictionary<Guid, AssistedGradingItem>> GetItemsAsync(
         IReadOnlyCollection<Guid> ids,
         CancellationToken cancellationToken)

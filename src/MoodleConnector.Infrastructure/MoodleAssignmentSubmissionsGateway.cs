@@ -263,6 +263,7 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
         var fileCount = 0;
         var hasOnlineText = false;
         var files = new List<AssignmentSubmissionFile>();
+        var onlineTextParts = new List<string>();
         foreach (var plugin in dto.Plugins ?? [])
         {
             foreach (var fileArea in plugin.FileAreas ?? [])
@@ -281,6 +282,13 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
             hasOnlineText = hasOnlineText ||
                 string.Equals(plugin.Type, "onlinetext", StringComparison.OrdinalIgnoreCase) &&
                 (plugin.EditorFields?.Count ?? 0) > 0;
+            if (string.Equals(plugin.Type, "onlinetext", StringComparison.OrdinalIgnoreCase))
+            {
+                onlineTextParts.AddRange((plugin.EditorFields ?? [])
+                    .Select(field => GetString(field, "text"))
+                    .Where(text => !string.IsNullOrWhiteSpace(text))
+                    .Select(text => text!.Trim()));
+            }
         }
 
         return new AssignmentSubmissionRecord(
@@ -293,7 +301,8 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
             ToNullableInt(dto.AttemptNumber),
             fileCount,
             hasOnlineText,
-            files);
+            files,
+            OnlineText: onlineTextParts.Count == 0 ? null : string.Join("\n", onlineTextParts));
     }
 
     private static AssignmentSubmissionFile? ToSubmissionFile(JsonElement file)

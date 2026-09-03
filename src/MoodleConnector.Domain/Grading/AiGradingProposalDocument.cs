@@ -22,6 +22,8 @@ public sealed class AiGradingProposalDocument
 
     public string? ContextHash { get; private init; }
 
+    public string? SubmissionContentHash { get; private init; }
+
     public string ProposalHash { get; private init; } = string.Empty;
 
     public string Status { get; private init; } = string.Empty;
@@ -45,6 +47,7 @@ public sealed class AiGradingProposalDocument
             Version = proposal.Version,
             SchemaVersion = proposal.SchemaVersion,
             ContextHash = proposal.ContextHash,
+            SubmissionContentHash = proposal.SubmissionContentHash,
             ProposalHash = proposal.ProposalHash,
             Status = proposal.Status,
             Confidence = proposal.Confidence,

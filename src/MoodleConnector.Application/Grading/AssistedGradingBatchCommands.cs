@@ -2265,13 +2265,24 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("extractedText")] string? ExtractedText,
     [property: JsonPropertyName("textTruncated")] bool TextTruncated,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
-    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null,
+    [property: JsonPropertyName("resourceDeliveryMode")] string ResourceDeliveryMode = "legacy_extracted_text",
+    [property: JsonPropertyName("resources")] IReadOnlyList<AiGradingResourceLink>? Resources = null);
+
+public sealed record AiGradingResourceLink(
+    [property: JsonPropertyName("uri")] string Uri,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("mimeType")] string MimeType,
+    [property: JsonPropertyName("size")] long? Size);
 
 public sealed class PrepareAiGradingBatchQueryHandler(
     IGradingReviewRepository repository,
     ICurrentUserContext currentUser,
     IMoodleAssignmentSettingsGateway settingsGateway,
-    IGradingOperationTelemetry? telemetry = null)
+    IGradingOperationTelemetry? telemetry = null,
+    IMoodleResourceGateway? resourceGateway = null,
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null,
+    IGradingArtifactIngestionService? artifactIngestionService = null)
     : IRequestHandler<PrepareAiGradingBatchQuery, AiGradingBatchPackageResult>
 {
     private const int MaxTextLength = 3000;
@@ -2317,7 +2328,48 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         foreach (var item in eligibleItems)
         {
             var itemWarnings = new List<string>();
-            var artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
+            IReadOnlyList<GradingArtifact> artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
+            var resourceLinks = new List<AiGradingResourceLink>();
+            var useMcpResources = resourceGateway is not null && resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true;
+            var deliveryMode = "legacy_extracted_text";
+            if (useMcpResources)
+            {
+                var submissionArtifacts = artifacts.Where(artifact => artifact.ArtifactType == "submission_file").ToArray();
+                try
+                {
+                    if (submissionArtifacts.Length == 0 || submissionArtifacts.Any(artifact => string.IsNullOrWhiteSpace(artifact.SourceUrl) || string.IsNullOrWhiteSpace(artifact.Filename)))
+                        throw new InvalidOperationException("source_reference_unavailable");
+                    foreach (var artifact in submissionArtifacts)
+                    {
+                        var descriptor = await resourceGateway!.RegisterAsync(new MoodleResourceRegistration("submission_attachment", artifact.Filename!, artifact.MimeType ?? "application/octet-stream", artifact.SourceUrl!, item.CourseId, item.AssignmentId, item.SubmissionId, item.MoodleUserId, SizeBytes: artifact.SizeBytes, Sha256: artifact.Sha256), cancellationToken);
+                        resourceLinks.Add(new AiGradingResourceLink(descriptor.Uri, descriptor.Filename, descriptor.MimeType, descriptor.SizeBytes));
+                    }
+                    deliveryMode = "mcp_resource";
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    resourceLinks.Clear();
+                    itemWarnings.Add($"legacy_fallback: resource_failure ({exception.GetType().Name}).");
+
+                    // O worker MCP não extrai anexos antecipadamente. Só faz o
+                    // download legado depois de uma falha real ao registrar o
+                    // resource, mantendo o custo do caminho principal linear.
+                    if (resourceFeatures?.Value.LegacySubmissionExtractionEnabled == true &&
+                        artifactIngestionService is not null)
+                    {
+                        await artifactIngestionService.MaterializeLegacySubmissionFallbackAsync(
+                            batch,
+                            item,
+                            cancellationToken);
+                        artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+                        itemWarnings.Add("legacy_fallback: extração sob demanda acionada após falha de resource.");
+                    }
+                }
+            }
+            else
+            {
+                itemWarnings.Add("legacy_fallback: feature_flag.");
+            }
 
             // Texto da submissão (combina múltiplos arquivos se houver)
             var allSubmissionTexts = artifacts
@@ -2334,7 +2386,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 _ => string.Join("\n\n---\n\n", allSubmissionTexts)
             };
 
-            if (string.IsNullOrWhiteSpace(combinedSubmission))
+            if (deliveryMode != "mcp_resource" && string.IsNullOrWhiteSpace(combinedSubmission))
             {
                 itemWarnings.Add("Texto da entrega nao disponivel. Verifique se os anexos foram extraidos.");
             }
@@ -2345,6 +2397,22 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 combinedSubmission = combinedSubmission[..MaxTextLength];
                 textTruncated = true;
                 itemWarnings.Add($"Texto da entrega truncado a {MaxTextLength} caracteres.");
+            }
+            if (deliveryMode == "mcp_resource")
+            {
+                combinedSubmission = null;
+                textTruncated = false;
+                itemWarnings.Add("Entrega fornecida por MCP Resources; leia os arquivos originais antes de propor a correcao.");
+            }
+            else
+            {
+                telemetry?.RecordPhase("grading", "legacy_fallback", itemWarnings.Any(warning => warning.Contains("resource_failure", StringComparison.Ordinal)) ? "resource_failure" : "feature_flag", 0, itemCount: 1);
+                if (resourceFeatures?.Value.LegacySubmissionExtractionEnabled == false)
+                {
+                    combinedSubmission = null;
+                    textTruncated = false;
+                    itemWarnings.Add("Entrega indisponivel: MCP Resource falhou e o fallback legado esta desabilitado.");
+                }
             }
 
             // Falhas de extração como warnings
@@ -2402,7 +2470,9 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 combinedSubmission,
                 textTruncated,
                 itemWarnings,
-                item.ContextHash));
+                item.ContextHash,
+                deliveryMode,
+                resourceLinks));
         }
 
         if (packageItems.Count == 0)
@@ -2587,7 +2657,10 @@ public sealed class SaveAiGradingBatchCommandHandler(
     IMoodleAuditLogRepository auditLogs,
     IMoodleAssignmentSettingsGateway settingsGateway,
     IGradingProposalStore? proposalStore = null,
-    IGradingOperationTelemetry? telemetry = null)
+    IGradingOperationTelemetry? telemetry = null,
+    IMoodleResourceRepository? resourceRepository = null,
+    ISubmissionContentHashResolver? submissionContentHashResolver = null,
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
     : IRequestHandler<SaveAiGradingBatchCommand, SaveAiGradingBatchResult>
 {
     // O contrato atual de salvar_correcoes_ia_lote é legado: não transporta
@@ -2766,12 +2839,72 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     var proposalVersion = proposalStore is null
                         ? input.Proposal.Version
                         : nextProposalVersions.GetValueOrDefault(item.Id, input.Proposal.Version);
+                    string? submissionContentHash = null;
+                    if (resourceFeatures?.Value.McpGradingDraftEnabled == true)
+                    {
+                        if (resourceRepository is null || submissionContentHashResolver is null)
+                            throw new InvalidOperationException("A integridade de draft MCP nao esta configurada.");
+                        if (item.SubmissionId is not long submissionId || moodleUserId is null)
+                            throw new InvalidOperationException("A submissao Moodle nao esta identificada para selar o draft.");
+
+                        var resourceUris = (input.Proposal.ResourceUris ?? [])
+                            .Concat((input.Proposal.Evidence ?? [])
+                                .Select(evidence => evidence.ResourceUri)
+                                .Where(uri => !string.IsNullOrWhiteSpace(uri))
+                                .Select(uri => uri!))
+                            .Distinct(StringComparer.Ordinal)
+                            .ToArray();
+                        var resources = new Dictionary<string, MoodleResource>(StringComparer.Ordinal);
+                        foreach (var uri in resourceUris)
+                        {
+                            if (!MoodleResourceUri.TryParse(uri, out var resourceId))
+                                throw new InvalidOperationException("A proposta aponta para uma URI de resource invalida.");
+                            var resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
+                            if (resource is null || resource.IsExpired(DateTimeOffset.UtcNow) || resource.SubmissionId != item.SubmissionId)
+                                throw new InvalidOperationException("A proposta referencia um resource invalido da submissao.");
+                            if (!string.IsNullOrWhiteSpace(resource.ParentResourceId))
+                            {
+                                resource = await resourceRepository.FindAsync(resource.ParentResourceId, cancellationToken)
+                                    ?? throw new InvalidOperationException("O resource ZIP pai nao esta mais disponivel.");
+                            }
+                            if (resource.IsExpired(DateTimeOffset.UtcNow) || string.IsNullOrWhiteSpace(resource.Sha256))
+                                throw new InvalidOperationException("Todos os resources da proposta devem ser lidos e validados antes de salvar o draft.");
+                            resources[resource.ResourceId] = resource;
+                        }
+
+                        var integrity = await submissionContentHashResolver.ResolveAsync(
+                            moodleUserId.Value.ToString(CultureInfo.InvariantCulture),
+                            item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                            item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
+                            submissionId,
+                            resources.Values.Select(resource => resource.Sha256!).ToArray(),
+                            cancellationToken);
+                        if (resources.Count != integrity.FileCount)
+                            throw new InvalidOperationException("O draft MCP deve vincular todos os anexos originais da submissao.");
+
+                        submissionContentHash = integrity.Hash;
+                        item.RecordSubmissionIntegrity(submissionContentHash, resources.Keys.ToArray());
+                    }
+                    else if (resourceRepository is not null)
+                    {
+                        // Mesmo no modo legado, URIs de evidência são sempre
+                        // verificadas; o ID opaco não é uma autorização.
+                        foreach (var evidence in input.Proposal.Evidence ?? [])
+                        {
+                            if (string.IsNullOrWhiteSpace(evidence.ResourceUri)) continue;
+                            if (!MoodleResourceUri.TryParse(evidence.ResourceUri, out var resourceId)) throw new InvalidOperationException("A evidencia aponta para uma URI de resource invalida.");
+                            var resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
+                            if (resource is null || resource.IsExpired(DateTimeOffset.UtcNow) || resource.SubmissionId != item.SubmissionId)
+                                throw new InvalidOperationException("A evidencia nao esta vinculada a um resource valido da submissao.");
+                        }
+                    }
                     proposal = AiGradingProposalFactory.Create(
                         item,
                         input.Proposal,
                         maxGrade,
                         proposalVersion,
-                        input.Feedback);
+                        input.Feedback,
+                        submissionContentHash);
                     if (proposalStore is not null)
                     {
                         proposalsToPublish.Add(proposal);

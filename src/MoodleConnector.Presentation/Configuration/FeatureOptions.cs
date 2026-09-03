@@ -11,6 +11,11 @@ public sealed class FeatureOptions
     public bool CourseContentWriteEnabled { get; init; }
     public bool UniversalMoodleWriteEnabled { get; init; }
     public bool UniversalMoodleFileDownloadEnabled { get; init; }
+    public bool McpResourceSubmissionDeliveryEnabled { get; init; }
+    public bool LegacySubmissionExtractionEnabled { get; init; } = true;
+    public bool McpResourceZipEnabled { get; init; }
+    public bool McpGradingDraftEnabled { get; init; }
+    public bool McpGradingWriteEnabled { get; init; }
     public bool AppV2Enabled { get; init; }
     /// <summary>Controls rollout of the professional agenda routes and MCP surface.</summary>
     public bool ProfessionalAgendaEnabled { get; init; }
