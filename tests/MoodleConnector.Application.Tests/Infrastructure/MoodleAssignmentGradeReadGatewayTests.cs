@@ -36,6 +36,35 @@ public sealed class MoodleAssignmentGradeReadGatewayTests
         Assert.Equal(-1m, grades["440730"].Grade);
     }
 
+        [Fact]
+        public async Task Preserva_grader_e_timemodified_para_atividade_sem_nota()
+        {
+                var sut = new MoodleAssignmentGradeReadGateway(
+                        Options.Create(new MoodleApiOptions()),
+                        new FakeCredentialsProvider(),
+                        new FakeRestClient("""
+                        {
+                            "assignments": [{
+                                "assignmentid": 117487,
+                                "grades": [
+                                    { "userid": 440752, "grade": "-1.00000", "grader": 317295, "timemodified": 1787075877 },
+                                    { "userid": 440739, "grade": "-1.00000", "grader": -1, "timemodified": 0 }
+                                ]
+                            }]
+                        }
+                        """));
+
+                var grades = await sut.GetExistingGradesAsync(
+                        "teacher-1",
+                        "117487",
+                        ["440752", "440739"],
+                        CancellationToken.None);
+
+                Assert.Equal(317295, grades["440752"].GraderId);
+                Assert.Equal(1787075877, grades["440752"].TimeModified);
+                Assert.Equal(-1, grades["440739"].GraderId);
+        }
+
     private sealed class FakeRestClient(string json) : IMoodleRestClient
     {
         public Task<JsonElement> CallAsync(

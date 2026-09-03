@@ -81,7 +81,9 @@ public sealed record AssignmentExistingGrade(
     decimal? Grade,
     bool HasGrade,
     string? Feedback = null,
-    decimal? GradeMax = null);
+    decimal? GradeMax = null,
+    long? GraderId = null,
+    long? TimeModified = null);
 
 public sealed record AssignmentSubmissionAttemptStatus(
     string AssignmentId,

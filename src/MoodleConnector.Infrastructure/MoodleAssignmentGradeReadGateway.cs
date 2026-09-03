@@ -111,7 +111,9 @@ internal sealed class MoodleAssignmentGradeReadGateway(
                     Feedback: ReadTextProperty(grade, "feedback")
                         ?? ReadTextProperty(grade, "feedbacktext")
                         ?? ReadTextProperty(grade, "feedbackcomments"),
-                    GradeMax: ReadDecimalProperty(grade, "grademax"));
+                    GradeMax: ReadDecimalProperty(grade, "grademax"),
+                    GraderId: ReadLongProperty(grade, "grader"),
+                    TimeModified: ReadLongProperty(grade, "timemodified"));
             }
         }
 
@@ -138,6 +140,9 @@ internal sealed class MoodleAssignmentGradeReadGateway(
             _ => false
         };
     }
+
+    private static long? ReadLongProperty(JsonElement element, string propertyName) =>
+        TryReadLongProperty(element, propertyName, out var value) ? value : null;
 
     private static decimal? ReadDecimalProperty(JsonElement element, string propertyName)
     {

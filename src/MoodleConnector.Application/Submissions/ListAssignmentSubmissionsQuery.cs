@@ -409,7 +409,10 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             GradedDateGraded: gradebookItem?.GradedDateGraded,
             Feedback: gradebookItem?.Feedback ?? existingGrade?.Feedback ?? submission.CurrentFeedback,
             ReviewEvidenceAvailable: gradebook is not null || existingGrades is not null,
-            GradingStatus: submission.GradingStatus));
+            GradingStatus: submission.GradingStatus,
+            GraderId: existingGrade?.GraderId ?? ParseGraderId(gradebookItem?.GraderId),
+            GradeTimeModified: existingGrade?.TimeModified ?? gradebookItem?.GradedDateGraded,
+            SubmissionTimeModified: submission.ModifiedAt?.ToUnixTimeSeconds()));
 
         return new AssignmentSubmissionSummary(
             userId,
@@ -464,6 +467,9 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             string.Equals(item.ItemModule, "assign", StringComparison.OrdinalIgnoreCase) &&
             (string.Equals(item.ItemInstance, assignmentInstanceId, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(item.CourseModuleId, assignmentModuleId, StringComparison.OrdinalIgnoreCase)));
+
+    private static long? ParseGraderId(string? value) =>
+        long.TryParse(value, out var graderId) ? graderId : null;
 
     private static string? ToMoodleSubmissionStatus(AssignmentSubmissionFilter filter)
     {

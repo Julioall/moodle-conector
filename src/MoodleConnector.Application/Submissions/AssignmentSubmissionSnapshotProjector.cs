@@ -250,7 +250,10 @@ public static class AssignmentSubmissionSnapshotProjector
             GradedDateGraded: null,
             Feedback: existingGrade?.Feedback ?? submission.CurrentFeedback,
             ReviewEvidenceAvailable: gradesRead,
-            GradingStatus: submission.GradingStatus));
+            GradingStatus: submission.GradingStatus,
+            GraderId: existingGrade?.GraderId,
+            GradeTimeModified: existingGrade?.TimeModified,
+            SubmissionTimeModified: submission.ModifiedAt?.ToUnixTimeSeconds()));
 
         return new AssignmentSubmissionSummary(
             userId,

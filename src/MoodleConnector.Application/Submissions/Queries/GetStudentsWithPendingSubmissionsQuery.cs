@@ -356,7 +356,10 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                     Feedback: gradebookItem?.Feedback ?? existingGrade?.Feedback ?? record.CurrentFeedback,
                     ReviewEvidenceAvailable: !request.IncludeAwaitingGrading ||
                         gradebooks is not null || feedbackReadyAssignments.Contains(module.InstanceId!),
-                    GradingStatus: record.GradingStatus));
+                    GradingStatus: record.GradingStatus,
+                    GraderId: existingGrade?.GraderId ?? ParseGraderId(gradebookItem?.GraderId),
+                    GradeTimeModified: existingGrade?.TimeModified ?? gradebookItem?.GradedDateGraded,
+                    SubmissionTimeModified: record.ModifiedAt?.ToUnixTimeSeconds()));
                 if (studentMap.ContainsKey(record.UserId))
                 {
                     evaluations.Add(new SubmissionEvaluationItem(
@@ -529,6 +532,9 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             string.Equals(item.ItemModule, "assign", StringComparison.OrdinalIgnoreCase) &&
             (string.Equals(item.ItemInstance, assignmentInstanceId, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(item.CourseModuleId, assignmentModuleId, StringComparison.OrdinalIgnoreCase)));
+
+    private static long? ParseGraderId(string? value) =>
+        long.TryParse(value, out var graderId) ? graderId : null;
 
     private async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>> ReadFeedbackByAssignmentAsync(
         string userExternalId,

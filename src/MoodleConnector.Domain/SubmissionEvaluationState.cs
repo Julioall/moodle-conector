@@ -21,7 +21,10 @@ public sealed record SubmissionEvaluationEvidence(
     long? GradedDateGraded,
     string? Feedback,
     bool ReviewEvidenceAvailable,
-    string? GradingStatus = null);
+    string? GradingStatus = null,
+    long? GraderId = null,
+    long? GradeTimeModified = null,
+    long? SubmissionTimeModified = null);
 
 public static class SubmissionEvaluationStateResolver
 {
@@ -50,6 +53,13 @@ public static class SubmissionEvaluationStateResolver
         }
 
         if (string.Equals(evidence.GradingStatus?.Trim(), "graded", StringComparison.OrdinalIgnoreCase))
+        {
+            return SubmissionEvaluationState.ReviewedWithFeedback;
+        }
+
+        if (evidence.GraderId is > 0 &&
+            (evidence.GradeTimeModified is null || evidence.SubmissionTimeModified is null ||
+             evidence.GradeTimeModified >= evidence.SubmissionTimeModified))
         {
             return SubmissionEvaluationState.ReviewedWithFeedback;
         }

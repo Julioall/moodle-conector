@@ -214,6 +214,40 @@ public sealed class SubmissionEvaluationStateResolverTests
     }
 
     [Fact]
+    public void GraderPositivoEmAtividadeSemNota_DeveSerReviewedWithFeedback()
+    {
+        var state = SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(
+            HasSubmission: true,
+            GradeRaw: null,
+            GradedDateGraded: null,
+            Feedback: null,
+            ReviewEvidenceAvailable: true,
+            GraderId: 317295,
+            GradeTimeModified: 1787075877,
+            SubmissionTimeModified: 1787075000));
+
+        Assert.Equal(SubmissionEvaluationState.ReviewedWithFeedback, state);
+        Assert.False(SubmissionEvaluationStateResolver.NeedsGrading(state));
+    }
+
+    [Fact]
+    public void GraderMenosUmEmAtividadeSemNota_DeveSerAwaitingGrading()
+    {
+        var state = SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(
+            HasSubmission: true,
+            GradeRaw: null,
+            GradedDateGraded: null,
+            Feedback: null,
+            ReviewEvidenceAvailable: true,
+            GraderId: -1,
+            GradeTimeModified: 0,
+            SubmissionTimeModified: 1787221494));
+
+        Assert.Equal(SubmissionEvaluationState.AwaitingGrading, state);
+        Assert.True(SubmissionEvaluationStateResolver.NeedsGrading(state));
+    }
+
+    [Fact]
     public void ArgumentNullException_QuandoEvidenciaEhNull()
     {
         Assert.Throws<ArgumentNullException>(() =>
