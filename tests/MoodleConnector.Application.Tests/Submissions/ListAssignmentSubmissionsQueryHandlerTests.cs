@@ -163,8 +163,9 @@ public class ListAssignmentSubmissionsQueryHandlerTests
 
         Assert.NotNull(result);
         Assert.Null(submissionsGateway.LastStatus);
-        Assert.Equal(3, result!.Total);
+        Assert.Equal(2, result!.Total);
         Assert.All(result.Submissions, submission => Assert.True(submission.NeedsGrading));
+        Assert.DoesNotContain(result.Submissions, submission => submission.UserId == "102");
     }
 
     [Fact]

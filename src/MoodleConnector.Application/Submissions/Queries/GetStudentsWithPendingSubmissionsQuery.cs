@@ -355,7 +355,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                     GradedDateGraded: gradebookItem?.GradedDateGraded,
                     Feedback: gradebookItem?.Feedback ?? existingGrade?.Feedback ?? record.CurrentFeedback,
                     ReviewEvidenceAvailable: !request.IncludeAwaitingGrading ||
-                        gradebooks is not null || feedbackReadyAssignments.Contains(module.InstanceId!)));
+                        gradebooks is not null || feedbackReadyAssignments.Contains(module.InstanceId!),
+                    GradingStatus: record.GradingStatus));
                 if (studentMap.ContainsKey(record.UserId))
                 {
                     evaluations.Add(new SubmissionEvaluationItem(

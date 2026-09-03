@@ -408,7 +408,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             GradeRaw: gradebookItem?.GradeRaw ?? (existingGrade?.HasGrade == true ? existingGrade.Grade : null),
             GradedDateGraded: gradebookItem?.GradedDateGraded,
             Feedback: gradebookItem?.Feedback ?? existingGrade?.Feedback ?? submission.CurrentFeedback,
-            ReviewEvidenceAvailable: gradebook is not null || existingGrades is not null));
+            ReviewEvidenceAvailable: gradebook is not null || existingGrades is not null,
+            GradingStatus: submission.GradingStatus));
 
         return new AssignmentSubmissionSummary(
             userId,

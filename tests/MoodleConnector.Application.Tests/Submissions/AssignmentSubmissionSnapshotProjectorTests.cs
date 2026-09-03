@@ -21,7 +21,7 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
                     "submission-1",
                     "student-1",
                     "submitted",
-                    "notgraded",
+                    "graded",
                     dueAt.AddHours(1),
                     dueAt.AddHours(1),
                     1,
@@ -38,8 +38,8 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
         var notSubmitted = Assert.Single(assignment.Submissions, row => row.UserId == "student-2");
         Assert.True(submitted.Submitted);
         Assert.True(submitted.Late);
-        Assert.True(submitted.NeedsGrading);
-        Assert.Equal(SubmissionEvaluationState.AwaitingGrading, submitted.EvaluationState);
+        Assert.False(submitted.NeedsGrading);
+        Assert.Equal(SubmissionEvaluationState.ReviewedWithFeedback, submitted.EvaluationState);
         Assert.False(notSubmitted.Submitted);
         Assert.False(notSubmitted.NeedsGrading);
     }

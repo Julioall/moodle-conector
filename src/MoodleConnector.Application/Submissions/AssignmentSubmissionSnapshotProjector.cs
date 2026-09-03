@@ -249,7 +249,8 @@ public static class AssignmentSubmissionSnapshotProjector
             GradeRaw: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
             GradedDateGraded: null,
             Feedback: existingGrade?.Feedback ?? submission.CurrentFeedback,
-            ReviewEvidenceAvailable: gradesRead));
+            ReviewEvidenceAvailable: gradesRead,
+            GradingStatus: submission.GradingStatus));
 
         return new AssignmentSubmissionSummary(
             userId,

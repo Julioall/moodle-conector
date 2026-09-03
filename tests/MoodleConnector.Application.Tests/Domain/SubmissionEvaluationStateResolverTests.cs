@@ -199,6 +199,21 @@ public sealed class SubmissionEvaluationStateResolverTests
     }
 
     [Fact]
+    public void StatusGradedSemNota_DeveSerReviewedWithFeedback()
+    {
+        var state = SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(
+            HasSubmission: true,
+            GradeRaw: null,
+            GradedDateGraded: null,
+            Feedback: null,
+            ReviewEvidenceAvailable: false,
+            GradingStatus: "graded"));
+
+        Assert.Equal(SubmissionEvaluationState.ReviewedWithFeedback, state);
+        Assert.False(SubmissionEvaluationStateResolver.NeedsGrading(state));
+    }
+
+    [Fact]
     public void ArgumentNullException_QuandoEvidenciaEhNull()
     {
         Assert.Throws<ArgumentNullException>(() =>

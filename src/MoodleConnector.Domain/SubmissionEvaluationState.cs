@@ -20,7 +20,8 @@ public sealed record SubmissionEvaluationEvidence(
     decimal? GradeRaw,
     long? GradedDateGraded,
     string? Feedback,
-    bool ReviewEvidenceAvailable);
+    bool ReviewEvidenceAvailable,
+    string? GradingStatus = null);
 
 public static class SubmissionEvaluationStateResolver
 {
@@ -44,6 +45,11 @@ public static class SubmissionEvaluationStateResolver
         }
 
         if (evidence.GradedDateGraded.HasValue || !string.IsNullOrWhiteSpace(evidence.Feedback))
+        {
+            return SubmissionEvaluationState.ReviewedWithFeedback;
+        }
+
+        if (string.Equals(evidence.GradingStatus?.Trim(), "graded", StringComparison.OrdinalIgnoreCase))
         {
             return SubmissionEvaluationState.ReviewedWithFeedback;
         }
