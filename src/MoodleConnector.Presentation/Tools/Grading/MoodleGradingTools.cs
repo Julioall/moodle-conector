@@ -1115,7 +1115,8 @@ public sealed class MoodleGradingTools(
                         : AssignmentSubmissionSnapshotProjector.FindAssignment(submissionsSnapshot.Data, assignmentId);
                     if (snapshotItem is { IsComplete: true } &&
                         (filter != AssignmentSubmissionFilter.NeedsGrading ||
-                         snapshotItem.Coverage?.NeedsGradingComplete == true))
+                         snapshotItem.Coverage?.NeedsGradingComplete == true) &&
+                        (!IsFeedbackOnlySnapshot(snapshotItem) || HasPersistedGraderEvidence(snapshotItem)))
                     {
                         submissions = AssignmentSubmissionSnapshotProjector.ToPage(
                             snapshotItem,
@@ -2404,6 +2405,14 @@ public sealed class MoodleGradingTools(
         [property: JsonPropertyName("modifiedAt")] DateTimeOffset? ModifiedAt,
         [property: JsonPropertyName("fileCount")] int FileCount,
         [property: JsonPropertyName("hasOnlineText")] bool HasOnlineText);
+
+    private static bool IsFeedbackOnlySnapshot(AssignmentSubmissionsSnapshotItem item) =>
+        item.MaxGrade is 0 or null && item.IsGradable != true;
+
+    private static bool HasPersistedGraderEvidence(AssignmentSubmissionsSnapshotItem item) =>
+        item.Submissions
+            .Where(submission => submission.Submitted)
+            .All(submission => submission.CurrentGraderId.HasValue);
 
     private static bool TryParseSubmissionFilter(string? value, out AssignmentSubmissionFilter filter)
     {

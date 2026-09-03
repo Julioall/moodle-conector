@@ -288,7 +288,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
                         // distinguish an empty grade from Moodle's -1 marker.
                         if (item is { IsComplete: true } &&
                             (filter != AssignmentSubmissionFilter.NeedsGrading ||
-                             item.Coverage?.NeedsGradingComplete == true))
+                             item.Coverage?.NeedsGradingComplete == true) &&
+                            (!IsFeedbackOnlySnapshot(item) || HasPersistedGraderEvidence(item)))
                         {
                             submissionsPage = AssignmentSubmissionSnapshotProjector.ToPage(
                                 item,
@@ -597,6 +598,14 @@ public sealed class MoodleAssignmentSubmissionsTools(
 
         return string.Join(", ", labels);
     }
+
+    private static bool IsFeedbackOnlySnapshot(AssignmentSubmissionsSnapshotItem item) =>
+        item.MaxGrade is 0 or null && item.IsGradable != true;
+
+    private static bool HasPersistedGraderEvidence(AssignmentSubmissionsSnapshotItem item) =>
+        item.Submissions
+            .Where(submission => submission.Submitted)
+            .All(submission => submission.CurrentGraderId.HasValue);
 
     private static bool TryParseFilter(string? value, out AssignmentSubmissionFilter filter)
     {
