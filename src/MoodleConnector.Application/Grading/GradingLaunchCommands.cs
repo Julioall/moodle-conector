@@ -352,8 +352,9 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         item.ContextVersion is > 0 &&
         !string.IsNullOrWhiteSpace(item.ContextHash) &&
         !string.IsNullOrWhiteSpace(item.ContextStatus) &&
-        !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) &&
-        !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
+        (!string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase) &&
+            (!string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) ||
+             !string.IsNullOrWhiteSpace(item.SubmissionContentHash)));
 
     private static bool NeedsContextIdentityRestore(AssistedGradingItem item) =>
         item.ContextVersion is null or <= 0 ||
@@ -796,8 +797,9 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         item.ContextVersion is > 0 &&
         !string.IsNullOrWhiteSpace(item.ContextHash) &&
         !string.IsNullOrWhiteSpace(item.ContextStatus) &&
-        !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) &&
-        !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
+        (!string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase) &&
+            (!string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) ||
+             !string.IsNullOrWhiteSpace(item.SubmissionContentHash)));
 
     private async Task<CapabilityValidationFailure?> ValidateSubmissionIntegrityAsync(
         string userExternalId,
