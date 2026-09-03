@@ -386,7 +386,11 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             fileGateway,
             extraction,
             Options.Create(new GradingLimitsOptions()),
-            NullLogger<GradingArtifactIngestionService>.Instance);
+            NullLogger<GradingArtifactIngestionService>.Instance,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                LegacySubmissionExtractionEnabled = true
+            }));
 
         await sut.IngestPendingAsync(batch, item, CancellationToken.None);
 
