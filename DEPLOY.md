@@ -110,6 +110,9 @@ Variables opcionais:
 - `MCP_REQUIRE_JWT` - padrão `true`
 - `MCP_REQUIRE_API_KEY` - padrão `false`
 - `FEATURES_MESSAGES_WRITE_ENABLED`, `FEATURES_SCHEDULED_MESSAGES_ENABLED`, `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED`, `FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED` e `FEATURES_COURSE_CONTENT_WRITE_ENABLED` - padrão `true`; defina explicitamente a política de escrita aprovada para o ambiente
+- `FEATURES_MCP_RESOURCE_SUBMISSION_DELIVERY_ENABLED` - padrão `true` no deploy; habilita a entrega de submissões por MCP Resources
+- `FEATURES_LEGACY_SUBMISSION_EXTRACTION_ENABLED` - padrão `true`; mantém o fallback legado disponível
+- `FEATURES_MCP_RESOURCE_ZIP_ENABLED`, `FEATURES_MCP_GRADING_DRAFT_ENABLED` e `FEATURES_MCP_GRADING_WRITE_ENABLED` - padrão `false`; habilite somente após validação da coorte correspondente
 - `OAUTH_CLIENT_ID` - padrão `moodle`
 - `OAUTH_SCOPE_NAME` - padrão `moodle-mcp-audience`
 - `OAUTH_REQUIRE_HTTPS_METADATA` - padrão `true`
