@@ -840,6 +840,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         item.SetDraft(8m, 0.8m, "Rascunho.");
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Snapshots.Add(Snapshot(item));
         await repository.SaveChangesAsync(CancellationToken.None);
         var sut = new GetAssistedGradingBatchStatusQueryHandler(
             repository,
@@ -1090,6 +1091,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         item.SetDraft(8m, 0.8m, "Rascunho.");
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Snapshots.Add(Snapshot(item));
         var sut = new UpdateAssistedGradingDraftCommandHandler(
             repository,
             new FakeCurrentUserContext("teacher-1"),
@@ -1128,6 +1130,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         item.SetDraft(null, 0.8m, "Rascunho de feedback.");
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Snapshots.Add(Snapshot(item));
         var sut = new UpdateAssistedGradingDraftCommandHandler(
             repository,
             new FakeCurrentUserContext("teacher-1"),
@@ -1161,6 +1164,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         item.ApplyTeacherReview(8.5m, "Feedback final revisado.", "teacher-1", 321, "approved", "Ajustei a nota pela conclusao.");
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Snapshots.Add(Snapshot(item));
         var sut = new UpdateAssistedGradingDraftCommandHandler(
             repository,
             new FakeCurrentUserContext("teacher-1"),
@@ -1192,6 +1196,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         item.ApplyTeacherReview(8.5m, "Feedback final revisado.", "teacher-1", 321, "approved", "Ajustei a nota.");
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
+        repository.Snapshots.Add(Snapshot(item));
         var sut = new UpdateAssistedGradingDraftCommandHandler(
             repository,
             new FakeCurrentUserContext("teacher-1"),
@@ -1320,6 +1325,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public List<GradingArtifact> Artifacts { get; } = [];
 
         public List<GradingEvidence> Evidence { get; } = [];
+        public List<GradingContextSnapshotDocument> Snapshots { get; } = [];
 
         public int SaveChangesCount { get; private set; }
 
@@ -1414,6 +1420,12 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                 .ToArray());
         }
 
+        public Task<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>> ListLatestContextSnapshotsByItemsAsync(IReadOnlyCollection<Guid> gradingItemIds, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>>(Snapshots
+                .Where(snapshot => gradingItemIds.Contains(snapshot.GradingItemId))
+                .GroupBy(snapshot => snapshot.GradingItemId)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(snapshot => snapshot.Version).First()));
+
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
             GradingBatchStatus status, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());
@@ -1423,6 +1435,29 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             return Task.CompletedTask;
         }
     }
+
+    private static GradingContextSnapshotDocument Snapshot(AssistedGradingItem item) =>
+        GradingContextSnapshotDocument.FromSnapshot(GradingContextSnapshot.Create(
+            item.Id,
+            item.BatchId,
+            new MoodleAssignmentReference(item.CourseId, item.AssignmentId, null),
+            new MoodleSubmissionReference(item.SubmissionId ?? 1),
+            new MoodleUserReference(item.MoodleUserId),
+            item.AttemptNumber,
+            1,
+            $"Tarefa {item.AssignmentId}",
+            null,
+            [],
+            null,
+            new GradingScaleSnapshot(10m, null, null),
+            [],
+            [],
+            new GradingExtractionSummary("succeeded", 0, false, 0, 0, null),
+            new GradingEvidenceCoverage(0, 0, 0, 0, 0, 0, false),
+            null,
+            [],
+            [],
+            false));
 
     private sealed class FakeCurrentUserContext(string subject, IReadOnlyCollection<string>? scopes = null) : ICurrentUserContext
     {

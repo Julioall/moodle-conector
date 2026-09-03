@@ -75,6 +75,12 @@ public sealed class UpdateAssistedGradingDraftsBatchCommandHandler(
                      throw new InvalidOperationException($"Item {input.GradingItemId} nao pertence a este lote.");
                 }
 
+                if (!GradingContextIdentity.EnsureVersioned(item, snapshotsDict.GetValueOrDefault(item.Id)))
+                {
+                    throw new InvalidOperationException(
+                        "O contexto de correcao nao esta disponivel. Gere novamente o contexto antes de revisar o item.");
+                }
+
                 var currentDraftVersionHash = GradingDraftVersionHash.Compute(item);
                 if (!string.IsNullOrWhiteSpace(input.ExpectedDraftVersionHash) &&
                     !string.Equals(currentDraftVersionHash, input.ExpectedDraftVersionHash, StringComparison.Ordinal))

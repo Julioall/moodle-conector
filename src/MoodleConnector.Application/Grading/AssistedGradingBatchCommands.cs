@@ -1332,6 +1332,15 @@ public sealed class UpdateAssistedGradingDraftCommandHandler(
             ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
 
+        var contextSnapshot = await repository.ListLatestContextSnapshotsByItemsAsync(
+            [item.Id],
+            cancellationToken);
+        if (!GradingContextIdentity.EnsureVersioned(item, contextSnapshot.GetValueOrDefault(item.Id)))
+        {
+            throw new InvalidOperationException(
+                "O contexto de correcao nao esta disponivel. Gere novamente o contexto antes de revisar o item.");
+        }
+
         var currentDraftVersionHash = GradingDraftVersionHash.Compute(item);
         if (!string.IsNullOrWhiteSpace(request.ExpectedDraftVersionHash) &&
             !string.Equals(currentDraftVersionHash, request.ExpectedDraftVersionHash, StringComparison.Ordinal))

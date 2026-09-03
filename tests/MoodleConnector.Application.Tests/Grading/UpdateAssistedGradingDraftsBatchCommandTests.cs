@@ -18,6 +18,7 @@ public sealed class UpdateAssistedGradingDraftsBatchCommandTests
         second.SetDraft(null, 0m, "Rascunho 2");
         repository.Batches.Add(batch);
         repository.Items.AddRange([first, second]);
+        repository.Snapshots.AddRange([Snapshot(first), Snapshot(second)]);
 
         var audit = new FakeAuditRepository();
         var result = await CreateHandler(repository, audit).Handle(
@@ -60,7 +61,7 @@ public sealed class UpdateAssistedGradingDraftsBatchCommandTests
 
         Assert.Equal(0, result.SuccessCount);
         Assert.Equal(1, result.FailureCount);
-        Assert.Contains("snapshot", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("contexto", result.Failures[0].Message, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(GradingReviewStatus.NotReviewed, item.ReviewStatus);
         Assert.Equal(0, repository.SaveChangesCount);
     }
@@ -75,6 +76,7 @@ public sealed class UpdateAssistedGradingDraftsBatchCommandTests
         item.ApplyTeacherReview(null, "Feedback original", "teacher-1", 321, "approved");
         repository.Batches.Add(batch);
         repository.Items.Add(item);
+        repository.Snapshots.Add(Snapshot(item));
 
         var result = await CreateHandler(repository, new FakeAuditRepository()).Handle(
             new UpdateAssistedGradingDraftsBatchCommand(
@@ -101,6 +103,7 @@ public sealed class UpdateAssistedGradingDraftsBatchCommandTests
     {
         public List<AssistedGradingBatch> Batches { get; } = [];
         public List<AssistedGradingItem> Items { get; } = [];
+        public List<GradingContextSnapshotDocument> Snapshots { get; } = [];
         public int SaveChangesCount { get; private set; }
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken) { Batches.Add(batch); return Task.CompletedTask; }
@@ -113,10 +116,38 @@ public sealed class UpdateAssistedGradingDraftsBatchCommandTests
         public Task<int> CountItemsByBatchAsync(Guid batchId, CancellationToken cancellationToken) => Task.FromResult(Items.Count(item => item.BatchId == batchId));
         public Task<IReadOnlyList<GradingArtifact>> ListArtifactsByItemAsync(Guid gradingItemId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<GradingArtifact>>([]);
         public Task<IReadOnlyList<GradingEvidence>> ListEvidenceByItemAsync(Guid gradingItemId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<GradingEvidence>>([]);
+        public Task<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>> ListLatestContextSnapshotsByItemsAsync(IReadOnlyCollection<Guid> gradingItemIds, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, GradingContextSnapshotDocument>>(Snapshots
+                .Where(snapshot => gradingItemIds.Contains(snapshot.GradingItemId))
+                .GroupBy(snapshot => snapshot.GradingItemId)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(snapshot => snapshot.Version).First()));
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(GradingBatchStatus status, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>([]);
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(string createdBySubject, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>([]);
         public Task SaveChangesAsync(CancellationToken cancellationToken) { SaveChangesCount++; return Task.CompletedTask; }
     }
+
+    private static GradingContextSnapshotDocument Snapshot(AssistedGradingItem item) =>
+        GradingContextSnapshotDocument.FromSnapshot(GradingContextSnapshot.Create(
+            item.Id,
+            item.BatchId,
+            new MoodleAssignmentReference(item.CourseId, item.AssignmentId, null),
+            new MoodleSubmissionReference(item.SubmissionId ?? 1),
+            new MoodleUserReference(item.MoodleUserId),
+            item.AttemptNumber,
+            1,
+            $"Tarefa {item.AssignmentId}",
+            null,
+            [],
+            null,
+            new GradingScaleSnapshot(10m, null, null),
+            [],
+            [],
+            new GradingExtractionSummary("succeeded", 0, false, 0, 0, null),
+            new GradingEvidenceCoverage(0, 0, 0, 0, 0, 0, false),
+            null,
+            [],
+            [],
+            false));
 
     private sealed class FakeCurrentUser(string subject) : ICurrentUserContext
     {
