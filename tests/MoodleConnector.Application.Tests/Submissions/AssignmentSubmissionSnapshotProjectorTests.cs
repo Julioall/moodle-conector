@@ -208,7 +208,7 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
             {
                 ["assignment-1"] = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["student-1"] = new("assignment-1", "student-1", 87.5m, true, "Bom trabalho", 100m)
+                    ["student-1"] = new("assignment-1", "student-1", 87.5m, true, "Bom trabalho", 100m, GraderId: 317295, TimeModified: 1787075877)
                 }
             });
 
@@ -220,6 +220,8 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
         Assert.Equal(87.5m, submitted.CurrentGrade);
         Assert.Equal("Bom trabalho", submitted.CurrentFeedback);
         Assert.Equal(100m, submitted.GradeMax);
+        Assert.Equal(317295, submitted.CurrentGraderId);
+        Assert.Equal(1787075877, submitted.CurrentGradeTimeModified);
     }
 
     [Fact]

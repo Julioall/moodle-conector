@@ -433,7 +433,9 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             CurrentFeedback: existingGrade?.Feedback,
             GradeMax: gradebookItem?.GradeMax ?? existingGrade?.GradeMax,
             EvaluationState: state,
-            OnlineText: submission.OnlineText);
+            OnlineText: submission.OnlineText,
+            CurrentGraderId: existingGrade?.GraderId ?? ParseGraderId(gradebookItem?.GraderId),
+            CurrentGradeTimeModified: existingGrade?.TimeModified ?? gradebookItem?.GradedDateGraded);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter)

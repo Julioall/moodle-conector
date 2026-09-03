@@ -156,7 +156,10 @@ public static class AssignmentSubmissionSnapshotProjector
             summary.FileCount,
             summary.HasOnlineText,
             Files: summary.Files ?? [],
-            CurrentFeedback: summary.CurrentFeedback);
+            CurrentFeedback: summary.CurrentFeedback,
+            OnlineText: summary.OnlineText,
+            CurrentGraderId: summary.CurrentGraderId,
+            CurrentGradeTimeModified: summary.CurrentGradeTimeModified);
 
     private static IReadOnlyList<AssignmentSubmissionSummary> BuildRows(
         IReadOnlyList<CourseParticipantSummary> participants,
@@ -251,8 +254,8 @@ public static class AssignmentSubmissionSnapshotProjector
             Feedback: existingGrade?.Feedback ?? submission.CurrentFeedback,
             ReviewEvidenceAvailable: gradesRead,
             GradingStatus: submission.GradingStatus,
-            GraderId: existingGrade?.GraderId,
-            GradeTimeModified: existingGrade?.TimeModified,
+            GraderId: existingGrade?.GraderId ?? submission.CurrentGraderId,
+            GradeTimeModified: existingGrade?.TimeModified ?? submission.CurrentGradeTimeModified,
             SubmissionTimeModified: submission.ModifiedAt?.ToUnixTimeSeconds()));
 
         return new AssignmentSubmissionSummary(
@@ -273,7 +276,9 @@ public static class AssignmentSubmissionSnapshotProjector
             CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
             CurrentFeedback: existingGrade?.Feedback,
             GradeMax: existingGrade?.GradeMax,
-            EvaluationState: state);
+            EvaluationState: state,
+            CurrentGraderId: existingGrade?.GraderId,
+            CurrentGradeTimeModified: existingGrade?.TimeModified);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter) =>

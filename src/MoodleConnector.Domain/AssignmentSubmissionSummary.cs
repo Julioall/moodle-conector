@@ -44,7 +44,9 @@ public sealed record AssignmentSubmissionSummary(
     string? CurrentFeedback = null,
     decimal? GradeMax = null,
     SubmissionEvaluationState EvaluationState = SubmissionEvaluationState.Unknown,
-    string? OnlineText = null);
+    string? OnlineText = null,
+    long? CurrentGraderId = null,
+    long? CurrentGradeTimeModified = null);
 
 public sealed record AssignmentSubmissionFile(
     string Filename,
@@ -64,4 +66,6 @@ public sealed record AssignmentSubmissionRecord(
     bool HasOnlineText,
     IReadOnlyList<AssignmentSubmissionFile>? Files = null,
     string? CurrentFeedback = null,
-    string? OnlineText = null);
+    string? OnlineText = null,
+    long? CurrentGraderId = null,
+    long? CurrentGradeTimeModified = null);
