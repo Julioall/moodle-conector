@@ -44,7 +44,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
     }
 
     [Fact]
-    public async Task Omits_no_grade_feedback_without_per_submission_reads()
+    public async Task Marks_no_grade_submission_awaiting_when_grade_evidence_is_empty()
     {
         var fixture = new Fixture
         {
@@ -65,14 +65,15 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
             {
                 ["assign-1"] = new("assign-1", 0, "Atividade extra", IsGradable: false),
             },
+            UseGradeRead = true,
         };
 
         var result = await fixture.CreateHandler().Handle(
             new GetStudentsWithPendingSubmissionsQuery("course-1", IncludeAwaitingGrading: true),
             CancellationToken.None);
 
-        Assert.Contains("Atividades sem nota foram omitidas", result.Warning);
-        Assert.Empty(result.AwaitingGrading);
+        Assert.Null(result.Warning);
+        Assert.Single(result.AwaitingGrading);
         Assert.True(result.IsComplete);
     }
 
@@ -115,6 +116,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         var fixture = new Fixture
         {
             Contents = Contents(Module("assign-1", "assign")),
+            UseGradeRead = true,
             Submissions = [new AssignmentSubmissionsBatch(
                 "assign-1",
                 [new AssignmentSubmissionRecord("submission-1", "student-1", "submitted", "notgraded", DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow, 1, 0, false)])]
@@ -152,6 +154,35 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         Assert.Equal(2, result.Students.Count);
         Assert.All(result.Students, student => Assert.Equal("assign-1", Assert.Single(student.PendingAssignments).AssignmentId));
         Assert.True(result.IsComplete);
+    }
+
+    [Fact]
+    public async Task Treats_new_submission_status_as_not_submitted()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(Module("assign-1", "assign")),
+            Submissions = [new AssignmentSubmissionsBatch(
+                "assign-1",
+                [new AssignmentSubmissionRecord(
+                    "submission-1",
+                    "student-1",
+                    "new",
+                    "notgraded",
+                    null,
+                    null,
+                    0,
+                    0,
+                    false)])]
+        };
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery("course-1"),
+            CancellationToken.None);
+
+        var student = Assert.Single(result.Students);
+        Assert.Equal("student-1", student.StudentId);
+        Assert.Equal("assign-1", Assert.Single(student.PendingAssignments).AssignmentId);
     }
 
     [Fact]
@@ -289,6 +320,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         public bool IncludeStudent2 { get; init; }
         public IReadOnlyDictionary<string, AssignmentExistingGrade> Grades { get; init; } =
             new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+        public bool UseGradeRead { get; init; }
         public int FeedbackReads { get; set; }
         public int ParticipantReads { get; set; }
         public int ContentReads { get; set; }
@@ -302,7 +334,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
                 new ContentsGateway(this),
                 new CurrentUserGateway(),
                 new AssignmentSettingsGateway(this),
-                Grades.Count > 0 ? new AssignmentGradeReadGateway(this) : null);
+                Grades.Count > 0 || UseGradeRead ? new AssignmentGradeReadGateway(this) : null);
     }
 
     private sealed class ParticipantsGateway(Fixture fixture) : IMoodleParticipantsGateway

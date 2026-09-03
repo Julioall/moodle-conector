@@ -24,6 +24,9 @@ public sealed record StudentClassCouncilRow(
     IReadOnlyList<string> Recommendations)
 {
     public int AwaitingGradingItemsCount { get; init; }
+    public int NotSubmittedItemsCount { get; init; }
+    public int ReviewedWithFeedbackItemsCount { get; init; }
+    public int GradedItemsCount { get; init; }
 }
 
 public sealed record GenerateClassCouncilReportResult(
@@ -62,7 +65,8 @@ public sealed record GenerateClassCouncilReportQuery(
 public sealed class GenerateClassCouncilReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleGradebookGateway gradebookGateway,
-    IMoodleCurrentUserIdGateway currentUserIdGateway)
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMediator? mediator = null)
     : IRequestHandler<GenerateClassCouncilReportQuery, GenerateClassCouncilReportResult>
 {
     private const string Disclaimer =
@@ -100,6 +104,11 @@ public sealed class GenerateClassCouncilReportQueryHandler(
         }
 
         var rows = new List<StudentClassCouncilRow>();
+        var submissionState = await CourseSubmissionReportState.LoadAsync(
+            mediator,
+            request.CourseId,
+            request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60,
+            cancellationToken);
 
         foreach (var student in participantsPage.Participants)
         {
@@ -141,10 +150,19 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                         belowMinimumItems = [courseTotalItem, ..belowMinimumItems];
                     }
                 }
-                pendingItemsCount = activityItems.Count(GradebookMappingHelper.IsConfirmedPending);
-                awaitingGradingItemsCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
+                if (!submissionState.IsAvailable)
+                {
+                    pendingItemsCount = activityItems.Count(GradebookMappingHelper.IsConfirmedPending);
+                    awaitingGradingItemsCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
+                }
             }
             catch { /* partial data */ }
+
+            if (submissionState.IsAvailable)
+            {
+                pendingItemsCount = submissionState.PendingFor(student.UserId).Count;
+                awaitingGradingItemsCount = submissionState.AwaitingFor(student.UserId).Count;
+            }
 
             // Classification
             bool hasLowGrade = belowMinimumItems.Count > 0;
@@ -174,7 +192,16 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                 SituationFlag: situationFlag,
                 Recommendations: recommendations)
             {
-                AwaitingGradingItemsCount = awaitingGradingItemsCount
+                AwaitingGradingItemsCount = awaitingGradingItemsCount,
+                NotSubmittedItemsCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.NotSubmitted)
+                    : pendingItemsCount,
+                ReviewedWithFeedbackItemsCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.ReviewedWithFeedback)
+                    : 0,
+                GradedItemsCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.GradedNumeric)
+                    : 0
             });
         }
 
@@ -199,7 +226,9 @@ public sealed class GenerateClassCouncilReportQueryHandler(
             MinGradePercent: request.MinGradePercent,
             Students: sorted,
             Disclaimer: Disclaimer,
-            Warning: null);
+            Warning: submissionState.IsAvailable && !submissionState.IsComplete
+                ? submissionState.Warning ?? "A cobertura de entregas está incompleta."
+                : null);
     }
 
     private static IReadOnlyList<string> BuildRecommendations(

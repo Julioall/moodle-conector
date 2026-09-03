@@ -35,6 +35,15 @@ public sealed record AwaitingGradingSubmission(
     DateTimeOffset? SubmittedAt,
     string GradingStatus);
 
+/// <summary>Canonical submission state consumed by pending tools and reports.</summary>
+public sealed record SubmissionEvaluationItem(
+    string CourseId,
+    string AssignmentId,
+    string AssignmentName,
+    string StudentId,
+    SubmissionEvaluationState State,
+    DateTimeOffset? SubmittedAt);
+
 /// <summary>
 /// Resumo de estudante com pelo menos uma SA pendente.
 /// </summary>
@@ -53,6 +62,7 @@ public sealed record GetStudentsWithPendingSubmissionsResult(
     string? Warning)
 {
     public IReadOnlyList<AwaitingGradingSubmission> AwaitingGrading { get; init; } = [];
+    public IReadOnlyList<SubmissionEvaluationItem> Evaluations { get; init; } = [];
     public bool IsComplete { get; init; } = true;
 }
 
@@ -84,7 +94,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMoodleAssignmentSettingsGateway assignmentSettingsGateway,
-    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null)
+    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null,
+    IMoodleGradebookGateway? gradebookGateway = null)
     : IRequestHandler<GetStudentsWithPendingSubmissionsQuery, GetStudentsWithPendingSubmissionsResult>
 {
     public async Task<GetStudentsWithPendingSubmissionsResult> Handle(
@@ -198,11 +209,10 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
 
         assignmentSettings ??= new Dictionary<string, AssignmentSettingsSummary>(StringComparer.Ordinal);
 
-        var canClassifyNoGradeActivities = assignmentSettings.Count > 0;
-        // Atividades sem nota usam feedback por atividade (não por envio).
-        // Quando a leitura não está disponível, não inventamos pendências:
-        // marcamos a cobertura como incompleta e preservamos a velocidade.
-        var noGradeFeedbackSkipped = false;
+        // Grade/feedback evidence is fetched for every assignment when
+        // awaiting-grading is requested. A null grade is not enough to say an
+        // assignment is awaiting correction: feedback and grade timestamps
+        // may prove it has already been reviewed.
         var feedbackByAssignment = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(StringComparer.OrdinalIgnoreCase);
         var feedbackReadyAssignments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var feedbackReadFailures = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -250,15 +260,14 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             }
         }
 
-        var noGradeAssignmentIds = assignmentContexts
-            .Where(context => IsNoGradeActivity(context.Module, assignmentSettings))
+        var assignmentIdsForEvidence = assignmentContexts
             .Select(context => context.Module.InstanceId!)
             .ToArray();
-        if (request.IncludeAwaitingGrading && noGradeAssignmentIds.Length > 0)
+        if (request.IncludeAwaitingGrading && assignmentIdsForEvidence.Length > 0)
         {
             if (IsForCourse(request.PrefetchedSubmissions, request.CourseId))
             {
-                foreach (var assignmentId in noGradeAssignmentIds)
+                foreach (var assignmentId in assignmentIdsForEvidence)
                 {
                     var snapshotItem = request.PrefetchedSubmissions!.Assignments.FirstOrDefault(item =>
                         string.Equals(item.AssignmentId, assignmentId, StringComparison.OrdinalIgnoreCase));
@@ -276,7 +285,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             {
                 var feedbackReads = await ReadFeedbackByAssignmentAsync(
                     currentUserExternalId,
-                    noGradeAssignmentIds,
+                    assignmentIdsForEvidence,
                     studentMap.Keys,
                     feedbackReadFailures,
                     cancellationToken);
@@ -288,15 +297,20 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             }
             else
             {
-                foreach (var assignmentId in noGradeAssignmentIds)
+                foreach (var assignmentId in assignmentIdsForEvidence)
                 {
                     feedbackReadFailures.Add(assignmentId);
                 }
             }
         }
 
+        var gradebooks = request.IncludeAwaitingGrading
+            ? await ReadGradebooksAsync(request.CourseId, studentMap.Keys, cancellationToken)
+            : null;
+
         var contextsByAssignmentId = assignmentContexts
             .ToDictionary(context => context.Module.InstanceId!, StringComparer.Ordinal);
+        var evaluations = new List<SubmissionEvaluationItem>();
 
         foreach (var batch in submissionBatches)
         {
@@ -321,8 +335,6 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 AssignmentName: module.Name,
                 DueDate: dueDate,
                 IsOverdue: isOverdue);
-            var isNoGradeActivity = canClassifyNoGradeActivities &&
-                IsNoGradeActivity(module, assignmentSettings);
             var returnedUserIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var record in batch.Submissions)
             {
@@ -331,46 +343,34 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                     returnedUserIds.Add(record.UserId);
                 }
 
-                if (string.Equals(record.Status, "notsubmitted", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(record.Status, "not_submitted", StringComparison.OrdinalIgnoreCase))
+                AssignmentExistingGrade? existingGrade = null;
+                feedbackByAssignment.TryGetValue(module.InstanceId!, out var grades);
+                grades?.TryGetValue(record.UserId, out existingGrade);
+                CourseGradebook? gradebook = null;
+                gradebooks?.TryGetValue(record.UserId, out gradebook);
+                var gradebookItem = FindAssignmentGradebookItem(gradebook, module.InstanceId, module.ModuleId);
+                var state = SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(
+                    HasSubmission: ToSubmissionPresence(record.Status),
+                    GradeRaw: gradebookItem?.GradeRaw ?? (existingGrade?.HasGrade == true ? existingGrade.Grade : null),
+                    GradedDateGraded: gradebookItem?.GradedDateGraded,
+                    Feedback: gradebookItem?.Feedback ?? existingGrade?.Feedback ?? record.CurrentFeedback,
+                    ReviewEvidenceAvailable: !request.IncludeAwaitingGrading ||
+                        gradebooks is not null || feedbackReadyAssignments.Contains(module.InstanceId!)));
+                if (studentMap.ContainsKey(record.UserId))
                 {
-                    // Atividades extras só entram na fila de feedback depois
-                    // que houve envio; não são cobranças de entrega avaliativa.
-                    if (!isNoGradeActivity && pendingByStudent.TryGetValue(record.UserId, out var pendingList))
+                    evaluations.Add(new SubmissionEvaluationItem(
+                        request.CourseId, module.InstanceId!, module.Name, record.UserId, state,
+                        record.ModifiedAt ?? record.CreatedAt));
+                }
+
+                if (state == SubmissionEvaluationState.NotSubmitted)
+                {
+                    if (pendingByStudent.TryGetValue(record.UserId, out var pendingList))
                         pendingList.Add(pendingItem);
                 }
-                else if (request.IncludeAwaitingGrading &&
-                         string.Equals(record.Status, "submitted", StringComparison.OrdinalIgnoreCase))
+                else if (request.IncludeAwaitingGrading && state == SubmissionEvaluationState.AwaitingGrading)
                 {
-                    var needsFeedback = IsAwaitingGrading(record.GradingStatus);
-                    if (isNoGradeActivity)
-                    {
-                        if (!feedbackReadyAssignments.Contains(module.InstanceId!))
-                        {
-                            noGradeFeedbackSkipped = true;
-                            continue;
-                        }
-
-                        var feedback = record.CurrentFeedback;
-                        if (feedbackByAssignment.TryGetValue(module.InstanceId!, out var grades) &&
-                            grades.TryGetValue(record.UserId, out var existingGrade))
-                        {
-                            feedback = existingGrade.Feedback;
-                        }
-
-                        if (string.IsNullOrWhiteSpace(feedback) &&
-                            gradingByStudent.TryGetValue(record.UserId, out var feedbackList))
-                        {
-                            feedbackList.Add(new AwaitingGradingItem(
-                                module.InstanceId!,
-                                module.Name,
-                                dueDate,
-                                record.ModifiedAt ?? record.CreatedAt));
-                        }
-                        continue;
-                    }
-
-                    if (needsFeedback && gradingByStudent.TryGetValue(record.UserId, out var gradingList))
+                    if (gradingByStudent.TryGetValue(record.UserId, out var gradingList))
                     {
                         gradingList.Add(new AwaitingGradingItem(
                             module.InstanceId!,
@@ -381,26 +381,22 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 }
             }
 
-            // `mod_assign_get_submissions` is allowed to omit users who have
-            // no submission (especially when a status filter is supplied).
-            // The assignment was read successfully, so an omitted active
-            // student is an explicit not-submitted signal for this
-            // student-facing query.  Do not apply this inference to
-            // non-gradable activities, which are tracked through feedback
-            // instead of delivery.
-            if (!isNoGradeActivity)
+            // A successful submission batch makes an omitted active student a
+            // known NOT_SUBMITTED state. Do not apply this inference to a
+            // failed or incomplete assignment read.
+            foreach (var studentId in studentMap.Keys)
             {
-                foreach (var studentId in studentMap.Keys)
+                if (returnedUserIds.Contains(studentId) ||
+                    !pendingByStudent.TryGetValue(studentId, out var pendingList) ||
+                    pendingList.Any(item => string.Equals(item.AssignmentId, module.InstanceId, StringComparison.OrdinalIgnoreCase)))
                 {
-                    if (returnedUserIds.Contains(studentId) ||
-                        !pendingByStudent.TryGetValue(studentId, out var pendingList) ||
-                        pendingList.Any(item => string.Equals(item.AssignmentId, module.InstanceId, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        continue;
-                    }
-
-                    pendingList.Add(pendingItem);
+                    continue;
                 }
+
+                pendingList.Add(pendingItem);
+                evaluations.Add(new SubmissionEvaluationItem(
+                    request.CourseId, module.InstanceId!, module.Name, studentId,
+                    SubmissionEvaluationState.NotSubmitted, null));
             }
         }
 
@@ -437,13 +433,6 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         else if (request.MaxAssignmentsToAnalyze > 0 && assignModules.Count > request.MaxAssignmentsToAnalyze)
         {
             warning = $"A análise foi limitada às {request.MaxAssignmentsToAnalyze} primeiras atividades avaliativas para preservar o desempenho.";
-        }
-
-        if (noGradeFeedbackSkipped)
-        {
-            warning = string.IsNullOrWhiteSpace(warning)
-                ? "Atividades sem nota foram omitidas do contador de correções para evitar consultas individuais por envio."
-                : $"{warning} Atividades sem nota foram omitidas do contador de correções para evitar consultas individuais por envio.";
         }
 
         if (submissionFailures.Count > 0)
@@ -492,14 +481,53 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             Warning: warning)
         {
             AwaitingGrading = awaitingGrading,
+            Evaluations = evaluations,
             IsComplete = !submissionReadFailed && submissionFailures.Count == 0,
         };
     }
 
-    private static bool IsAwaitingGrading(string? gradingStatus) =>
-        string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(gradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
+    private static bool? ToSubmissionPresence(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        "submitted" => true,
+        "new" or "draft" or "reopened" or "notsubmitted" or "not_submitted" => false,
+        _ => null
+    };
+
+    private async Task<IReadOnlyDictionary<string, CourseGradebook>?> ReadGradebooksAsync(
+        string courseId,
+        IEnumerable<string> studentIds,
+        CancellationToken cancellationToken)
+    {
+        if (gradebookGateway is null)
+        {
+            return null;
+        }
+
+        const int maxConcurrency = 6;
+        using var gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        try
+        {
+            var reads = studentIds.Distinct(StringComparer.OrdinalIgnoreCase).Select(async studentId =>
+            {
+                await gate.WaitAsync(cancellationToken);
+                try { return await gradebookGateway.GetStudentGradebookAsync(courseId, studentId, cancellationToken); }
+                finally { gate.Release(); }
+            });
+            var results = await Task.WhenAll(reads);
+            return results.ToDictionary(item => item.StudentId, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private static GradebookItem? FindAssignmentGradebookItem(
+        CourseGradebook? gradebook,
+        string? assignmentInstanceId,
+        string? assignmentModuleId) =>
+        gradebook?.Items.FirstOrDefault(item =>
+            string.Equals(item.ItemModule, "assign", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(item.ItemInstance, assignmentInstanceId, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(item.CourseModuleId, assignmentModuleId, StringComparison.OrdinalIgnoreCase)));
 
     private async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>> ReadFeedbackByAssignmentAsync(
         string userExternalId,

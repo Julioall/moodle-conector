@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -73,9 +75,9 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
                 candidate.NormalizedKey,
                 candidate.Content,
                 candidate.Origin,
-                (object?)candidate.MoodleAlias ?? DBNull.Value,
-                (object?)candidate.CourseId ?? DBNull.Value,
-                (object?)candidate.LinkedDocumentId ?? DBNull.Value,
+                NullableTextParameter("moodleAlias", candidate.MoodleAlias),
+                NullableTextParameter("courseId", candidate.CourseId),
+                NullableGuidParameter("linkedDocumentId", candidate.LinkedDocumentId),
                 candidate.CreatedAtUtc,
                 candidate.UpdatedAtUtc
             ],
@@ -174,4 +176,16 @@ public sealed class UserMemoryRepository(ConnectorDbContext dbContext) : IUserMe
             memory => memory.OwnerSubject == ownerSubject && memory.Id == id,
             cancellationToken);
     }
+
+    private static NpgsqlParameter NullableTextParameter(string name, string? value) =>
+        new(name, NpgsqlDbType.Varchar)
+        {
+            Value = (object?)value ?? DBNull.Value
+        };
+
+    private static NpgsqlParameter NullableGuidParameter(string name, Guid? value) =>
+        new(name, NpgsqlDbType.Uuid)
+        {
+            Value = (object?)value ?? DBNull.Value
+        };
 }

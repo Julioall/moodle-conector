@@ -25,6 +25,9 @@ public sealed class MoodleGradebookGatewayCachingTests
         Assert.Equal(1, restClient.Calls);
         Assert.Single(first.Items);
         Assert.Single(second.Items);
+        Assert.Equal(1787075877, first.Items.Single().GradedDateGraded);
+        Assert.Equal("117487", first.Items.Single().ItemInstance);
+        Assert.Equal("1108049", first.Items.Single().CourseModuleId);
     }
 
     private sealed class CredentialsProvider : IMoodleConnectorCredentialsProvider
@@ -54,7 +57,7 @@ public sealed class MoodleGradebookGatewayCachingTests
         {
             Calls++;
             using var document = JsonDocument.Parse("""
-                {"usergrades":[{"gradeitems":[{"id":1,"itemname":"SA 1","itemtype":"mod","itemmodule":"assign","graderaw":8,"grademin":0,"grademax":10}]}]}
+                {"usergrades":[{"gradeitems":[{"id":1,"itemname":"SA 1","itemtype":"mod","itemmodule":"assign","iteminstance":117487,"cmid":1108049,"graderaw":8,"grademin":0,"grademax":10,"gradedategraded":1787075877}]}]}
                 """);
             return Task.FromResult(document.RootElement.Clone());
         }

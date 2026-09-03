@@ -79,8 +79,13 @@ internal sealed class MoodleGradebookGateway(
                         Feedback: ReadStringProperty(item, "feedback"),
                         FeedbackFormat: ReadStringProperty(item, "feedbackformat"),
                         GradedDateSubmitted: ReadLongProperty(item, "gradeddatesubmitted"),
-                        GradedDateGraded: ReadLongProperty(item, "gradeddategraded"),
-                        GraderId: ReadStringProperty(item, "grader")
+                        // Moodle names this field "gradedategraded" (one d
+                        // after grade).  Keep the historical misspelling as a
+                        // compatibility fallback for non-standard instances.
+                        GradedDateGraded: ReadLongProperty(item, "gradedategraded", "gradeddategraded"),
+                        GraderId: ReadStringProperty(item, "grader"),
+                        ItemInstance: ReadStringProperty(item, "iteminstance"),
+                        CourseModuleId: ReadStringProperty(item, "cmid")
                     ));
                 }
             }
@@ -130,10 +135,14 @@ internal sealed class MoodleGradebookGateway(
         return null;
     }
 
-    private static long? ReadLongProperty(JsonElement element, string propertyName)
+    private static long? ReadLongProperty(JsonElement element, params string[] propertyNames)
     {
-        if (element.TryGetProperty(propertyName, out var value))
+        foreach (var propertyName in propertyNames)
         {
+            if (!element.TryGetProperty(propertyName, out var value))
+            {
+                continue;
+            }
             if (value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var d))
                 return d;
             if (value.ValueKind == JsonValueKind.String && long.TryParse(value.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var ds))

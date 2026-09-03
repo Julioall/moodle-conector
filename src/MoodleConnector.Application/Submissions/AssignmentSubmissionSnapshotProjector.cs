@@ -174,10 +174,7 @@ public static class AssignmentSubmissionSnapshotProjector
                     .ThenByDescending(submission => submission.ModifiedAt ?? submission.CreatedAt ?? DateTimeOffset.MinValue)
                     .First(),
                 StringComparer.OrdinalIgnoreCase);
-        var participantIds = participants
-            .Select(participant => participant.UserId)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var rows = new List<AssignmentSubmissionSummary>(participants.Count + latestSubmissionByUser.Count);
+        var rows = new List<AssignmentSubmissionSummary>(participants.Count);
 
         foreach (var participant in participants)
         {
@@ -187,13 +184,9 @@ public static class AssignmentSubmissionSnapshotProjector
             rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable, existingGrade, existingGrades is not null));
         }
 
-        foreach (var submission in latestSubmissionByUser.Values.Where(submission => !participantIds.Contains(submission.UserId)))
-        {
-            AssignmentExistingGrade? existingGrade = null;
-            existingGrades?.TryGetValue(submission.UserId, out existingGrade);
-            rows.Add(ToSummary(submission.UserId, null, submission, dueAt, isGradable, existingGrade, existingGrades is not null));
-        }
-
+        // `mod_assign_get_submissions` may include teachers or service
+        // accounts. Snapshots are reused by student-facing tools, so they
+        // must contain the same active-student population as the live path.
         return rows
             .OrderBy(row => row.FullName ?? row.UserId, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -244,19 +237,19 @@ public static class AssignmentSubmissionSnapshotProjector
                 Files: [],
                 CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
                 CurrentFeedback: existingGrade?.Feedback,
-                GradeMax: existingGrade?.GradeMax);
+                GradeMax: existingGrade?.GradeMax,
+                EvaluationState: SubmissionEvaluationState.NotSubmitted);
         }
 
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
         var submittedAt = submitted ? submission.ModifiedAt ?? submission.CreatedAt : null;
         var late = submittedAt is not null && dueAt is not null && submittedAt > dueAt;
-        var needsGrading = isGradable == false
-            ? submitted && gradesRead &&
-              (existingGrade is null || (!existingGrade.HasGrade && string.IsNullOrWhiteSpace(existingGrade.Feedback)))
-            : isGradable != false && submitted && (
-                string.Equals(submission.GradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(submission.GradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
+        var state = SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(
+            HasSubmission: ToSubmissionPresence(submission.Status),
+            GradeRaw: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
+            GradedDateGraded: null,
+            Feedback: existingGrade?.Feedback ?? submission.CurrentFeedback,
+            ReviewEvidenceAvailable: gradesRead));
 
         return new AssignmentSubmissionSummary(
             userId,
@@ -266,7 +259,7 @@ public static class AssignmentSubmissionSnapshotProjector
             submission.GradingStatus,
             submitted,
             late,
-            needsGrading,
+            SubmissionEvaluationStateResolver.NeedsGrading(state),
             submittedAt,
             submission.ModifiedAt,
             submission.AttemptNumber,
@@ -275,7 +268,8 @@ public static class AssignmentSubmissionSnapshotProjector
             Files: submission.Files ?? [],
             CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
             CurrentFeedback: existingGrade?.Feedback,
-            GradeMax: existingGrade?.GradeMax);
+            GradeMax: existingGrade?.GradeMax,
+            EvaluationState: state);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter) =>
@@ -287,6 +281,13 @@ public static class AssignmentSubmissionSnapshotProjector
             AssignmentSubmissionFilter.NeedsGrading => row.NeedsGrading,
             _ => true,
         };
+
+    private static bool? ToSubmissionPresence(string? status) => status?.Trim().ToLowerInvariant() switch
+    {
+        "submitted" => true,
+        "new" or "draft" or "reopened" or "notsubmitted" or "not_submitted" => false,
+        _ => null
+    };
 
     private static DateTimeOffset? FindDueDate(IReadOnlyList<CourseModuleDate> dates) =>
         dates.FirstOrDefault(date =>

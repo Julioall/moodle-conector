@@ -27,6 +27,23 @@ internal sealed class MoodleParticipantsGateway(
         string? groupId,
         CancellationToken cancellationToken)
     {
+        // The all-enrolments response on some Moodle installations omits the
+        // per-course suspended flag. Read the two authoritative enrolment
+        // populations instead so `status=todos` never degrades known active
+        // or suspended records to `unknown`.
+        if (statusFilter == ParticipantStatusFilter.All)
+        {
+            return await GetParticipantsAcrossEnrollmentStatusesAsync(
+                userExternalId,
+                courseId,
+                page,
+                pageSize,
+                studentsOnly,
+                includeEmail,
+                groupId,
+                cancellationToken);
+        }
+
         if (_options.UseStubData)
         {
             throw new InvalidOperationException("UseStubData esta desativado para fluxos reais. Ajuste a configuracao para usar Moodle real.");
@@ -143,6 +160,108 @@ internal sealed class MoodleParticipantsGateway(
                     evaluatedCount,
                     includedByStudentRoleCount,
                     includedByFallbackCount)));
+    }
+
+    private async Task<CourseParticipantsPage> GetParticipantsAcrossEnrollmentStatusesAsync(
+        string userExternalId,
+        string courseId,
+        int page,
+        int pageSize,
+        bool studentsOnly,
+        bool includeEmail,
+        string? groupId,
+        CancellationToken cancellationToken)
+    {
+        var active = await ReadAllPagesForStatusAsync(
+            userExternalId, courseId, ParticipantStatusFilter.Active, studentsOnly, includeEmail, groupId, cancellationToken);
+        var suspended = await ReadAllPagesForStatusAsync(
+            userExternalId, courseId, ParticipantStatusFilter.Suspended, studentsOnly, includeEmail, groupId, cancellationToken);
+
+        var allParticipants = active.Participants
+            .Concat(suspended.Participants)
+            .GroupBy(participant => participant.UserId, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        var normalizedPage = Math.Max(1, page);
+        var normalizedPageSize = Math.Clamp(pageSize, 1, 100);
+        var skip = (normalizedPage - 1) * normalizedPageSize;
+        var diagnostics = MergeDiagnostics(active.Diagnostics, suspended.Diagnostics);
+
+        return new CourseParticipantsPage(
+            active.CourseId,
+            page,
+            normalizedPageSize,
+            ParticipantStatusFilter.All,
+            studentsOnly,
+            includeEmail,
+            skip + normalizedPageSize < allParticipants.Length,
+            allParticipants.Skip(skip).Take(normalizedPageSize).ToArray(),
+            diagnostics);
+    }
+
+    private async Task<(string CourseId, IReadOnlyList<CourseParticipantSummary> Participants, ParticipantClassificationDiagnostics Diagnostics)> ReadAllPagesForStatusAsync(
+        string userExternalId,
+        string courseId,
+        ParticipantStatusFilter statusFilter,
+        bool studentsOnly,
+        bool includeEmail,
+        string? groupId,
+        CancellationToken cancellationToken)
+    {
+        var participants = new List<CourseParticipantSummary>();
+        var diagnostics = new List<ParticipantClassificationDiagnostics>();
+        var page = 1;
+        string? normalizedCourseId = null;
+
+        while (true)
+        {
+            var result = await GetCourseParticipantsAsync(
+                userExternalId,
+                courseId,
+                statusFilter,
+                page,
+                ParticipantFetchBatchSize,
+                studentsOnly,
+                includeEmail,
+                groupId,
+                cancellationToken);
+            normalizedCourseId ??= result.CourseId;
+            participants.AddRange(result.Participants);
+            if (result.ClassificationDiagnostics is not null)
+            {
+                diagnostics.Add(result.ClassificationDiagnostics);
+            }
+
+            if (!result.HasMore || result.Participants.Count == 0)
+            {
+                break;
+            }
+
+            page++;
+        }
+
+        return (normalizedCourseId ?? courseId, participants, MergeDiagnostics(diagnostics));
+    }
+
+    private static ParticipantClassificationDiagnostics MergeDiagnostics(
+        params ParticipantClassificationDiagnostics[] diagnostics) =>
+        MergeDiagnostics((IEnumerable<ParticipantClassificationDiagnostics>)diagnostics);
+
+    private static ParticipantClassificationDiagnostics MergeDiagnostics(
+        IEnumerable<ParticipantClassificationDiagnostics> source)
+    {
+        var diagnostics = source.ToArray();
+        var evaluated = diagnostics.Sum(item => item.EvaluatedCount);
+        var roleBased = diagnostics.Sum(item => item.IncludedByStudentRoleCount);
+        var fallback = diagnostics.Sum(item => item.IncludedByFallbackCount);
+        return new ParticipantClassificationDiagnostics(
+            evaluated,
+            roleBased,
+            fallback,
+            diagnostics.Sum(item => item.ExcludedKnownStaffCount),
+            diagnostics.Any(item => item.HasEmptyRoles),
+            diagnostics.Any(item => item.HasEmptyGroups),
+            ResolveClassificationMode(evaluated, roleBased, fallback));
     }
 
     public async Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(

@@ -121,6 +121,9 @@ public sealed record PostExecutionStudentRow(
     string OutcomeIndicator)  // "likely_complete" | "pending_recovery" | "at_risk" | "unknown"
 {
     public int AwaitingGradingCount { get; init; }
+    public int NotSubmittedCount { get; init; }
+    public int ReviewedWithFeedbackCount { get; init; }
+    public int GradedCount { get; init; }
 }
 
 public sealed record GeneratePostExecutionReportResult(
@@ -155,7 +158,8 @@ public sealed record GeneratePostExecutionReportQuery(
 public sealed class GeneratePostExecutionReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleGradebookGateway gradebookGateway,
-    IMoodleCurrentUserIdGateway currentUserIdGateway)
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMediator? mediator = null)
     : IRequestHandler<GeneratePostExecutionReportQuery, GeneratePostExecutionReportResult>
 {
     private const string Disclaimer =
@@ -192,6 +196,11 @@ public sealed class GeneratePostExecutionReportQueryHandler(
         }
 
         var rows = new List<PostExecutionStudentRow>();
+        var submissionState = await CourseSubmissionReportState.LoadAsync(
+            mediator,
+            request.CourseId,
+            request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60,
+            cancellationToken);
 
         foreach (var student in participantsPage.Participants)
         {
@@ -232,10 +241,19 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                         belowMinimumCount++;
                     }
                 }
-                pendingCount = activityItems.Count(GradebookMappingHelper.IsConfirmedPending);
-                awaitingGradingCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
+                if (!submissionState.IsAvailable)
+                {
+                    pendingCount = activityItems.Count(GradebookMappingHelper.IsConfirmedPending);
+                    awaitingGradingCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
+                }
             }
             catch { /* partial data */ }
+
+            if (submissionState.IsAvailable)
+            {
+                pendingCount = submissionState.PendingFor(student.UserId).Count;
+                awaitingGradingCount = submissionState.AwaitingFor(student.UserId).Count;
+            }
 
             var outcome = DetermineOutcome(neverAccessed, belowMinimumCount, pendingCount, hasGradebookData);
 
@@ -249,7 +267,16 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                 PendingCount: pendingCount,
                 OutcomeIndicator: outcome)
             {
-                AwaitingGradingCount = awaitingGradingCount
+                AwaitingGradingCount = awaitingGradingCount,
+                NotSubmittedCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.NotSubmitted)
+                    : pendingCount,
+                ReviewedWithFeedbackCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.ReviewedWithFeedback)
+                    : 0,
+                GradedCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.GradedNumeric)
+                    : 0
             });
         }
 
@@ -272,7 +299,9 @@ public sealed class GeneratePostExecutionReportQueryHandler(
             MinGradePercent: request.MinGradePercent,
             Students: sorted,
             Disclaimer: Disclaimer,
-            Warning: null);
+            Warning: submissionState.IsAvailable && !submissionState.IsComplete
+                ? submissionState.Warning ?? "A cobertura de entregas está incompleta."
+                : null);
     }
 
     private static string DetermineOutcome(bool neverAccessed, int belowMin, int pending, bool hasData)

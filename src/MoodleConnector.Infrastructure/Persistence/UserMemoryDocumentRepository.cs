@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -45,8 +47,8 @@ public sealed class UserMemoryDocumentRepository(ConnectorDbContext dbContext) :
                 candidate.Content,
                 candidate.Format,
                 candidate.Origin,
-                candidate.MoodleAlias ?? (object)DBNull.Value,
-                candidate.CourseId ?? (object)DBNull.Value,
+                NullableTextParameter("moodleAlias", candidate.MoodleAlias),
+                NullableTextParameter("courseId", candidate.CourseId),
                 candidate.CreatedAtUtc,
                 candidate.UpdatedAtUtc
             ],
@@ -144,4 +146,10 @@ public sealed class UserMemoryDocumentRepository(ConnectorDbContext dbContext) :
         value.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
+
+    private static NpgsqlParameter NullableTextParameter(string name, string? value) =>
+        new(name, NpgsqlDbType.Varchar)
+        {
+            Value = (object?)value ?? DBNull.Value
+        };
 }

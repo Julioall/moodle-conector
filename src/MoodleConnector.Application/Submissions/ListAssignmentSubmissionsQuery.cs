@@ -36,7 +36,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IMoodleAssignmentSettingsGateway? assignmentSettingsGateway = null,
-    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null)
+    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null,
+    IMoodleGradebookGateway? gradebookGateway = null)
     : IRequestHandler<ListAssignmentSubmissionsQuery, AssignmentSubmissionsPage?>
 {
     private const int ParticipantFetchPageSize = 100;
@@ -122,20 +123,23 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             course.CourseId,
             assignmentInstanceId,
             cancellationToken);
-        var gradesTask = request.Filter == AssignmentSubmissionFilter.NeedsGrading
-            ? ReadExistingGradesAsync(
-                request.UserExternalId,
-                assignmentInstanceId,
-                submissions,
-                cancellationToken)
-            : Task.FromResult<IReadOnlyDictionary<string, AssignmentExistingGrade>?>(null);
-        await Task.WhenAll(settingsTask, gradesTask);
+        var gradesTask = ReadExistingGradesAsync(
+            request.UserExternalId,
+            assignmentInstanceId,
+            participants.Select(participant => participant.UserId).ToArray(),
+            cancellationToken);
+        var gradebookTask = ReadGradebooksAsync(
+            course.CourseId,
+            participants.Select(participant => participant.UserId).ToArray(),
+            cancellationToken);
+        await Task.WhenAll(settingsTask, gradesTask, gradebookTask);
         var assignmentSettings = await settingsTask;
 
         bool? isGradable = assignmentSettings is null
             ? null
             : assignmentSettings.IsGradable ?? (assignmentSettings.MaxGrade > 0 ? true : null);
         var existingGrades = await gradesTask;
+        var gradebooks = await gradebookTask;
 
         var rows = BuildRows(
             participants,
@@ -145,7 +149,10 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             request.IncludeLate,
             request.IncludeUngraded,
             isGradable,
-            existingGrades);
+            existingGrades,
+            gradebooks,
+            assignmentInstanceId,
+            assignment.ActivityId);
         return new AssignmentSubmissionRows(
             course.CourseId,
             assignmentInstanceId,
@@ -184,7 +191,7 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
     private async Task<IReadOnlyDictionary<string, AssignmentExistingGrade>?> ReadExistingGradesAsync(
         string userExternalId,
         string assignmentId,
-        IReadOnlyList<AssignmentSubmissionRecord> submissions,
+        IReadOnlyCollection<string> studentIds,
         CancellationToken cancellationToken)
     {
         if (gradeReadGateway is null)
@@ -197,14 +204,53 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             return await gradeReadGateway.GetExistingGradesAsync(
                 userExternalId,
                 assignmentId,
-                submissions.Select(submission => submission.UserId).ToArray(),
+                studentIds,
                 cancellationToken);
         }
         catch
         {
-            // Do not turn a missing grade capability into zero pending
-            // submissions. Fall back to Moodle's submission status.
-            return new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+            // A grade read failure leaves a submitted item as UNKNOWN. It must
+            // not be silently promoted to awaiting grading.
+            return null;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<string, CourseGradebook>?> ReadGradebooksAsync(
+        string courseId,
+        IReadOnlyCollection<string> studentIds,
+        CancellationToken cancellationToken)
+    {
+        if (gradebookGateway is null || studentIds.Count == 0)
+        {
+            return null;
+        }
+
+        const int maxConcurrency = 6;
+        using var gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        try
+        {
+            var reads = studentIds.Distinct(StringComparer.OrdinalIgnoreCase).Select(async studentId =>
+            {
+                await gate.WaitAsync(cancellationToken);
+                try
+                {
+                    return await gradebookGateway.GetStudentGradebookAsync(courseId, studentId, cancellationToken);
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            });
+            var results = await Task.WhenAll(reads);
+            return results.ToDictionary(item => item.StudentId, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -282,7 +328,10 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         bool includeLate,
         bool includeUngraded,
         bool? isGradable,
-        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades = null)
+        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades = null,
+        IReadOnlyDictionary<string, CourseGradebook>? gradebooks = null,
+        string? assignmentInstanceId = null,
+        string? assignmentModuleId = null)
     {
         var latestSubmissionByUser = submissions
             .GroupBy(submission => submission.UserId, StringComparer.OrdinalIgnoreCase)
@@ -298,7 +347,9 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         foreach (var participant in participants)
         {
             latestSubmissionByUser.TryGetValue(participant.UserId, out var submission);
-            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, isGradable, existingGrades));
+            CourseGradebook? gradebook = null;
+            gradebooks?.TryGetValue(participant.UserId, out gradebook);
+            rows.Add(ToSummary(participant.UserId, participant.FullName, submission, dueAt, existingGrades, gradebook, assignmentInstanceId, assignmentModuleId));
         }
 
         // `mod_assign_get_submissions` can include teachers and other course
@@ -318,8 +369,10 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         string? fullName,
         AssignmentSubmissionRecord? submission,
         DateTimeOffset? dueAt,
-        bool? isGradable,
-        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades)
+        IReadOnlyDictionary<string, AssignmentExistingGrade>? existingGrades,
+        CourseGradebook? gradebook,
+        string? assignmentInstanceId,
+        string? assignmentModuleId)
     {
         if (submission is null)
         {
@@ -337,7 +390,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
                 AttemptNumber: null,
                 FileCount: 0,
                 HasOnlineText: false,
-                Files: []);
+                Files: [],
+                EvaluationState: SubmissionEvaluationState.NotSubmitted);
         }
 
         var submitted = string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
@@ -348,15 +402,13 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         {
             existingGrades.TryGetValue(userId, out existingGrade);
         }
-        // Moodle represents an ungraded submission with the numeric sentinel
-        // -1. Preserve that value for diagnostics, but do not treat it as a
-        // grade already entered by the teacher.
-        var hasMoodleGradeValue = existingGrade?.HasGrade == true;
-        var needsGrading = isGradable == false
-            ? submitted && existingGrades is not null &&
-              (existingGrade is null || (!existingGrade.HasGrade && string.IsNullOrWhiteSpace(existingGrade.Feedback)))
-            : IsNeedsGrading(submission.GradingStatus, submitted) &&
-              (existingGrades is null ? isGradable != false : !hasMoodleGradeValue);
+        var gradebookItem = FindAssignmentGradebookItem(gradebook, assignmentInstanceId, assignmentModuleId);
+        var state = SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(
+            HasSubmission: ToSubmissionPresence(submission.Status),
+            GradeRaw: gradebookItem?.GradeRaw ?? (existingGrade?.HasGrade == true ? existingGrade.Grade : null),
+            GradedDateGraded: gradebookItem?.GradedDateGraded,
+            Feedback: gradebookItem?.Feedback ?? existingGrade?.Feedback ?? submission.CurrentFeedback,
+            ReviewEvidenceAvailable: gradebook is not null || existingGrades is not null));
 
         return new AssignmentSubmissionSummary(
             userId,
@@ -366,7 +418,7 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             submission.GradingStatus,
             submitted,
             late,
-            needsGrading,
+            SubmissionEvaluationStateResolver.NeedsGrading(state),
             submittedAt,
             submission.ModifiedAt,
             submission.AttemptNumber,
@@ -375,7 +427,8 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             submission.Files ?? [],
             CurrentGrade: existingGrade?.HasGrade == true ? existingGrade.Grade : null,
             CurrentFeedback: existingGrade?.Feedback,
-            GradeMax: existingGrade?.GradeMax);
+            GradeMax: gradebookItem?.GradeMax ?? existingGrade?.GradeMax,
+            EvaluationState: state);
     }
 
     private static bool MatchesFilter(AssignmentSubmissionSummary row, AssignmentSubmissionFilter filter)
@@ -391,17 +444,24 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         };
     }
 
-    private static bool IsNeedsGrading(string? gradingStatus, bool submitted)
+    private static bool? ToSubmissionPresence(string? status)
     {
-        if (!submitted)
+        return status?.Trim().ToLowerInvariant() switch
         {
-            return false;
-        }
-
-        return string.Equals(gradingStatus, "notgraded", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(gradingStatus, "needsgrading", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(gradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase);
+            "submitted" => true,
+            "new" or "draft" or "reopened" or "notsubmitted" or "not_submitted" => false,
+            _ => null
+        };
     }
+
+    private static GradebookItem? FindAssignmentGradebookItem(
+        CourseGradebook? gradebook,
+        string? assignmentInstanceId,
+        string? assignmentModuleId) =>
+        gradebook?.Items.FirstOrDefault(item =>
+            string.Equals(item.ItemModule, "assign", StringComparison.OrdinalIgnoreCase) &&
+            (string.Equals(item.ItemInstance, assignmentInstanceId, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(item.CourseModuleId, assignmentModuleId, StringComparison.OrdinalIgnoreCase)));
 
     private static string? ToMoodleSubmissionStatus(AssignmentSubmissionFilter filter)
     {
@@ -419,7 +479,9 @@ public sealed class GetStudentSubmissionQueryHandler(
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleParticipantsGateway participantsGateway,
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
-    IMoodleAssignmentSettingsGateway? assignmentSettingsGateway = null)
+    IMoodleAssignmentSettingsGateway? assignmentSettingsGateway = null,
+    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null,
+    IMoodleGradebookGateway? gradebookGateway = null)
     : IRequestHandler<GetStudentSubmissionQuery, AssignmentSubmissionSummary?>
 {
     public async Task<AssignmentSubmissionSummary?> Handle(
@@ -436,7 +498,9 @@ public sealed class GetStudentSubmissionQueryHandler(
             contentsGateway,
             participantsGateway,
             submissionsGateway,
-            assignmentSettingsGateway);
+            assignmentSettingsGateway,
+            gradeReadGateway,
+            gradebookGateway);
         var rowsContext = await handler.BuildRowsAsync(
             new ListAssignmentSubmissionsQuery(
                 request.UserExternalId,

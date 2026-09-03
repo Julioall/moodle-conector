@@ -536,7 +536,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
             submission.ModifiedAt,
             submission.AttemptNumber,
             submission.FileCount,
-            submission.HasOnlineText);
+            submission.HasOnlineText,
+            submission.EvaluationState.ToString());
     }
 
     private static string BuildSubmissionsNarration(ListAssignmentSubmissionsResponse response)
@@ -667,5 +668,6 @@ public sealed class MoodleAssignmentSubmissionsTools(
         [property: JsonPropertyName("modifiedAt")] DateTimeOffset? ModifiedAt,
         [property: JsonPropertyName("attemptNumber")] int? AttemptNumber,
         [property: JsonPropertyName("fileCount")] int FileCount,
-        [property: JsonPropertyName("hasOnlineText")] bool HasOnlineText);
+        [property: JsonPropertyName("hasOnlineText")] bool HasOnlineText,
+        [property: JsonPropertyName("evaluationState")] string? EvaluationState = null);
 }

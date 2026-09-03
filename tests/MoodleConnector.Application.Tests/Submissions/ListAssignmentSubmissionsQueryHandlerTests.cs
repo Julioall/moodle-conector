@@ -144,7 +144,8 @@ public class ListAssignmentSubmissionsQueryHandlerTests
             ]
         };
         var sut = CreateHandler(
-            submissionsGateway: submissionsGateway);
+            submissionsGateway: submissionsGateway,
+            gradeReadGateway: new FakeAssignmentGradeReadGateway());
 
         var result = await sut.Handle(
             new ListAssignmentSubmissionsQuery(
@@ -162,9 +163,8 @@ public class ListAssignmentSubmissionsQueryHandlerTests
 
         Assert.NotNull(result);
         Assert.Null(submissionsGateway.LastStatus);
-        var submission = Assert.Single(result!.Submissions);
-        Assert.Equal("101", submission.UserId);
-        Assert.True(submission.NeedsGrading);
+        Assert.Equal(3, result!.Total);
+        Assert.All(result.Submissions, submission => Assert.True(submission.NeedsGrading));
     }
 
     [Fact]
@@ -228,7 +228,8 @@ public class ListAssignmentSubmissionsQueryHandlerTests
             settingsGateway: new FakeAssignmentSettingsGateway
             {
                 Settings = new AssignmentSettingsSummary("501", 0m, "Atividade com escala", IsGradable: true)
-            });
+            },
+            gradeReadGateway: new FakeAssignmentGradeReadGateway());
 
         var result = await sut.Handle(
             new ListAssignmentSubmissionsQuery(

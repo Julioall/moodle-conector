@@ -6,6 +6,8 @@ public sealed class MoodleFunctionClassifierTests
 {
     [Theory]
     [InlineData("mod_forum_get_forum_discussions_paginated")]
+    [InlineData("mod_assign_get_submissions")]
+    [InlineData("mod_assign_get_grades")]
     [InlineData("local_attendance_get_sessions")]
     public void Classify_ReturnsReadForDiscoveredQueryVerbs(string functionName)
     {

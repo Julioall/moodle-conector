@@ -26,6 +26,9 @@ public sealed record StudentWeeklyPerformanceRow(
 {
     public int AwaitingGradingCount { get; init; }
     public IReadOnlyList<string> AwaitingGradingAssignmentNames { get; init; } = [];
+    public int NotSubmittedCount { get; init; }
+    public int ReviewedWithFeedbackCount { get; init; }
+    public int GradedCount { get; init; }
 }
 
 public sealed record GenerateWeeklyPerformanceReportResult(
@@ -69,7 +72,8 @@ public sealed record GenerateWeeklyPerformanceReportQuery(
 public sealed class GenerateWeeklyPerformanceReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleGradebookGateway gradebookGateway,
-    IMoodleCurrentUserIdGateway currentUserIdGateway)
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMediator? mediator = null)
     : IRequestHandler<GenerateWeeklyPerformanceReportQuery, GenerateWeeklyPerformanceReportResult>
 {
     private const string LimitationMessage =
@@ -119,6 +123,11 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
         var recipientsForAccess = new List<string>();
         var recipientsForGrade = new List<string>();
         var recipientsForPending = new List<string>();
+        var submissionState = await CourseSubmissionReportState.LoadAsync(
+            mediator,
+            request.CourseId,
+            request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60,
+            cancellationToken);
 
         // 2. Per-student analysis
         foreach (var student in participantsPage.Participants)
@@ -175,22 +184,34 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                     }
                 }
 
-                // Only an evaluative item with no grade and no submission
-                // metadata is treated as a confirmed non-delivery. A
-                // submitted item awaiting grading is reported separately.
-                var pending = activityItems
-                    .Where(GradebookMappingHelper.IsConfirmedPending)
-                    .ToList();
-                pendingCount = pending.Count;
-                pendingNames = pending.Select(i => i.ItemName).ToList();
-                awaitingGradingNames = activityItems
-                    .Where(GradebookMappingHelper.IsAwaitingGrading)
-                    .Select(i => i.ItemName)
-                    .ToList();
+                // Compatibility fallback for unit hosts that do not register
+                // MediatR. Production uses the assignment submission state
+                // below, which is authoritative for delivery vs. grading.
+                if (!submissionState.IsAvailable)
+                {
+                    var pending = activityItems
+                        .Where(GradebookMappingHelper.IsConfirmedPending)
+                        .ToList();
+                    pendingCount = pending.Count;
+                    pendingNames = pending.Select(i => i.ItemName).ToList();
+                    awaitingGradingNames = activityItems
+                        .Where(GradebookMappingHelper.IsAwaitingGrading)
+                        .Select(i => i.ItemName)
+                        .ToList();
+                }
             }
             catch
             {
                 // Gradebook unavailable for this student — continue with partial data
+            }
+
+            if (submissionState.IsAvailable)
+            {
+                var pending = submissionState.PendingFor(student.UserId);
+                var awaiting = submissionState.AwaitingFor(student.UserId);
+                pendingCount = pending.Count;
+                pendingNames = pending.Select(item => item.AssignmentName).ToList();
+                awaitingGradingNames = awaiting.Select(item => item.AssignmentName).ToList();
             }
 
             int submittedCount = totalAssignments - pendingCount;
@@ -223,7 +244,16 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                 AttentionLevel: attentionLevel)
             {
                 AwaitingGradingCount = awaitingGradingNames.Count,
-                AwaitingGradingAssignmentNames = awaitingGradingNames
+                AwaitingGradingAssignmentNames = awaitingGradingNames,
+                NotSubmittedCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.NotSubmitted)
+                    : pendingCount,
+                ReviewedWithFeedbackCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.ReviewedWithFeedback)
+                    : 0,
+                GradedCount = submissionState.IsAvailable
+                    ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.GradedNumeric)
+                    : 0
             });
 
             if (isInactive) recipientsForAccess.Add(student.UserId);
@@ -252,6 +282,8 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
             SuggestedRecipientIdsForAccess: recipientsForAccess,
             SuggestedRecipientIdsForGrade: recipientsForGrade,
             SuggestedRecipientIdsForPending: recipientsForPending,
-            Warning: LimitationMessage);
+            Warning: submissionState.IsAvailable && !submissionState.IsComplete
+                ? $"{LimitationMessage} {submissionState.Warning ?? "A cobertura de entregas está incompleta."}"
+                : LimitationMessage);
     }
 }

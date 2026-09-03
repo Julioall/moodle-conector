@@ -42,7 +42,8 @@ public sealed record AssignmentSubmissionSummary(
     IReadOnlyList<AssignmentSubmissionFile>? Files = null,
     decimal? CurrentGrade = null,
     string? CurrentFeedback = null,
-    decimal? GradeMax = null);
+    decimal? GradeMax = null,
+    SubmissionEvaluationState EvaluationState = SubmissionEvaluationState.Unknown);
 
 public sealed record AssignmentSubmissionFile(
     string Filename,

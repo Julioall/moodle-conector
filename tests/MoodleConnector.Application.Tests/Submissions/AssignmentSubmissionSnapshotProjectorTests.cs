@@ -38,9 +38,34 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
         var notSubmitted = Assert.Single(assignment.Submissions, row => row.UserId == "student-2");
         Assert.True(submitted.Submitted);
         Assert.True(submitted.Late);
-        Assert.True(submitted.NeedsGrading);
+        Assert.False(submitted.NeedsGrading);
+        Assert.Equal(SubmissionEvaluationState.Unknown, submitted.EvaluationState);
         Assert.False(notSubmitted.Submitted);
         Assert.False(notSubmitted.NeedsGrading);
+    }
+
+    [Fact]
+    public void Build_excludes_submission_for_user_outside_active_student_population()
+    {
+        var snapshot = AssignmentSubmissionSnapshotProjector.Build(
+            Contents(DateTimeOffset.UtcNow.AddDays(1)),
+            Participants(),
+            [new AssignmentSubmissionsBatch(
+                "assignment-1",
+                [new AssignmentSubmissionRecord(
+                    "submission-staff",
+                    "staff-1",
+                    "new",
+                    "notgraded",
+                    null,
+                    null,
+                    null,
+                    0,
+                    false)])]);
+
+        var rows = Assert.Single(snapshot.Assignments).Submissions;
+        Assert.DoesNotContain(rows, row => row.UserId == "staff-1");
+        Assert.Equal(2, rows.Count);
     }
 
     [Fact]
@@ -77,9 +102,9 @@ public sealed class AssignmentSubmissionSnapshotProjectorTests
             includeLate: true,
             includeUngraded: true);
 
-        Assert.Equal(1, page.Total);
+        Assert.Equal(0, page.Total);
         Assert.False(page.HasMore);
-        Assert.Equal("student-1", Assert.Single(page.Submissions).UserId);
+        Assert.Empty(page.Submissions);
     }
 
     [Fact]

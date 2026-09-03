@@ -15,7 +15,9 @@ public record GradebookItem(
     string? FeedbackFormat,
     long? GradedDateSubmitted,
     long? GradedDateGraded,
-    string? GraderId);
+    string? GraderId,
+    string? ItemInstance = null,
+    string? CourseModuleId = null);
 
 public record CourseGradebook(
     string CourseId,

@@ -25,7 +25,8 @@ public sealed record AppSubmissionDto(
     IReadOnlyList<AppSubmissionFileDto> Files,
     decimal? CurrentGrade,
     string? CurrentFeedback,
-    decimal? GradeMax);
+    decimal? GradeMax,
+    string? EvaluationState = null);
 
 public sealed record AppSubmissionsPageDto(
     string CourseId,
@@ -80,7 +81,8 @@ public static class AppSubmissionContractMapper
             file.FileUrl)).ToArray() ?? [],
         existingGrade?.Grade ?? item.CurrentGrade,
         existingGrade?.Feedback ?? item.CurrentFeedback,
-        existingGrade?.GradeMax ?? item.GradeMax);
+        existingGrade?.GradeMax ?? item.GradeMax,
+        item.EvaluationState.ToString());
 
     public static AppSubmissionsPageDto ToPage(AssignmentSubmissionsPage page) => new(
         page.CourseId,
