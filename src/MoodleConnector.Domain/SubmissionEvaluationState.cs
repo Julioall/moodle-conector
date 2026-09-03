@@ -48,9 +48,10 @@ public static class SubmissionEvaluationStateResolver
             return SubmissionEvaluationState.ReviewedWithFeedback;
         }
 
-        return evidence.ReviewEvidenceAvailable
-            ? SubmissionEvaluationState.AwaitingGrading
-            : SubmissionEvaluationState.Unknown;
+        // A real submitted submission is enough to classify an ungraded item
+        // as awaiting correction. Gradebook availability must not turn it into
+        // Unknown, otherwise feedback-only assignments disappear from queues.
+        return SubmissionEvaluationState.AwaitingGrading;
     }
 
     public static bool NeedsGrading(SubmissionEvaluationState state) =>

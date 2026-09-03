@@ -34,7 +34,7 @@ public sealed class SubmissionEvaluationStateResolverTests
     [InlineData(true, null, null, null, true, SubmissionEvaluationState.AwaitingGrading)]
     [InlineData(false, null, null, null, true, SubmissionEvaluationState.NotSubmitted)]
     [InlineData(true, null, null, "feedback only", true, SubmissionEvaluationState.ReviewedWithFeedback)]
-    [InlineData(true, null, null, null, false, SubmissionEvaluationState.Unknown)]
+    [InlineData(true, null, null, null, false, SubmissionEvaluationState.AwaitingGrading)]
     public void Resolve_uses_submission_and_review_evidence(
         bool hasSubmission,
         object? gradeRaw,

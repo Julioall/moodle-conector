@@ -140,9 +140,10 @@ public sealed class SubmissionEvaluationStateResolverTests
     }
 
     [Fact]
-    public void Submissao_SemEvidenciasDeRevisao_E_SemReviewEvidence_Deve_Ser_Unknown()
+    public void Submissao_EntregueSemNotaMesmoSemLeituraDeGradebook_Deve_Ser_AwaitingGrading()
     {
-        // HasSubmission true mas sem nenhuma evidência de revisão e ReviewEvidenceAvailable false
+        // Uma submissão entregue sem nota, data de correção ou feedback ainda
+        // precisa entrar na fila, mesmo quando o gradebook não foi lido.
         var evidence = new SubmissionEvaluationEvidence(
             HasSubmission: true,
             GradeRaw: null,
@@ -152,7 +153,8 @@ public sealed class SubmissionEvaluationStateResolverTests
 
         var state = SubmissionEvaluationStateResolver.Resolve(evidence);
 
-        Assert.Equal(SubmissionEvaluationState.Unknown, state);
+        Assert.Equal(SubmissionEvaluationState.AwaitingGrading, state);
+        Assert.True(SubmissionEvaluationStateResolver.NeedsGrading(state));
     }
 
     // =========================================================================
