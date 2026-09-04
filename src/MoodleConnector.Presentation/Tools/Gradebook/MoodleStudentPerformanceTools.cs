@@ -7,6 +7,8 @@ using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Gradebook.Queries;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
+using MoodleConnector.Presentation.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Gradebook;
 
@@ -14,7 +16,8 @@ namespace MoodleConnector.Presentation.Tools.Gradebook;
 public sealed class MoodleStudentPerformanceTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     // ── Desempenho por atividade ──────────────────────────────────────────────
 
@@ -60,11 +63,52 @@ public sealed class MoodleStudentPerformanceTools(
         if (moodleUserId is null)
             return ToolResultHelper.Error<StudentGradeItemsResult>("Usuário não autenticado.");
 
+        var effectiveCourseId = courseId;
+        CourseGradebookSnapshot? prefetchedGradebook = null;
+        ToolFreshness? freshness = null;
+        if (snapshotContext is not null)
+        {
+            try
+            {
+                var courseRead = await snapshotContext.ReadAsync(
+                    new CourseReadSnapshotRequest(
+                        courseId,
+                        moodleAlias,
+                        moodleUserId.Value.ToString(),
+                        CourseReadSnapshotRequirements.Gradebook),
+                    cancellationToken);
+                if (courseRead is not null)
+                {
+                    effectiveCourseId = courseRead.CourseId;
+                    prefetchedGradebook = courseRead.Gradebook?.Data;
+                    var updatedAt = courseRead.Metadata.OldestUpdatedAt;
+                    freshness = new ToolFreshness(
+                        "snapshot",
+                        updatedAt,
+                        updatedAt.HasValue
+                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
+                            : null,
+                        courseRead.Metadata.StaleDatasets.Count > 0,
+                        courseRead.Metadata.RefreshQueued,
+                        courseRead.Metadata.IsComplete,
+                        courseRead.Gradebook?.RecordCount ?? 0);
+                }
+            }
+            catch
+            {
+                // Snapshot lookup is an optimization. Keep the live path.
+            }
+        }
+
         StudentGradeItemsResult data;
         try
         {
             data = await mediator.Send(
-                new GetStudentGradeItemsQuery(courseId, studentId, minGradePercent),
+                new GetStudentGradeItemsQuery(
+                    effectiveCourseId,
+                    studentId,
+                    minGradePercent,
+                    prefetchedGradebook),
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
@@ -77,7 +121,8 @@ public sealed class MoodleStudentPerformanceTools(
             return ToolResultHelper.Error<StudentGradeItemsResult>(exception);
         }
 
-        var response = new ToolResponse<StudentGradeItemsResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<StudentGradeItemsResult>(
+            "ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         var narration = $"Desempenho do estudante {studentId} no curso {courseId}: {data.Items.Count} atividade(s) avaliativa(s). " +
                         $"{data.BelowMinimumItems.Count} abaixo do mínimo de {data.MinGradePercent}%.";
 
@@ -130,11 +175,62 @@ public sealed class MoodleStudentPerformanceTools(
         if (moodleUserId is null)
             return ToolResultHelper.Error<GetStudentsBelowMinGradeResult>("Usuário não autenticado.");
 
+        var effectiveCourseId = courseId;
+        CourseGradebookSnapshot? prefetchedGradebook = null;
+        CourseParticipantsPage? prefetchedParticipants = null;
+        ToolFreshness? freshness = null;
+        if (snapshotContext is not null)
+        {
+            try
+            {
+                var courseRead = await snapshotContext.ReadAsync(
+                    new CourseReadSnapshotRequest(
+                        courseId,
+                        moodleAlias,
+                        moodleUserId.Value.ToString(),
+                        CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
+                    cancellationToken);
+                if (courseRead is not null)
+                {
+                    effectiveCourseId = courseRead.CourseId;
+                    prefetchedGradebook = courseRead.Gradebook?.Data;
+                    if (courseRead.Students?.Data is { HasMore: false } participants &&
+                        courseRead.Students.IsComplete)
+                    {
+                        prefetchedParticipants = participants;
+                    }
+
+                    var updatedAt = courseRead.Metadata.OldestUpdatedAt;
+                    freshness = new ToolFreshness(
+                        "snapshot",
+                        updatedAt,
+                        updatedAt.HasValue
+                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
+                            : null,
+                        courseRead.Metadata.StaleDatasets.Count > 0,
+                        courseRead.Metadata.RefreshQueued,
+                        courseRead.Metadata.IsComplete,
+                        (courseRead.Students?.RecordCount ?? 0) +
+                        (courseRead.Gradebook?.RecordCount ?? 0));
+                }
+            }
+            catch
+            {
+                // Snapshot warming is best effort; the current request uses
+                // the live bulk gateway and its explicit fallback.
+            }
+        }
+
         GetStudentsBelowMinGradeResult data;
         try
         {
             data = await mediator.Send(
-                new GetStudentsBelowMinGradeQuery(courseId, minGradePercent, maxStudentsToAnalyze),
+                new GetStudentsBelowMinGradeQuery(
+                    effectiveCourseId,
+                    minGradePercent,
+                    maxStudentsToAnalyze,
+                    PrefetchedGradebook: prefetchedGradebook,
+                    PrefetchedParticipants: prefetchedParticipants),
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
@@ -147,7 +243,8 @@ public sealed class MoodleStudentPerformanceTools(
             return ToolResultHelper.Error<GetStudentsBelowMinGradeResult>(exception);
         }
 
-        var response = new ToolResponse<GetStudentsBelowMinGradeResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<GetStudentsBelowMinGradeResult>(
+            "ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         var narration = $"Análise do curso {courseId}: {data.TotalStudentsAnalyzed} estudante(s) analisado(s). " +
                         $"{data.Students.Count} com pelo menos uma SA abaixo de {data.MinGradePercent}%.";
 

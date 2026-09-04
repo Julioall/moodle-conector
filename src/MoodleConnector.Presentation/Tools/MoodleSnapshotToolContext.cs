@@ -1,6 +1,8 @@
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Registry;
 using MoodleConnector.Domain;
+using MoodleConnector.Infrastructure.Configuration;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Presentation.Tools.Portal;
 
 namespace MoodleConnector.Presentation.Tools;
@@ -13,8 +15,12 @@ public sealed class MoodleSnapshotToolContext(
     PortalMcpIdentityResolver identityResolver,
     IConnectionRegistry connectionRegistry,
     IMoodleSnapshotStore snapshotStore,
-    IMoodleSnapshotSyncQueue snapshotSyncQueue)
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
+    IOptions<MoodleSnapshotOptions>? snapshotOptions = null) : IMoodleCourseReadSnapshotCoordinator
 {
+    private readonly MoodleSnapshotOptions options =
+        (snapshotOptions?.Value ?? new MoodleSnapshotOptions()).Normalize();
+
     public async Task<MoodleSnapshotToolScope?> TryResolveAsync(
         string? moodleAlias,
         CancellationToken cancellationToken = default)
@@ -40,6 +46,189 @@ public sealed class MoodleSnapshotToolContext(
             return null;
         }
     }
+
+    public async Task<CourseReadSnapshot?> ReadAsync(
+        CourseReadSnapshotRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.CourseId) ||
+            string.IsNullOrWhiteSpace(request.UserExternalId))
+        {
+            return null;
+        }
+
+        var scope = await TryResolveAsync(request.MoodleAlias, cancellationToken);
+        if (scope is null)
+        {
+            return null;
+        }
+
+        var courseId = await ResolveCourseIdAsync(scope, request.CourseId, cancellationToken);
+        MoodleSnapshotEnvelope<CourseContentsSummary>? activities = null;
+        MoodleSnapshotEnvelope<CourseParticipantsPage>? students = null;
+        MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>? groups = null;
+        MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>? submissions = null;
+        MoodleSnapshotEnvelope<CourseGradebookSnapshot>? gradebook = null;
+        var requiredDatasets = new List<string>();
+        var refreshQueued = false;
+
+        if (request.Requirements.HasFlag(CourseReadSnapshotRequirements.Activities))
+        {
+            requiredDatasets.Add(MoodleSnapshotDatasets.Activities);
+            activities = await GetActivitiesAsync(scope, courseId, cancellationToken);
+            refreshQueued |= await QueueIfNeededAsync(
+                scope, request.UserExternalId, MoodleSnapshotDatasets.Activities, courseId, activities, cancellationToken);
+        }
+
+        if (request.Requirements.HasFlag(CourseReadSnapshotRequirements.Students))
+        {
+            requiredDatasets.Add(MoodleSnapshotDatasets.Students);
+            students = await GetStudentsAsync(scope, courseId, cancellationToken);
+            refreshQueued |= await QueueIfNeededAsync(
+                scope, request.UserExternalId, MoodleSnapshotDatasets.Students, courseId, students, cancellationToken);
+        }
+
+        if (request.Requirements.HasFlag(CourseReadSnapshotRequirements.Groups))
+        {
+            requiredDatasets.Add(MoodleSnapshotDatasets.Groups);
+            groups = await GetGroupsAsync(scope, courseId, cancellationToken);
+            refreshQueued |= await QueueIfNeededAsync(
+                scope, request.UserExternalId, MoodleSnapshotDatasets.Groups, courseId, groups, cancellationToken);
+        }
+
+        if (request.Requirements.HasFlag(CourseReadSnapshotRequirements.Submissions))
+        {
+            requiredDatasets.Add(MoodleSnapshotDatasets.Submissions);
+            submissions = await GetSubmissionsAsync(scope, courseId, cancellationToken);
+            refreshQueued |= await QueueIfNeededAsync(
+                scope, request.UserExternalId, MoodleSnapshotDatasets.Submissions, courseId, submissions, cancellationToken);
+        }
+
+        if (request.Requirements.HasFlag(CourseReadSnapshotRequirements.Gradebook))
+        {
+            requiredDatasets.Add(MoodleSnapshotDatasets.Gradebook);
+            gradebook = await GetGradebookAsync(scope, courseId, cancellationToken);
+            refreshQueued |= await QueueIfNeededAsync(
+                scope, request.UserExternalId, MoodleSnapshotDatasets.Gradebook, courseId, gradebook, cancellationToken);
+        }
+
+        var heads = new[]
+        {
+            activities?.UpdatedAt,
+            students?.UpdatedAt,
+            groups?.UpdatedAt,
+            submissions?.UpdatedAt,
+            gradebook?.UpdatedAt,
+        }.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+        var missingDatasets = requiredDatasets
+            .Where(dataset => !HasDataset(dataset, activities, students, groups, submissions, gradebook))
+            .ToArray();
+        var staleDatasets = requiredDatasets
+            .Where(dataset => IsDatasetStale(dataset, activities, students, groups, submissions, gradebook))
+            .ToArray();
+        var incompleteDatasets = requiredDatasets
+            .Where(dataset => IsDatasetIncomplete(dataset, activities, students, groups, submissions, gradebook))
+            .ToArray();
+        DateTimeOffset? oldest = heads.Length == 0 ? null : heads.Min();
+        DateTimeOffset? newest = heads.Length == 0 ? null : heads.Max();
+        var skewSeconds = oldest.HasValue && newest.HasValue
+            ? (newest.Value - oldest.Value).TotalSeconds
+            : (double?)null;
+        if (skewSeconds > TimeSpan.FromMinutes(options.MaxAnalyticalSnapshotSkewMinutes).TotalSeconds)
+        {
+            incompleteDatasets = [.. incompleteDatasets, "snapshot_skew"];
+        }
+
+        return new CourseReadSnapshot(
+            courseId,
+            activities,
+            students,
+            groups,
+            submissions,
+            gradebook,
+            new CourseReadSnapshotMetadata(
+                requiredDatasets,
+                missingDatasets,
+                staleDatasets,
+                incompleteDatasets,
+                oldest,
+                newest,
+                skewSeconds,
+                missingDatasets.Length == 0 && incompleteDatasets.Length == 0 &&
+                    (request.AllowStale || staleDatasets.Length == 0),
+                refreshQueued));
+    }
+
+    private async Task<bool> QueueIfNeededAsync<T>(
+        MoodleSnapshotToolScope scope,
+        string userExternalId,
+        string dataset,
+        string courseId,
+        MoodleSnapshotEnvelope<T>? envelope,
+        CancellationToken cancellationToken)
+    {
+        if (envelope is not null && !envelope.IsStale && envelope.IsComplete)
+        {
+            return false;
+        }
+
+        return await QueueAsync(
+            scope,
+            userExternalId,
+            dataset,
+            courseId,
+            priority: 20,
+            cancellationToken: cancellationToken);
+    }
+
+    private static bool HasDataset(
+        string dataset,
+        MoodleSnapshotEnvelope<CourseContentsSummary>? activities,
+        MoodleSnapshotEnvelope<CourseParticipantsPage>? students,
+        MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>? groups,
+        MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>? submissions,
+        MoodleSnapshotEnvelope<CourseGradebookSnapshot>? gradebook) => dataset switch
+        {
+            MoodleSnapshotDatasets.Activities => activities is not null,
+            MoodleSnapshotDatasets.Students => students is not null,
+            MoodleSnapshotDatasets.Groups => groups is not null,
+            MoodleSnapshotDatasets.Submissions => submissions is not null,
+            MoodleSnapshotDatasets.Gradebook => gradebook is not null,
+            _ => false,
+        };
+
+    private static bool IsDatasetStale(
+        string dataset,
+        MoodleSnapshotEnvelope<CourseContentsSummary>? activities,
+        MoodleSnapshotEnvelope<CourseParticipantsPage>? students,
+        MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>? groups,
+        MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>? submissions,
+        MoodleSnapshotEnvelope<CourseGradebookSnapshot>? gradebook) => dataset switch
+        {
+            MoodleSnapshotDatasets.Activities => activities?.IsStale == true,
+            MoodleSnapshotDatasets.Students => students?.IsStale == true,
+            MoodleSnapshotDatasets.Groups => groups?.IsStale == true,
+            MoodleSnapshotDatasets.Submissions => submissions?.IsStale == true,
+            MoodleSnapshotDatasets.Gradebook => gradebook?.IsStale == true,
+            _ => false,
+        };
+
+    private static bool IsDatasetIncomplete(
+        string dataset,
+        MoodleSnapshotEnvelope<CourseContentsSummary>? activities,
+        MoodleSnapshotEnvelope<CourseParticipantsPage>? students,
+        MoodleSnapshotEnvelope<IReadOnlyList<CourseGroupSummary>>? groups,
+        MoodleSnapshotEnvelope<CourseAssignmentSubmissionsSnapshot>? submissions,
+        MoodleSnapshotEnvelope<CourseGradebookSnapshot>? gradebook) => dataset switch
+        {
+            MoodleSnapshotDatasets.Activities => activities?.IsComplete == false,
+            MoodleSnapshotDatasets.Students => students?.IsComplete == false,
+            MoodleSnapshotDatasets.Groups => groups?.IsComplete == false,
+            MoodleSnapshotDatasets.Submissions => submissions?.IsComplete == false,
+            MoodleSnapshotDatasets.Gradebook => gradebook?.IsComplete == false ||
+                gradebook?.Data.Coverage.IsComplete == false,
+            _ => true,
+        };
 
     public Task<MoodleSnapshotEnvelope<T>?> GetAsync<T>(
         MoodleSnapshotToolScope scope,
@@ -96,6 +285,39 @@ public sealed class MoodleSnapshotToolContext(
             MoodleSnapshotDatasets.Submissions,
             courseId,
             cancellationToken);
+
+    public Task<MoodleSnapshotEnvelope<CourseGradebookSnapshot>?> GetGradebookAsync(
+        MoodleSnapshotToolScope scope,
+        string courseId,
+        CancellationToken cancellationToken = default) =>
+        snapshotStore.GetAsync<CourseGradebookSnapshot>(
+            scope.Identity.Id,
+            scope.ConnectionAlias,
+            MoodleSnapshotDatasets.Gradebook,
+            courseId,
+            cancellationToken);
+
+    public async Task<bool> EnsureGradebookQueuedAsync(
+        MoodleSnapshotToolScope scope,
+        string userExternalId,
+        string courseId,
+        int priority = 20,
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetGradebookAsync(scope, courseId, cancellationToken);
+        if (snapshot is not null && !snapshot.IsStale && snapshot.IsComplete)
+        {
+            return false;
+        }
+
+        return await QueueAsync(
+            scope,
+            userExternalId,
+            MoodleSnapshotDatasets.Gradebook,
+            courseId,
+            priority,
+            cancellationToken: cancellationToken);
+    }
 
     public async Task<string> ResolveCourseIdAsync(
         MoodleSnapshotToolScope? scope,

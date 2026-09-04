@@ -16,6 +16,9 @@ public sealed class MoodleSnapshotMetrics : IDisposable
     private readonly Counter<long> throttleWaits;
     private readonly Counter<long> runsCleaned;
     private readonly Histogram<long> payloadBytes;
+    private readonly Counter<long> gradebookReads;
+    private readonly Counter<long> gradebookFallbacks;
+    private readonly Counter<long> gradebookCacheHits;
 
     public MoodleSnapshotMetrics()
     {
@@ -30,6 +33,9 @@ public sealed class MoodleSnapshotMetrics : IDisposable
         throttleWaits = meter.CreateCounter<long>("moodle_snapshot_throttle_waits");
         runsCleaned = meter.CreateCounter<long>("moodle_snapshot_runs_cleaned");
         payloadBytes = meter.CreateHistogram<long>("moodle_snapshot_payload_bytes");
+        gradebookReads = meter.CreateCounter<long>("moodle_gradebook_reads");
+        gradebookFallbacks = meter.CreateCounter<long>("moodle_gradebook_fallbacks");
+        gradebookCacheHits = meter.CreateCounter<long>("moodle_gradebook_cache_hits");
     }
 
     public void RecordL1Hit(string dataset) => l1Hits.Add(1, new KeyValuePair<string, object?>("dataset", dataset));
@@ -48,6 +54,9 @@ public sealed class MoodleSnapshotMetrics : IDisposable
     public void RecordThrottleWait(string scope) => throttleWaits.Add(1, new KeyValuePair<string, object?>("scope", scope));
     public void RecordRunsCleaned(int count) => runsCleaned.Add(count);
     public void RecordPayloadBytes(string dataset, long bytes) => payloadBytes.Record(bytes, new KeyValuePair<string, object?>("dataset", dataset));
+    public void RecordGradebookRead(string mode) => gradebookReads.Add(1, new KeyValuePair<string, object?>("mode", mode));
+    public void RecordGradebookFallback(string reason) => gradebookFallbacks.Add(1, new KeyValuePair<string, object?>("reason", reason));
+    public void RecordGradebookCacheHit(string mode) => gradebookCacheHits.Add(1, new KeyValuePair<string, object?>("mode", mode));
 
     public void Dispose() => meter.Dispose();
 }

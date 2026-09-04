@@ -72,6 +72,45 @@ public sealed class GenerateCourseGradesReportQueryHandlerTests
         Assert.Equal(39m, Assert.Single(result.Students).TotalGradePercentage);
     }
 
+    [Fact]
+    public async Task Handle_Distingue_erro_de_gradebook_de_aluno_sem_nota()
+    {
+        var students = new[]
+        {
+            MakeStudent("1", "Aluno com gradebook"),
+            MakeStudent("2", "Aluno não retornado"),
+        };
+        var prefetched = new CourseGradebookSnapshot(
+            "course-1",
+            new Dictionary<string, CourseGradebook>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["1"] = new CourseGradebook("course-1", "1", [
+                    MakeGradeItem("course-total", "Total do curso", "course", 70m),
+                ]),
+            },
+            new GradebookSnapshotCoverage(
+                "mixed",
+                RequestedStudentCount: 2,
+                ReturnedStudentCount: 1,
+                IsComplete: false,
+                Truncated: false,
+                MissingStudentIds: ["2"],
+                Warnings: ["student_read_failed"])
+            {
+                // The failed fallback is explicitly separated from a user
+                // merely omitted by a bulk response.
+                ErrorStudentIds = ["2"],
+            });
+
+        var handler = CreateHandler(students, []);
+        var result = await handler.Handle(
+            new GenerateCourseGradesReportQuery("course-1", PrefetchedGradebook: prefetched),
+            CancellationToken.None);
+
+        Assert.Equal("com_nota", result.Students.Single(row => row.StudentId == "1").Status);
+        Assert.Equal(GradebookCoverageStates.Error, result.Students.Single(row => row.StudentId == "2").GradebookStatus);
+    }
+
     private static GenerateCourseGradesReportQueryHandler CreateHandler(
         IReadOnlyList<CourseParticipantSummary> students,
         Dictionary<string, IReadOnlyList<GradebookItem>> gradesByStudent) =>

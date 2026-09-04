@@ -8,11 +8,20 @@ public sealed class MoodleSnapshotOptions
     public int GlobalConcurrency { get; init; } = 4;
     public int PerConnectionConcurrency { get; init; } = 1;
     public int FeedbackReadConcurrency { get; init; } = 4;
+    public bool BulkGradebookEnabled { get; init; } = true;
+    public int MaxBulkGradebookStudents { get; init; } = 200;
+    public int MaxBulkGradebookCells { get; init; } = 20_000;
+    public int IndividualGradebookConcurrency { get; init; } = 4;
+    public int GradebookFreshMinutes { get; init; } = 15;
+    public int GradebookStaleMinutes { get; init; } = 120;
+    public int MaxAnalyticalSnapshotSkewMinutes { get; init; } = 15;
     public int MaxPayloadBytes { get; init; } = 10 * 1024 * 1024;
     public int CoursePageSize { get; init; } = 100;
     public int MaxCoursePages { get; init; } = 10;
     public int ParticipantPageSize { get; init; } = 1000;
+    public int MaxParticipantPages { get; init; } = 100;
     public int AssignmentBatchSize { get; init; } = 100;
+    public int AssignmentGradeBatchSize { get; init; } = 50;
     public int RunRetentionDays { get; init; } = 30;
     public int CleanupIntervalMinutes { get; init; } = 60;
     public int LeaseMinutes { get; init; } = 30;
@@ -23,11 +32,22 @@ public sealed class MoodleSnapshotOptions
         GlobalConcurrency = Math.Clamp(GlobalConcurrency, 1, 64),
         PerConnectionConcurrency = Math.Clamp(PerConnectionConcurrency, 1, 16),
         FeedbackReadConcurrency = Math.Clamp(FeedbackReadConcurrency, 1, 16),
+        BulkGradebookEnabled = BulkGradebookEnabled,
+        MaxBulkGradebookStudents = Math.Clamp(MaxBulkGradebookStudents, 1, 10_000),
+        MaxBulkGradebookCells = Math.Clamp(MaxBulkGradebookCells, 1, 1_000_000),
+        IndividualGradebookConcurrency = Math.Clamp(IndividualGradebookConcurrency, 1, 32),
+        GradebookFreshMinutes = Math.Clamp(GradebookFreshMinutes, 1, 24 * 60),
+        GradebookStaleMinutes = Math.Clamp(GradebookStaleMinutes, 1, 7 * 24 * 60),
+        MaxAnalyticalSnapshotSkewMinutes = Math.Clamp(MaxAnalyticalSnapshotSkewMinutes, 1, 24 * 60),
         MaxPayloadBytes = Math.Clamp(MaxPayloadBytes, 64 * 1024, 100 * 1024 * 1024),
         CoursePageSize = Math.Clamp(CoursePageSize, 1, 1000),
         MaxCoursePages = Math.Clamp(MaxCoursePages, 1, 100),
         ParticipantPageSize = Math.Clamp(ParticipantPageSize, 1, 1000),
+        MaxParticipantPages = Math.Clamp(MaxParticipantPages, 1, 1000),
         AssignmentBatchSize = Math.Clamp(AssignmentBatchSize, 1, 500),
+        // Moodle's mod_assign_get_grades contract is safely bounded at 50
+        // assignment IDs per request; callers may choose a smaller canary.
+        AssignmentGradeBatchSize = Math.Clamp(AssignmentGradeBatchSize, 1, 50),
         RunRetentionDays = Math.Clamp(RunRetentionDays, 1, 3650),
         CleanupIntervalMinutes = Math.Clamp(CleanupIntervalMinutes, 5, 24 * 60),
         LeaseMinutes = Math.Clamp(LeaseMinutes, 5, 180),

@@ -6,6 +6,8 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Risk.Queries;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
+using MoodleConnector.Presentation.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Risk;
 
@@ -13,7 +15,8 @@ namespace MoodleConnector.Presentation.Tools.Risk;
 public sealed class MoodleRiskAnalysisTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null)
 {
     [McpServerTool(
         Name = "report_students_at_risk",
@@ -67,11 +70,62 @@ public sealed class MoodleRiskAnalysisTools(
             return ToolResultHelper.Error<IReadOnlyList<StudentRiskReport>>("Usuario nao autenticado para gerar relatorio.");
         }
 
+        var effectiveCourseId = courseId;
+        CourseGradebookSnapshot? prefetchedGradebook = null;
+        CourseParticipantsPage? prefetchedParticipants = null;
+        ToolFreshness? freshness = null;
+        if (snapshotContext is not null)
+        {
+            try
+            {
+                var courseRead = await snapshotContext.ReadAsync(
+                    new CourseReadSnapshotRequest(
+                        courseId,
+                        moodleAlias,
+                        moodleUserId.Value.ToString(),
+                        CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
+                    cancellationToken);
+                if (courseRead is not null)
+                {
+                    effectiveCourseId = courseRead.CourseId;
+                    prefetchedGradebook = courseRead.Gradebook?.Data;
+                    if (courseRead.Students?.Data is { HasMore: false } participants &&
+                        courseRead.Students.IsComplete)
+                    {
+                        prefetchedParticipants = participants;
+                    }
+                    var updatedAt = courseRead.Metadata.OldestUpdatedAt;
+                    freshness = new ToolFreshness(
+                        "snapshot",
+                        updatedAt,
+                        updatedAt.HasValue
+                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
+                            : null,
+                        courseRead.Metadata.StaleDatasets.Count > 0,
+                        courseRead.Metadata.RefreshQueued,
+                        courseRead.Metadata.IsComplete,
+                        (courseRead.Students?.RecordCount ?? 0) +
+                        (courseRead.Gradebook?.RecordCount ?? 0));
+                }
+            }
+            catch
+            {
+                // Snapshot warming is best effort; the current report keeps
+                // its live bulk/fallback behavior.
+            }
+        }
+
         StudentsAtRiskReportResult result;
         try
         {
             result = await mediator.Send(
-                new GetStudentsAtRiskReportQuery(courseId, maxStudents, inactivityThresholdDays, minGradePercentage),
+                new GetStudentsAtRiskReportQuery(
+                    effectiveCourseId,
+                    maxStudents,
+                    inactivityThresholdDays,
+                    minGradePercentage,
+                    PrefetchedGradebook: prefetchedGradebook,
+                    PrefetchedParticipants: prefetchedParticipants),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -89,7 +143,8 @@ public sealed class MoodleRiskAnalysisTools(
             data,
             BuildWarnings(result),
             AuditId: null,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            Freshness: freshness);
 
         var altos = data.Count(d => d.RiskLevel == RiskLevel.Alto);
         var medios = data.Count(d => d.RiskLevel == RiskLevel.Medio);

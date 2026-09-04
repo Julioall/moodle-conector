@@ -23,6 +23,7 @@ public sealed record StudentClassCouncilRow(
     string SituationFlag,   // "regular" | "attention" | "recovery_needed" | "at_risk"
     IReadOnlyList<string> Recommendations)
 {
+    public string GradebookStatus { get; init; } = GradebookCoverageStates.NotRequested;
     public int AwaitingGradingItemsCount { get; init; }
     public int NotSubmittedItemsCount { get; init; }
     public int ReviewedWithFeedbackItemsCount { get; init; }
@@ -60,7 +61,9 @@ public sealed record GenerateClassCouncilReportQuery(
     string CourseId,
     decimal MinGradePercent = 60m,
     int InactiveDaysThreshold = 7,
-    int MaxStudentsToAnalyze = 60) : IRequest<GenerateClassCouncilReportResult>;
+    int MaxStudentsToAnalyze = 60,
+    CourseGradebookSnapshot? PrefetchedGradebook = null,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<GenerateClassCouncilReportResult>;
 
 public sealed class GenerateClassCouncilReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -82,16 +85,23 @@ public sealed class GenerateClassCouncilReportQueryHandler(
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
         var now = DateTimeOffset.UtcNow;
 
-        var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-            userExternalId: currentUserExternalId,
-            courseId: request.CourseId,
-            statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
-            pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60,
-            studentsOnly: true,
-            includeEmail: false,
-            groupId: null,
-            cancellationToken: cancellationToken);
+        var requestedPageSize = request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60;
+        var participantsPage = request.PrefetchedParticipants is { HasMore: false } cachedParticipants &&
+            string.Equals(cachedParticipants.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+            ? cachedParticipants with
+            {
+                Participants = cachedParticipants.Participants.Take(requestedPageSize).ToArray(),
+            }
+            : await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId: currentUserExternalId,
+                courseId: request.CourseId,
+                statusFilter: ParticipantStatusFilter.Active,
+                page: 0,
+                pageSize: requestedPageSize,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken);
 
         if (participantsPage.Participants.Count == 0)
         {
@@ -104,6 +114,26 @@ public sealed class GenerateClassCouncilReportQueryHandler(
         }
 
         var rows = new List<StudentClassCouncilRow>();
+        var gradebookIncompleteCount = 0;
+        CourseGradebookSnapshot? bulkGradebook =
+            string.Equals(request.PrefetchedGradebook?.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+                ? request.PrefetchedGradebook
+                : null;
+        if (bulkGradebook is null)
+        {
+            try
+            {
+                bulkGradebook = await gradebookGateway.GetCourseGradebookAsync(
+                    request.CourseId,
+                    participantsPage.Participants.Select(student => student.UserId).ToArray(),
+                    groupId: null,
+                    cancellationToken);
+            }
+            catch
+            {
+                // Individual reads remain the compatibility fallback.
+            }
+        }
         var submissionState = await CourseSubmissionReportState.LoadAsync(
             mediator,
             request.CourseId,
@@ -126,10 +156,33 @@ public sealed class GenerateClassCouncilReportQueryHandler(
             int totalGradedItems = 0;
             int pendingItemsCount = 0;
             int awaitingGradingItemsCount = 0;
+            var gradebookStatus = GradebookCoverageStates.Error;
             try
             {
-                var gradebook = await gradebookGateway.GetStudentGradebookAsync(
-                    request.CourseId, student.UserId, cancellationToken);
+                CourseGradebook gradebook;
+                if (bulkGradebook?.TryGetForStudent(student.UserId, out var bulkStudentGradebook) == true)
+                {
+                    gradebook = bulkStudentGradebook;
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
+                else if (bulkGradebook is null || bulkGradebook.Coverage.SourceMode == "bulk")
+                {
+                    gradebook = await gradebookGateway.GetStudentGradebookAsync(
+                        request.CourseId, student.UserId, cancellationToken);
+                    gradebookStatus = gradebook.Items.Count == 0
+                        ? GradebookCoverageStates.Empty
+                        : GradebookCoverageStates.Covered;
+                }
+                else
+                {
+                    gradebook = new CourseGradebook(request.CourseId, student.UserId, []);
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
+
+                if (gradebookStatus is GradebookCoverageStates.Error or GradebookCoverageStates.NotReturned)
+                {
+                    gradebookIncompleteCount++;
+                }
 
                 var activityItems = gradebook.Items
                     .Where(GradebookMappingHelper.IsEvaluativeReportActivityItem)
@@ -156,7 +209,12 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                     awaitingGradingItemsCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
                 }
             }
-            catch { /* partial data */ }
+            catch
+            {
+                gradebookIncompleteCount++;
+                // Preserve the per-student failure through GradebookStatus
+                // instead of converting it into a regular empty gradebook.
+            }
 
             if (submissionState.IsAvailable)
             {
@@ -201,7 +259,8 @@ public sealed class GenerateClassCouncilReportQueryHandler(
                     : 0,
                 GradedItemsCount = submissionState.IsAvailable
                     ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.GradedNumeric)
-                    : 0
+                    : 0,
+                GradebookStatus = gradebookStatus
             });
         }
 
@@ -215,6 +274,19 @@ public sealed class GenerateClassCouncilReportQueryHandler(
             })
             .ToList();
 
+        var gradebookWarning = gradebookIncompleteCount > 0
+            ? $"A cobertura do gradebook está incompleta para {gradebookIncompleteCount} estudante(s); estados de ausência e erro foram preservados."
+            : null;
+        var warning = submissionState.IsAvailable && !submissionState.IsComplete
+            ? submissionState.Warning ?? "A cobertura de entregas está incompleta."
+            : null;
+        if (gradebookWarning is not null)
+        {
+            warning = string.IsNullOrWhiteSpace(warning)
+                ? gradebookWarning
+                : $"{warning} {gradebookWarning}";
+        }
+
         return new GenerateClassCouncilReportResult(
             CourseId: request.CourseId,
             GeneratedAt: now,
@@ -226,9 +298,7 @@ public sealed class GenerateClassCouncilReportQueryHandler(
             MinGradePercent: request.MinGradePercent,
             Students: sorted,
             Disclaimer: Disclaimer,
-            Warning: submissionState.IsAvailable && !submissionState.IsComplete
-                ? submissionState.Warning ?? "A cobertura de entregas está incompleta."
-                : null);
+            Warning: warning);
     }
 
     private static IReadOnlyList<string> BuildRecommendations(

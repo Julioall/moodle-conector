@@ -262,25 +262,27 @@ internal sealed class MoodleSnapshotStore(
         exception.InnerException is PostgresException postgres &&
         postgres.SqlState == PostgresErrorCodes.UniqueViolation;
 
-    private static TimeSpan GetFreshTtl(string dataset, string tier, bool frozen) =>
+    private TimeSpan GetFreshTtl(string dataset, string tier, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : dataset switch
         {
             MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(2),
             MoodleSnapshotDatasets.Activities => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(1) : TimeSpan.FromHours(4),
             MoodleSnapshotDatasets.Submissions => TimeSpan.FromMinutes(15),
+            MoodleSnapshotDatasets.Gradebook => TimeSpan.FromMinutes(options.GradebookFreshMinutes),
             MoodleSnapshotDatasets.DashboardPending => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.DashboardAccess => TimeSpan.FromMinutes(45),
             _ => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? HotTtl : WarmTtl,
         };
 
-    private static TimeSpan GetStaleWindow(string dataset, bool frozen) =>
+    private TimeSpan GetStaleWindow(string dataset, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : dataset switch
         {
             MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(7),
             MoodleSnapshotDatasets.Activities => TimeSpan.FromDays(3),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.Submissions => TimeSpan.FromHours(6),
+            MoodleSnapshotDatasets.Gradebook => TimeSpan.FromMinutes(options.GradebookStaleMinutes),
             MoodleSnapshotDatasets.DashboardPending => TimeSpan.FromDays(3),
             MoodleSnapshotDatasets.DashboardAccess => TimeSpan.FromHours(6),
             _ => TimeSpan.FromHours(12),

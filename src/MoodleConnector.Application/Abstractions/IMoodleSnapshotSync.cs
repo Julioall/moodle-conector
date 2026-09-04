@@ -22,6 +22,7 @@ public static class MoodleSnapshotDatasets
     public const string Students = "students";
     public const string Groups = "groups";
     public const string Submissions = "submissions";
+    public const string Gradebook = "gradebook";
     public const string DashboardPending = "dashboard_pending";
     public const string DashboardAccess = "dashboard_access";
 }

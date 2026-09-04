@@ -13,7 +13,15 @@ public sealed record CourseGradeReportStudentRow(
     decimal? TotalGradeMax,
     decimal? TotalGradePercentage,
     string? TotalGradeFormatted,
-    string Status);
+    string Status)
+{
+    /// <summary>
+    /// Distinguishes a covered gradebook, an empty gradebook, a missing total
+    /// item and an actual read error. <see cref="Status"/> remains unchanged
+    /// for existing consumers.
+    /// </summary>
+    public string GradebookStatus { get; init; } = GradebookCoverageStates.NotRequested;
+}
 
 public sealed record GenerateCourseGradesReportResult(
     string CourseId,
@@ -27,7 +35,9 @@ public sealed record GenerateCourseGradesReportResult(
 
 public sealed record GenerateCourseGradesReportQuery(
     string CourseId,
-    int PageSize = 100) : IRequest<GenerateCourseGradesReportResult>;
+    int PageSize = 100,
+    CourseGradebookSnapshot? PrefetchedGradebook = null,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<GenerateCourseGradesReportResult>;
 
 /// <summary>
 /// Gera o relatório de notas usando somente o item total do curso retornado pelo Moodle.
@@ -47,28 +57,35 @@ public sealed class GenerateCourseGradesReportQueryHandler(
         var now = DateTimeOffset.UtcNow;
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
         var participants = new List<CourseParticipantSummary>();
-        var page = 1;
-
-        while (true)
+        if (request.PrefetchedParticipants is { HasMore: false } cachedParticipants &&
+            string.Equals(cachedParticipants.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase))
         {
-            var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-                userExternalId: currentUserExternalId,
-                courseId: request.CourseId,
-                statusFilter: ParticipantStatusFilter.Active,
-                page: page,
-                pageSize: pageSize,
-                studentsOnly: true,
-                includeEmail: false,
-                groupId: null,
-                cancellationToken: cancellationToken);
-
-            participants.AddRange(participantsPage.Participants);
-            if (!participantsPage.HasMore || participantsPage.Participants.Count == 0)
+            participants.AddRange(cachedParticipants.Participants);
+        }
+        else
+        {
+            var page = 1;
+            while (true)
             {
-                break;
-            }
+                var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
+                    userExternalId: currentUserExternalId,
+                    courseId: request.CourseId,
+                    statusFilter: ParticipantStatusFilter.Active,
+                    page: page,
+                    pageSize: pageSize,
+                    studentsOnly: true,
+                    includeEmail: false,
+                    groupId: null,
+                    cancellationToken: cancellationToken);
 
-            page++;
+                participants.AddRange(participantsPage.Participants);
+                if (!participantsPage.HasMore || participantsPage.Participants.Count == 0)
+                {
+                    break;
+                }
+
+                page++;
+            }
         }
 
         if (participants.Count == 0)
@@ -84,26 +101,76 @@ public sealed class GenerateCourseGradesReportQueryHandler(
                 Warning: "Nenhum estudante ativo encontrado no curso.");
         }
 
+        CourseGradebookSnapshot? bulkGradebook =
+            string.Equals(request.PrefetchedGradebook?.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+                ? request.PrefetchedGradebook
+                : null;
+        if (bulkGradebook is null)
+        {
+            try
+            {
+                bulkGradebook = await gradebookGateway.GetCourseGradebookAsync(
+                    request.CourseId,
+                    participants.Select(participant => participant.UserId).ToArray(),
+                    groupId: null,
+                    cancellationToken);
+            }
+            catch
+            {
+                // The per-student path below remains the compatibility fallback.
+            }
+        }
+
         var rows = new List<CourseGradeReportStudentRow>(participants.Count);
         foreach (var participant in participants)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            var gradebookStatus = GradebookCoverageStates.Error;
             try
             {
-                var gradebook = await gradebookGateway.GetStudentGradebookAsync(
-                    request.CourseId,
-                    participant.UserId,
-                    cancellationToken);
+                CourseGradebook gradebook;
+                if (bulkGradebook?.TryGetForStudent(participant.UserId, out var bulkStudentGradebook) == true)
+                {
+                    gradebook = bulkStudentGradebook;
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(participant.UserId);
+                }
+                else if (bulkGradebook is null || bulkGradebook.Coverage.SourceMode == "bulk")
+                {
+                    gradebook = await gradebookGateway.GetStudentGradebookAsync(
+                        request.CourseId,
+                        participant.UserId,
+                        cancellationToken);
+                    gradebookStatus = gradebook.Items.Count == 0
+                        ? GradebookCoverageStates.Empty
+                        : GradebookCoverageStates.Covered;
+                }
+                else
+                {
+                    gradebook = new CourseGradebook(request.CourseId, participant.UserId, []);
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(participant.UserId);
+                }
 
                 var courseTotal = gradebook.Items.FirstOrDefault(IsCourseTotalItem);
-                rows.Add(courseTotal is null
-                    ? WithoutGrade(participant)
-                    : ToRow(participant, courseTotal));
+                if (courseTotal is null)
+                {
+                    var itemStatus = gradebookStatus == GradebookCoverageStates.Empty
+                        ? GradebookCoverageStates.Empty
+                        : gradebookStatus is GradebookCoverageStates.Covered
+                            ? GradebookCoverageStates.ItemAbsent
+                            : gradebookStatus;
+                    rows.Add(WithoutGrade(participant, itemStatus));
+                }
+                else
+                {
+                    rows.Add(ToRow(participant, courseTotal, courseTotal.GradeRaw.HasValue
+                        ? gradebookStatus
+                        : GradebookCoverageStates.NoGrade));
+                }
             }
             catch
             {
-                rows.Add(WithoutGrade(participant));
+                rows.Add(WithoutGrade(participant, GradebookCoverageStates.Error));
             }
         }
 
@@ -131,7 +198,8 @@ public sealed class GenerateCourseGradesReportQueryHandler(
 
     private static CourseGradeReportStudentRow ToRow(
         CourseParticipantSummary participant,
-        GradebookItem item) => new(
+        GradebookItem item,
+        string gradebookStatus) => new(
             StudentId: participant.UserId,
             FullName: participant.FullName,
             LastAccessAt: participant.LastAccessAt,
@@ -139,9 +207,14 @@ public sealed class GenerateCourseGradesReportQueryHandler(
             TotalGradeMax: GradebookMappingHelper.ResolveGradeMax(item),
             TotalGradePercentage: GradebookMappingHelper.ResolvePercentage(item),
             TotalGradeFormatted: item.GradeFormatted,
-            Status: item.GradeRaw.HasValue ? "com_nota" : "sem_nota");
+            Status: item.GradeRaw.HasValue ? "com_nota" : "sem_nota")
+        {
+            GradebookStatus = gradebookStatus,
+        };
 
-    private static CourseGradeReportStudentRow WithoutGrade(CourseParticipantSummary participant) => new(
+    private static CourseGradeReportStudentRow WithoutGrade(
+        CourseParticipantSummary participant,
+        string gradebookStatus) => new(
         StudentId: participant.UserId,
         FullName: participant.FullName,
         LastAccessAt: participant.LastAccessAt,
@@ -149,5 +222,8 @@ public sealed class GenerateCourseGradesReportQueryHandler(
         TotalGradeMax: null,
         TotalGradePercentage: null,
         TotalGradeFormatted: null,
-        Status: "sem_nota");
+        Status: "sem_nota")
+    {
+        GradebookStatus = gradebookStatus,
+    };
 }

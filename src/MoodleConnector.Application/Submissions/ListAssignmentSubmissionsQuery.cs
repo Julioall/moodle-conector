@@ -225,24 +225,14 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             return null;
         }
 
-        const int maxConcurrency = 6;
-        using var gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         try
         {
-            var reads = studentIds.Distinct(StringComparer.OrdinalIgnoreCase).Select(async studentId =>
-            {
-                await gate.WaitAsync(cancellationToken);
-                try
-                {
-                    return await gradebookGateway.GetStudentGradebookAsync(courseId, studentId, cancellationToken);
-                }
-                finally
-                {
-                    gate.Release();
-                }
-            });
-            var results = await Task.WhenAll(reads);
-            return results.ToDictionary(item => item.StudentId, StringComparer.OrdinalIgnoreCase);
+            var snapshot = await gradebookGateway.GetCourseGradebookAsync(
+                courseId,
+                studentIds,
+                groupId: null,
+                cancellationToken);
+            return snapshot.Gradebooks;
         }
         catch (OperationCanceledException)
         {

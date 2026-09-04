@@ -342,6 +342,7 @@ var mcpServerBuilder = builder.Services
     .AddScoped<DashboardAccessSnapshotService>()
     .AddScoped<PortalMcpIdentityResolver>()
     .AddScoped<MoodleSnapshotToolContext>()
+    .AddScoped<IMoodleCourseReadSnapshotCoordinator>(sp => sp.GetRequiredService<MoodleSnapshotToolContext>())
     .AddSingleton<DashboardOverviewRefreshQueue>()
     .AddSingleton<IDashboardOverviewRefreshQueue>(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
     .AddHostedService(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
@@ -906,6 +907,9 @@ app.MapGet("/api/reports/course-overview/{connectionRef}/{courseId}", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IMoodleConnectionSelection moodleSelection,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleCourseReadSnapshotCoordinator snapshotCoordinator,
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
@@ -914,7 +918,21 @@ app.MapGet("/api/reports/course-overview/{connectionRef}/{courseId}", async (
     if (identity is null) return Results.Unauthorized();
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
         return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var report = await mediator.Send(new GenerateCourseOverviewQuery(courseId), cancellationToken);
+    moodleSelection.Alias = connectionRef;
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var courseRead = await snapshotCoordinator.ReadAsync(
+        new CourseReadSnapshotRequest(
+            courseId,
+            connectionRef,
+            currentUserId.ToString(),
+            CourseReadSnapshotRequirements.Students),
+        cancellationToken);
+    var effectiveCourseId = courseRead?.CourseId ?? courseId;
+    var report = await mediator.Send(new GenerateCourseOverviewQuery(
+        effectiveCourseId,
+        PrefetchedParticipants: courseRead?.Students is { IsComplete: true } students
+            ? students.Data
+            : null), cancellationToken);
     var now = DateTimeOffset.UtcNow;
     return Results.Ok(new AppEnvelope<AppCourseOverviewReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalActiveStudents, report.StudentsWhoAccessed,
@@ -929,19 +947,43 @@ app.MapGet("/api/reports/weekly/{connectionRef}/{courseId}", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IMoodleConnectionSelection moodleSelection,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleCourseReadSnapshotCoordinator snapshotCoordinator,
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
     if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    moodleSelection.Alias = connectionRef;
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
         return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var report = await mediator.Send(new GenerateWeeklyPerformanceReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var courseRead = await snapshotCoordinator.ReadAsync(
+        new CourseReadSnapshotRequest(
+            courseId,
+            connectionRef,
+            currentUserId.ToString(),
+            CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
+        cancellationToken);
+    var effectiveCourseId = courseRead?.CourseId ?? courseId;
+    var report = await mediator.Send(new GenerateWeeklyPerformanceReportQuery(
+        effectiveCourseId,
+        MaxStudentsToAnalyze: 60,
+        PrefetchedGradebook: courseRead?.Gradebook?.Data,
+        PrefetchedParticipants: courseRead?.Students is { IsComplete: true } students
+            ? students.Data
+            : null), cancellationToken);
+    var snapshotAt = courseRead?.Metadata.OldestUpdatedAt;
     return Results.Ok(new AppEnvelope<AppWeeklyReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.StudentsWithAttention,
             report.StudentsAtRisk, report.MinGradePercent, report.InactiveDaysThreshold, report.Warning),
-        new(report.GeneratedAt, connectionRef)));
+        new(report.GeneratedAt, connectionRef, courseRead is null ? "live" : "snapshot", snapshotAt,
+            snapshotAt.HasValue ? Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshotAt.Value).TotalSeconds) : null,
+            courseRead?.Metadata.StaleDatasets.Count > 0,
+            courseRead?.Metadata.RefreshQueued ?? false,
+            courseRead?.Metadata.IsComplete ?? true)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/reports/completion/{connectionRef}/{courseId}", async (
@@ -950,19 +992,43 @@ app.MapGet("/api/reports/completion/{connectionRef}/{courseId}", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IMoodleConnectionSelection moodleSelection,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleCourseReadSnapshotCoordinator snapshotCoordinator,
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
     if (!HasAppPermission(context, AppPermissionCatalog.ReportsView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    moodleSelection.Alias = connectionRef;
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
         return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var report = await mediator.Send(new GeneratePostExecutionReportQuery(courseId, MaxStudentsToAnalyze: 60), cancellationToken);
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var courseRead = await snapshotCoordinator.ReadAsync(
+        new CourseReadSnapshotRequest(
+            courseId,
+            connectionRef,
+            currentUserId.ToString(),
+            CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
+        cancellationToken);
+    var effectiveCourseId = courseRead?.CourseId ?? courseId;
+    var report = await mediator.Send(new GeneratePostExecutionReportQuery(
+        effectiveCourseId,
+        MaxStudentsToAnalyze: 60,
+        PrefetchedGradebook: courseRead?.Gradebook?.Data,
+        PrefetchedParticipants: courseRead?.Students is { IsComplete: true } students
+            ? students.Data
+            : null), cancellationToken);
+    var snapshotAt = courseRead?.Metadata.OldestUpdatedAt;
     return Results.Ok(new AppEnvelope<AppCompletionReportDto>(
         new(connectionRef, report.CourseId, report.GeneratedAt, report.TotalStudents, report.LikelyComplete,
             report.PendingRecovery, report.AtRisk, report.Unknown, report.MinGradePercent, report.Disclaimer, report.Warning),
-        new(report.GeneratedAt, connectionRef)));
+        new(report.GeneratedAt, connectionRef, courseRead is null ? "live" : "snapshot", snapshotAt,
+            snapshotAt.HasValue ? Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshotAt.Value).TotalSeconds) : null,
+            courseRead?.Metadata.StaleDatasets.Count > 0,
+            courseRead?.Metadata.RefreshQueued ?? false,
+            courseRead?.Metadata.IsComplete ?? true)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/reports/jobs", async (
@@ -1293,6 +1359,9 @@ app.MapGet("/api/pending", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IMoodleConnectionSelection moodleSelection,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleCourseReadSnapshotCoordinator snapshotCoordinator,
     IMediator mediator,
     CancellationToken cancellationToken) =>
 {
@@ -1314,6 +1383,7 @@ app.MapGet("/api/pending", async (
                 ["Nenhuma conexão Moodle foi configurada para esta conta."])));
     }
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    moodleSelection.Alias = resolved.Alias;
     var effectiveConnectionRef = connectionRef ?? resolved.Alias;
     if (string.IsNullOrWhiteSpace(courseId))
     {
@@ -1322,10 +1392,32 @@ app.MapGet("/api/pending", async (
                 ["Selecione um curso para consultar pendências; nenhuma consulta agregada foi executada."])));
     }
 
-    var participants = await mediator.Send(new ListCourseParticipantsQuery(
-        identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, 1, 100, true, false), cancellationToken);
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var courseRead = await snapshotCoordinator.ReadAsync(
+        new CourseReadSnapshotRequest(
+            courseId,
+            effectiveConnectionRef,
+            currentUserId.ToString(),
+            CourseReadSnapshotRequirements.Activities |
+            CourseReadSnapshotRequirements.Students |
+            CourseReadSnapshotRequirements.Submissions |
+            CourseReadSnapshotRequirements.Gradebook),
+        cancellationToken);
+    var effectiveCourseId = courseRead?.CourseId ?? courseId;
+    var participants = courseRead?.Students is { IsComplete: true } students
+        ? students.Data
+        : await mediator.Send(new ListCourseParticipantsQuery(
+            currentUserId.ToString(), effectiveCourseId, ParticipantStatusFilter.Active, 1, 100, true, false), cancellationToken);
     if (participants is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
-    var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(courseId, 0, 100), cancellationToken);
+    var pending = await mediator.Send(new GetStudentsWithPendingSubmissionsQuery(
+        effectiveCourseId,
+        0,
+        100,
+        IncludeAwaitingGrading: true,
+        PrefetchedContents: courseRead?.Activities?.Data,
+        PrefetchedParticipants: courseRead?.Students?.IsComplete == true ? courseRead.Students.Data : null,
+        PrefetchedSubmissions: courseRead?.Submissions?.Data,
+        PrefetchedGradebook: courseRead?.Gradebook?.Data), cancellationToken);
     var inactivityDays = Math.Clamp(periodDays ?? 14, 1, 3650);
     var cutoff = generatedAt.AddDays(-inactivityDays);
     var accessRows = participants.Participants
@@ -1339,7 +1431,7 @@ app.MapGet("/api/pending", async (
             activity.AssignmentId, activity.AssignmentName, "pending_submission", activity.DueDate,
             activity.IsOverdue, false)));
 
-    var allItems = AppPendingContractMapper.Build(effectiveConnectionRef, courseId, submissionRows, accessRows, generatedAt);
+    var allItems = AppPendingContractMapper.Build(effectiveConnectionRef, effectiveCourseId, submissionRows, accessRows, generatedAt);
     var requestedLevel = level?.Trim().ToLowerInvariant();
     var requestedType = type?.Trim().ToLowerInvariant();
     var filtered = allItems
@@ -1349,7 +1441,15 @@ app.MapGet("/api/pending", async (
     var items = filtered.Skip((currentPage - 1) * size).Take(size).ToArray();
     return Results.Ok(new AppListEnvelope<AppPendingDto>(
         items, new(currentPage, size, items.Length, currentPage * size < filtered.Length, generatedAt, effectiveConnectionRef,
-            pending.Warning is null ? null : [pending.Warning], filtered.Length)));
+            pending.Warning is null ? null : [pending.Warning], filtered.Length,
+            courseRead is null ? "live" : "snapshot",
+            courseRead?.Metadata.OldestUpdatedAt,
+            courseRead?.Metadata.OldestUpdatedAt is { } snapshotAt
+                ? Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshotAt).TotalSeconds)
+                : null,
+            courseRead?.Metadata.StaleDatasets.Count > 0,
+            courseRead?.Metadata.RefreshQueued ?? false,
+            courseRead?.Metadata.IsComplete ?? true)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/submissions", async (
@@ -1367,6 +1467,7 @@ app.MapGet("/api/submissions", async (
     HttpContext context,
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
+    IMoodleConnectionSelection moodleSelection,
     IMoodleCurrentUserIdGateway currentUserIdGateway,
     IMediator mediator,
     CancellationToken cancellationToken) =>
@@ -1374,6 +1475,7 @@ app.MapGet("/api/submissions", async (
     if (!HasAppPermission(context, AppPermissionCatalog.GradingView)) return Results.Forbid();
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    moodleSelection.Alias = connectionRef;
     var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     if (string.IsNullOrWhiteSpace(courseId) || string.IsNullOrWhiteSpace(assignmentId))
@@ -2460,22 +2562,52 @@ app.MapGet("/api/courses/{connectionRef}/{courseId}/students", async (
 
 app.MapGet("/api/courses/{connectionRef}/{courseId}/students/{studentId}", async (
     string connectionRef, string courseId, string studentId, HttpContext context, ConnectorDbContext dbContext,
-    IMediator mediator, IConnectionRegistry connectionRegistry, CancellationToken cancellationToken) =>
+    IMediator mediator, IConnectionRegistry connectionRegistry,
+    IMoodleConnectionSelection moodleSelection,
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleCourseReadSnapshotCoordinator snapshotCoordinator,
+    CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
     if (identity is null) return Results.Unauthorized();
+    moodleSelection.Alias = connectionRef;
     if (await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken) is null)
         return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
-    var paged = await mediator.Send(new ListCourseParticipantsQuery(identity.Id.ToString(), courseId, ParticipantStatusFilter.Active, 1, 1000, true, true), cancellationToken);
-    var participant = paged?.Participants.FirstOrDefault(p => p.UserId == studentId);
+    var currentUserId = await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken);
+    var courseRead = await snapshotCoordinator.ReadAsync(
+        new CourseReadSnapshotRequest(
+            courseId,
+            connectionRef,
+            currentUserId.ToString(),
+            CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
+        cancellationToken);
+    var effectiveCourseId = courseRead?.CourseId ?? courseId;
+    var paged = courseRead?.Students is { IsComplete: true } students
+        ? students.Data
+        : await mediator.Send(new ListCourseParticipantsQuery(
+            currentUserId.ToString(), effectiveCourseId, ParticipantStatusFilter.Active, 1, 1000, true, true), cancellationToken);
+    if (paged is null) return AppErrorResults.NotFound("course_not_found", "Curso não encontrado.");
+    var participant = paged.Participants.FirstOrDefault(p => p.UserId == studentId);
     if (participant is null) return AppErrorResults.NotFound("student_not_found", "Aluno não encontrado neste curso.");
-    var gradeItems = await mediator.Send(new GetStudentGradeItemsQuery(courseId, studentId), cancellationToken);
+    var gradeItems = await mediator.Send(new GetStudentGradeItemsQuery(
+        effectiveCourseId,
+        studentId,
+        PrefetchedGradebook: courseRead?.Gradebook?.Data), cancellationToken);
     var courseDtos = new[] { new StudentCourseDto(connectionRef, courseId, courseId, null,
         participant.EnrollmentStatus, null,
         participant.LastCourseAccessAt,
         gradeItems?.Items.Select(StudentContractMapper.ToGradeDto).ToArray() ?? Array.Empty<StudentGradeDto>()) };
     var studentDto = StudentContractMapper.ToDto(connectionRef, participant, courseDtos);
-    return Results.Ok(new AppEnvelope<StudentDto>(studentDto, new(DateTimeOffset.UtcNow, connectionRef)));
+    var snapshotAt = courseRead?.Metadata.OldestUpdatedAt;
+    return Results.Ok(new AppEnvelope<StudentDto>(studentDto, new(
+        DateTimeOffset.UtcNow,
+        connectionRef,
+        courseRead is null ? "live" : "snapshot",
+        snapshotAt,
+        snapshotAt.HasValue ? Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshotAt.Value).TotalSeconds) : null,
+        courseRead?.Metadata.StaleDatasets.Count > 0,
+        courseRead?.Metadata.RefreshQueued ?? false,
+        courseRead?.Metadata.IsComplete ?? true)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/info", (IOptions<MoodleApiOptions> moodleOpts) => Results.Ok(new

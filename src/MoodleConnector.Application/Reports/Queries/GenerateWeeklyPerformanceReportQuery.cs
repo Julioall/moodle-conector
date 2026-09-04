@@ -24,6 +24,7 @@ public sealed record StudentWeeklyPerformanceRow(
     IReadOnlyList<string> PendingAssignmentNames,
     string AttentionLevel)  // "ok" | "attention" | "risk"
 {
+    public string GradebookStatus { get; init; } = GradebookCoverageStates.NotRequested;
     public int AwaitingGradingCount { get; init; }
     public IReadOnlyList<string> AwaitingGradingAssignmentNames { get; init; } = [];
     public int NotSubmittedCount { get; init; }
@@ -61,13 +62,16 @@ public sealed record GenerateWeeklyPerformanceReportResult(
 /// - Uma SA só entra como pendente quando não há nota nem metadado de envio;
 ///   entregas aguardando correção são expostas separadamente.
 /// - Dados de acesso dependem do campo lastcourseaccess da API Moodle.
-/// - Pode ser lento para turmas grandes (uma chamada por estudante ao gradebook).
+/// - O gradebook é lido em modo coletivo quando a capability e os limites permitem;
+///   instalações incompatíveis usam fallback individual limitado.
 /// </summary>
 public sealed record GenerateWeeklyPerformanceReportQuery(
     string CourseId,
     decimal MinGradePercent = 60m,
     int InactiveDaysThreshold = 7,
-    int MaxStudentsToAnalyze = 60) : IRequest<GenerateWeeklyPerformanceReportResult>;
+    int MaxStudentsToAnalyze = 60,
+    CourseGradebookSnapshot? PrefetchedGradebook = null,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<GenerateWeeklyPerformanceReportResult>;
 
 public sealed class GenerateWeeklyPerformanceReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -81,7 +85,7 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
         "Notas sem lançamento aparecem como 'sem nota'; entregas identificadas como aguardando correção não entram como pendência. " +
         "Acesso ao AVA depende do campo lastcourseaccess disponível no Moodle. " +
         "Atividades cujo nome indica recuperação não são tratadas como pendência geral. " +
-        "Para turmas grandes o relatório pode ser lento (uma consulta de boletim por estudante).";
+        "Para turmas grandes o relatório pode ser limitado pela capability bulk, orçamento de payload ou fallback individual.";
 
     public async Task<GenerateWeeklyPerformanceReportResult> Handle(
         GenerateWeeklyPerformanceReportQuery request,
@@ -91,16 +95,23 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
         var now = DateTimeOffset.UtcNow;
 
         // 1. Fetch active students
-        var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-            userExternalId: currentUserExternalId,
-            courseId: request.CourseId,
-            statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
-            pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60,
-            studentsOnly: true,
-            includeEmail: false,
-            groupId: null,
-            cancellationToken: cancellationToken);
+        var requestedPageSize = request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60;
+        var participantsPage = request.PrefetchedParticipants is { HasMore: false } cachedParticipants &&
+            string.Equals(cachedParticipants.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+            ? cachedParticipants with
+            {
+                Participants = cachedParticipants.Participants.Take(requestedPageSize).ToArray(),
+            }
+            : await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId: currentUserExternalId,
+                courseId: request.CourseId,
+                statusFilter: ParticipantStatusFilter.Active,
+                page: 0,
+                pageSize: requestedPageSize,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken);
 
         if (participantsPage.Participants.Count == 0)
         {
@@ -123,6 +134,26 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
         var recipientsForAccess = new List<string>();
         var recipientsForGrade = new List<string>();
         var recipientsForPending = new List<string>();
+        var gradebookIncompleteCount = 0;
+        CourseGradebookSnapshot? bulkGradebook =
+            string.Equals(request.PrefetchedGradebook?.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+                ? request.PrefetchedGradebook
+                : null;
+        if (bulkGradebook is null)
+        {
+            try
+            {
+                bulkGradebook = await gradebookGateway.GetCourseGradebookAsync(
+                    request.CourseId,
+                    participantsPage.Participants.Select(student => student.UserId).ToArray(),
+                    groupId: null,
+                    cancellationToken);
+            }
+            catch
+            {
+                // Individual reads remain the compatibility fallback.
+            }
+        }
         var submissionState = await CourseSubmissionReportState.LoadAsync(
             mediator,
             request.CourseId,
@@ -156,11 +187,34 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
             int pendingCount = 0;
             var pendingNames = new List<string>();
             var awaitingGradingNames = new List<string>();
+            var gradebookStatus = GradebookCoverageStates.Error;
 
             try
             {
-                var gradebook = await gradebookGateway.GetStudentGradebookAsync(
-                    request.CourseId, student.UserId, cancellationToken);
+                CourseGradebook gradebook;
+                if (bulkGradebook?.TryGetForStudent(student.UserId, out var bulkStudentGradebook) == true)
+                {
+                    gradebook = bulkStudentGradebook;
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
+                else if (bulkGradebook is null || bulkGradebook.Coverage.SourceMode == "bulk")
+                {
+                    gradebook = await gradebookGateway.GetStudentGradebookAsync(
+                        request.CourseId, student.UserId, cancellationToken);
+                    gradebookStatus = gradebook.Items.Count == 0
+                        ? GradebookCoverageStates.Empty
+                        : GradebookCoverageStates.Covered;
+                }
+                else
+                {
+                    gradebook = new CourseGradebook(request.CourseId, student.UserId, []);
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
+
+                if (gradebookStatus is GradebookCoverageStates.Error or GradebookCoverageStates.NotReturned)
+                {
+                    gradebookIncompleteCount++;
+                }
 
                 var activityItems = gradebook.Items
                     .Where(GradebookMappingHelper.IsEvaluativeReportActivityItem)
@@ -202,7 +256,9 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
             }
             catch
             {
-                // Gradebook unavailable for this student — continue with partial data
+                gradebookIncompleteCount++;
+                // Gradebook unavailable for this student — continue with
+                // partial data while preserving the state in the row.
             }
 
             if (submissionState.IsAvailable)
@@ -253,7 +309,8 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                     : 0,
                 GradedCount = submissionState.IsAvailable
                     ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.GradedNumeric)
-                    : 0
+                    : 0,
+                GradebookStatus = gradebookStatus
             });
 
             if (isInactive) recipientsForAccess.Add(student.UserId);
@@ -270,6 +327,17 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
         int studentsAtRisk = sorted.Count(r => r.AttentionLevel == "risk");
         int studentsWithAttention = sorted.Count(r => r.AttentionLevel == "attention");
 
+        var gradebookWarning = gradebookIncompleteCount > 0
+            ? $"A cobertura do gradebook está incompleta para {gradebookIncompleteCount} estudante(s); estados de ausência e erro foram preservados."
+            : null;
+        var warning = submissionState.IsAvailable && !submissionState.IsComplete
+            ? $"{LimitationMessage} {submissionState.Warning ?? "A cobertura de entregas está incompleta."}"
+            : LimitationMessage;
+        if (gradebookWarning is not null)
+        {
+            warning = $"{warning} {gradebookWarning}";
+        }
+
         return new GenerateWeeklyPerformanceReportResult(
             CourseId: request.CourseId,
             GeneratedAt: now,
@@ -282,8 +350,6 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
             SuggestedRecipientIdsForAccess: recipientsForAccess,
             SuggestedRecipientIdsForGrade: recipientsForGrade,
             SuggestedRecipientIdsForPending: recipientsForPending,
-            Warning: submissionState.IsAvailable && !submissionState.IsComplete
-                ? $"{LimitationMessage} {submissionState.Warning ?? "A cobertura de entregas está incompleta."}"
-                : LimitationMessage);
+            Warning: warning);
     }
 }

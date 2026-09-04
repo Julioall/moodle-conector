@@ -24,12 +24,16 @@ public sealed record StudentGradeItemsResult(
     decimal MinGradePercent,
     IReadOnlyList<StudentGradeItem> Items,
     IReadOnlyList<StudentGradeItem> BelowMinimumItems,
-    string? Warning);
+    string? Warning)
+{
+    public string GradebookStatus { get; init; } = GradebookCoverageStates.NotRequested;
+}
 
 public sealed record GetStudentGradeItemsQuery(
     string CourseId,
     string StudentId,
-    decimal MinGradePercent = 60m) : IRequest<StudentGradeItemsResult>;
+    decimal MinGradePercent = 60m,
+    CourseGradebookSnapshot? PrefetchedGradebook = null) : IRequest<StudentGradeItemsResult>;
 
 public sealed class GetStudentGradeItemsQueryHandler(IMoodleGradebookGateway gradebookGateway)
     : IRequestHandler<GetStudentGradeItemsQuery, StudentGradeItemsResult>
@@ -38,10 +42,26 @@ public sealed class GetStudentGradeItemsQueryHandler(IMoodleGradebookGateway gra
         GetStudentGradeItemsQuery request,
         CancellationToken cancellationToken)
     {
-        var gradebook = await gradebookGateway.GetStudentGradebookAsync(
-            request.CourseId,
-            request.StudentId,
-            cancellationToken);
+        CourseGradebook gradebook;
+        var gradebookStatus = GradebookCoverageStates.Error;
+        var prefetchedSnapshot = request.PrefetchedGradebook;
+        if (string.Equals(prefetchedSnapshot?.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase) &&
+            prefetchedSnapshot is not null &&
+            prefetchedSnapshot.TryGetForStudent(request.StudentId, out var prefetched))
+        {
+            gradebook = prefetched;
+            gradebookStatus = prefetchedSnapshot.GetStudentCoverageState(request.StudentId);
+        }
+        else
+        {
+            gradebook = await gradebookGateway.GetStudentGradebookAsync(
+                request.CourseId,
+                request.StudentId,
+                cancellationToken);
+            gradebookStatus = gradebook.Items.Count == 0
+                ? GradebookCoverageStates.Empty
+                : GradebookCoverageStates.Covered;
+        }
 
         // Filter to only assignment-type items (SAs), excluding the overall course item
         var activityItems = gradebook.Items
@@ -58,6 +78,10 @@ public sealed class GetStudentGradeItemsQueryHandler(IMoodleGradebookGateway gra
         if (activityItems.Count == 0)
         {
             warning = "Nenhum item avaliativo encontrado. O gradebook pode estar desabilitado ou o estudante ainda não possui atividades avaliadas.";
+            if (gradebookStatus == GradebookCoverageStates.Covered)
+            {
+                gradebookStatus = GradebookCoverageStates.ItemAbsent;
+            }
         }
 
         return new StudentGradeItemsResult(
@@ -66,6 +90,9 @@ public sealed class GetStudentGradeItemsQueryHandler(IMoodleGradebookGateway gra
             MinGradePercent: request.MinGradePercent,
             Items: gradeItems,
             BelowMinimumItems: belowMinimum,
-            Warning: warning);
+            Warning: warning)
+        {
+            GradebookStatus = gradebookStatus,
+        };
     }
 }

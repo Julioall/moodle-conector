@@ -1,4 +1,5 @@
 using MediatR;
+using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Domain;
 
 namespace MoodleConnector.Application.Risk.Queries;
@@ -17,7 +18,10 @@ public sealed record StudentRiskReport(
     IReadOnlyList<string> Factors,
     DateTimeOffset? LastCourseAccessAt,
     decimal? CurrentGrade,
-    decimal? CompletionRate);
+    decimal? CompletionRate)
+{
+    public string GradebookStatus { get; init; } = GradebookCoverageStates.NotRequested;
+}
 
 public sealed record StudentsAtRiskReportResult(
     IReadOnlyList<StudentRiskReport> Reports,
@@ -29,4 +33,6 @@ public sealed record GetStudentsAtRiskReportQuery(
     string CourseId,
     int MaxStudentsToAnalyze,
     int InactivityThresholdDays = 7,
-    decimal MinGradePercentage = 60m) : IRequest<StudentsAtRiskReportResult>;
+    decimal MinGradePercentage = 60m,
+    CourseGradebookSnapshot? PrefetchedGradebook = null,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<StudentsAtRiskReportResult>;

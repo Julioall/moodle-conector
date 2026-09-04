@@ -66,50 +66,48 @@ public sealed class MoodlePendingSubmissionsTools(
             CourseContentsSummary? prefetchedContents = null;
             CourseParticipantsPage? prefetchedParticipants = null;
             CourseAssignmentSubmissionsSnapshot? prefetchedSubmissions = null;
+            CourseGradebookSnapshot? prefetchedGradebook = null;
             if (snapshotContext is not null)
             {
                 try
                 {
-                    var scope = await snapshotContext.TryResolveAsync(moodleAlias, cancellationToken);
-                    if (scope is not null)
+                    var courseRead = await snapshotContext.ReadAsync(
+                        new CourseReadSnapshotRequest(
+                            courseId,
+                            moodleAlias,
+                            moodleUserId.Value.ToString(),
+                            CourseReadSnapshotRequirements.Activities |
+                            CourseReadSnapshotRequirements.Students |
+                            CourseReadSnapshotRequirements.Submissions |
+                            CourseReadSnapshotRequirements.Gradebook),
+                        cancellationToken);
+                    if (courseRead is not null)
                     {
-                        resolvedCourseId = await snapshotContext.ResolveCourseIdAsync(scope, courseId, cancellationToken);
-                        var activities = await snapshotContext.GetActivitiesAsync(scope, resolvedCourseId, cancellationToken);
-                        var students = await snapshotContext.GetStudentsAsync(scope, resolvedCourseId, cancellationToken);
-                        var submissions = await snapshotContext.GetSubmissionsAsync(scope, resolvedCourseId, cancellationToken);
+                        resolvedCourseId = courseRead.CourseId;
+                        var activities = courseRead.Activities;
+                        var students = courseRead.Students;
+                        var submissions = courseRead.Submissions;
+                        var gradebook = courseRead.Gradebook;
                         if (activities?.IsComplete == true) prefetchedContents = activities.Data;
                         if (students?.IsComplete == true) prefetchedParticipants = students.Data;
                         if (submissions?.Data is not null) prefetchedSubmissions = submissions.Data;
+                        if (gradebook?.Data is not null) prefetchedGradebook = gradebook.Data;
 
-                        if (submissions is not null)
+                        if (submissions is not null || gradebook is not null)
                         {
-                            var refreshQueued = submissions.IsStale && await snapshotContext.QueueAsync(
-                                scope,
-                                moodleUserId.Value.ToString(),
-                                MoodleSnapshotDatasets.Submissions,
-                                resolvedCourseId,
-                                priority: 10,
-                                force: submissions.IsStale,
-                                cancellationToken);
+                            var updatedAt = new[] { submissions?.UpdatedAt, gradebook?.UpdatedAt }
+                                .Where(value => value.HasValue)
+                                .Select(value => value!.Value)
+                                .OrderByDescending(value => value)
+                                .FirstOrDefault();
                             freshness = new ToolFreshness(
                                 "snapshot",
-                                submissions.UpdatedAt,
-                                Math.Max(0, (long)(DateTimeOffset.UtcNow - submissions.UpdatedAt).TotalSeconds),
-                                submissions.IsStale,
-                                refreshQueued,
-                                submissions.IsComplete,
-                                submissions.RecordCount);
-                        }
-                        else
-                        {
-                            var refreshQueued = await snapshotContext.QueueAsync(
-                                scope,
-                                moodleUserId.Value.ToString(),
-                                MoodleSnapshotDatasets.Submissions,
-                                resolvedCourseId,
-                                priority: 10,
-                                cancellationToken: cancellationToken);
-                            freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+                                updatedAt == default ? null : updatedAt,
+                                updatedAt == default ? null : Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt).TotalSeconds),
+                                courseRead.Metadata.StaleDatasets.Count > 0,
+                                courseRead.Metadata.RefreshQueued,
+                                courseRead.Metadata.IsComplete,
+                                (submissions?.RecordCount ?? 0) + (gradebook?.RecordCount ?? 0));
                         }
                     }
                 }
@@ -129,7 +127,8 @@ public sealed class MoodlePendingSubmissionsTools(
                     IncludeAwaitingGrading: true,
                     PrefetchedContents: prefetchedContents,
                     PrefetchedParticipants: prefetchedParticipants,
-                    PrefetchedSubmissions: prefetchedSubmissions),
+                    PrefetchedSubmissions: prefetchedSubmissions,
+                    PrefetchedGradebook: prefetchedGradebook),
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }

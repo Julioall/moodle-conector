@@ -6,7 +6,9 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Reports.Queries;
 using MoodleConnector.Application.Tools;
+using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure.Reports;
+using MoodleConnector.Presentation.Tools;
 
 namespace MoodleConnector.Presentation.Tools.Reports;
 
@@ -30,7 +32,9 @@ public sealed record CourseGradesExcelExportResult(
 public sealed class MoodleReportTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
-    IMoodleUserResolver moodleUserResolver)
+    IMoodleUserResolver moodleUserResolver,
+    MoodleSnapshotToolContext? snapshotContext = null,
+    IMoodleCourseReadSnapshotCoordinator? snapshotCoordinator = null)
 {
     private const string ExcelContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -49,10 +53,17 @@ public sealed class MoodleReportTools(
         => ExecuteReportAsync<GenerateCourseGradesReportResult>(
             courseId,
             moodleAlias,
-            () => mediator.Send(new GenerateCourseGradesReportQuery(courseId, pageSize), cancellationToken),
+            (effectiveCourseId, gradebook, participants) => mediator.Send(
+                new GenerateCourseGradesReportQuery(
+                    effectiveCourseId,
+                    pageSize,
+                    PrefetchedGradebook: gradebook,
+                    PrefetchedParticipants: participants),
+                cancellationToken),
             result => $"Relatorio de notas - curso {courseId}: {result.TotalStudents} estudante(s), " +
                       $"{result.StudentsWithGrade} com nota e {result.StudentsWithoutGrade} sem nota.",
-            cancellationToken);
+            cancellationToken,
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
 
     [McpServerTool(
         Name = "export_course_grades_excel",
@@ -77,8 +88,36 @@ public sealed class MoodleReportTools(
 
         try
         {
+            var effectiveCourseId = courseId;
+            CourseGradebookSnapshot? prefetchedGradebook = null;
+            CourseParticipantsPage? prefetchedParticipants = null;
+            var coordinator = snapshotCoordinator ?? snapshotContext as IMoodleCourseReadSnapshotCoordinator;
+            if (coordinator is not null)
+            {
+                var courseRead = await coordinator.ReadAsync(
+                    new CourseReadSnapshotRequest(
+                        courseId,
+                        moodleAlias,
+                        moodleUserId.Value.ToString(),
+                        CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
+                    cancellationToken);
+                if (courseRead is not null)
+                {
+                    effectiveCourseId = courseRead.CourseId;
+                    prefetchedGradebook = courseRead.Gradebook?.Data;
+                    if (courseRead.Students?.Data is { HasMore: false } participants &&
+                        courseRead.Students.IsComplete)
+                    {
+                        prefetchedParticipants = participants;
+                    }
+                }
+            }
             var report = await mediator.Send(
-                new GenerateCourseGradesReportQuery(courseId, pageSize),
+                new GenerateCourseGradesReportQuery(
+                    effectiveCourseId,
+                    pageSize,
+                    PrefetchedGradebook: prefetchedGradebook,
+                    PrefetchedParticipants: prefetchedParticipants),
                 cancellationToken);
             var fileName = $"relatorio_notas_{Slugify(courseId)}_{report.GeneratedAt:yyyyMMdd-HHmmss}.xlsx";
             var workbook = ExcelGradeReportBuilder.BuildWorkbook(
@@ -133,7 +172,7 @@ public sealed class MoodleReportTools(
         ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GenerateWeeklyPerformanceReportResult>))]
-    [Description("Gera relatório semanal de desempenho da turma: cruza acesso ao AVA, notas por SA e entregas pendentes. Classifica cada estudante como 'ok', 'attention' ou 'risk'. Retorna 3 listas de destinatários sugeridos para envio de mensagem (acesso, nota e pendência). AVISO: uma consulta de boletim por estudante — pode ser lento para turmas grandes.")]
+    [Description("Gera relatório semanal de desempenho da turma: cruza acesso ao AVA, notas por SA e entregas pendentes. Classifica cada estudante como 'ok', 'attention' ou 'risk'. Retorna 3 listas de destinatários sugeridos para envio de mensagem (acesso, nota e pendência). A leitura do boletim usa uma consulta agregada por curso, com fallback seguro quando a instalação não oferece a capacidade bulk.")]
     public Task<CallToolResult> GerarRelatorioSemanalDesempenhoAsync(
         [Description("Identificador do curso Moodle.")] string courseId,
         [Description("Nota mínima esperada em porcentagem (0-100). Padrão: 60.")] decimal minGradePercent = 60m,
@@ -143,13 +182,20 @@ public sealed class MoodleReportTools(
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<GenerateWeeklyPerformanceReportResult>(
             courseId, moodleAlias,
-            () => mediator.Send(
-                new GenerateWeeklyPerformanceReportQuery(courseId, minGradePercent, inactiveDaysThreshold, maxStudentsToAnalyze),
+            (effectiveCourseId, gradebook, participants) => mediator.Send(
+                new GenerateWeeklyPerformanceReportQuery(
+                    effectiveCourseId,
+                    minGradePercent,
+                    inactiveDaysThreshold,
+                    maxStudentsToAnalyze,
+                    PrefetchedGradebook: gradebook,
+                    PrefetchedParticipants: participants),
                 cancellationToken),
             result => $"Relatório semanal — curso {courseId}: {result.TotalStudents} estudante(s). " +
                       $"{result.StudentsAtRisk} em risco, {result.StudentsWithAttention} em atenção. " +
                       $"Gerado em: {result.GeneratedAt:dd/MM/yyyy HH:mm} UTC.",
-            cancellationToken);
+            cancellationToken,
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
 
     // â”€â”€ Relatório de conselho de classe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -169,12 +215,19 @@ public sealed class MoodleReportTools(
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<GenerateClassCouncilReportResult>(
             courseId, moodleAlias,
-            () => mediator.Send(
-                new GenerateClassCouncilReportQuery(courseId, minGradePercent, inactiveDaysThreshold, maxStudentsToAnalyze),
+            (effectiveCourseId, gradebook, participants) => mediator.Send(
+                new GenerateClassCouncilReportQuery(
+                    effectiveCourseId,
+                    minGradePercent,
+                    inactiveDaysThreshold,
+                    maxStudentsToAnalyze,
+                    PrefetchedGradebook: gradebook,
+                    PrefetchedParticipants: participants),
                 cancellationToken),
             result => $"Conselho de classe - curso {courseId}: {result.TotalStudents} estudante(s). " +
                       $"Regular: {result.Regular} | Atenção: {result.NeedAttention} | Recuperação: {result.NeedRecovery} | Risco: {result.AtRisk}.",
-            cancellationToken);
+            cancellationToken,
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
 
 
     [McpServerTool(
@@ -192,8 +245,8 @@ public sealed class MoodleReportTools(
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<CourseOverviewResult>(
             courseId, moodleAlias,
-            () => mediator.Send(
-                new GenerateCourseOverviewQuery(courseId, inactiveDaysThreshold, maxStudentsToAnalyze),
+            (effectiveCourseId, _, _) => mediator.Send(
+                new GenerateCourseOverviewQuery(effectiveCourseId, inactiveDaysThreshold, maxStudentsToAnalyze),
                 cancellationToken),
             result => $"Resumo - curso {courseId}: {result.TotalActiveStudents} estudante(s). " +
                       $"{result.StudentsWhoAccessed} acessaram, {result.StudentsNeverAccessed} nunca acessaram, " +
@@ -217,13 +270,19 @@ public sealed class MoodleReportTools(
         CancellationToken cancellationToken = default)
         => ExecuteReportAsync<GeneratePostExecutionReportResult>(
             courseId, moodleAlias,
-            () => mediator.Send(
-                new GeneratePostExecutionReportQuery(courseId, minGradePercent, maxStudentsToAnalyze),
+            (effectiveCourseId, gradebook, participants) => mediator.Send(
+                new GeneratePostExecutionReportQuery(
+                    effectiveCourseId,
+                    minGradePercent,
+                    maxStudentsToAnalyze,
+                    PrefetchedGradebook: gradebook,
+                    PrefetchedParticipants: participants),
                 cancellationToken),
             result => $"Pós-execução — curso {courseId}: {result.TotalStudents} estudante(s). " +
                       $"Provável conclusão: {result.LikelyComplete} | Recuperação: {result.PendingRecovery} | " +
                       $"Risco: {result.AtRisk} | Dados insuficientes: {result.Unknown}.",
-            cancellationToken);
+            cancellationToken,
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
 
     
     [Description("Baixa o JSON de qualquer relatório personalizado do Moodle Report Builder acessível ao usuário do token. Retorna os registros paginados limitados ao 'pageSize'.")]
@@ -279,9 +338,10 @@ public sealed class MoodleReportTools(
     private async Task<CallToolResult> ExecuteReportAsync<TResult>(
         string courseId,
         string? moodleAlias,
-        Func<Task<TResult>> execute,
+        Func<string, CourseGradebookSnapshot?, CourseParticipantsPage?, Task<TResult>> execute,
         Func<TResult, string> narrate,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CourseReadSnapshotRequirements requirements = CourseReadSnapshotRequirements.None)
     {
         if (string.IsNullOrWhiteSpace(courseId))
             return ToolResultHelper.Error<TResult>("Informe um identificador de curso válido.");
@@ -291,15 +351,66 @@ public sealed class MoodleReportTools(
         if (moodleUserId is null)
             return ToolResultHelper.Error<TResult>("Usuário não autenticado.");
 
+        CourseGradebookSnapshot? prefetchedGradebook = null;
+        CourseParticipantsPage? prefetchedParticipants = null;
+        var effectiveCourseId = courseId;
+        ToolFreshness? freshness = null;
+        if (requirements != CourseReadSnapshotRequirements.None)
+        {
+            try
+            {
+                var coordinator = snapshotCoordinator ?? snapshotContext as IMoodleCourseReadSnapshotCoordinator;
+                if (coordinator is not null)
+                {
+                    var courseRead = await coordinator.ReadAsync(
+                        new CourseReadSnapshotRequest(
+                            courseId,
+                            moodleAlias,
+                            moodleUserId.Value.ToString(),
+                            requirements),
+                        cancellationToken);
+                    if (courseRead is not null)
+                    {
+                        effectiveCourseId = courseRead.CourseId;
+                        prefetchedGradebook = courseRead.Gradebook?.Data;
+                        if (courseRead.Students?.Data is { HasMore: false } participants &&
+                            courseRead.Students.IsComplete)
+                        {
+                            prefetchedParticipants = participants;
+                        }
+
+                        var updatedAt = courseRead.Metadata.OldestUpdatedAt;
+                        var recordCount = (courseRead.Students?.RecordCount ?? 0) +
+                            (courseRead.Gradebook?.RecordCount ?? 0);
+                        freshness = new ToolFreshness(
+                            "snapshot",
+                            updatedAt,
+                            updatedAt.HasValue
+                                ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
+                                : null,
+                            courseRead.Metadata.StaleDatasets.Count > 0,
+                            courseRead.Metadata.RefreshQueued,
+                            courseRead.Metadata.IsComplete,
+                            recordCount);
+                    }
+                }
+            }
+            catch
+            {
+                // Warming is best effort; the current report still uses the
+                // bulk gateway and its capability-driven fallback.
+            }
+        }
+
         TResult data;
-        try { data = await execute(); }
+        try { data = await execute(effectiveCourseId, prefetchedGradebook, prefetchedParticipants); }
         catch (OperationCanceledException) { throw; }
         catch
         {
             return ToolResultHelper.Error<TResult>("Não foi possível gerar o relatório neste momento.");
         }
 
-        var response = new ToolResponse<TResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow);
+        var response = new ToolResponse<TResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = narrate(data) }],

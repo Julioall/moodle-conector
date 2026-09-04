@@ -9,6 +9,57 @@ namespace MoodleConnector.Application.Tests.Infrastructure;
 public sealed class MoodleAssignmentGradeReadGatewayTests
 {
     [Fact]
+    public async Task Le_notas_de_varios_assignments_em_uma_chamada_e_preserva_a_chave_da_atividade()
+    {
+        var restClient = new FakeRestClient("""
+        {
+          "assignments": [
+            { "assignmentid": 116124, "grades": [{ "userid": 440752, "grade": "82.0" }] },
+            { "assignmentid": 117487, "grades": [{ "userid": 440752, "grade": "91.0" }] }
+          ]
+        }
+        """);
+        var sut = new MoodleAssignmentGradeReadGateway(
+            Options.Create(new MoodleApiOptions()),
+            new FakeCredentialsProvider(),
+            restClient);
+
+        var batches = await sut.GetExistingGradesBatchAsync(
+            "teacher-1",
+            ["116124", "117487"],
+            ["440752"],
+            CancellationToken.None);
+
+        Assert.Single(restClient.Calls);
+        Assert.Equal("116124", restClient.Calls[0].Parameters["assignmentids[0]"]?.ToString());
+        Assert.Equal("117487", restClient.Calls[0].Parameters["assignmentids[1]"]?.ToString());
+        Assert.Equal(2, batches.Count);
+        Assert.Equal(82m, batches.Single(batch => batch.AssignmentId == "116124").Grades["440752"].Grade);
+        Assert.Equal(91m, batches.Single(batch => batch.AssignmentId == "117487").Grades["440752"].Grade);
+    }
+
+    [Fact]
+    public async Task Reprocessa_somente_o_assignment_omitido_no_lote()
+    {
+        var restClient = new OmittedAssignmentRestClient();
+        var sut = new MoodleAssignmentGradeReadGateway(
+            Options.Create(new MoodleApiOptions()),
+            new FakeCredentialsProvider(),
+            restClient);
+
+        var batches = await sut.GetExistingGradesBatchAsync(
+            "teacher-1",
+            ["116124", "117487"],
+            ["440752"],
+            CancellationToken.None);
+
+        Assert.Equal(2, restClient.Calls.Count);
+        Assert.Equal(2, batches.Count);
+        Assert.Null(batches.Single(batch => batch.AssignmentId == "117487").ErrorCode);
+        Assert.Equal(91m, batches.Single(batch => batch.AssignmentId == "117487").Grades["440752"].Grade);
+    }
+
+    [Fact]
     public async Task Mantem_nota_vazia_distinta_do_marcador_menos_um_do_Moodle()
     {
         var sut = new MoodleAssignmentGradeReadGateway(
@@ -67,23 +118,59 @@ public sealed class MoodleAssignmentGradeReadGatewayTests
 
     private sealed class FakeRestClient(string json) : IMoodleRestClient
     {
+        public List<(string FunctionName, IReadOnlyDictionary<string, object?> Parameters)> Calls { get; } = [];
+
         public Task<JsonElement> CallAsync(
             MoodleConnectorCredentials connection,
             string functionName,
             IReadOnlyDictionary<string, object?> parameters,
-            CancellationToken cancellationToken) => Task.FromResult(Payload());
+            CancellationToken cancellationToken)
+        {
+            Calls.Add((functionName, parameters));
+            return Task.FromResult(Payload());
+        }
 
         public Task<JsonElement> CallAsync(
             MoodleConnectorCredentials connection,
             string functionName,
             IReadOnlyDictionary<string, object?> parameters,
             bool allowServiceToken,
-            CancellationToken cancellationToken) => Task.FromResult(Payload());
+            CancellationToken cancellationToken)
+        {
+            Calls.Add((functionName, parameters));
+            return Task.FromResult(Payload());
+        }
 
         private JsonElement Payload()
         {
             using var document = JsonDocument.Parse(json);
             return document.RootElement.Clone();
+        }
+    }
+
+    private sealed class OmittedAssignmentRestClient : IMoodleRestClient
+    {
+        public List<IReadOnlyDictionary<string, object?>> Calls { get; } = [];
+
+        public Task<JsonElement> CallAsync(
+            MoodleConnectorCredentials connection,
+            string functionName,
+            IReadOnlyDictionary<string, object?> parameters,
+            CancellationToken cancellationToken) => CallAsync(connection, functionName, parameters, true, cancellationToken);
+
+        public Task<JsonElement> CallAsync(
+            MoodleConnectorCredentials connection,
+            string functionName,
+            IReadOnlyDictionary<string, object?> parameters,
+            bool allowServiceToken,
+            CancellationToken cancellationToken)
+        {
+            Calls.Add(parameters);
+            var json = Calls.Count == 1
+                ? "{\"assignments\":[{\"assignmentid\":116124,\"grades\":[]}]}"
+                : "{\"assignments\":[{\"assignmentid\":117487,\"grades\":[{\"userid\":440752,\"grade\":\"91\"}]}]}";
+            using var document = JsonDocument.Parse(json);
+            return Task.FromResult(document.RootElement.Clone());
         }
     }
 

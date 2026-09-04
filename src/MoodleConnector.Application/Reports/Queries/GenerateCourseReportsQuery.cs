@@ -29,7 +29,8 @@ public sealed record CourseOverviewResult(
 public sealed record GenerateCourseOverviewQuery(
     string CourseId,
     int InactiveDaysThreshold = 7,
-    int MaxStudentsToAnalyze = 100) : IRequest<CourseOverviewResult>;
+    int MaxStudentsToAnalyze = 100,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<CourseOverviewResult>;
 
 public sealed class GenerateCourseOverviewQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -43,18 +44,20 @@ public sealed class GenerateCourseOverviewQueryHandler(
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
         var now = DateTimeOffset.UtcNow;
 
-        var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-            userExternalId: currentUserExternalId,
-            courseId: request.CourseId,
-            statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
-            pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
-            studentsOnly: true,
-            includeEmail: false,
-            groupId: null,
-            cancellationToken: cancellationToken);
-
-        var students = participantsPage.Participants;
+        var maxStudents = request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100;
+        var students = request.PrefetchedParticipants is { HasMore: false } cachedParticipants &&
+                        string.Equals(cachedParticipants.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+            ? cachedParticipants.Participants.Take(maxStudents).ToArray()
+            : (await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId: currentUserExternalId,
+                courseId: request.CourseId,
+                statusFilter: ParticipantStatusFilter.Active,
+                page: 0,
+                pageSize: maxStudents,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken)).Participants;
         int total = students.Count;
 
         if (total == 0)
@@ -120,6 +123,7 @@ public sealed record PostExecutionStudentRow(
     int PendingCount,
     string OutcomeIndicator)  // "likely_complete" | "pending_recovery" | "at_risk" | "unknown"
 {
+    public string GradebookStatus { get; init; } = GradebookCoverageStates.NotRequested;
     public int AwaitingGradingCount { get; init; }
     public int NotSubmittedCount { get; init; }
     public int ReviewedWithFeedbackCount { get; init; }
@@ -153,7 +157,9 @@ public sealed record GeneratePostExecutionReportResult(
 public sealed record GeneratePostExecutionReportQuery(
     string CourseId,
     decimal MinGradePercent = 60m,
-    int MaxStudentsToAnalyze = 60) : IRequest<GeneratePostExecutionReportResult>;
+    int MaxStudentsToAnalyze = 60,
+    CourseGradebookSnapshot? PrefetchedGradebook = null,
+    CourseParticipantsPage? PrefetchedParticipants = null) : IRequest<GeneratePostExecutionReportResult>;
 
 public sealed class GeneratePostExecutionReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -174,16 +180,23 @@ public sealed class GeneratePostExecutionReportQueryHandler(
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
         var now = DateTimeOffset.UtcNow;
 
-        var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-            userExternalId: currentUserExternalId,
-            courseId: request.CourseId,
-            statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
-            pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60,
-            studentsOnly: true,
-            includeEmail: false,
-            groupId: null,
-            cancellationToken: cancellationToken);
+        var requestedPageSize = request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 60;
+        var participantsPage = request.PrefetchedParticipants is { HasMore: false } cachedParticipants &&
+            string.Equals(cachedParticipants.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+            ? cachedParticipants with
+            {
+                Participants = cachedParticipants.Participants.Take(requestedPageSize).ToArray(),
+            }
+            : await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId: currentUserExternalId,
+                courseId: request.CourseId,
+                statusFilter: ParticipantStatusFilter.Active,
+                page: 0,
+                pageSize: requestedPageSize,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken);
 
         if (participantsPage.Participants.Count == 0)
         {
@@ -196,6 +209,26 @@ public sealed class GeneratePostExecutionReportQueryHandler(
         }
 
         var rows = new List<PostExecutionStudentRow>();
+        var gradebookIncompleteCount = 0;
+        CourseGradebookSnapshot? bulkGradebook =
+            string.Equals(request.PrefetchedGradebook?.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+                ? request.PrefetchedGradebook
+                : null;
+        if (bulkGradebook is null)
+        {
+            try
+            {
+                bulkGradebook = await gradebookGateway.GetCourseGradebookAsync(
+                    request.CourseId,
+                    participantsPage.Participants.Select(student => student.UserId).ToArray(),
+                    groupId: null,
+                    cancellationToken);
+            }
+            catch
+            {
+                // Individual reads remain the compatibility fallback.
+            }
+        }
         var submissionState = await CourseSubmissionReportState.LoadAsync(
             mediator,
             request.CourseId,
@@ -213,11 +246,34 @@ public sealed class GeneratePostExecutionReportQueryHandler(
 
             int totalGradedItems = 0, belowMinimumCount = 0, pendingCount = 0, awaitingGradingCount = 0;
             bool hasGradebookData = false;
+            var gradebookStatus = GradebookCoverageStates.Error;
 
             try
             {
-                var gradebook = await gradebookGateway.GetStudentGradebookAsync(
-                    request.CourseId, student.UserId, cancellationToken);
+                CourseGradebook gradebook;
+                if (bulkGradebook?.TryGetForStudent(student.UserId, out var bulkStudentGradebook) == true)
+                {
+                    gradebook = bulkStudentGradebook;
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
+                else if (bulkGradebook is null || bulkGradebook.Coverage.SourceMode == "bulk")
+                {
+                    gradebook = await gradebookGateway.GetStudentGradebookAsync(
+                        request.CourseId, student.UserId, cancellationToken);
+                    gradebookStatus = gradebook.Items.Count == 0
+                        ? GradebookCoverageStates.Empty
+                        : GradebookCoverageStates.Covered;
+                }
+                else
+                {
+                    gradebook = new CourseGradebook(request.CourseId, student.UserId, []);
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
+
+                if (gradebookStatus is GradebookCoverageStates.Error or GradebookCoverageStates.NotReturned)
+                {
+                    gradebookIncompleteCount++;
+                }
 
                 var activityItems = gradebook.Items
                     .Where(GradebookMappingHelper.IsEvaluativeReportActivityItem)
@@ -247,7 +303,11 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                     awaitingGradingCount = activityItems.Count(GradebookMappingHelper.IsAwaitingGrading);
                 }
             }
-            catch { /* partial data */ }
+            catch
+            {
+                gradebookIncompleteCount++;
+                // Preserve the actual read failure through the row status.
+            }
 
             if (submissionState.IsAvailable)
             {
@@ -276,7 +336,8 @@ public sealed class GeneratePostExecutionReportQueryHandler(
                     : 0,
                 GradedCount = submissionState.IsAvailable
                     ? submissionState.CountFor(student.UserId, SubmissionEvaluationState.GradedNumeric)
-                    : 0
+                    : 0,
+                GradebookStatus = gradebookStatus
             });
         }
 
@@ -287,6 +348,19 @@ public sealed class GeneratePostExecutionReportQueryHandler(
             "unknown" => 2,
             _ => 3
         }).ToList();
+
+        var gradebookWarning = gradebookIncompleteCount > 0
+            ? $"A cobertura do gradebook está incompleta para {gradebookIncompleteCount} estudante(s); estados de ausência e erro foram preservados."
+            : null;
+        var warning = submissionState.IsAvailable && !submissionState.IsComplete
+            ? submissionState.Warning ?? "A cobertura de entregas está incompleta."
+            : null;
+        if (gradebookWarning is not null)
+        {
+            warning = string.IsNullOrWhiteSpace(warning)
+                ? gradebookWarning
+                : $"{warning} {gradebookWarning}";
+        }
 
         return new GeneratePostExecutionReportResult(
             CourseId: request.CourseId,
@@ -299,9 +373,7 @@ public sealed class GeneratePostExecutionReportQueryHandler(
             MinGradePercent: request.MinGradePercent,
             Students: sorted,
             Disclaimer: Disclaimer,
-            Warning: submissionState.IsAvailable && !submissionState.IsComplete
-                ? submissionState.Warning ?? "A cobertura de entregas está incompleta."
-                : null);
+            Warning: warning);
     }
 
     private static string DetermineOutcome(bool neverAccessed, int belowMin, int pending, bool hasData)

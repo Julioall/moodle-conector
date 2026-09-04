@@ -16,19 +16,45 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
         var currentUserExternalId = (await currentUserIdGateway.GetCurrentUserIdAsync(cancellationToken)).ToString();
 
         // Fetch students (max 100 to avoid API rate limits for now)
-        var participantsPage = await participantsGateway.GetCourseParticipantsAsync(
-            userExternalId: currentUserExternalId,
-            courseId: request.CourseId,
-            statusFilter: ParticipantStatusFilter.Active,
-            page: 0,
-            pageSize: request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100,
-            studentsOnly: true,
-            includeEmail: false,
-            groupId: null,
-            cancellationToken: cancellationToken);
+        var requestedPageSize = request.MaxStudentsToAnalyze > 0 ? request.MaxStudentsToAnalyze : 100;
+        var participantsPage = request.PrefetchedParticipants is { HasMore: false } cachedParticipants &&
+            string.Equals(cachedParticipants.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+            ? cachedParticipants with
+            {
+                Participants = cachedParticipants.Participants.Take(requestedPageSize).ToArray(),
+            }
+            : await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId: currentUserExternalId,
+                courseId: request.CourseId,
+                statusFilter: ParticipantStatusFilter.Active,
+                page: 0,
+                pageSize: requestedPageSize,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken);
 
         var reports = new List<StudentRiskReport>();
         var gradebookFailureCount = 0;
+        CourseGradebookSnapshot? bulkGradebook =
+            string.Equals(request.PrefetchedGradebook?.CourseId, request.CourseId, StringComparison.OrdinalIgnoreCase)
+                ? request.PrefetchedGradebook
+                : null;
+        if (bulkGradebook is null)
+        {
+            try
+            {
+                bulkGradebook = await gradebookGateway.GetCourseGradebookAsync(
+                    request.CourseId,
+                    participantsPage.Participants.Select(student => student.UserId).ToArray(),
+                    groupId: null,
+                    cancellationToken);
+            }
+            catch
+            {
+                // Preserve the individual-read compatibility path below.
+            }
+        }
 
         foreach (var student in participantsPage.Participants)
         {
@@ -53,9 +79,28 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
 
             // Fetch Gradebook
             decimal? currentGrade = null;
+            var gradebookStatus = GradebookCoverageStates.Error;
             try
             {
-                var gradebook = await gradebookGateway.GetStudentGradebookAsync(request.CourseId, student.UserId, cancellationToken);
+                CourseGradebook gradebook;
+                if (bulkGradebook?.TryGetForStudent(student.UserId, out var bulkStudentGradebook) == true)
+                {
+                    gradebook = bulkStudentGradebook;
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
+                else if (bulkGradebook is null || bulkGradebook.Coverage.SourceMode == "bulk")
+                {
+                    gradebook = await gradebookGateway.GetStudentGradebookAsync(request.CourseId, student.UserId, cancellationToken);
+                    gradebookStatus = gradebook.Items.Count == 0
+                        ? GradebookCoverageStates.Empty
+                        : GradebookCoverageStates.Covered;
+                }
+                else
+                {
+                    gradebook = new CourseGradebook(request.CourseId, student.UserId, []);
+                    gradebookFailureCount++;
+                    gradebookStatus = bulkGradebook.GetStudentCoverageState(student.UserId);
+                }
                 var courseGradeItem = gradebook.Items.FirstOrDefault(i => i.ItemType == "course");
 
                 if (courseGradeItem != null)
@@ -76,6 +121,12 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
             {
                 // Gradebook might be disabled or unreachable for this student
                 gradebookFailureCount++;
+                gradebookStatus = GradebookCoverageStates.Error;
+            }
+
+            if (gradebookStatus is GradebookCoverageStates.Error or GradebookCoverageStates.NotReturned)
+            {
+                factors.Add("Dados do gradebook indisponíveis para este estudante; a classificação de nota é incompleta.");
             }
 
             // Calculate overall risk
@@ -96,7 +147,10 @@ public sealed class GetStudentsAtRiskReportQueryHandler(
                     // Detailed Moodle completion is not part of this report's
                     // evidence set because its dedicated endpoint is not
                     // reliable across the supported connections.
-                    CompletionRate: null));
+                     CompletionRate: null)
+                {
+                    GradebookStatus = gradebookStatus,
+                });
             }
         }
 

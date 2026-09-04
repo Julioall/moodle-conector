@@ -399,7 +399,8 @@ internal sealed class MoodleSnapshotSyncQueue(
                     MoodleSnapshotDatasets.Submissions => [
                         MoodleSnapshotDatasets.Submissions,
                         MoodleSnapshotDatasets.Activities,
-                        MoodleSnapshotDatasets.Students],
+                        MoodleSnapshotDatasets.Students,
+                        MoodleSnapshotDatasets.Gradebook],
                     _ => [work.Dataset],
                 };
                 foreach (var dataset in invalidatedDatasets)
@@ -767,6 +768,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         var submissionsGateway = services.GetRequiredService<IMoodleAssignmentSubmissionsGateway>();
         var assignmentSettingsGateway = services.GetRequiredService<IMoodleAssignmentSettingsGateway>();
         var assignmentGradeReadGateway = services.GetRequiredService<IMoodleAssignmentGradeReadGateway>();
+        var gradebookGateway = services.GetRequiredService<IMoodleGradebookGateway>();
 
         if (work.Dataset is MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses)
         {
@@ -815,11 +817,14 @@ internal sealed class MoodleSnapshotSyncQueue(
 
         var nowForCourse = DateTimeOffset.UtcNow;
         var finishedCourse = courseSummary.EndDate is not null && courseSummary.EndDate < nowForCourse;
+        var frozenCheckDataset = work.Dataset == MoodleSnapshotDatasets.Gradebook
+            ? MoodleSnapshotDatasets.Gradebook
+            : MoodleSnapshotDatasets.Activities;
         var existingSnapshot = await db.MoodleSnapshots.AsNoTracking().SingleOrDefaultAsync(
             item => item.OwnerId == work.OwnerId &&
                     (item.ConnectionId == work.ConnectionId ||
                      (item.ConnectionId == string.Empty && item.ConnectionAlias == work.ConnectionAlias)) &&
-                    item.SnapshotType == MoodleSnapshotDatasets.Activities &&
+                    item.SnapshotType == frozenCheckDataset &&
                     item.CourseId == courseSummary.CourseId,
             cancellationToken);
         if (finishedCourse && existingSnapshot?.IsFrozen == true && !work.Force)
@@ -847,19 +852,97 @@ internal sealed class MoodleSnapshotSyncQueue(
             }
             case MoodleSnapshotDatasets.Students:
             {
-                var students = await participantsGateway.GetCourseParticipantsAsync(
+                var students = await ReadAllStudentsAsync(
+                    participantsGateway,
                     work.UserExternalId,
                     courseSummary.CourseId,
-                    ParticipantStatusFilter.Active,
-                    1,
                     _options.ParticipantPageSize,
-                    studentsOnly: true,
-                    includeEmail: false,
-                    groupId: null,
+                    _options.MaxParticipantPages,
                     cancellationToken);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Students, courseSummary.CourseId, students, "hot", false, cancellationToken);
                 records = CountRecords(students);
                 partial = students.HasMore;
+                break;
+            }
+            case MoodleSnapshotDatasets.Gradebook:
+            {
+                var students = await ReadAllStudentsAsync(
+                    participantsGateway,
+                    work.UserExternalId,
+                    courseSummary.CourseId,
+                    _options.ParticipantPageSize,
+                    _options.MaxParticipantPages,
+                    cancellationToken);
+                var studentIds = students.Participants
+                    .Select(student => student.UserId)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                CourseGradebookSnapshot gradebook;
+                try
+                {
+                    gradebook = await gradebookGateway.GetCourseGradebookAsync(
+                        courseSummary.CourseId,
+                        studentIds,
+                        groupId: null,
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    // A capability error on the bulk endpoint must not turn a
+                    // useful snapshot into a failed run. Fall back to bounded
+                    // individual reads and publish explicit coverage.
+                    gradebook = await ReadIndividualGradebooksAsync(
+                        gradebookGateway,
+                        courseSummary.CourseId,
+                        studentIds,
+                        exception,
+                        _options.IndividualGradebookConcurrency,
+                        cancellationToken);
+                }
+                if (gradebook.Coverage.SourceMode == "bulk" &&
+                    (gradebook.Coverage.MissingStudentIds?.Count ?? 0) > 0)
+                {
+                    var missingGradebooks = await ReadIndividualGradebooksAsync(
+                        gradebookGateway,
+                        courseSummary.CourseId,
+                        gradebook.Coverage.MissingStudentIds ?? [],
+                        new InvalidOperationException("bulk_missing_requested_users"),
+                        _options.IndividualGradebookConcurrency,
+                        cancellationToken);
+                    gradebook = MergeGradebookSnapshots(gradebook, missingGradebooks, studentIds);
+                }
+                if (students.HasMore)
+                {
+                    gradebook = gradebook with
+                    {
+                        Coverage = gradebook.Coverage with
+                        {
+                            IsComplete = false,
+                            Truncated = true,
+                            Warnings = (gradebook.Coverage.Warnings ?? [])
+                                .Concat(["participants_truncated"])
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToArray(),
+                        }
+                    };
+                }
+                await SaveAsync(
+                    db,
+                    work,
+                    MoodleSnapshotDatasets.Gradebook,
+                    courseSummary.CourseId,
+                    gradebook,
+                    finishedCourse ? "cold" : "hot",
+                    finishedCourse,
+                    cancellationToken,
+                    completeOverride: !students.HasMore && gradebook.Coverage.IsComplete);
+                records = CountRecords(gradebook);
+                partial = students.HasMore || !gradebook.Coverage.IsComplete;
                 break;
             }
             case MoodleSnapshotDatasets.Groups:
@@ -878,15 +961,12 @@ internal sealed class MoodleSnapshotSyncQueue(
                     includeHidden: false,
                     onlyWithFiles: false,
                     cancellationToken);
-                var participants = await participantsGateway.GetCourseParticipantsAsync(
+                var participants = await ReadAllStudentsAsync(
+                    participantsGateway,
                     work.UserExternalId,
                     courseSummary.CourseId,
-                    ParticipantStatusFilter.Active,
-                    page: 1,
-                    pageSize: _options.ParticipantPageSize,
-                    studentsOnly: true,
-                    includeEmail: false,
-                    groupId: null,
+                    _options.ParticipantPageSize,
+                    _options.MaxParticipantPages,
                     cancellationToken);
                 var assignmentIds = contents.Sections
                     .SelectMany(section => section.Modules)
@@ -934,48 +1014,28 @@ internal sealed class MoodleSnapshotSyncQueue(
                 var existingGrades = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(
                     StringComparer.OrdinalIgnoreCase);
                 var gradesPartial = false;
-                using (var feedbackLimiter = new SemaphoreSlim(_options.FeedbackReadConcurrency, _options.FeedbackReadConcurrency))
+                var feedbackResults = await assignmentGradeReadGateway.GetExistingGradesBatchAsync(
+                    work.UserExternalId,
+                    assignmentIds,
+                    participants.Participants.Select(participant => participant.UserId).ToArray(),
+                    cancellationToken);
+                foreach (var result in feedbackResults)
                 {
-                    var feedbackTasks = assignmentIds.Select(async assignmentId =>
+                    existingGrades[result.AssignmentId] = result.Grades;
+                    if (!string.IsNullOrWhiteSpace(result.ErrorCode))
                     {
-                        await feedbackLimiter.WaitAsync(cancellationToken);
-                        try
-                        {
-                            var grades = await assignmentGradeReadGateway.GetExistingGradesAsync(
-                                work.UserExternalId,
-                                assignmentId,
-                                participants.Participants.Select(participant => participant.UserId).ToArray(),
-                                cancellationToken);
-                            return (AssignmentId: assignmentId, Grades: grades, Success: true);
-                        }
-                        catch (OperationCanceledException)
-                        {
-                            throw;
-                        }
-                        catch
-                        {
-                            return (AssignmentId: assignmentId,
-                                Grades: (IReadOnlyDictionary<string, AssignmentExistingGrade>)new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase),
-                                Success: false);
-                        }
-                        finally
-                        {
-                            feedbackLimiter.Release();
-                        }
-                    }).ToArray();
-
-                    var feedbackResults = await Task.WhenAll(feedbackTasks);
-                    foreach (var result in feedbackResults)
-                    {
-                        if (result.Success)
-                        {
-                            existingGrades[result.AssignmentId] = result.Grades;
-                        }
-                        else
-                        {
-                            gradesPartial = true;
-                        }
+                        gradesPartial = true;
                     }
+                }
+
+                // A gateway implementation may omit an assignment result
+                // without throwing. Treat the omission as incomplete coverage
+                // rather than publishing a falsely complete grade snapshot.
+                if (feedbackResults.Select(result => result.AssignmentId)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    .Count != assignmentIds.Length)
+                {
+                    gradesPartial = true;
                 }
 
                 var snapshot = AssignmentSubmissionSnapshotProjector.Build(
@@ -986,7 +1046,19 @@ internal sealed class MoodleSnapshotSyncQueue(
                     existingGrades);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Activities, courseSummary.CourseId, contents, finishedCourse ? "cold" : "hot", finishedCourse, cancellationToken);
                 await SaveAsync(db, work, MoodleSnapshotDatasets.Students, courseSummary.CourseId, participants, "hot", false, cancellationToken);
-                await SaveAsync(db, work, MoodleSnapshotDatasets.Submissions, courseSummary.CourseId, snapshot, finishedCourse ? "cold" : "hot", finishedCourse, cancellationToken);
+                var submissionsComplete = !participants.HasMore && !gradesPartial && snapshot.Assignments.All(assignment =>
+                    assignment.IsComplete &&
+                    (assignment.Coverage is null || assignment.Coverage.NeedsGradingComplete));
+                await SaveAsync(
+                    db,
+                    work,
+                    MoodleSnapshotDatasets.Submissions,
+                    courseSummary.CourseId,
+                    snapshot,
+                    finishedCourse ? "cold" : "hot",
+                    finishedCourse,
+                    cancellationToken,
+                    completeOverride: submissionsComplete);
                 records = CountRecords(snapshot);
                 partial = participants.HasMore || gradesPartial || snapshot.Assignments.Any(assignment =>
                     !assignment.IsComplete || assignment.Coverage is not null && !assignment.Coverage.NeedsGradingComplete);
@@ -1019,6 +1091,159 @@ internal sealed class MoodleSnapshotSyncQueue(
         }
 
         return new CourseReadResult(courses, partial);
+    }
+
+    private static async Task<CourseParticipantsPage> ReadAllStudentsAsync(
+        IMoodleParticipantsGateway participantsGateway,
+        string userExternalId,
+        string courseId,
+        int pageSize,
+        int maxPages,
+        CancellationToken cancellationToken)
+    {
+        var participants = new List<CourseParticipantSummary>();
+        var seenParticipantIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var page = 1;
+        var hasMore = false;
+        ParticipantClassificationDiagnostics? diagnostics = null;
+        while (page <= maxPages)
+        {
+            var result = await participantsGateway.GetCourseParticipantsAsync(
+                userExternalId,
+                courseId,
+                ParticipantStatusFilter.Active,
+                page,
+                pageSize,
+                studentsOnly: true,
+                includeEmail: false,
+                groupId: null,
+                cancellationToken: cancellationToken);
+            var added = 0;
+            foreach (var participant in result.Participants)
+            {
+                if (seenParticipantIds.Add(participant.UserId))
+                {
+                    participants.Add(participant);
+                    added++;
+                }
+            }
+            diagnostics = result.ClassificationDiagnostics;
+            hasMore = result.HasMore;
+            if (!result.HasMore || result.Participants.Count == 0 || added == 0)
+            {
+                break;
+            }
+            page++;
+        }
+
+        if (page > maxPages && hasMore)
+        {
+            hasMore = true;
+        }
+
+        return new CourseParticipantsPage(
+            CourseId: courseId,
+            Page: 1,
+            PageSize: pageSize,
+            StatusFilter: ParticipantStatusFilter.Active,
+            StudentsOnly: true,
+            IncludeEmail: false,
+            HasMore: hasMore,
+            Participants: participants,
+            ClassificationDiagnostics: diagnostics);
+    }
+
+    private static async Task<CourseGradebookSnapshot> ReadIndividualGradebooksAsync(
+        IMoodleGradebookGateway gradebookGateway,
+        string courseId,
+        IReadOnlyCollection<string> studentIds,
+        Exception bulkException,
+        int maxConcurrency,
+        CancellationToken cancellationToken)
+    {
+        var gradebooks = new Dictionary<string, CourseGradebook>(StringComparer.OrdinalIgnoreCase);
+        var missing = new List<string>();
+        var errors = new List<string>();
+        var warnings = new List<string> { $"bulk:{bulkException.GetType().Name}" };
+        using var gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        var reads = studentIds.Select(async studentId =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                var gradebook = await gradebookGateway.GetStudentGradebookAsync(courseId, studentId, cancellationToken);
+                lock (gradebooks) gradebooks[studentId] = gradebook;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception exception)
+            {
+                lock (missing)
+                {
+                    missing.Add(studentId);
+                    errors.Add(studentId);
+                    warnings.Add($"student_read_failed:{exception.GetType().Name}");
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+        await Task.WhenAll(reads);
+        return new CourseGradebookSnapshot(
+            courseId,
+            gradebooks,
+            new GradebookSnapshotCoverage(
+                "individual_fallback",
+                studentIds.Count,
+                gradebooks.Count,
+                missing.Count == 0,
+                false,
+                missing,
+                warnings)
+            {
+                ErrorStudentIds = errors,
+            })
+            .WithCanonicalProjection();
+    }
+
+    private static CourseGradebookSnapshot MergeGradebookSnapshots(
+        CourseGradebookSnapshot bulk,
+        CourseGradebookSnapshot fallback,
+        IReadOnlyCollection<string> requestedStudentIds)
+    {
+        var gradebooks = new Dictionary<string, CourseGradebook>(bulk.Gradebooks, StringComparer.OrdinalIgnoreCase);
+        foreach (var item in fallback.Gradebooks)
+        {
+            gradebooks[item.Key] = item.Value;
+        }
+
+        var missing = requestedStudentIds
+            .Where(id => !gradebooks.ContainsKey(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var warnings = (bulk.Coverage.Warnings ?? [])
+            .Concat(fallback.Coverage.Warnings ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var errors = (bulk.Coverage.ErrorStudentIds ?? [])
+            .Concat(fallback.Coverage.ErrorStudentIds ?? [])
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return (bulk with
+        {
+            Gradebooks = gradebooks,
+            Coverage = bulk.Coverage with
+            {
+                SourceMode = "mixed",
+                RequestedStudentCount = requestedStudentIds.Count,
+                ReturnedStudentCount = requestedStudentIds.Count - missing.Length,
+                IsComplete = missing.Length == 0 && fallback.Coverage.IsComplete,
+                MissingStudentIds = missing,
+                Warnings = warnings,
+                ErrorStudentIds = errors,
+            }
+        }).WithCanonicalProjection();
     }
 
     private static async Task<CourseSummary?> ReadCourseFromSnapshotAsync(
@@ -1104,9 +1329,20 @@ internal sealed class MoodleSnapshotSyncQueue(
                 $"O payload do snapshot excede o limite configurado de {_options.MaxPayloadBytes} bytes.");
         }
         var now = DateTimeOffset.UtcNow;
+        if (entity is not null && entity.IsComplete && !completeOverride)
+        {
+            // A partial refresh must never replace the last complete head with
+            // a truncated/failed population. Keep the old payload and
+            // freshness, but retain the attempt marker for diagnostics and
+            // let the durable state remain partial for a subsequent retry.
+            entity.LastAttemptAt = now;
+            entity.LastError = "partial_refresh_preserved";
+            await db.SaveChangesAsync(cancellationToken);
+            return;
+        }
         var freshInterval = GetFreshInterval(type, tier, frozen);
         var payloadHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
-        ApplyQueueSnapshot(entity, work, json, payloadHash, tier, frozen, type, now, freshInterval, payload, completeOverride);
+        ApplyQueueSnapshot(entity!, work, json, payloadHash, tier, frozen, type, now, freshInterval, payload, completeOverride);
         const string savepointName = "moodle_snapshot_upsert";
         var transaction = db.Database.CurrentTransaction;
         if (transaction is not null)
@@ -1124,7 +1360,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             {
                 await transaction.RollbackToSavepointAsync(savepointName, CancellationToken.None);
             }
-            db.Entry(entity).State = EntityState.Detached;
+            db.Entry(entity!).State = EntityState.Detached;
             entity = await db.MoodleSnapshots.SingleOrDefaultAsync(
                 item => item.OwnerId == work.OwnerId &&
                         item.ConnectionId == work.ConnectionId &&
@@ -1137,7 +1373,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         }
     }
 
-    private static void ApplyQueueSnapshot<T>(
+    private void ApplyQueueSnapshot<T>(
         MoodleSnapshotEntity entity,
         SyncWork work,
         string json,
@@ -1171,6 +1407,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         {
             CourseParticipantsPage participants => !participants.HasMore,
             CourseAssignmentSubmissionsSnapshot submissions => submissions.Assignments.All(item => item.IsComplete),
+            CourseGradebookSnapshot gradebook => gradebook.Coverage.IsComplete,
             _ => true,
         };
         entity.RecordCount = CountRecords(payload);
@@ -1185,23 +1422,25 @@ internal sealed class MoodleSnapshotSyncQueue(
         postgres.SqlState == PostgresErrorCodes.UniqueViolation &&
         (postgres.ConstraintName is "IX_moodle_sync_states_scope" or "IX_moodle_sync_states_connection_scope");
 
-    private static TimeSpan GetFreshInterval(string type, string tier, bool frozen) =>
+    private TimeSpan GetFreshInterval(string type, string tier, bool frozen) =>
         frozen ? TimeSpan.FromDays(3650) : type switch
         {
             MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(2),
             MoodleSnapshotDatasets.Activities => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromHours(1) : TimeSpan.FromHours(4),
             MoodleSnapshotDatasets.Submissions => TimeSpan.FromMinutes(15),
+            MoodleSnapshotDatasets.Gradebook => TimeSpan.FromMinutes(_options.GradebookFreshMinutes),
             _ => TimeSpan.FromHours(1),
         };
 
-    private static TimeSpan GetStaleWindow(string type, string tier, bool frozen) =>
+    private TimeSpan GetStaleWindow(string type, string tier, bool frozen) =>
         frozen ? TimeSpan.Zero : type switch
         {
             MoodleSnapshotDatasets.Courses => TimeSpan.FromDays(7),
             MoodleSnapshotDatasets.Activities => tier.Equals("cold", StringComparison.OrdinalIgnoreCase) ? TimeSpan.FromDays(30) : TimeSpan.FromDays(3),
             MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups => TimeSpan.FromHours(24),
             MoodleSnapshotDatasets.Submissions => TimeSpan.FromHours(6),
+            MoodleSnapshotDatasets.Gradebook => TimeSpan.FromMinutes(_options.GradebookStaleMinutes),
             _ => TimeSpan.FromHours(12),
         };
 
@@ -1212,6 +1451,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         CourseParticipantsPage participants => participants.Participants.Count,
         IReadOnlyCollection<CourseGroupSummary> groups => groups.Count,
         CourseAssignmentSubmissionsSnapshot submissions => submissions.Assignments.Sum(item => item.Submissions.Count),
+        CourseGradebookSnapshot gradebook => gradebook.Gradebooks.Sum(item => item.Value.Items.Count),
         _ => 0,
     };
 
@@ -1220,6 +1460,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses => GetNextBrazilMidnight(now).AddDays(2),
             MoodleSnapshotDatasets.Activities => GetNextBrazilMidnight(now).AddDays(1),
             MoodleSnapshotDatasets.Submissions => now.AddMinutes(30),
+            MoodleSnapshotDatasets.Gradebook => now.AddMinutes(15),
             _ => now.Add(dataset == MoodleSnapshotDatasets.Groups ? TimeSpan.FromHours(2) : TimeSpan.FromHours(1)),
         };
 
@@ -1269,7 +1510,7 @@ internal sealed class MoodleSnapshotSyncQueue(
     private static MoodleSnapshotSyncRequest Normalize(MoodleSnapshotSyncRequest request)
     {
         var dataset = request.Dataset.Trim().ToLowerInvariant();
-        if (dataset is not (MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses or MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups or MoodleSnapshotDatasets.Submissions))
+        if (dataset is not (MoodleSnapshotDatasets.Connection or MoodleSnapshotDatasets.Courses or MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups or MoodleSnapshotDatasets.Submissions or MoodleSnapshotDatasets.Gradebook))
         {
             dataset = MoodleSnapshotDatasets.Connection;
         }
@@ -1280,7 +1521,7 @@ internal sealed class MoodleSnapshotSyncQueue(
             ConnectionId = string.IsNullOrWhiteSpace(request.ConnectionId) ? null : request.ConnectionId.Trim(),
             Trigger = string.IsNullOrWhiteSpace(request.Trigger) ? "scheduled" : request.Trigger.Trim().ToLowerInvariant(),
             Dataset = dataset,
-            CourseId = dataset is MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups or MoodleSnapshotDatasets.Submissions
+            CourseId = dataset is MoodleSnapshotDatasets.Activities or MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Groups or MoodleSnapshotDatasets.Submissions or MoodleSnapshotDatasets.Gradebook
                 ? request.CourseId?.Trim()
                 : null,
             Priority = Math.Clamp(request.Priority, 0, 1000),

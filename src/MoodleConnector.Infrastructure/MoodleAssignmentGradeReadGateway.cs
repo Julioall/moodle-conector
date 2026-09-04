@@ -3,16 +3,115 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.MoodleApi;
+using MoodleConnector.Infrastructure.Configuration;
 
 namespace MoodleConnector.Infrastructure;
 
 internal sealed class MoodleAssignmentGradeReadGateway(
     IOptions<MoodleApiOptions> options,
     IMoodleConnectorCredentialsProvider credentialsProvider,
-    IMoodleRestClient restClient) : IMoodleAssignmentGradeReadGateway
+    IMoodleRestClient restClient,
+    IOptions<MoodleSnapshotOptions>? snapshotOptions = null) : IMoodleAssignmentGradeReadGateway
 {
     private const string MoodleFunction = "mod_assign_get_grades";
+    private const int MaxConcurrentFallbackReads = 4;
     private readonly MoodleApiOptions _options = options.Value;
+    private readonly MoodleSnapshotOptions _snapshotOptions =
+        (snapshotOptions?.Value ?? new MoodleSnapshotOptions()).Normalize();
+
+    public async Task<IReadOnlyList<AssignmentGradesBatch>> GetExistingGradesBatchAsync(
+        string userExternalId,
+        IReadOnlyCollection<string> assignmentIds,
+        IReadOnlyCollection<string> studentIds,
+        CancellationToken cancellationToken)
+    {
+        var normalizedAssignmentIds = assignmentIds
+            .Select(id => TryParseMoodleId(id, out var value) ? value.ToString(CultureInfo.InvariantCulture) : null)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (normalizedAssignmentIds.Length == 0)
+        {
+            return [];
+        }
+
+        if (_options.UseStubData || studentIds.Count == 0)
+        {
+            return normalizedAssignmentIds
+                .Select(id => new AssignmentGradesBatch(
+                    id,
+                    new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase)))
+                .ToArray();
+        }
+
+        if (string.IsNullOrWhiteSpace(userExternalId))
+        {
+            throw new ArgumentException("O usuario Moodle e obrigatorio.", nameof(userExternalId));
+        }
+
+        var requestedStudentIds = studentIds
+            .Select(studentId => TryParseMoodleId(studentId, out var value) ? value : 0L)
+            .Where(id => id > 0)
+            .ToHashSet();
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var result = new List<AssignmentGradesBatch>(normalizedAssignmentIds.Length);
+
+        foreach (var chunk in normalizedAssignmentIds.Chunk(_snapshotOptions.AssignmentGradeBatchSize))
+        {
+            try
+            {
+                var parsed = await ReadGradesChunkAsync(
+                    credentials,
+                    chunk,
+                    requestedStudentIds,
+                    cancellationToken);
+                var missing = new List<string>();
+                foreach (var assignmentId in chunk)
+                {
+                    if (parsed.TryGetValue(assignmentId, out var grades))
+                    {
+                        result.Add(new AssignmentGradesBatch(assignmentId, grades));
+                    }
+                    else
+                    {
+                        missing.Add(assignmentId);
+                    }
+                }
+
+                // A Moodle installation may omit one inaccessible assignment
+                // from an otherwise valid bulk response. Isolate only those
+                // IDs so the valid part of the set remains usable.
+                if (missing.Count > 0)
+                {
+                    result.AddRange(await ReadSingleGradesConcurrentlyAsync(
+                        credentials,
+                        missing,
+                        requestedStudentIds,
+                        cancellationToken));
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                // A rejected multi-assignment request must not discard the
+                // assignments that could still be read safely. Retry only
+                // this chunk individually with bounded concurrency; each
+                // assignment keeps its own error contract if the retry fails.
+                result.AddRange(await ReadSingleGradesConcurrentlyAsync(
+                    credentials,
+                    chunk,
+                    requestedStudentIds,
+                    cancellationToken));
+            }
+        }
+
+        return result;
+    }
 
     public async Task<AssignmentExistingGrade?> GetExistingGradeAsync(
         string userExternalId,
@@ -59,19 +158,86 @@ internal sealed class MoodleAssignmentGradeReadGateway(
             .Select(studentId => ParseMoodleId(studentId, nameof(studentIds)))
             .ToHashSet();
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
-        var payload = await restClient.CallAsync(credentials, MoodleFunction, new Dictionary<string, object?>
-        {
-            ["assignmentids[0]"] = assignmentIdNumber.ToString(CultureInfo.InvariantCulture)
-        }, cancellationToken);
-        return ParseGrades(payload.GetRawText(), assignmentIdNumber, requestedStudentIds);
+        var parsed = await ReadGradesChunkAsync(
+            credentials,
+            [assignmentIdNumber.ToString(CultureInfo.InvariantCulture)],
+            requestedStudentIds,
+            cancellationToken);
+        return parsed.GetValueOrDefault(
+                   assignmentIdNumber.ToString(CultureInfo.InvariantCulture))
+               ?? new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
     }
 
-    private static IReadOnlyDictionary<string, AssignmentExistingGrade> ParseGrades(
+    private async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>> ReadGradesChunkAsync(
+        MoodleConnectorCredentials credentials,
+        IReadOnlyCollection<string> assignmentIds,
+        IReadOnlySet<long> requestedStudentIds,
+        CancellationToken cancellationToken)
+    {
+        var parameters = assignmentIds
+            .Select((assignmentId, index) => new KeyValuePair<string, object?>(
+                $"assignmentids[{index}]",
+                assignmentId))
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+        var payload = await restClient.CallAsync(
+            credentials,
+            MoodleFunction,
+            parameters,
+            cancellationToken);
+        return ParseGrades(payload.GetRawText(), requestedStudentIds);
+    }
+
+    private async Task<IReadOnlyList<AssignmentGradesBatch>> ReadSingleGradesConcurrentlyAsync(
+        MoodleConnectorCredentials credentials,
+        IReadOnlyCollection<string> assignmentIds,
+        IReadOnlySet<long> requestedStudentIds,
+        CancellationToken cancellationToken)
+    {
+        using var gate = new SemaphoreSlim(MaxConcurrentFallbackReads, MaxConcurrentFallbackReads);
+        var batches = await Task.WhenAll(assignmentIds.Select(async assignmentId =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                var parsed = await ReadGradesChunkAsync(
+                    credentials,
+                    [assignmentId],
+                    requestedStudentIds,
+                    cancellationToken);
+                return parsed.TryGetValue(assignmentId, out var grades)
+                    ? new AssignmentGradesBatch(assignmentId, grades)
+                    : new AssignmentGradesBatch(
+                        assignmentId,
+                        new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase),
+                        "assignment_not_returned",
+                        "A tarefa não foi retornada pelo Moodle no lote de notas.");
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                var failure = MoodleErrorContract.Describe(exception);
+                return new AssignmentGradesBatch(
+                    assignmentId,
+                    new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase),
+                    failure.ErrorCode,
+                    failure.Message);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+        return batches;
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>> ParseGrades(
         string payload,
-        long assignmentId,
         IReadOnlySet<long> requestedStudentIds)
     {
-        var result = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(payload))
         {
             return result;
@@ -86,43 +252,44 @@ internal sealed class MoodleAssignmentGradeReadGateway(
 
         foreach (var assignment in assignments.EnumerateArray())
         {
-            if (!MatchesLongProperty(assignment, "assignmentid", assignmentId) ||
-                !assignment.TryGetProperty("grades", out var grades) ||
-                grades.ValueKind != JsonValueKind.Array)
+            if (!TryReadLongProperty(assignment, "assignmentid", out var assignmentId))
             {
                 continue;
             }
 
-            foreach (var grade in grades.EnumerateArray())
+            var assignmentGrades = new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase);
+            if (assignment.TryGetProperty("grades", out var grades) && grades.ValueKind == JsonValueKind.Array)
             {
-                if (!TryReadLongProperty(grade, "userid", out var studentId) ||
-                    !requestedStudentIds.Contains(studentId))
+                foreach (var grade in grades.EnumerateArray())
                 {
-                    continue;
-                }
+                    if (!TryReadLongProperty(grade, "userid", out var studentId) ||
+                        !requestedStudentIds.Contains(studentId))
+                    {
+                        continue;
+                    }
 
-                var parsedGrade = ReadDecimalProperty(grade, "grade");
-                var studentIdText = studentId.ToString(CultureInfo.InvariantCulture);
-                result[studentIdText] = new AssignmentExistingGrade(
-                    assignmentId.ToString(CultureInfo.InvariantCulture),
-                    studentIdText,
-                    parsedGrade,
-                    HasGrade: parsedGrade is >= 0,
-                    Feedback: ReadTextProperty(grade, "feedback")
-                        ?? ReadTextProperty(grade, "feedbacktext")
-                        ?? ReadTextProperty(grade, "feedbackcomments"),
-                    GradeMax: ReadDecimalProperty(grade, "grademax"),
-                    GraderId: ReadLongProperty(grade, "grader"),
-                    TimeModified: ReadLongProperty(grade, "timemodified"));
+                    var parsedGrade = ReadDecimalProperty(grade, "grade");
+                    var studentIdText = studentId.ToString(CultureInfo.InvariantCulture);
+                    assignmentGrades[studentIdText] = new AssignmentExistingGrade(
+                        assignmentId.ToString(CultureInfo.InvariantCulture),
+                        studentIdText,
+                        parsedGrade,
+                        HasGrade: parsedGrade is >= 0,
+                        Feedback: ReadTextProperty(grade, "feedback")
+                            ?? ReadTextProperty(grade, "feedbacktext")
+                            ?? ReadTextProperty(grade, "feedbackcomments"),
+                        GradeMax: ReadDecimalProperty(grade, "grademax"),
+                        GraderId: ReadLongProperty(grade, "grader"),
+                        TimeModified: ReadLongProperty(grade, "timemodified"));
+                }
             }
+
+            // An assignment with no grades is a successful empty set. This
+            // differs from an assignment omitted from the response.
+            result[assignmentId.ToString(CultureInfo.InvariantCulture)] = assignmentGrades;
         }
 
         return result;
-    }
-
-    private static bool MatchesLongProperty(JsonElement element, string propertyName, long expected)
-    {
-        return TryReadLongProperty(element, propertyName, out var actual) && actual == expected;
     }
 
     private static bool TryReadLongProperty(JsonElement element, string propertyName, out long result)
@@ -187,7 +354,7 @@ internal sealed class MoodleAssignmentGradeReadGateway(
 
     private static long ParseMoodleId(string value, string parameterName)
     {
-        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id) && id > 0)
+        if (TryParseMoodleId(value, out var id))
         {
             return id;
         }
@@ -195,4 +362,6 @@ internal sealed class MoodleAssignmentGradeReadGateway(
         throw new ArgumentException($"O parametro {parameterName} deve ser um identificador numerico do Moodle.", parameterName);
     }
 
+    private static bool TryParseMoodleId(string value, out long id) =>
+        long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out id) && id > 0;
 }

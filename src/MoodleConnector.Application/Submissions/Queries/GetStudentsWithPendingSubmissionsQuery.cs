@@ -63,6 +63,8 @@ public sealed record GetStudentsWithPendingSubmissionsResult(
 {
     public IReadOnlyList<AwaitingGradingSubmission> AwaitingGrading { get; init; } = [];
     public IReadOnlyList<SubmissionEvaluationItem> Evaluations { get; init; } = [];
+    public IReadOnlyList<string> GradebookNotReturnedStudentIds { get; init; } = [];
+    public IReadOnlyList<string> GradebookErrorStudentIds { get; init; } = [];
     public bool IsComplete { get; init; } = true;
 }
 
@@ -86,7 +88,8 @@ public sealed record GetStudentsWithPendingSubmissionsQuery(
     int MaxAssignmentsToAnalyze = 0,
     CourseContentsSummary? PrefetchedContents = null,
     CourseParticipantsPage? PrefetchedParticipants = null,
-    CourseAssignmentSubmissionsSnapshot? PrefetchedSubmissions = null) : IRequest<GetStudentsWithPendingSubmissionsResult>;
+    CourseAssignmentSubmissionsSnapshot? PrefetchedSubmissions = null,
+    CourseGradebookSnapshot? PrefetchedGradebook = null) : IRequest<GetStudentsWithPendingSubmissionsResult>;
 
 public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -304,9 +307,17 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             }
         }
 
-        var gradebooks = request.IncludeAwaitingGrading
-            ? await ReadGradebooksAsync(request.CourseId, studentMap.Keys, cancellationToken)
+        var gradebookRead = request.IncludeAwaitingGrading
+            ? IsForCourse(request.PrefetchedGradebook, request.CourseId)
+                ? new GradebookReadResult(
+                    request.PrefetchedGradebook!.Gradebooks,
+                    request.PrefetchedGradebook.Coverage.IsComplete,
+                    request.PrefetchedGradebook.Coverage.MissingStudentIds,
+                    request.PrefetchedGradebook.Coverage.ErrorStudentIds)
+                : await ReadGradebooksAsync(request.CourseId, studentMap.Keys, cancellationToken)
             : null;
+        var gradebooks = gradebookRead?.Gradebooks;
+        var gradebooksComplete = gradebookRead?.IsComplete == true;
 
         var contextsByAssignmentId = assignmentContexts
             .ToDictionary(context => context.Module.InstanceId!, StringComparer.Ordinal);
@@ -354,8 +365,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                     GradeRaw: gradebookItem?.GradeRaw ?? (existingGrade?.HasGrade == true ? existingGrade.Grade : null),
                     GradedDateGraded: gradebookItem?.GradedDateGraded,
                     Feedback: gradebookItem?.Feedback ?? existingGrade?.Feedback ?? record.CurrentFeedback,
-                    ReviewEvidenceAvailable: !request.IncludeAwaitingGrading ||
-                        gradebooks is not null || feedbackReadyAssignments.Contains(module.InstanceId!),
+                        ReviewEvidenceAvailable: !request.IncludeAwaitingGrading ||
+                        gradebooksComplete || feedbackReadyAssignments.Contains(module.InstanceId!),
                     GradingStatus: record.GradingStatus,
                     GraderId: existingGrade?.GraderId ?? ParseGraderId(gradebookItem?.GraderId) ?? record.CurrentGraderId,
                     GradeTimeModified: existingGrade?.TimeModified ?? gradebookItem?.GradedDateGraded ?? record.CurrentGradeTimeModified,
@@ -457,6 +468,20 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 : $"{warning} {submissionWarning}";
         }
 
+        var gradebookNotReturned = gradebookRead?.NotReturnedStudentIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+        var gradebookErrors = gradebookRead?.ErrorStudentIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+        if (gradebookNotReturned.Length > 0 || gradebookErrors.Length > 0)
+        {
+            const string gradebookWarning = "A cobertura do gradebook ficou incompleta; estudantes não retornados e erros de leitura foram mantidos separados.";
+            warning = string.IsNullOrWhiteSpace(warning)
+                ? gradebookWarning
+                : $"{warning} {gradebookWarning}";
+        }
+
         var suggestedRecipients = studentsWithPending.Select(s => s.StudentId).ToList();
         var awaitingGrading = gradingByStudent
             .Where(kv => kv.Value.Count > 0 && studentMap.ContainsKey(kv.Key))
@@ -486,6 +511,8 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         {
             AwaitingGrading = awaitingGrading,
             Evaluations = evaluations,
+            GradebookNotReturnedStudentIds = gradebookNotReturned,
+            GradebookErrorStudentIds = gradebookErrors,
             IsComplete = !submissionReadFailed && submissionFailures.Count == 0,
         };
     }
@@ -497,7 +524,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         _ => null
     };
 
-    private async Task<IReadOnlyDictionary<string, CourseGradebook>?> ReadGradebooksAsync(
+    private async Task<GradebookReadResult?> ReadGradebooksAsync(
         string courseId,
         IEnumerable<string> studentIds,
         CancellationToken cancellationToken)
@@ -507,21 +534,29 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
             return null;
         }
 
-        const int maxConcurrency = 6;
-        using var gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         try
         {
-            var reads = studentIds.Distinct(StringComparer.OrdinalIgnoreCase).Select(async studentId =>
-            {
-                await gate.WaitAsync(cancellationToken);
-                try { return await gradebookGateway.GetStudentGradebookAsync(courseId, studentId, cancellationToken); }
-                finally { gate.Release(); }
-            });
-            var results = await Task.WhenAll(reads);
-            return results.ToDictionary(item => item.StudentId, StringComparer.OrdinalIgnoreCase);
+            var snapshot = await gradebookGateway.GetCourseGradebookAsync(
+                courseId,
+                studentIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                groupId: null,
+                cancellationToken);
+            return new GradebookReadResult(
+                snapshot.Gradebooks,
+                snapshot.Coverage.IsComplete,
+                snapshot.Coverage.MissingStudentIds,
+                snapshot.Coverage.ErrorStudentIds);
         }
         catch (OperationCanceledException) { throw; }
-        catch { return null; }
+        catch
+        {
+            var ids = studentIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            return new GradebookReadResult(
+                new Dictionary<string, CourseGradebook>(StringComparer.OrdinalIgnoreCase),
+                false,
+                ids,
+                ids);
+        }
     }
 
     private static GradebookItem? FindAssignmentGradebookItem(
@@ -543,47 +578,46 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         ISet<string> failures,
         CancellationToken cancellationToken)
     {
-        const int maxConcurrency = 4;
-        using var limiter = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         var students = studentIds.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        var tasks = assignmentIds.Select(async assignmentId =>
+        try
         {
-            await limiter.WaitAsync(cancellationToken);
-            try
+            var batches = await gradeReadGateway!.GetExistingGradesBatchAsync(
+                userExternalId,
+                assignmentIds,
+                students,
+                cancellationToken);
+            foreach (var batch in batches)
             {
-                var grades = await gradeReadGateway!.GetExistingGradesAsync(
-                    userExternalId,
-                    assignmentId,
-                    students,
-                    cancellationToken);
-                return (AssignmentId: assignmentId, Grades: grades, Success: true);
+                if (!string.IsNullOrWhiteSpace(batch.ErrorCode))
+                {
+                    failures.Add(batch.AssignmentId);
+                }
             }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
+            return batches
+                .Where(batch => string.IsNullOrWhiteSpace(batch.ErrorCode))
+                .ToDictionary(batch => batch.AssignmentId, batch => batch.Grades, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            foreach (var assignmentId in assignmentIds)
             {
                 failures.Add(assignmentId);
-                return (AssignmentId: assignmentId,
-                    Grades: (IReadOnlyDictionary<string, AssignmentExistingGrade>)new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase),
-                    Success: false);
             }
-            finally
-            {
-                limiter.Release();
-            }
-        }).ToArray();
-
-        var results = await Task.WhenAll(tasks);
-        return results
-            .Where(result => result.Success)
-            .ToDictionary(result => result.AssignmentId, result => result.Grades, StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private static bool IsForCourse(CourseContentsSummary? contents, string courseId) =>
         contents is not null &&
         string.Equals(contents.CourseId, courseId, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsForCourse(CourseGradebookSnapshot? gradebook, string courseId) =>
+        gradebook is not null &&
+        string.Equals(gradebook.CourseId, courseId, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsForCourse(CourseParticipantsPage? participants, string courseId) =>
         participants is not null &&
@@ -648,4 +682,10 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         settings.IsGradable ?? settings.MaxGrade > 0;
 
     private sealed record AssignmentContext(CourseModuleSummary Module, DateTimeOffset? DueDate);
+
+    private sealed record GradebookReadResult(
+        IReadOnlyDictionary<string, CourseGradebook> Gradebooks,
+        bool IsComplete,
+        IReadOnlyCollection<string> NotReturnedStudentIds,
+        IReadOnlyCollection<string> ErrorStudentIds);
 }
