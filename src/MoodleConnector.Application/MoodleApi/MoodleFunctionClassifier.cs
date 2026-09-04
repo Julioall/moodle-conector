@@ -36,14 +36,16 @@ public static class MoodleFunctionClassifier
         }
 
         // In mod_assign_get_* the word "assign" identifies Moodle's module;
-        // it is not the mutation verb used by functions such as
-        // core_role_assign_roles. Exclude only that module segment before
+        // in core_enrol_get_* the word "enrol" identifies the enrollment
+        // module. Neither is the mutation verb used by functions such as
+        // core_role_assign_roles. Exclude only those module segments before
         // applying the conservative mutation check.
         var actionWords = words.Where((word, index) =>
-            !(index == 1 &&
-              words.Length > 1 &&
-              words[0].Equals("mod", StringComparison.OrdinalIgnoreCase) &&
-              word.Equals("assign", StringComparison.OrdinalIgnoreCase)));
+            !(index == 1 && words.Length > 1 &&
+              ((words[0].Equals("mod", StringComparison.OrdinalIgnoreCase) &&
+                word.Equals("assign", StringComparison.OrdinalIgnoreCase)) ||
+               (words[0].Equals("core", StringComparison.OrdinalIgnoreCase) &&
+                word.Equals("enrol", StringComparison.OrdinalIgnoreCase)))));
 
         // A mutating term anywhere in the canonical Moodle function name wins.
         // This includes removal/destructive actions: they are not executed by

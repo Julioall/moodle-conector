@@ -409,7 +409,7 @@ Validação executada nesta implementação:
 ```text
 dotnet build MoodleConnector.sln --no-restore                         # 0 erros, 0 avisos
 dotnet vstest .../MoodleConnector.Application.Tests.dll `
-  --TestCaseFilter:"FullyQualifiedName!~Integration"                  # 948 aprovados
+  --TestCaseFilter:"FullyQualifiedName!~Integration"                  # 949 aprovados
 dotnet vstest .../MoodleConnector.Application.Tests.dll `
   --TestCaseFilter:"FullyQualifiedName~MoodleGradebookGatewayCachingTests" # 7 aprovados após a projeção
 dotnet test ... --filter "MoodleAssignmentGradeReadGatewayTests"       # 4 aprovados
