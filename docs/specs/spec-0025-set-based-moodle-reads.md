@@ -401,7 +401,7 @@ Testes automatizados previstos:
 ```powershell
 dotnet test tests/MoodleConnector.Application.Tests --filter "FullyQualifiedName~Gradebook|FullyQualifiedName~Snapshot|FullyQualifiedName~Report|FullyQualifiedName~Risk|FullyQualifiedName~Submission"
 dotnet test tests/MoodleConnector.Application.Tests --filter "FullyQualifiedName~MoodleAssignmentGradeReadGateway|FullyQualifiedName~MoodleSnapshotSync"
-dotnet test tests/MoodleConnector.Postgres.IntegrationTests --filter "FullyQualifiedName~Snapshot|FullyQualifiedName~Sync"
+dotnet test tests/MoodleConnector.Application.Tests --filter "FullyQualifiedName~MoodleSnapshotPostgresIntegrationTests|FullyQualifiedName~GradingBatchJobPostgresIntegrationTests" # requer MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION
 ```
 
 Validação executada nesta implementação:
