@@ -14,7 +14,7 @@ carga; esses itens pertencem a uma fase posterior.
 | 1. Persistência durável | Concluída | Claims, leases, tentativas, checkpoint do lote e migrations 041–047. |
 | 2. Coordenação multi-réplica | Concluída | Claim de item, recuperação de leases expirados, fairness por aging e testes PostgreSQL. |
 | 3. Criação leve | Em implementação | Flag `DeferHeavyIngestion`, artifacts com referência normalizada e migration 048. |
-| 4. Worker de ingestão | Em implementação | Recuperação de conexão fora de HTTP, download/extraction por artifact e checkpoint por estágio. |
+| 4. Worker de ingestão | Em implementação | Recuperação de conexão fora de HTTP, descoberta de referências MCP e checkpoint por estágio. |
 | 5. Retenção e operação | Parcial | Worker de retenção e redaction implementados; métricas de backlog/idade e alertas ainda pendentes. |
 | 6. Certificação | Pendente | Cenário de 400 itens, restart, duas réplicas, idempotência e rollout gradual. |
 
@@ -27,18 +27,17 @@ carga; esses itens pertencem a uma fase posterior.
    download.
 3. O worker entra em `IConnectorExecutionContext` usando identidade não secreta persistida no
    lote e limpa o contexto em `finally`.
-4. Claims são obtidos antes da materialização. O worker salva `Ingestion`, permite checkpoints
+4. Claims são obtidos antes da validação das referências. O worker salva `Ingestion`, permite checkpoints
    de `Context`/`Analysis` no processor e só libera os leases após a persistência final.
-5. Falhas de download ou extração produzem `ExtractionStatus=failed` e referência de erro
-   sanitizada; nunca são convertidas em sucesso e nunca disparam reenvio de escrita Moodle.
-6. O caminho inline permanece disponível quando a flag está desabilitada, reduzindo risco de
-   rollback. A ativação em produção deve ser acompanhada por backlog, idade, tentativas,
-   leases expirados e duração por estágio.
+5. O worker não baixa nem extrai arquivos. O chat registra e lê o resource original; falhas de
+   registro/leitura bloqueiam o item sem inventar conteúdo ou disparar escrita Moodle.
+6. A flag `LegacySubmissionExtractionEnabled=false` não possui fallback operacional. Se o MCP
+   Resource estiver desligado, novas correções devem permanecer bloqueadas.
 
 ## Gates de aceite
 
 - Teste unitário prova que criação diferida não chama download, extraction ou contents.
-- Teste unitário prova que o worker materializa uma referência e remove a URL após sucesso.
+- Teste unitário prova que o worker preserva a referência e não executa download ou extração.
 - Schema test prova a migration 048 e sua idempotência.
 - Suíte completa .NET, validadores de documentação/skills e PostgreSQL efêmero passam.
 - Antes do rollout final: teste de 400 itens, queda entre `Pending` e enqueue, restart no meio

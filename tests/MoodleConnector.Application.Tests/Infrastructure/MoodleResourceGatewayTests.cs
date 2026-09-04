@@ -54,15 +54,68 @@ public sealed class MoodleResourceGatewayTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsMismatchedMimeAndSignature()
+    public async Task ReadAsync_DeliversBytesWithoutInspectingMimeOrSignature()
     {
         await using var db = CreateDb();
         var gateway = CreateGateway(db, new InvalidFileGateway(), new Credentials("client-a", "connection-a"));
         var descriptor = await gateway.RegisterAsync(new MoodleResourceRegistration("submission_attachment", "atividade.pdf", "application/pdf", "https://moodle.example/pluginfile.php/1/a.pdf"), CancellationToken.None);
 
-        var exception = await Assert.ThrowsAsync<MoodleResourceException>(() => gateway.ReadAsync(descriptor.Uri, CancellationToken.None));
+        var result = await gateway.ReadAsync(descriptor.Uri, CancellationToken.None);
 
-        Assert.Equal("RESOURCE_UNSUPPORTED", exception.ErrorCode);
+        Assert.Equal([1, 2, 3], result.Content);
+        Assert.Equal("image/png", result.MimeType);
+    }
+
+    [Theory]
+    [InlineData("resposta.rtf", "text/rtf")]
+    [InlineData("resposta.rtf", "application/octet-stream")]
+    [InlineData("resposta.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")]
+    [InlineData("resposta.pdf", "application/pdf")]
+    [InlineData("planilha.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")]
+    public async Task ReadAsync_PreservesOriginalFileForCommonSubmissionFormats(string filename, string mimeType)
+    {
+        await using var db = CreateDb();
+        var original = System.Text.Encoding.UTF8.GetBytes($"bytes originais de {filename}");
+        var gateway = CreateGateway(
+            db,
+            new TypedFileGateway(mimeType, original),
+            new Credentials("client-a", "connection-a"));
+        var descriptor = await gateway.RegisterAsync(
+            new MoodleResourceRegistration(
+                "submission_attachment",
+                filename,
+                mimeType,
+                $"https://moodle.example/pluginfile.php/1/{filename}"),
+            CancellationToken.None);
+
+        var result = await gateway.ReadAsync(descriptor.Uri, CancellationToken.None);
+
+        Assert.Equal(original, result.Content);
+        Assert.Equal(mimeType, result.MimeType);
+        Assert.Equal(filename, descriptor.Filename);
+        Assert.Equal(mimeType, descriptor.MimeType);
+    }
+
+    [Fact]
+    public async Task ReadAsync_WhenMoodleDownloadFails_DoesNotReturnContent()
+    {
+        await using var db = CreateDb();
+        var gateway = CreateGateway(
+            db,
+            new FailingFileGateway(),
+            new Credentials("client-a", "connection-a"));
+        var descriptor = await gateway.RegisterAsync(
+            new MoodleResourceRegistration(
+                "submission_attachment",
+                "resposta.rtf",
+                "text/rtf",
+                "https://moodle.example/pluginfile.php/1/resposta.rtf"),
+            CancellationToken.None);
+
+        var exception = await Assert.ThrowsAsync<MoodleResourceException>(
+            () => gateway.ReadAsync(descriptor.Uri, CancellationToken.None));
+
+        Assert.Equal("RESOURCE_DOWNLOAD_FAILED", exception.ErrorCode);
     }
 
     [Fact]
@@ -103,6 +156,22 @@ public sealed class MoodleResourceGatewayTests
     }
     private sealed class Credentials(string clientId, string connectionId) : IMoodleConnectorCredentialsProvider { public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken) => Task.FromResult(new MoodleConnectorCredentials(clientId, connectionId, "default", "https://moodle.example", "u", "p", "default", false)); }
     private sealed class InvalidFileGateway : IMoodleSubmissionFileGateway { public Task<SubmissionFileDownloadResult> DownloadFileAsync(string userExternalId, string fileUrl, string filename, long maxBytes, CancellationToken cancellationToken) => Task.FromResult(new SubmissionFileDownloadResult(filename, "image/png", 3, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", [1, 2, 3], false)); }
+    private sealed class TypedFileGateway(string mimeType, byte[] bytes) : IMoodleSubmissionFileGateway
+    {
+        public Task<SubmissionFileDownloadResult> DownloadFileAsync(string userExternalId, string fileUrl, string filename, long maxBytes, CancellationToken cancellationToken) =>
+            Task.FromResult(new SubmissionFileDownloadResult(
+                filename,
+                mimeType,
+                bytes.LongLength,
+                Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(),
+                bytes,
+                false));
+    }
+    private sealed class FailingFileGateway : IMoodleSubmissionFileGateway
+    {
+        public Task<SubmissionFileDownloadResult> DownloadFileAsync(string userExternalId, string fileUrl, string filename, long maxBytes, CancellationToken cancellationToken) =>
+            Task.FromException<SubmissionFileDownloadResult>(new InvalidOperationException("download failed"));
+    }
     private sealed class ZipFileGateway(byte[] bytes) : IMoodleSubmissionFileGateway { public Task<SubmissionFileDownloadResult> DownloadFileAsync(string userExternalId, string fileUrl, string filename, long maxBytes, CancellationToken cancellationToken) => Task.FromResult(new SubmissionFileDownloadResult(filename, "application/zip", bytes.Length, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(), bytes, false)); }
     private sealed class User(string subject = "teacher", bool isAdmin = false) : ICurrentUserContext { public string Subject => subject; public string? Email => null; public IReadOnlyCollection<string> Scopes => isAdmin ? ["grading.admin"] : []; public bool HasScope(string scope) => isAdmin && string.Equals(scope, "grading.admin", StringComparison.Ordinal); }
     private sealed class Audits : IMoodleAuditLogRepository { public Task AddAsync(MoodleAuditLog log, CancellationToken cancellationToken) => Task.CompletedTask; public Task<int> CountByBatchJobIdAsync(Guid batchJobId, CancellationToken cancellationToken) => Task.FromResult(0); public Task<int> CountByCorrelationIdAsync(string correlationId, CancellationToken cancellationToken) => Task.FromResult(0); public Task<IReadOnlyList<MoodleAuditLog>> ListByBatchJobIdAsync(Guid batchJobId, int page, int pageSize, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MoodleAuditLog>>([]); public Task<IReadOnlyList<MoodleAuditLog>> ListByCorrelationIdAsync(string correlationId, int page, int pageSize, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MoodleAuditLog>>([]); public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask; }

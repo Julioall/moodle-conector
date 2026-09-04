@@ -109,27 +109,30 @@ public sealed class GradingContext
             else
             {
                 var fileNames = string.Join(", ", attachedFiles.Select(f => f.FileName));
-                if (attachedFiles.Any(f =>
+                if (!attachedFiles.Any(f => f.OriginalResourceAvailable))
+                {
+                    if (attachedFiles.Any(f =>
                         string.Equals(f.ExtractionStatus, "failed", StringComparison.OrdinalIgnoreCase)))
-                {
-                    blockers.Add($"Submissão sem conteúdo legível. Falhou o download ou a extração dos arquivos anexados ({fileNames}); tente novamente ou verifique o material no Moodle.");
-                }
-                else if (attachedFiles.Any(f =>
+                    {
+                        blockers.Add($"Submissão sem conteúdo legível. Falhou o download ou a extração dos arquivos anexados ({fileNames}); tente novamente ou verifique o material no Moodle.");
+                    }
+                    else if (attachedFiles.Any(f =>
                              string.Equals(f.ExtractionStatus, "scanned_pdf", StringComparison.OrdinalIgnoreCase)))
-                {
-                    blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) parecem ser PDF escaneado e exigem OCR.");
-                }
-                else if (attachedFiles.Any(f => string.IsNullOrWhiteSpace(f.ExtractedText) && f.IsSupported))
-                {
-                    blockers.Add($"Submissão sem conteúdo legível. Não foi possível extrair texto dos arquivos suportados ({fileNames}). Motivos comuns: PDF escaneado, arquivo sem texto extraível, corrompido ou protegido por senha.");
-                }
-                else if (attachedFiles.Any(f => !f.IsSupported))
-                {
-                    blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) estão em formatos não suportados para extração de texto.");
-                }
-                else
-                {
-                    blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) apresentam ausência real de dados mínimos de texto para análise.");
+                    {
+                        blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) parecem ser PDF escaneado e exigem OCR.");
+                    }
+                    else if (attachedFiles.Any(f => string.IsNullOrWhiteSpace(f.ExtractedText) && f.IsSupported))
+                    {
+                        blockers.Add($"Submissão sem conteúdo legível. Não foi possível extrair texto dos arquivos suportados ({fileNames}). Motivos comuns: PDF escaneado, arquivo sem texto extraível, corrompido ou protegido por senha.");
+                    }
+                    else if (attachedFiles.Any(f => !f.IsSupported))
+                    {
+                        blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) estão em formatos não suportados para extração de texto.");
+                    }
+                    else
+                    {
+                        blockers.Add($"Submissão sem conteúdo legível. Os arquivos anexados ({fileNames}) apresentam ausência real de dados mínimos de texto para análise.");
+                    }
                 }
             }
         }
@@ -184,4 +187,5 @@ public sealed record GradingFileInfo(
     string? ExtractionStatus = null,
     int? SourceCharacterCount = null,
     bool IsTruncated = false,
-    GradingSourceMetadata? Source = null);
+    GradingSourceMetadata? Source = null,
+    bool OriginalResourceAvailable = false);

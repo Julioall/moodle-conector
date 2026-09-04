@@ -10,29 +10,18 @@ using MoodleConnector.Domain.Grading;
 namespace MoodleConnector.Application.Grading;
 
 /// <summary>
-/// Executa a parte pesada da preparação de um lote em contexto de worker.
-/// O request pode deixar apenas referências técnicas; este serviço materializa
-/// os artifacts, salva cada transição e nunca persiste bytes do arquivo.
+/// Completa as referências de um lote em contexto de worker.
+/// A correção usa somente MCP Resources: este serviço não baixa, interpreta ou
+/// persiste conteúdo de arquivos.
 /// </summary>
 public sealed class GradingArtifactIngestionService(
     IGradingReviewRepository repository,
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IMoodleCourseContentsGateway contentsGateway,
-    IMoodleSubmissionFileGateway fileGateway,
-    IDocumentExtractionService extractionService,
     IOptions<GradingLimitsOptions> limits,
     ILogger<GradingArtifactIngestionService> logger,
-    IGradingOperationTelemetry? telemetry = null,
-    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null) : IGradingArtifactIngestionService
+    IGradingOperationTelemetry? telemetry = null) : IGradingArtifactIngestionService
 {
-    private static readonly HashSet<string> AllowedExtractionMimeTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/msword",
-        "text/plain"
-    };
-
     public async Task IngestPendingAsync(
         AssistedGradingBatch batch,
         AssistedGradingItem item,
@@ -73,28 +62,6 @@ public sealed class GradingArtifactIngestionService(
                 await repository.SaveChangesAsync(cancellationToken);
             }
 
-            var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
-            var deferSubmissionExtraction = resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true ||
-                resourceFeatures?.Value.LegacySubmissionExtractionEnabled != true;
-            var pendingArtifacts = artifacts
-                .Where(artifact => IsPendingDownload(artifact) &&
-                    (!deferSubmissionExtraction ||
-                     !string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase)))
-                .ToArray();
-            if (pendingArtifacts.Length > 1)
-            {
-                await MaterializeConcurrentlyAsync(
-                    pendingArtifacts,
-                    userExternalId,
-                    cancellationToken);
-            }
-            else
-            {
-                foreach (var artifact in pendingArtifacts)
-                {
-                    await MaterializeAsync(artifact, userExternalId, cancellationToken);
-                }
-            }
         }
         catch
         {
@@ -111,75 +78,6 @@ public sealed class GradingArtifactIngestionService(
                 queryCount: 1,
                 itemCount: 1,
                 bytes: 0);
-        }
-    }
-
-    public async Task MaterializeLegacySubmissionFallbackAsync(
-        AssistedGradingBatch batch,
-        AssistedGradingItem item,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(batch);
-        ArgumentNullException.ThrowIfNull(item);
-
-        var userExternalId = batch.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture)
-            ?? batch.CreatedBySubject;
-        var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
-        var pendingSubmissionArtifacts = artifacts
-            .Where(artifact =>
-                string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase) &&
-                IsPendingDownload(artifact))
-            .ToArray();
-
-        if (pendingSubmissionArtifacts.Length == 0)
-        {
-            return;
-        }
-
-        logger.LogInformation(
-            "Ativando fallback legado sob demanda para {ArtifactCount} arquivo(s) da submissao {SubmissionId}.",
-            pendingSubmissionArtifacts.Length,
-            item.SubmissionId);
-
-        if (pendingSubmissionArtifacts.Length > 1)
-        {
-            await MaterializeConcurrentlyAsync(pendingSubmissionArtifacts, userExternalId, cancellationToken);
-            return;
-        }
-
-        await MaterializeAsync(pendingSubmissionArtifacts[0], userExternalId, cancellationToken);
-    }
-
-    private async Task MaterializeConcurrentlyAsync(
-        IReadOnlyList<GradingArtifact> artifacts,
-        string userExternalId,
-        CancellationToken cancellationToken)
-    {
-        var configuredConcurrency = Math.Min(
-            limits.Value.FileDownloadWorkers,
-            Math.Min(
-                limits.Value.MaxConcurrentDownloadsPerConnection,
-                limits.Value.MaxConcurrentDownloadsPerBatch));
-        var concurrency = Math.Clamp(configuredConcurrency, 1, 16);
-        using var gate = new SemaphoreSlim(concurrency, concurrency);
-        var prepared = await Task.WhenAll(artifacts.Select(async artifact =>
-        {
-            await gate.WaitAsync(cancellationToken);
-            try
-            {
-                return await PrepareMaterializationAsync(artifact, userExternalId, cancellationToken);
-            }
-            finally
-            {
-                gate.Release();
-            }
-        }));
-
-        // O DbContext é scoped e não é thread-safe. Downloads/extração são
-        // concorrentes; a projeção persistida é aplicada em ordem, uma por vez.
-        foreach (var result in prepared)
-        {
-            await PersistMaterializationAsync(result, cancellationToken);
         }
     }
 
@@ -436,120 +334,6 @@ public sealed class GradingArtifactIngestionService(
         }
     }
 
-    private async Task MaterializeAsync(
-        GradingArtifact artifact,
-        string userExternalId,
-        CancellationToken cancellationToken)
-    {
-        var result = await PrepareMaterializationAsync(artifact, userExternalId, cancellationToken);
-        await PersistMaterializationAsync(result, cancellationToken);
-    }
-
-    private async Task<MaterializationResult> PrepareMaterializationAsync(
-        GradingArtifact artifact,
-        string userExternalId,
-        CancellationToken cancellationToken)
-    {
-        var sourceUrl = artifact.SourceUrl;
-        if (string.IsNullOrWhiteSpace(sourceUrl))
-        {
-            return new MaterializationResult(artifact, null, null, null);
-        }
-
-        try
-        {
-            var maxBytes = Math.Max(1, limits.Value.MaxFileSizeMb) * 1024L * 1024L;
-            var download = await GradingMoodleReadRetry.ExecuteAsync(
-                retryCancellationToken => fileGateway.DownloadFileAsync(
-                    userExternalId,
-                    sourceUrl,
-                    artifact.Filename ?? "arquivo",
-                    maxBytes,
-                    retryCancellationToken),
-                (exception, attempt) => logger.LogWarning(
-                    exception,
-                    "Falha transitória ao baixar artifact {ArtifactId}; nova tentativa {Attempt}.",
-                    artifact.Id,
-                    attempt),
-                cancellationToken);
-            if (!AllowedExtractionMimeTypes.Contains(download.MimeType))
-            {
-                throw new InvalidOperationException("O tipo MIME do arquivo não é permitido para extração acadêmica.");
-            }
-            var extraction = await extractionService.ExtractAsync(
-                download.Filename,
-                download.MimeType,
-                download.Content,
-                cancellationToken);
-            return new MaterializationResult(artifact, download, extraction, null);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Falha ao materializar artifact {ArtifactId} do item {GradingItemId}.",
-                artifact.Id,
-                artifact.GradingItemId);
-            return new MaterializationResult(artifact, null, null, ex);
-        }
-    }
-
-    private async Task PersistMaterializationAsync(
-        MaterializationResult result,
-        CancellationToken cancellationToken)
-    {
-        if (result.Error is not null)
-        {
-            await repository.UpdateArtifactAsync(
-                result.Artifact with
-                {
-                    ExtractionStatus = ExtractionStatus.Failed,
-                    ExtractedTextRef = null,
-                    SummaryRef = result.Artifact.ArtifactType == "assignment_context"
-                        ? "context_materialization_failed"
-                        : "ingestion_failed",
-                    SourceUrl = null
-                },
-                cancellationToken);
-            await repository.SaveChangesAsync(cancellationToken);
-            return;
-        }
-
-        if (result.Download is null || result.Extraction is null)
-        {
-            return;
-        }
-
-        await repository.UpdateArtifactAsync(
-            result.Artifact with
-            {
-                Filename = result.Download.Filename,
-                MimeType = result.Download.MimeType,
-                Sha256 = result.Download.Sha256Hex,
-                SizeBytes = result.Download.SizeBytes,
-                ExtractionStatus = result.Extraction.ExtractionStatus,
-                ExtractedTextRef = result.Extraction.ExtractedText,
-                SummaryRef = result.Extraction.ErrorMessage,
-                SourceUrl = null
-            },
-            cancellationToken);
-        await repository.SaveChangesAsync(cancellationToken);
-    }
-
-    private sealed record MaterializationResult(
-        GradingArtifact Artifact,
-        SubmissionFileDownloadResult? Download,
-        DocumentExtractionResult? Extraction,
-        Exception? Error);
-
-    private static bool IsPendingDownload(GradingArtifact artifact) =>
-        artifact.ExtractionStatus == ExtractionStatus.Pending &&
-        !string.IsNullOrWhiteSpace(artifact.SourceUrl);
-
     private static GradingArtifact BuildPendingArtifact(
         Guid gradingItemId,
         string artifactType,
@@ -569,7 +353,7 @@ public sealed class GradingArtifactIngestionService(
             sizeBytes,
             normalizedSource is null ? ExtractionStatus.Failed : ExtractionStatus.Pending,
             ExtractedTextRef: null,
-            SummaryRef: normalizedSource is null ? "source_url_invalid" : "pending_ingestion",
+                    SummaryRef: normalizedSource is null ? "source_url_invalid" : "pending_resource",
             DateTimeOffset.UtcNow,
             normalizedSource);
     }

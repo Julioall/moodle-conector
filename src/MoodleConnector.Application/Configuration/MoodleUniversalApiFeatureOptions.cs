@@ -8,10 +8,12 @@ public sealed class MoodleUniversalApiFeatureOptions
 
     public bool UniversalMoodleFileDownloadEnabled { get; init; }
 
-    // Delivery of submission files through opaque MCP resources. Kept off until
-    // the resource gateway is enabled for an explicitly approved rollout.
+    // Delivery of submission files through opaque MCP resources. This is the
+    // only delivery path used by assisted grading.
     public bool McpResourceSubmissionDeliveryEnabled { get; init; }
 
+    // Retained only so existing configuration files continue to bind. No
+    // correction code reads this flag or invokes a legacy extractor.
     public bool LegacySubmissionExtractionEnabled { get; init; }
 
     public bool McpResourceZipEnabled { get; init; }

@@ -161,10 +161,10 @@ artifacts de referência (`ExtractionStatus=pending`) e não baixa arquivos, ext
 consulta materiais de curso. URLs persistidas são normalizadas para remover query string,
 fragmento e informações de usuário; tokens Moodle nunca fazem parte do artifact.
 
-O `GradingBatchWorkerService` materializa as referências em um escopo próprio, usando o
-`ConnectorClientId` e o alias de conexão persistidos no lote para recuperar credenciais sem
-`HttpContext`. Cada download/extraction atualiza o artifact individualmente e salva a
-transição antes de o item avançar para o contexto. O processamento também registra checkpoints
+O `GradingBatchWorkerService` valida as referências em um escopo próprio, usando o
+`ConnectorClientId` e o alias de conexão persistidos no lote para recuperar a identidade sem
+`HttpContext`. Nenhum arquivo é baixado ou extraído pelo worker; o item avança para o contexto
+com a referência que será registrada como MCP Resource no chat. O processamento também registra checkpoints
 de `Ingestion`, `Context` e `Analysis`; a callback de checkpoint é usada apenas pelo worker,
 preservando o contrato de uma única persistência do orquestrador inline de testes/legado.
 

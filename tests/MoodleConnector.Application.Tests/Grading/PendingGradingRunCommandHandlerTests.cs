@@ -208,6 +208,21 @@ public sealed class PendingGradingRunCommandHandlerTests
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(blocked, CancellationToken.None);
         await repository.AddItemAsync(eligible, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(),
+                eligible.Id,
+                "submission_file",
+                "entrega.pdf",
+                "application/pdf",
+                null,
+                12,
+                ExtractionStatus.Pending,
+                null,
+                "pending_resource",
+                DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/1/entrega.pdf"),
+            CancellationToken.None);
         var sut = new SaveAiGradingBatchCommandHandler(
             repository,
             new RunCurrentUserContext("teacher-1"),
@@ -372,10 +387,21 @@ public sealed class PendingGradingRunCommandHandlerTests
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(blocked, CancellationToken.None);
         await repository.AddItemAsync(eligible, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(), eligible.Id, "submission_file", "entrega.pdf", "application/pdf",
+                null, 12, ExtractionStatus.Pending, null, "pending_resource", DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/1/entrega.pdf"),
+            CancellationToken.None);
         var sut = new PrepareAiGradingBatchQueryHandler(
             repository,
             new RunCurrentUserContext("teacher-1"),
-            new RunAssignmentSettingsGateway());
+            new RunAssignmentSettingsGateway(),
+            resourceGateway: new RunResourceGateway(),
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
 
         var result = await sut.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None);
 
@@ -416,12 +442,32 @@ public sealed class PendingGradingRunCommandHandlerTests
         item.RecordContextSnapshot(snapshot);
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "submission_file",
+                "entrega.txt",
+                "text/plain",
+                null,
+                31,
+                ExtractionStatus.Pending,
+                null,
+                "pending_resource",
+                DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/1/entrega.txt"),
+            CancellationToken.None);
         repository.AddSnapshot(snapshot);
 
         var prepare = new PrepareAiGradingBatchQueryHandler(
             repository,
             new RunCurrentUserContext("teacher-1"),
-            new RunAssignmentSettingsGateway(maxGrade: 0m));
+            new RunAssignmentSettingsGateway(maxGrade: 0m),
+            resourceGateway: new RunResourceGateway(),
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
         var package = await prepare.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None);
 
         var packageItem = Assert.Single(package.Items);
@@ -469,6 +515,83 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Equal("mcp_resource", result.ResourceDeliveryMode);
         Assert.Null(result.ExtractedText);
         Assert.Equal("moodle://resource/0123456789abcdef0123456789abcdef", Assert.Single(result.Resources!).Uri);
+    }
+
+    [Fact]
+    public async Task PrepareAiBatch_ComMcpDesligado_NaoUsaTextoHistoricoNemFallback()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(), item.Id, "submission_file", "entrega.rtf", "text/rtf", null, 4028,
+                ExtractionStatus.Succeeded, "texto historico", null, DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/1/entrega.rtf"),
+            CancellationToken.None);
+
+        var sut = new PrepareAiGradingBatchQueryHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunAssignmentSettingsGateway(),
+            resourceGateway: new RunResourceGateway(),
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = false,
+                LegacySubmissionExtractionEnabled = false
+            }));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            sut.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PrepareSubmissionGrading_EntregaArquivoOriginalComoMcpResource()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "submission_file",
+                "resposta.rtf",
+                "text/rtf",
+                null,
+                4028,
+                ExtractionStatus.Failed,
+                "texto local ignorado",
+                "extract_failed",
+                DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/1/resposta.rtf"),
+            CancellationToken.None);
+
+        var sut = new PrepareGradingContextForChatQueryHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunAssignmentSettingsGateway(),
+            resourceGateway: new RunResourceGateway(),
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
+
+        var result = await sut.Handle(
+            new PrepareGradingContextForChatQuery(item.Id),
+            CancellationToken.None);
+
+        var resource = Assert.Single(result.Resources!);
+        Assert.Equal("resposta.rtf", resource.Name);
+        Assert.Equal("text/rtf", resource.MimeType);
+        Assert.Null(result.StudentSubmission);
+        Assert.Contains(result.Warnings, warning => warning.Contains("MCP Resource", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("extracao falhou", StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed class RunCurrentUserContext(string subject) : ICurrentUserContext

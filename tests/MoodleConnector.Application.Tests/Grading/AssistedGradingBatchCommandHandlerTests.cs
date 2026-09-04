@@ -27,8 +27,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             new FakeCourseContentsGateway(),
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway());
 
         var result = await sut.Handle(
@@ -79,8 +77,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             new FakeCourseContentsGateway(),
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             submissionsGateway);
 
         await Assert.ThrowsAsync<MoodleApiException>(() => sut.Handle(
@@ -117,8 +113,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             new FakeGradingBatchOrchestrator(),
             contents,
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             submissions);
 
         var result = await sut.Handle(
@@ -215,8 +209,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             new FakeCourseContentsGateway(),
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway(),
             credentialsProvider: credentialsProvider);
 
@@ -237,13 +229,11 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
-    public async Task CreateBatch_ComArquivosDeSubmissao_BaixaExtraiEPersisteArtefato()
+    public async Task CreateBatch_ComArquivosDeSubmissao_PersisteSomenteReferenciaOriginal()
     {
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator();
         var orchestrator = new FakeGradingBatchOrchestrator();
-        var fileGateway = new FakeSubmissionFileGateway();
-        var extraction = new FakeDocumentExtractionService();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
             mediator,
@@ -252,8 +242,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             new FakeCourseContentsGateway(),
-            fileGateway,
-            extraction,
             new FakeAssignmentSubmissionsGateway());
 
         var result = await sut.Handle(
@@ -271,10 +259,10 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(repository.Items.Single().Id, artifact.GradingItemId);
         Assert.Equal("submission_file", artifact.ArtifactType);
         Assert.Equal("entrega.txt", artifact.Filename);
-        Assert.Equal("Texto extraido real da submissao.", artifact.ExtractedTextRef);
-        Assert.Equal("succeeded", artifact.ExtractionStatus);
-        Assert.Contains("https://moodle.example/pluginfile.php/entrega.txt", fileGateway.DownloadedFileUrls);
-        Assert.Contains("entrega.txt", extraction.Filenames);
+        Assert.Null(artifact.ExtractedTextRef);
+        Assert.Equal("pending", artifact.ExtractionStatus);
+        Assert.Equal("pending_resource", artifact.SummaryRef);
+        Assert.Equal("https://moodle.example/pluginfile.php/entrega.txt", artifact.SourceUrl);
         Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
     }
 
@@ -282,8 +270,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     public async Task CreateBatch_ComIngestaoDiferida_NaoBaixaExtraiNemConsultaConteudoPesado()
     {
         var repository = new FakeGradingReviewRepository();
-        var fileGateway = new FakeSubmissionFileGateway();
-        var extraction = new FakeDocumentExtractionService();
         var contentsGateway = new FakeCourseContentsGateway();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
@@ -293,8 +279,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             new FakeGradingBatchOrchestrator(),
             contentsGateway,
-            fileGateway,
-            extraction,
             new FakeAssignmentSubmissionsGateway(),
             Options.Create(new GradingLimitsOptions { DeferHeavyIngestion = true }));
 
@@ -339,75 +323,73 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var artifact = Assert.Single(repository.Artifacts, item => item.ArtifactType == "submission_file");
         Assert.Equal(ExtractionStatus.Pending, artifact.ExtractionStatus);
         Assert.Equal("https://moodle.example/pluginfile.php/entrega.txt", artifact.SourceUrl);
-        Assert.Equal("pending_ingestion", artifact.SummaryRef);
-        Assert.Empty(fileGateway.DownloadedFileUrls);
-        Assert.Empty(extraction.Filenames);
+        Assert.Equal("pending_resource", artifact.SummaryRef);
         Assert.Equal(0, contentsGateway.CallCount);
     }
 
     [Fact]
-    public async Task IngestionService_MaterializaReferenciaPendenteEAtualizaArtifact()
+    public async Task CreateBatch_ComMcpResourceAtivo_NaoDependeDeExtracaoMesmoSemIngestaoDiferida()
     {
         var repository = new FakeGradingReviewRepository();
-        var fileGateway = new FakeSubmissionFileGateway();
-        var extraction = new FakeDocumentExtractionService();
-        var batch = AssistedGradingBatch.Create(
-            10,
-            [501],
-            "teacher-1",
-            321,
-            totalItems: 1,
-            includeRubric: false,
-            includeSubmissionFiles: true,
-            includeCourseMaterials: false);
-        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
-        await repository.AddBatchAsync(batch, CancellationToken.None);
-        await repository.AddItemAsync(item, CancellationToken.None);
-        await repository.AddArtifactAsync(
-            new GradingArtifact(
-                Guid.NewGuid(),
-                item.Id,
-                "submission_file",
-                "entrega.txt",
-                "text/plain",
-                Sha256: null,
-                SizeBytes: 31,
-                ExtractionStatus.Pending,
-                ExtractedTextRef: null,
-                SummaryRef: "pending_ingestion",
-                DateTimeOffset.UtcNow,
-                "https://moodle.example/pluginfile.php/entrega.txt"),
+        var sut = new CreateAssistedGradingBatchCommandHandler(
+            repository,
+            new FakeMediator(),
+            new FakeCurrentUserContext("teacher-1"),
+            new FakeMoodleUserResolver(321),
+            new FakeAuditLogRepository(),
+            new FakeGradingBatchOrchestrator(),
+            new FakeCourseContentsGateway(),
+            new FakeAssignmentSubmissionsGateway(),
+            Options.Create(new GradingLimitsOptions { DeferHeavyIngestion = false }));
+
+        await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                UserExternalId: "321",
+                CourseId: "10",
+                AssignmentIds: ["501"],
+                SubmissionIds: ["9001"],
+                MaxItems: 25,
+                OnlyAwaitingGrading: true,
+                IncludeRubric: false,
+                IncludeSubmissionFiles: true,
+                PrefetchedSubmissions:
+                [
+                    new AssignmentSubmissionSummary(
+                        "101",
+                        "Ana Souza",
+                        "9001",
+                        "submitted",
+                        "notgraded",
+                        Submitted: true,
+                        Late: false,
+                        NeedsGrading: true,
+                        SubmittedAt: null,
+                        ModifiedAt: null,
+                        AttemptNumber: 0,
+                        FileCount: 1,
+                        HasOnlineText: false,
+                        Files:
+                        [
+                            new AssignmentSubmissionFile(
+                                "resposta.rtf",
+                                "text/rtf",
+                                4028,
+                                "https://moodle.example/pluginfile.php/resposta.rtf")
+                        ])
+                ]),
             CancellationToken.None);
 
-        var sut = new GradingArtifactIngestionService(
-            repository,
-            new FakeAssignmentSubmissionsGateway(),
-            new FakeCourseContentsGateway(),
-            fileGateway,
-            extraction,
-            Options.Create(new GradingLimitsOptions()),
-            NullLogger<GradingArtifactIngestionService>.Instance,
-            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
-            {
-                LegacySubmissionExtractionEnabled = true
-            }));
-
-        await sut.IngestPendingAsync(batch, item, CancellationToken.None);
-
-        var artifact = Assert.Single(repository.Artifacts);
-        Assert.Equal(ExtractionStatus.Succeeded, artifact.ExtractionStatus);
-        Assert.Equal("Texto extraido real da submissao.", artifact.ExtractedTextRef);
-        Assert.Null(artifact.SourceUrl);
-        Assert.Contains("https://moodle.example/pluginfile.php/entrega.txt", fileGateway.DownloadedFileUrls);
-        Assert.Contains("entrega.txt", extraction.Filenames);
+        var artifact = Assert.Single(repository.Artifacts, item => item.ArtifactType == "submission_file");
+        Assert.Equal(ExtractionStatus.Pending, artifact.ExtractionStatus);
+        Assert.Equal("text/rtf", artifact.MimeType);
+        Assert.Equal("resposta.rtf", artifact.Filename);
+        Assert.Equal("https://moodle.example/pluginfile.php/resposta.rtf", artifact.SourceUrl);
     }
 
     [Fact]
-    public async Task IngestionService_ComMcpAtivo_AdiaExtracaoAteFallbackExplicito()
+    public async Task IngestionService_NaoBaixaNemExtraiArquivos()
     {
         var repository = new FakeGradingReviewRepository();
-        var fileGateway = new FakeSubmissionFileGateway();
-        var extraction = new FakeDocumentExtractionService();
         var batch = AssistedGradingBatch.Create(
             10,
             [501],
@@ -424,7 +406,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new GradingArtifact(
                 Guid.NewGuid(), item.Id, "submission_file", "entrega.txt", "text/plain",
                 Sha256: null, SizeBytes: 31, ExtractionStatus.Pending, ExtractedTextRef: null,
-                SummaryRef: "pending_ingestion", DateTimeOffset.UtcNow,
+                SummaryRef: "pending_resource", DateTimeOffset.UtcNow,
                 "https://moodle.example/pluginfile.php/entrega.txt"),
             CancellationToken.None);
 
@@ -432,14 +414,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             repository,
             new FakeAssignmentSubmissionsGateway(),
             new FakeCourseContentsGateway(),
-            fileGateway,
-            extraction,
             Options.Create(new GradingLimitsOptions()),
-            NullLogger<GradingArtifactIngestionService>.Instance,
-            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
-            {
-                McpResourceSubmissionDeliveryEnabled = true
-            }));
+            NullLogger<GradingArtifactIngestionService>.Instance);
 
         await sut.IngestPendingAsync(batch, item, CancellationToken.None);
 
@@ -447,15 +423,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.Equal(ExtractionStatus.Pending, deferred.ExtractionStatus);
         Assert.Null(deferred.ExtractedTextRef);
         Assert.NotNull(deferred.SourceUrl);
-        Assert.Empty(fileGateway.DownloadedFileUrls);
-        Assert.Empty(extraction.Filenames);
-
-        await sut.MaterializeLegacySubmissionFallbackAsync(batch, item, CancellationToken.None);
-
-        var materialized = Assert.Single(repository.Artifacts);
-        Assert.Equal(ExtractionStatus.Succeeded, materialized.ExtractionStatus);
-        Assert.Equal("Texto extraido real da submissao.", materialized.ExtractedTextRef);
-        Assert.NotEmpty(fileGateway.DownloadedFileUrls);
     }
 
     [Fact]
@@ -480,8 +447,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             repository,
             new FakeAssignmentSubmissionsGateway(),
             contentsGateway,
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             Options.Create(new GradingLimitsOptions()),
             NullLogger<GradingArtifactIngestionService>.Instance);
 
@@ -512,8 +477,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             repository,
             new FakeAssignmentSubmissionsGateway(),
             contentsGateway,
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             Options.Create(new GradingLimitsOptions()),
             NullLogger<GradingArtifactIngestionService>.Instance);
 
@@ -530,7 +493,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator();
         var orchestrator = new FakeGradingBatchOrchestrator();
-        var fileGateway = new FakeSubmissionFileGateway();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
             mediator,
@@ -539,8 +501,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             new FakeCourseContentsGateway(),
-            fileGateway,
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway());
 
         await sut.Handle(
@@ -561,11 +521,12 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             .ToArray();
         Assert.Contains(contextArtifacts, artifact =>
             artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf" &&
-            artifact.ExtractedTextRef == "Texto extraido real da submissao.");
+            artifact.ExtractedTextRef is null &&
+            artifact.ExtractionStatus == ExtractionStatus.Pending &&
+            artifact.SourceUrl == "https://moodle.example/pluginfile.php/orientacoes.pdf");
         Assert.Contains(contextArtifacts, artifact =>
             artifact.Filename == "Tarefa 1" &&
             artifact.ExtractedTextRef!.Contains("Descricao da tarefa SAP 01", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(fileGateway.DownloadedFileUrls, url => url == "https://moodle.example/pluginfile.php/orientacoes.pdf");
     }
 
     [Fact]
@@ -581,8 +542,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             new FakeGradingBatchOrchestrator(),
             contentsGateway,
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway());
 
         await sut.Handle(
@@ -616,8 +575,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             new FakeGradingBatchOrchestrator(),
             new FakeCourseContentsGateway(),
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway());
 
         await sut.Handle(
@@ -638,7 +595,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator();
         var orchestrator = new FakeGradingBatchOrchestrator();
-        var fileGateway = new FakeSubmissionFileGateway();
         var contentsGateway = new FakeCourseContentsGateway();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
@@ -648,8 +604,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             contentsGateway,
-            fileGateway,
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway());
 
         await sut.Handle(
@@ -666,7 +620,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             CancellationToken.None);
 
         Assert.Equal(1, contentsGateway.CallCount);
-        Assert.Empty(fileGateway.DownloadedFileUrls);
         Assert.Contains(repository.Artifacts, artifact => artifact.Filename == "Tarefa 1");
         Assert.DoesNotContain(repository.Artifacts, artifact => artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf");
     }
@@ -677,9 +630,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator();
         var orchestrator = new FakeGradingBatchOrchestrator();
-        var fileGateway = new FakeSubmissionFileGateway();
         var contentsGateway = new FakeCourseContentsGateway();
-        var extraction = new FakeDocumentExtractionService();
         var sut = new CreateAssistedGradingBatchCommandHandler(
             repository,
             mediator,
@@ -688,8 +639,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             contentsGateway,
-            fileGateway,
-            extraction,
             new FakeAssignmentSubmissionsGateway());
 
         await sut.Handle(
@@ -707,8 +656,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         Assert.Equal(2, repository.Items.Count);
         Assert.Equal(1, contentsGateway.CallCount);
-        Assert.Single(fileGateway.DownloadedFileUrls, url => url == "https://moodle.example/pluginfile.php/orientacoes.pdf");
-        Assert.Single(extraction.Filenames, filename => filename == "Orientacoes SAP 01 - Etapa 1.pdf");
 
         var contextArtifacts = repository.Artifacts
             .Where(artifact => artifact.ArtifactType == "assignment_context")
@@ -739,8 +686,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             new FakeCourseContentsGateway(),
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway());
 
         var result = await sut.Handle(
@@ -775,8 +720,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             orchestrator,
             new FakeCourseContentsGateway(),
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             new FakeAssignmentSubmissionsGateway());
 
         var result = await sut.Handle(
@@ -1316,8 +1259,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             new FakeAuditLogRepository(),
             new FakeGradingBatchOrchestrator(),
             new FakeCourseContentsGateway(),
-            new FakeSubmissionFileGateway(),
-            new FakeDocumentExtractionService(),
             submissionsGateway ?? new FakeAssignmentSubmissionsGateway());
 
     private sealed class FakeGradingReviewRepository : IGradingReviewRepository
@@ -1845,32 +1786,6 @@ public sealed class AssistedGradingBatchCommandHandlerTests
                                 Files: [])
                         ])
                 ]));
-        }
-    }
-
-    private sealed class FakeDocumentExtractionService : IDocumentExtractionService
-    {
-        public string? LastFilename { get; private set; }
-
-        public List<string> Filenames { get; } = [];
-
-        public Task<DocumentExtractionResult> ExtractAsync(
-            string filename,
-            string mimeType,
-            byte[] content,
-            CancellationToken cancellationToken)
-        {
-            LastFilename = filename;
-            Filenames.Add(filename);
-            return Task.FromResult(new DocumentExtractionResult(
-                filename,
-                mimeType,
-                ExtractionStatus.Succeeded,
-                "Texto extraido real da submissao.",
-                WordCount: 5,
-                CharCount: 31,
-                Truncated: false,
-                ErrorMessage: null));
         }
     }
 

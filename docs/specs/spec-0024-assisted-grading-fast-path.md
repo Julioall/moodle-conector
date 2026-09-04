@@ -300,8 +300,8 @@ representação canônica.
 4. Persistir nomes de exibição e eliminar enriquecimentos Moodle da revisão.
 5. Implementar package/save em lote e reconciliação local da UI.
 6. Estender snapshot de submissões com modo/estado/cobertura de avaliação.
-7. Implementar caminho direto e paralelizar somente o fallback ao vivo inevitável.
-8. Aplicar concorrência limitada ao download/extraction no worker.
+7. Implementar o caminho direto por MCP Resource.
+8. Remover download/extraction do worker de correção; manter o gateway de resource como leitura lazy e segura.
 9. Expor `moodle_download_file` atrás de feature flag e testes de segurança.
 10. Certificar o executor universal de escrita existente sem torná-lo fallback automático.
 11. Executar shadow mode, carga, fault injection, rollout gradual e remoção do read path antigo.

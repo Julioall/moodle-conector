@@ -9,29 +9,28 @@
 
 ## Ordem de ativação
 
-1. Manter todas as flags MCP desligadas em produção.
-2. Em curso, atividade e usuário de teste, ativar `McpResourceSubmissionDeliveryEnabled`.
-3. Validar PDF, DOCX, XLSX, PPTX, PNG/JPG, múltiplos anexos, arquivo inválido e ZIP; `McpResourceZipEnabled` só é ativada para a coorte ZIP.
-4. Depois de uma leitura bem-sucedida de resources e revisão humana, ativar `McpGradingDraftEnabled` para a mesma coorte.
-5. Ativar `McpGradingWriteEnabled` somente depois de confirmar preview, hash, confirmação humana e readback no ambiente de teste.
+1. Ativar `McpResourceSubmissionDeliveryEnabled=true` no ambiente de correção.
+2. Validar PDF, DOCX, XLSX, PPTX, PNG/JPG, múltiplos anexos, arquivo inválido e ZIP; `McpResourceZipEnabled` permanece `false` por padrão.
+3. Depois de uma leitura bem-sucedida de resources e revisão humana, ativar `McpGradingDraftEnabled` para a mesma coorte.
+4. Ativar `McpGradingWriteEnabled` somente depois de confirmar preview, hash, confirmação humana e readback no ambiente de teste.
 
-O fluxo direto por MCP Resource é o padrão. `LegacySubmissionExtractionEnabled` deve permanecer `false`; habilite-o apenas como exceção operacional temporária e explicitamente controlada.
+O fluxo direto por MCP Resource é o único caminho de correção. `LegacySubmissionExtractionEnabled` deve permanecer `false`; a flag é mantida somente para compatibilidade de configuração.
 
 ## Métricas e alertas
 
 Monitorar os instrumentos `resource_register_count`, `resource_read_count`, `resource_read_duration_ms`, `resource_download_duration_ms`, `resource_download_bytes`, `resource_cache_hit`, `resource_cache_miss` e `resource_read_failure`.
 
-Criar alerta de severidade alta para qualquer `RESOURCE_FORBIDDEN` inesperado, `RESOURCE_HASH_MISMATCH`, write sem confirmação ou falha de readback. Criar alerta de severidade média quando a taxa de `resource_read_failure` exceder 2% em 15 minutos, a latência p95 de leitura exceder o SLO acordado, ou o fallback legado aumentar de forma sustentada.
+Criar alerta de severidade alta para qualquer `RESOURCE_FORBIDDEN` inesperado, `RESOURCE_HASH_MISMATCH`, write sem confirmação ou falha de readback. Criar alerta de severidade média quando a taxa de `resource_read_failure` exceder 2% em 15 minutos ou a latência p95 de leitura exceder o SLO acordado.
 
 ## Rollback
 
 O rollback é somente de configuração:
 
 1. Definir `McpGradingWriteEnabled=false` para interromper novos writes MCP.
-2. Definir `McpGradingDraftEnabled=false` para retornar à criação de drafts legados.
-3. Definir `McpResourceSubmissionDeliveryEnabled=false`; o lote passa a usar o pipeline legado disponível.
+2. Definir `McpGradingDraftEnabled=false` para interromper novos drafts.
+3. Definir `McpResourceSubmissionDeliveryEnabled=false`; novas correções devem permanecer bloqueadas até a restauração do MCP Resource.
 4. Preservar auditoria, drafts e resources até a expiração/retencão; não apagar evidências durante investigação.
 
 ## Critérios de expansão
 
-Expandir a coorte somente sem vazamento de credenciais, sem `RESOURCE_FORBIDDEN` indevido, sem write não confirmado, sem divergência de hash e com fallback observável. Registrar o resultado das coortes FIEG e SENAI antes da ativação padrão.
+Expandir a coorte somente sem vazamento de credenciais, sem `RESOURCE_FORBIDDEN` indevido, sem write não confirmado e sem divergência de hash. Registrar o resultado das coortes FIEG e SENAI antes da ativação padrão.

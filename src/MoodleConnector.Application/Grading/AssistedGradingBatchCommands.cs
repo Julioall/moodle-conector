@@ -200,8 +200,6 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
     IMoodleAuditLogRepository auditLogs,
     IGradingBatchOrchestrator orchestrator,
     IMoodleCourseContentsGateway contentsGateway,
-    IMoodleSubmissionFileGateway fileGateway,
-    IDocumentExtractionService extractionService,
     IMoodleAssignmentSubmissionsGateway submissionsGateway,
     IOptions<GradingLimitsOptions>? limits = null,
     IConnectorExecutionContext? executionContext = null,
@@ -732,7 +730,6 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         CancellationToken cancellationToken)
     {
         var maxFiles = Math.Clamp(_limits.MaxFilesPerSubmission, 0, 100);
-        var maxBytes = Math.Max(1, _limits.MaxFileSizeMb) * 1024L * 1024L;
 
         var effectiveFiles = files;
 
@@ -775,92 +772,26 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             }
         }
 
-        if (_limits.DeferHeavyIngestion)
-        {
-            foreach (var file in effectiveFiles.Take(maxFiles))
-            {
-                var sourceUrl = GradingArtifactSourceReference.Normalize(file.FileUrl);
-                await repository.AddArtifactAsync(
-                    new GradingArtifact(
-                        Guid.NewGuid(),
-                        gradingItemId,
-                        "submission_file",
-                        file.Filename,
-                        file.MimeType,
-                        Sha256: null,
-                        file.SizeBytes,
-                        sourceUrl is null
-                            ? ExtractionStatus.Failed
-                            : ExtractionStatus.Pending,
-                        ExtractedTextRef: null,
-                        SummaryRef: sourceUrl is null
-                            ? "source_url_invalid"
-                            : "pending_ingestion",
-                        DateTimeOffset.UtcNow,
-                        sourceUrl),
-                    cancellationToken);
-            }
-
-            return;
-        }
-
+        // A correção assistida não materializa anexos. Persistimos somente a
+        // referência autenticável que será convertida em MCP Resource no chat.
         foreach (var file in effectiveFiles.Take(maxFiles))
         {
-            try
-            {
-                var download = await GradingMoodleReadRetry.ExecuteAsync(
-                    retryCancellationToken => fileGateway.DownloadFileAsync(
-                        userExternalId,
-                        file.FileUrl,
-                        file.Filename,
-                        maxBytes,
-                        retryCancellationToken),
-                    (_, attempt) => warnings.Add(
-                        $"Falha transitória ao baixar o arquivo {file.Filename}; nova tentativa {attempt}."),
-                    cancellationToken);
-                var extraction = await extractionService.ExtractAsync(
-                    download.Filename,
-                    download.MimeType,
-                    download.Content,
-                    cancellationToken);
-
-                await repository.AddArtifactAsync(
-                    new GradingArtifact(
-                        Guid.NewGuid(),
-                        gradingItemId,
-                        "submission_file",
-                        download.Filename,
-                        download.MimeType,
-                        download.Sha256Hex,
-                        download.SizeBytes,
-                        extraction.ExtractionStatus,
-                        extraction.ExtractedText,
-                        extraction.ErrorMessage,
-                        DateTimeOffset.UtcNow),
-                    cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                warnings.Add($"Arquivo {file.Filename} nao foi extraido: {ex.Message}");
-                await repository.AddArtifactAsync(
-                    new GradingArtifact(
-                        Id: Guid.NewGuid(),
-                        GradingItemId: gradingItemId,
-                        ArtifactType: "submission_file",
-                        Filename: file.Filename,
-                        MimeType: file.MimeType,
-                        Sha256: null,
-                        SizeBytes: file.SizeBytes,
-                        ExtractionStatus: ExtractionStatus.Failed,
-                        ExtractedTextRef: null,
-                        SummaryRef: ex.Message,
-                        CreatedAt: DateTimeOffset.UtcNow),
-                    cancellationToken);
-            }
+            var sourceUrl = GradingArtifactSourceReference.Normalize(file.FileUrl);
+            await repository.AddArtifactAsync(
+                new GradingArtifact(
+                    Guid.NewGuid(),
+                    gradingItemId,
+                    "submission_file",
+                    file.Filename,
+                    file.MimeType,
+                    Sha256: null,
+                    file.SizeBytes,
+                    sourceUrl is null ? ExtractionStatus.Failed : ExtractionStatus.Pending,
+                    ExtractedTextRef: null,
+                    SummaryRef: sourceUrl is null ? "source_url_invalid" : "pending_resource",
+                    DateTimeOffset.UtcNow,
+                    sourceUrl),
+                cancellationToken);
         }
     }
 
@@ -989,11 +920,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
 
             foreach (var file in entry.Module.Files.Where(file => !string.IsNullOrWhiteSpace(file.FileUrl)))
             {
-                var template = await BuildContextFileArtifactTemplateAsync(
-                    userExternalId,
-                    file,
-                    warnings,
-                    cancellationToken);
+                var template = BuildContextFileArtifactTemplate(file);
                 if (template is not null)
                 {
                     templates.Add(template);
@@ -1004,63 +931,23 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         return templates;
     }
 
-    private async Task<ContextArtifactTemplate?> BuildContextFileArtifactTemplateAsync(
-        string userExternalId,
-        CourseModuleFile file,
-        List<string> warnings,
-        CancellationToken cancellationToken)
+    private static ContextArtifactTemplate? BuildContextFileArtifactTemplate(CourseModuleFile file)
     {
         var filename = string.IsNullOrWhiteSpace(file.FileName)
             ? "context-file"
             : file.FileName;
-        var maxBytes = Math.Max(1, _limits.MaxFileSizeMb) * 1024L * 1024L;
 
-        try
-        {
-            var download = await GradingMoodleReadRetry.ExecuteAsync(
-                retryCancellationToken => fileGateway.DownloadFileAsync(
-                    userExternalId,
-                    file.FileUrl!,
-                    filename,
-                    maxBytes,
-                    retryCancellationToken),
-                (_, attempt) => warnings.Add(
-                    $"Falha transitória ao baixar o material de contexto {filename}; nova tentativa {attempt}."),
-                cancellationToken);
-            var extraction = await extractionService.ExtractAsync(
-                download.Filename,
-                download.MimeType,
-                download.Content,
-                cancellationToken);
-
-            return new ContextArtifactTemplate(
-                "assignment_context",
-                download.Filename,
-                download.MimeType,
-                download.Sha256Hex,
-                download.SizeBytes,
-                extraction.ExtractionStatus,
-                extraction.ExtractedText,
-                extraction.ErrorMessage);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            var error = MoodleErrorContract.Describe(ex);
-            warnings.Add($"Material de contexto {filename} nao foi extraido: {error.ErrorCode}.");
-            return new ContextArtifactTemplate(
-                "assignment_context",
-                filename,
-                file.MimeType,
-                Sha256: null,
-                SizeBytes: file.FileSize,
-                ExtractionStatus.Failed,
-                ExtractedTextRef: null,
-                SummaryRef: "context_materialization_failed");
-        }
+        var sourceUrl = GradingArtifactSourceReference.Normalize(file.FileUrl);
+        return new ContextArtifactTemplate(
+            "assignment_context",
+            filename,
+            file.MimeType,
+            Sha256: null,
+            SizeBytes: file.FileSize,
+            sourceUrl is null ? ExtractionStatus.Failed : ExtractionStatus.Pending,
+            ExtractedTextRef: null,
+            SummaryRef: sourceUrl is null ? "source_url_invalid" : "pending_resource",
+            SourceUrl: sourceUrl);
     }
 
     private static void AddDiscoveryFailure(
@@ -1191,7 +1078,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         long? SizeBytes,
         string ExtractionStatus,
         string? ExtractedTextRef,
-        string? SummaryRef)
+        string? SummaryRef,
+        string? SourceUrl = null)
     {
         public GradingArtifact ToArtifact(Guid gradingItemId)
         {
@@ -1206,7 +1094,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 ExtractionStatus,
                 ExtractedTextRef,
                 SummaryRef,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                SourceUrl);
         }
     }
 }
@@ -2095,12 +1984,15 @@ public sealed record GradingContextForChatResult(
     [property: JsonPropertyName("confidence")] decimal? Confidence,
     [property: JsonPropertyName("instructions")] string Instructions,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
-    [property: JsonPropertyName("contextHash")] string? ContextHash = null);
+    [property: JsonPropertyName("contextHash")] string? ContextHash = null,
+    [property: JsonPropertyName("resources")] IReadOnlyList<AiGradingResourceLink>? Resources = null);
 
 public sealed class PrepareGradingContextForChatQueryHandler(
     IGradingReviewRepository repository,
     ICurrentUserContext currentUser,
-    IMoodleAssignmentSettingsGateway settingsGateway)
+    IMoodleAssignmentSettingsGateway settingsGateway,
+    IMoodleResourceGateway? resourceGateway = null,
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
     : IRequestHandler<PrepareGradingContextForChatQuery, GradingContextForChatResult>
 {
     public async Task<GradingContextForChatResult> Handle(
@@ -2126,16 +2018,93 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         var warnings = new List<string>();
         var artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
 
-        // Texto da entrega do aluno
-        var submissionArtifact = artifacts
-            .Where(a => a.ArtifactType == "submission_file" &&
-                        ExtractionStatus.IsReadable(a.ExtractionStatus) &&
-                        !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
-            .FirstOrDefault();
-        var studentSubmission = submissionArtifact?.ExtractedTextRef;
-        if (string.IsNullOrWhiteSpace(studentSubmission))
+        // A correção lê os anexos originais no chat. O texto extraído local
+        // não participa deste fluxo, mesmo quando existe em artifacts antigos.
+        var submissionArtifacts = artifacts
+            .Where(a => a.ArtifactType == "submission_file")
+            .ToArray();
+        var resources = new List<AiGradingResourceLink>();
+        if (resourceGateway is null || resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled != true)
         {
-            warnings.Add("Texto da entrega do aluno nao disponivel. Verifique se os anexos foram extraidos.");
+            throw new InvalidOperationException(
+                "A correção assistida exige McpResourceSubmissionDeliveryEnabled=true e o gateway MCP Resource disponível.");
+        }
+
+        if (submissionArtifacts.Length == 0)
+        {
+            throw new InvalidOperationException(
+                "A entrega não possui anexos originais para disponibilizar como MCP Resource.");
+        }
+        else
+        {
+            foreach (var artifact in submissionArtifacts)
+            {
+                if (string.IsNullOrWhiteSpace(artifact.SourceUrl) || string.IsNullOrWhiteSpace(artifact.Filename))
+                {
+                    throw new InvalidOperationException(
+                        $"O arquivo {artifact.Filename ?? "desconhecido"} não possui referência original disponível para MCP Resource.");
+                }
+
+                var descriptor = await resourceGateway.RegisterAsync(
+                    new MoodleResourceRegistration(
+                        "submission_attachment",
+                        artifact.Filename,
+                        artifact.MimeType ?? "application/octet-stream",
+                        artifact.SourceUrl,
+                        item.CourseId,
+                        item.AssignmentId,
+                        item.SubmissionId,
+                        item.MoodleUserId,
+                        SizeBytes: artifact.SizeBytes,
+                        Sha256: artifact.Sha256),
+                    cancellationToken);
+                resources.Add(new AiGradingResourceLink(
+                    descriptor.Uri,
+                    descriptor.Filename,
+                    descriptor.MimeType,
+                    descriptor.SizeBytes));
+            }
+
+            warnings.Add("Entrega fornecida por MCP Resource; leia os arquivos originais antes de propor a correção.");
+        }
+
+        // Materiais binários de contexto também seguem diretamente para o chat.
+        // Descrições textuais vindas da API Moodle continuam como contexto
+        // textual, mas nenhum arquivo de contexto é baixado ou extraído aqui.
+        foreach (var artifact in artifacts.Where(a =>
+                     a.ArtifactType == "assignment_context" &&
+                     !string.IsNullOrWhiteSpace(a.SourceUrl) &&
+                     !string.IsNullOrWhiteSpace(a.Filename)))
+        {
+            try
+            {
+                var descriptor = await resourceGateway.RegisterAsync(
+                    new MoodleResourceRegistration(
+                        "assignment_context_attachment",
+                        artifact.Filename!,
+                        artifact.MimeType ?? "application/octet-stream",
+                        artifact.SourceUrl!,
+                        item.CourseId,
+                        item.AssignmentId,
+                        item.SubmissionId,
+                        item.MoodleUserId,
+                        SizeBytes: artifact.SizeBytes,
+                        Sha256: artifact.Sha256),
+                    cancellationToken);
+                resources.Add(new AiGradingResourceLink(
+                    descriptor.Uri,
+                    descriptor.Filename,
+                    descriptor.MimeType,
+                    descriptor.SizeBytes));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                warnings.Add($"Material de contexto {artifact.Filename} não foi disponibilizado como MCP Resource ({exception.GetType().Name}).");
+            }
         }
 
         // Texto do enunciado da atividade
@@ -2223,7 +2192,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             item.SubmissionId?.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             assignmentStatement,
-            studentSubmission,
+            StudentSubmission: null,
             extractedCriteria,
             item.Status.ToString(),
             item.DraftFeedback,
@@ -2231,7 +2200,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             item.Confidence,
             instructions,
             warnings,
-            item.ContextHash);
+            item.ContextHash,
+            resources);
     }
 
     private static string ResolveGradingMode(decimal? maxGrade, bool? isGradable) =>
@@ -2275,7 +2245,7 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("textTruncated")] bool TextTruncated,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
     [property: JsonPropertyName("contextHash")] string? ContextHash = null,
-    [property: JsonPropertyName("resourceDeliveryMode")] string ResourceDeliveryMode = "legacy_extracted_text",
+    [property: JsonPropertyName("resourceDeliveryMode")] string ResourceDeliveryMode = "mcp_resource",
     [property: JsonPropertyName("resources")] IReadOnlyList<AiGradingResourceLink>? Resources = null);
 
 public sealed record AiGradingResourceLink(
@@ -2293,7 +2263,6 @@ public sealed class PrepareAiGradingBatchQueryHandler(
     IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
     : IRequestHandler<PrepareAiGradingBatchQuery, AiGradingBatchPackageResult>
 {
-    private const int MaxTextLength = 3000;
     private const int PageSize = 100;
 
     public async Task<AiGradingBatchPackageResult> Handle(
@@ -2338,86 +2307,92 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             var itemWarnings = new List<string>();
             IReadOnlyList<GradingArtifact> artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
             var resourceLinks = new List<AiGradingResourceLink>();
-            var useMcpResources = resourceGateway is not null && resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true;
-            var deliveryMode = "legacy_extracted_text";
-            if (useMcpResources)
+            if (resourceGateway is null || resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled != true)
             {
-                var submissionArtifacts = artifacts.Where(artifact => artifact.ArtifactType == "submission_file").ToArray();
-                try
-                {
-                    if (submissionArtifacts.Length == 0 || submissionArtifacts.Any(artifact => string.IsNullOrWhiteSpace(artifact.SourceUrl) || string.IsNullOrWhiteSpace(artifact.Filename)))
-                        throw new InvalidOperationException("source_reference_unavailable");
-                    foreach (var artifact in submissionArtifacts)
-                    {
-                        var descriptor = await resourceGateway!.RegisterAsync(new MoodleResourceRegistration("submission_attachment", artifact.Filename!, artifact.MimeType ?? "application/octet-stream", artifact.SourceUrl!, item.CourseId, item.AssignmentId, item.SubmissionId, item.MoodleUserId, SizeBytes: artifact.SizeBytes, Sha256: artifact.Sha256), cancellationToken);
-                        resourceLinks.Add(new AiGradingResourceLink(descriptor.Uri, descriptor.Filename, descriptor.MimeType, descriptor.SizeBytes));
-                    }
-                    deliveryMode = "mcp_resource";
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    resourceLinks.Clear();
-                    throw new InvalidOperationException(
-                        $"Nao foi possivel registrar os anexos da submissao como MCP Resource ({exception.GetType().Name}).",
-                        exception);
-                }
-            }
-            else
-            {
-                itemWarnings.Add("legacy_fallback: feature_flag.");
+                throw new InvalidOperationException(
+                    "A correção assistida exige McpResourceSubmissionDeliveryEnabled=true e o gateway MCP Resource disponível.");
             }
 
-            // Texto da submissão (combina múltiplos arquivos se houver)
-            var allSubmissionTexts = artifacts
-                .Where(a => a.ArtifactType == "submission_file" &&
-                            ExtractionStatus.IsReadable(a.ExtractionStatus) &&
-                            !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
-                .Select(a => a.ExtractedTextRef!)
+            var submissionArtifacts = artifacts
+                .Where(artifact => artifact.ArtifactType == "submission_file")
                 .ToArray();
-
-            var combinedSubmission = allSubmissionTexts.Length switch
+            if (submissionArtifacts.Length == 0 || submissionArtifacts.Any(artifact =>
+                    string.IsNullOrWhiteSpace(artifact.SourceUrl) ||
+                    string.IsNullOrWhiteSpace(artifact.Filename)))
             {
-                0 => (string?)null,
-                1 => allSubmissionTexts[0],
-                _ => string.Join("\n\n---\n\n", allSubmissionTexts)
-            };
-
-            if (deliveryMode != "mcp_resource" && string.IsNullOrWhiteSpace(combinedSubmission))
-            {
-                itemWarnings.Add("Texto da entrega nao disponivel. Verifique se os anexos foram extraidos.");
+                throw new InvalidOperationException(
+                    $"A entrega do item {item.Id} não possui referências originais completas para MCP Resource.");
             }
 
-            var textTruncated = false;
-            if (combinedSubmission is not null && combinedSubmission.Length > MaxTextLength)
+            try
             {
-                combinedSubmission = combinedSubmission[..MaxTextLength];
-                textTruncated = true;
-                itemWarnings.Add($"Texto da entrega truncado a {MaxTextLength} caracteres.");
-            }
-            if (deliveryMode == "mcp_resource")
-            {
-                combinedSubmission = null;
-                textTruncated = false;
-                itemWarnings.Add("Entrega fornecida por MCP Resources; leia os arquivos originais antes de propor a correcao.");
-            }
-            else
-            {
-                telemetry?.RecordPhase("grading", "legacy_fallback", itemWarnings.Any(warning => warning.Contains("resource_failure", StringComparison.Ordinal)) ? "resource_failure" : "feature_flag", 0, itemCount: 1);
-                if (resourceFeatures?.Value.LegacySubmissionExtractionEnabled == false)
+                foreach (var artifact in submissionArtifacts)
                 {
-                    combinedSubmission = null;
-                    textTruncated = false;
-                    itemWarnings.Add("Entrega indisponivel: MCP Resource falhou e o fallback legado esta desabilitado.");
+                    var descriptor = await resourceGateway.RegisterAsync(
+                        new MoodleResourceRegistration(
+                            "submission_attachment",
+                            artifact.Filename!,
+                            artifact.MimeType ?? "application/octet-stream",
+                            artifact.SourceUrl!,
+                            item.CourseId,
+                            item.AssignmentId,
+                            item.SubmissionId,
+                            item.MoodleUserId,
+                            SizeBytes: artifact.SizeBytes,
+                            Sha256: artifact.Sha256),
+                        cancellationToken);
+                    resourceLinks.Add(new AiGradingResourceLink(
+                        descriptor.Uri,
+                        descriptor.Filename,
+                        descriptor.MimeType,
+                        descriptor.SizeBytes));
+                }
+
+                foreach (var artifact in artifacts.Where(a =>
+                             a.ArtifactType == "assignment_context" &&
+                             !string.IsNullOrWhiteSpace(a.SourceUrl) &&
+                             !string.IsNullOrWhiteSpace(a.Filename)))
+                {
+                    try
+                    {
+                        var descriptor = await resourceGateway.RegisterAsync(
+                            new MoodleResourceRegistration(
+                                "assignment_context_attachment",
+                                artifact.Filename!,
+                                artifact.MimeType ?? "application/octet-stream",
+                                artifact.SourceUrl!,
+                                item.CourseId,
+                                item.AssignmentId,
+                                item.SubmissionId,
+                                item.MoodleUserId,
+                                SizeBytes: artifact.SizeBytes,
+                                Sha256: artifact.Sha256),
+                            cancellationToken);
+                        resourceLinks.Add(new AiGradingResourceLink(
+                            descriptor.Uri,
+                            descriptor.Filename,
+                            descriptor.MimeType,
+                            descriptor.SizeBytes));
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        itemWarnings.Add($"Material de contexto {artifact.Filename} não foi disponibilizado como MCP Resource ({exception.GetType().Name}).");
+                    }
                 }
             }
-
-            // Falhas de extração como warnings
-            foreach (var failedArtifact in artifacts.Where(a =>
-                a.ArtifactType == "submission_file" &&
-                ExtractionStatus.IsFailure(a.ExtractionStatus)))
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                itemWarnings.Add($"Arquivo {failedArtifact.Filename ?? "desconhecido"}: extracao falhou ({failedArtifact.SummaryRef ?? "sem detalhe"}).");
+                resourceLinks.Clear();
+                throw new InvalidOperationException(
+                    $"Não foi possível registrar os anexos da submissão como MCP Resource ({exception.GetType().Name}).",
+                    exception);
             }
+
+            itemWarnings.Add("Entrega fornecida por MCP Resource; leia os arquivos originais antes de propor a correção.");
 
             // Contexto da atividade
             var contextArtifact = artifacts
@@ -2463,11 +2438,11 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 snapshotData.GradingMode,
                 assignmentStatement,
                 extractedCriteria,
-                combinedSubmission,
-                textTruncated,
+                ExtractedText: null,
+                TextTruncated: false,
                 itemWarnings,
                 item.ContextHash,
-                deliveryMode,
+                ResourceDeliveryMode: "mcp_resource",
                 resourceLinks));
         }
 

@@ -131,8 +131,10 @@ public sealed class LocalGradingBatchOrchestratorTests
         Assert.Equal(1, repository.SaveChangesCount);
     }
 
-    [Fact]
-    public async Task ProcessItem_ComResourcePendenteEMcpAtivo_AguardaIaSemExtrairTexto()
+    [Theory]
+    [InlineData(ExtractionStatus.Pending)]
+    [InlineData(ExtractionStatus.Failed)]
+    public async Task ProcessItem_ComResourceOriginalEMcpAtivo_AguardaIaSemExtrairTexto(string extractionStatus)
     {
         var repository = new FakeGradingReviewRepository();
         var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
@@ -141,7 +143,7 @@ public sealed class LocalGradingBatchOrchestratorTests
         await repository.AddItemAsync(item, CancellationToken.None);
         await repository.AddArtifactAsync(new GradingArtifact(
             Guid.NewGuid(), item.Id, "submission_file", "entrega.pdf", "application/pdf", null, 120,
-            ExtractionStatus.Pending, null, "pending_ingestion", DateTimeOffset.UtcNow,
+            extractionStatus, null, "pending_ingestion", DateTimeOffset.UtcNow,
             "https://moodle.example/pluginfile.php/entrega.pdf"), CancellationToken.None);
 
         var processor = new GradingItemProcessor(

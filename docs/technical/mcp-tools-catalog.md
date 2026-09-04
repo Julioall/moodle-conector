@@ -798,10 +798,11 @@ Metadados MCP:
 Descricao:
 
 - Cria um job interno em `grading_batch` e itens em `grading_item` a partir das entregas retornadas pelas queries de submissao existentes.
-- Quando `includeSubmissionFiles=true`, baixa os anexos retornados pela submissao com `fileUrl`, respeita os limites de arquivo configurados e persiste `GradingArtifact` com o resultado da extracao.
-- A extracao suporta textos simples/HTML/JSON/XML/CSV, PDF com texto embutido, DOCX, PPTX, XLSX, OpenDocument e ZIP com arquivos internos suportados. Textos muito grandes usam chunking representativo com trechos distribuídos pelo documento dentro do limite de contexto. PDF escaneado ou composto apenas por imagem retorna status `scanned_pdf` e ainda exige OCR.
+- Quando `includeSubmissionFiles=true`, preserva os metadados e a referencia `fileUrl` dos anexos retornados pela submissao. Com `McpResourceSubmissionDeliveryEnabled`, o anexo segue como resource/file original e nao depende de download/extracao durante a criacao do lote.
+- `prepare_submission_grading`, `prepare_ai_grading_batch` e `get_submission_grading_package` registram os anexos como resources MCP opacos com nome, MIME, tamanho e URI segura. A leitura do resource revalida autorizacao, vinculo, limite e integridade antes de devolver os bytes.
+- A correção não executa extração local. RTF, DOC/XLS/PPT, OpenDocument, imagens, ZIP e formatos desconhecidos seguem como resources MCP originais; estados históricos de extração não bloqueiam nem substituem a leitura do resource.
 - Quando `includeRubric=true` ou `includeCourseMaterials=true`, escaneia a secao da tarefa, persiste candidatos de contexto como `assignment_context` e usa selecao heuristica para escolher o provavel enunciado/material principal.
-- O orquestrador inline do MVP processa itens pendentes logo apos a criacao do lote: se houver texto extraido, gera um parecer preliminar revisavel; se nao houver conteudo legivel, marca o item como bloqueado.
+- O orquestrador inline do MVP processa itens pendentes logo apos a criacao do lote e marca o item como aguardando leitura pela IA via MCP Resource. Sem resource utilizável, bloqueia a correção.
 - Nota sugerida confiavel continua dependente de rubrica/criterios e escala disponiveis.
 - Nao escreve nota ou feedback no Moodle.
 - Limita `maxItems` entre 1 e 400 e retorna warnings quando o lote foi truncado ou alguma tarefa nao foi encontrada.
@@ -1187,7 +1188,7 @@ Metadados MCP:
 Descricao:
 
 - Prepara o contexto de correcao de uma entrega individual fora de um lote.
-- Baixa anexos se disponíveis e extrai texto para o pacote de correcao.
+- Retorna os anexos originais como `resource/file` com nome, MIME, tamanho e URI segura. Se o MCP Resource estiver desabilitado, a correção fica bloqueada; não há fallback de texto extraído.
 - Nao escreve nota ou feedback no Moodle.
 
 Metadados MCP:
@@ -1204,7 +1205,7 @@ Metadados MCP:
 Descricao:
 
 - Prepara o pacote de dados de um lote para consumo por IA externa.
-- Retorna itens pendentes com texto extraido, rubrica e instrucoes do professor em formato otimizado para prompt.
+- Retorna itens pendentes com resources MCP dos anexos originais, além de rubrica e instruções. A IA deve ler os resources diretamente.
 - Nao executa analise de IA nem escreve no Moodle.
 
 Metadados MCP:

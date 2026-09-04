@@ -2415,22 +2415,20 @@ public sealed class MoodleGradingTools(
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"## Pacote IA — Lote {data.BatchJobId}");
         sb.AppendLine();
-        sb.AppendLine($"**{data.TotalItems} aluno(s)** com dados extraidos para correcao.");
+        sb.AppendLine($"**{data.TotalItems} aluno(s)** com contexto de correcao preparado.");
         sb.AppendLine();
 
         foreach (var item in data.Items)
         {
-            var textInfo = string.IsNullOrWhiteSpace(item.ExtractedText)
-                ? "sem texto extraido"
-                : item.TextTruncated
-                    ? $"texto truncado ({item.ExtractedText.Length} chars)"
-                    : $"texto completo ({item.ExtractedText.Length} chars)";
+            var resourceInfo = item.Resources?.Count > 0
+                ? $"{item.Resources.Count} arquivo(s) original(is) via MCP Resource"
+                : "sem arquivo original disponível";
             var gradeInfo = item.GradingMode == "feedback_only"
                 ? "modo: somente feedback (sem nota)"
                 : item.MaxGrade > 0
                     ? $"nota maxima: {item.MaxGrade}"
                     : "nota maxima: nao confirmada (sugestao numerica bloqueada)";
-            sb.AppendLine($"- **Aluno {item.StudentId}** (item {item.GradingItemId}): {textInfo}, {gradeInfo}");
+            sb.AppendLine($"- **Aluno {item.StudentId}** (item {item.GradingItemId}): {resourceInfo}, {gradeInfo}");
         }
 
         sb.AppendLine();
@@ -2598,7 +2596,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GradingContextForChatResult>))]
-    [Description("Retorna o contexto completo de uma entrega para correcao: enunciado da atividade, texto da entrega do aluno, nota maxima e instrucoes. Use este contexto para gerar feedback e nota sugerida diretamente no chat. Nao escreve no Moodle.")]
+    [Description("Retorna o contexto completo de uma entrega para correcao: enunciado da atividade, anexos originais como MCP Resources, nota maxima e instrucoes. Use este contexto para gerar feedback e nota sugerida diretamente no chat. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararCorrecaoEntregaAsync(
         [Description("Identificador do item retornado pelo status do lote.")]
         Guid gradingItemId,
@@ -2643,9 +2641,19 @@ public sealed class MoodleGradingTools(
             AuditId: null,
             DateTimeOffset.UtcNow);
 
+        var content = new List<ContentBlock> { new TextContentBlock { Text = narration } };
+        content.AddRange((data.Resources ?? [])
+            .Select(link => new ResourceLinkBlock
+            {
+                Uri = link.Uri,
+                Name = link.Name,
+                MimeType = link.MimeType,
+                Size = link.Size
+            }));
+
         return new CallToolResult
         {
-            Content = [new TextContentBlock { Text = narration }],
+            Content = content,
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
@@ -2687,7 +2695,24 @@ public sealed class MoodleGradingTools(
         else
         {
             sb.AppendLine("### Entrega do Aluno");
-            sb.AppendLine("*Texto nao disponivel — verificar anexos.*");
+            if (data.Resources is { Count: > 0 })
+            {
+                sb.AppendLine("*Arquivo(s) original(is) disponibilizado(s) abaixo como MCP Resource.*");
+            }
+            else
+            {
+                sb.AppendLine("*Texto nao disponivel — verificar anexos.*");
+            }
+            sb.AppendLine();
+        }
+
+        if (data.Resources is { Count: > 0 })
+        {
+            sb.AppendLine("### Arquivos originais da entrega");
+            foreach (var resource in data.Resources)
+            {
+                sb.AppendLine($"- {resource.Name} [{resource.MimeType}]");
+            }
             sb.AppendLine();
         }
 

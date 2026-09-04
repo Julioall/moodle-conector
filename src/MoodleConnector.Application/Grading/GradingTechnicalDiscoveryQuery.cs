@@ -132,7 +132,7 @@ public sealed class GradingTechnicalDiscoveryQueryHandler(
             Confirmed: false,
             "core_files_get_files esta disponivel; falta provar download de pluginfile com uma entrega real.",
             ["core_files_get_files"],
-            ["Selecionar uma entrega com anexo e validar download/extracao."]);
+                ["Selecionar uma entrega com anexo e validar download e leitura pelo MCP Resource."]);
     }
 
     private GradingTechnicalDiscoveryArea BuildGradeWrite(

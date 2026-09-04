@@ -135,7 +135,8 @@ public sealed partial class GradingContextBuilder(
                     ExtractionStatus: artifact.ExtractionStatus,
                     SourceCharacterCount: sourceCharacterCount,
                     IsTruncated: isTruncated,
-                    Source: BuildSourceMetadata(artifact)));
+                    Source: BuildSourceMetadata(artifact),
+                    OriginalResourceAvailable: !string.IsNullOrWhiteSpace(artifact.SourceUrl)));
 
                 if (extracted != null && submissionText == null)
                 {

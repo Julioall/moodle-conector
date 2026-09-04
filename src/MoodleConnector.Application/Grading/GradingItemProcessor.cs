@@ -79,7 +79,6 @@ public sealed class GradingItemProcessor(
                 var hasDeferredSubmissionResource = (await repository.ListArtifactsByItemAsync(item.Id, cancellationToken))
                     .Any(artifact =>
                         string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase) &&
-                        artifact.ExtractionStatus == ExtractionStatus.Pending &&
                         !string.IsNullOrWhiteSpace(artifact.SourceUrl));
                 if (hasDeferredSubmissionResource)
                 {
@@ -87,7 +86,7 @@ public sealed class GradingItemProcessor(
                     // modo MCP está ativo. O modelo fará isso a partir do
                     // arquivo original, através do resource_link.
                     item.MarkAwaitingAiAnalysis(
-                        "Entrega pendente de leitura via MCP Resource; extração textual legado não foi executada.");
+                        "Entrega pendente de leitura via MCP Resource; o texto local não é utilizado.");
                     return;
                 }
             }

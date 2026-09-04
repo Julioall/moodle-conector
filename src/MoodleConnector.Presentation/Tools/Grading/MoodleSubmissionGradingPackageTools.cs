@@ -49,10 +49,7 @@ public sealed class MoodleSubmissionGradingPackageTools(
     {
         if (!features.Value.McpResourceSubmissionDeliveryEnabled)
         {
-            // Emite métrica de fallback para rastrear o volume de chamadas que
-            // ainda dependem do pipeline legado por feature flag desabilitada.
-            telemetry?.RecordPhase("legacy_fallback", "submission_delivery", "feature_flag", 0);
-            return ToolResultHelper.Error<SubmissionGradingPackage>("A entrega por MCP Resource esta desabilitada. Use o pipeline legado enquanto o rollout nao estiver habilitado.");
+            return ToolResultHelper.Error<SubmissionGradingPackage>("A entrega por MCP Resource esta desabilitada; a correcao assistida nao possui fallback de extracao local.");
         }
         if (string.IsNullOrWhiteSpace(courseId) || string.IsNullOrWhiteSpace(assignmentId) || string.IsNullOrWhiteSpace(studentId))
         {
@@ -99,7 +96,7 @@ public sealed class MoodleSubmissionGradingPackageTools(
                 }
                 catch
                 {
-                    telemetry?.RecordPhase("legacy_fallback", "submission_delivery", "resource_failure", 0);
+                    telemetry?.RecordPhase("resource_delivery", "submission_delivery", "resource_failure", 0);
                     throw;
                 }
                 var resources = IsZip(descriptor.MimeType) && features.Value.McpResourceZipEnabled

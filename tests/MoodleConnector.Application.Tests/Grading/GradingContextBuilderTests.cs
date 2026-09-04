@@ -9,6 +9,45 @@ namespace MoodleConnector.Application.Tests.Grading;
 public sealed class GradingContextBuilderTests
 {
     [Fact]
+    public async Task BuildAsync_ComResourceOriginal_NaoBloqueiaQuandoExtracaoFalha()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        repository.Artifacts.Add(new GradingArtifact(
+            Guid.NewGuid(),
+            item.Id,
+            "submission_file",
+            "resposta.rtf",
+            "text/rtf",
+            "hash-rtf",
+            SizeBytes: 4028,
+            ExtractionStatus: ExtractionStatus.Failed,
+            ExtractedTextRef: null,
+            SummaryRef: "extract_failed",
+            CreatedAt: DateTimeOffset.UtcNow,
+            SourceUrl: "https://moodle.example/pluginfile.php/1/resposta.rtf"));
+
+        var sut = new GradingContextBuilder(
+            repository,
+            Options.Create(new GradingLimitsOptions()),
+            new HeuristicAssignmentContextSelectionService(),
+            new FakeMoodleAssignmentSettingsGateway(),
+            new HeuristicCriteriaGenerationService());
+
+        var context = await sut.BuildAsync(
+            item,
+            new GradingContextOptions(IncludeRubric: false, IncludeSubmissionFiles: true),
+            CancellationToken.None);
+
+        var file = Assert.Single(context.AttachedFiles);
+        Assert.True(file.OriginalResourceAvailable);
+        Assert.DoesNotContain(
+            context.Blockers,
+            blocker => blocker.Contains("Submissão sem conteúdo legível", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task BuildAsync_UsaSomenteTextoExtraidoJaPersistido()
     {
         var repository = new FakeGradingReviewRepository();

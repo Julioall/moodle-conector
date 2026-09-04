@@ -117,9 +117,9 @@ internal sealed class MoodleResourceGateway(
             var downloadDurationMs = (DateTimeOffset.UtcNow - downloadStartedAt).TotalMilliseconds;
             telemetry?.RecordPhase("moodle_resource", "download", "success", downloadDurationMs, itemCount: 1, bytes: download.SizeBytes);
             if (download.Truncated || download.SizeBytes > maxBytes) throw new MoodleResourceException("RESOURCE_TOO_LARGE", "O arquivo excede o limite configurado para resources.");
-            if (!IsSupportedMime(download.MimeType)) throw new MoodleResourceException("RESOURCE_UNSUPPORTED", "O tipo MIME do arquivo nao e suportado pelo resource gateway.");
-            if (!IsCompatibleMime(resource.MimeType, download.MimeType, resource.Filename) || !HasValidSignature(download.MimeType, resource.Filename, download.Content))
-                throw new MoodleResourceException("RESOURCE_UNSUPPORTED", "O MIME, extensao ou assinatura do arquivo Moodle e incompativel.");
+            // Este gateway transporta o binario original. MIME, extensao e
+            // assinatura sao metadados do arquivo, nao uma whitelist de
+            // formatos que o conector precise interpretar.
             if (!string.IsNullOrWhiteSpace(resource.Sha256) && !string.Equals(resource.Sha256, download.Sha256Hex, StringComparison.OrdinalIgnoreCase)) throw new MoodleResourceException("RESOURCE_HASH_MISMATCH", "O arquivo Moodle foi alterado desde o registro do resource.");
             resource.RecordIntegrity(download.MimeType, download.SizeBytes, download.Sha256Hex);
             await repository.SaveChangesAsync(cancellationToken);

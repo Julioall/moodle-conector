@@ -69,7 +69,28 @@ public sealed class MoodleSubmissionFileGatewayTests
         Assert.Contains("/webservice/pluginfile.php/", handler.Uri!.AbsolutePath, StringComparison.Ordinal);
     }
 
-    private sealed class Handler(HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler
+    [Fact]
+    public async Task DownloadFileAsync_ComMimeGenericoPreservaDeteccaoPorExtensaoRtf()
+    {
+        var handler = new Handler(contentType: "application/octet-stream");
+        var sut = new MoodleSubmissionFileGateway(
+            new HttpClient(handler),
+            Options.Create(new MoodleApiOptions()),
+            new TokenProvider(),
+            new CredentialsProvider());
+
+        var result = await sut.DownloadFileAsync(
+            "1",
+            "https://moodle.example/pluginfile.php/1/resposta.rtf",
+            "resposta.rtf",
+            1000,
+            CancellationToken.None);
+
+        Assert.Equal("text/rtf", result.MimeType);
+        Assert.Equal(3, result.SizeBytes);
+    }
+
+    private sealed class Handler(HttpStatusCode statusCode = HttpStatusCode.OK, string? contentType = null) : HttpMessageHandler
     {
         public Uri? Uri { get; private set; }
         public string? AuthorizationScheme { get; private set; }
@@ -79,7 +100,12 @@ public sealed class MoodleSubmissionFileGatewayTests
             Uri = request.RequestUri;
             AuthorizationScheme = request.Headers.Authorization?.Scheme;
             AuthorizationParameter = request.Headers.Authorization?.Parameter;
-            return Task.FromResult(new HttpResponseMessage(statusCode) { Content = new ByteArrayContent([1, 2, 3]) });
+            var content = new ByteArrayContent([1, 2, 3]);
+            if (contentType is not null)
+            {
+                content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+            }
+            return Task.FromResult(new HttpResponseMessage(statusCode) { Content = content });
         }
     }
 

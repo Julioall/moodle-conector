@@ -31,10 +31,10 @@ Leituras coletivas nao devem expor o texto integral das entregas. Quando o usuar
 
 1. Crie um lote limitado com `create_assisted_grading_batch`, usando `includeSubmissionFiles`, `includeRubric` e `includeCourseMaterials` somente quando necessarios.
 2. Consulte `get_grading_batch_status` e `get_grading_item_context` para cobertura e artefatos.
-3. Use `prepare_submission_grading` para obter enunciado, texto extraido, nota maxima, instrucoes e status de cada entrega.
-4. Trate `succeeded`, `scanned_pdf`, `ocr_extracted`, `unsupported_format`, `file_too_large`, `empty` e `failed` como estados distintos.
-5. So pontue criterios cujo conteudo esteja verificavel. `scanned_pdf`, `unsupported_format` ou `failed` bloqueiam a atribuicao automatica de nota.
+3. Use `prepare_submission_grading` para obter enunciado, arquivos originais como `resource/file`, nota maxima, instrucoes e status de cada entrega.
+4. Trate o resource original como a fonte da entrega; MIME desconhecido não é motivo para bloqueio.
+5. Bloqueie somente se o arquivo não puder ser obtido, registrado, lido, autorizado ou validado pelo gateway; marque critérios não verificáveis para revisão humana.
 
-O extrator atual cobre texto/HTML/JSON/XML/CSV, PDF, DOCX, PPTX, XLSX, OpenDocument e ZIP com entradas suportadas, com limites de tamanho, quantidade e chunking. Ele nao verifica nativamente formulas calculadas, graficos, camadas XCF/PSD ou requisitos de audio/video. Para detalhes e o pre-processador local de bundles, leia [references/submission-inspection.md](references/submission-inspection.md).
+A entrega de anexos usa o binário original via MCP Resource e não depende de whitelist de extensões/MIME nem de parser local. Para detalhes, limites e o pre-processador local de bundles, leia [references/submission-inspection.md](references/submission-inspection.md).
 
 Para correcao, entregue contexto de submissao e identidade a `moodle-grading`; nao prepare ou confirme escrita nesta skill.
