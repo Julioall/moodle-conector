@@ -66,6 +66,7 @@ public sealed class MoodleStudentPerformanceTools(
         var effectiveCourseId = courseId;
         CourseGradebookSnapshot? prefetchedGradebook = null;
         ToolFreshness? freshness = null;
+        var snapshotContainsStudent = false;
         if (snapshotContext is not null)
         {
             try
@@ -81,17 +82,29 @@ public sealed class MoodleStudentPerformanceTools(
                 {
                     effectiveCourseId = courseRead.CourseId;
                     prefetchedGradebook = courseRead.Gradebook?.Data;
-                    var updatedAt = courseRead.Metadata.OldestUpdatedAt;
-                    freshness = new ToolFreshness(
-                        "snapshot",
-                        updatedAt,
-                        updatedAt.HasValue
-                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
-                            : null,
-                        courseRead.Metadata.StaleDatasets.Count > 0,
-                        courseRead.Metadata.RefreshQueued,
-                        courseRead.Metadata.IsComplete,
-                        courseRead.Gradebook?.RecordCount ?? 0);
+                    snapshotContainsStudent = prefetchedGradebook?.TryGetForStudent(studentId, out _) == true;
+                    if (snapshotContainsStudent && courseRead.Gradebook is not null)
+                    {
+                        freshness = new ToolFreshness(
+                            "snapshot",
+                            courseRead.Gradebook.UpdatedAt,
+                            Math.Max(0, (long)(DateTimeOffset.UtcNow - courseRead.Gradebook.UpdatedAt).TotalSeconds),
+                            courseRead.Gradebook.IsStale,
+                            courseRead.Metadata.RefreshQueued,
+                            courseRead.Gradebook.IsComplete && courseRead.Gradebook.Data.Coverage.IsComplete,
+                            courseRead.Gradebook.RecordCount);
+                    }
+                    else
+                    {
+                        freshness = new ToolFreshness(
+                            "live",
+                            null,
+                            null,
+                            false,
+                            courseRead.Metadata.RefreshQueued,
+                            false,
+                            0);
+                    }
                 }
             }
             catch

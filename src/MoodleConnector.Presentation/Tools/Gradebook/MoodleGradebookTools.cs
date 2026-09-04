@@ -66,6 +66,7 @@ public sealed class MoodleGradebookTools(
         var effectiveCourseId = courseId;
         CourseGradebookSnapshot? prefetchedGradebook = null;
         ToolFreshness? freshness = null;
+        var snapshotContainsStudent = false;
         if (snapshotContext is not null)
         {
             try
@@ -81,17 +82,34 @@ public sealed class MoodleGradebookTools(
                 {
                     effectiveCourseId = courseRead.CourseId;
                     prefetchedGradebook = courseRead.Gradebook?.Data;
-                    var updatedAt = courseRead.Metadata.OldestUpdatedAt;
-                    freshness = new ToolFreshness(
-                        "snapshot",
-                        updatedAt,
-                        updatedAt.HasValue
-                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
-                            : null,
-                        courseRead.Metadata.StaleDatasets.Count > 0,
-                        courseRead.Metadata.RefreshQueued,
-                        courseRead.Metadata.IsComplete,
-                        courseRead.Gradebook?.RecordCount ?? 0);
+                    snapshotContainsStudent = prefetchedGradebook?.TryGetForStudent(studentId, out _) == true;
+                    if (snapshotContainsStudent && courseRead.Gradebook is not null)
+                    {
+                        var updatedAt = courseRead.Gradebook.UpdatedAt;
+                        freshness = new ToolFreshness(
+                            "snapshot",
+                            updatedAt,
+                            Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt).TotalSeconds),
+                            courseRead.Gradebook.IsStale,
+                            courseRead.Metadata.RefreshQueued,
+                            courseRead.Gradebook.IsComplete && courseRead.Gradebook.Data.Coverage.IsComplete,
+                            courseRead.Gradebook.RecordCount);
+                    }
+                    else
+                    {
+                        // The coordinator may queue a refresh while the
+                        // authoritative individual read still comes from
+                        // Moodle. Do not label that live response as an empty
+                        // snapshot (or expose a null snapshot timestamp).
+                        freshness = new ToolFreshness(
+                            "live",
+                            null,
+                            null,
+                            false,
+                            courseRead.Metadata.RefreshQueued,
+                            false,
+                            0);
+                    }
                 }
             }
             catch

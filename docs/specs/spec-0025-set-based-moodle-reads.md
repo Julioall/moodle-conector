@@ -231,6 +231,13 @@ Os read models expõem ainda \`GradebookStatus\`/listas de cobertura aditivas pa
 gradebook coberto, vazio, item ausente, usuário não retornado e erro de leitura; nenhum desses
 estados é convertido silenciosamente em “sem nota”.
 
+Para participantes, quando uma instalação permite `core_enrol_get_enrolled_users` mas rejeita as
+opções `onlyactive`/`onlysuspended`, o gateway repete a leitura sem o filtro, aplica a
+classificação de estudantes e preserva a limitação em `UsedStatusFilterFallback`/warning. O
+resultado não afirma cobertura de status além do que o payload fornece. As tools de gradebook
+também rotulam como `live` uma resposta individual que não foi encontrada no head do snapshot;
+um head parcial continua identificado como `snapshot` com `complete=false` e warning explícito.
+
 ## Orçamento de chamadas
 
 Considere `S` estudantes, `A` assignments, `P` páginas de participantes e chunks de 50 IDs.

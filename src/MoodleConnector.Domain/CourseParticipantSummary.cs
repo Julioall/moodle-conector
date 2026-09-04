@@ -22,7 +22,8 @@ public sealed record ParticipantClassificationDiagnostics(
     int ExcludedKnownStaffCount,
     bool HasEmptyRoles,
     bool HasEmptyGroups,
-    ParticipantClassificationMode Mode)
+    ParticipantClassificationMode Mode,
+    bool UsedStatusFilterFallback = false)
 {
     public static ParticipantClassificationDiagnostics Empty { get; } =
         new(0, 0, 0, 0, false, false, ParticipantClassificationMode.NotRequested);

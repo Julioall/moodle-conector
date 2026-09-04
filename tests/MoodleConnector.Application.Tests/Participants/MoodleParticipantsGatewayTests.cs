@@ -150,6 +150,47 @@ public sealed class MoodleParticipantsGatewayTests
         Assert.Equal(0, result.ClassificationDiagnostics.IncludedByFallbackCount);
     }
 
+    [Fact]
+    public async Task Usa_populacao_sem_filtro_quando_onlyactive_e_negado_e_preserva_alunos()
+    {
+        var sut = CreateGateway(new JsonHandler(
+            """{"exception":"required_capability_exception","errorcode":"nopermissions","message":"Sem permissao"}""",
+            """
+            [
+              {"id":1,"fullname":"Professor","suspended":false,"roles":[{"roleid":3,"shortname":"editingteacher-go","name":"Professor - GO"}],"groups":[]},
+              {"id":2,"fullname":"Aluno ativo","roles":[{"roleid":5,"shortname":"student","name":"Estudante"}],"groups":[]},
+              {"id":3,"fullname":"Aluno suspenso","suspended":true,"roles":[{"roleid":5,"shortname":"student","name":"Estudante"}],"groups":[]}
+            ]
+            """));
+
+        var result = await sut.GetCourseParticipantsAsync(
+            "42", "10", ParticipantStatusFilter.Active, 1, 20, true, false, null, CancellationToken.None);
+
+        var participant = Assert.Single(result.Participants);
+        Assert.Equal("2", participant.UserId);
+        Assert.Equal("active", participant.EnrollmentStatus);
+        Assert.True(result.ClassificationDiagnostics!.UsedStatusFilterFallback);
+        Assert.Equal(1, result.ClassificationDiagnostics.ExcludedKnownStaffCount);
+    }
+
+    [Fact]
+    public async Task Status_all_combina_populacoes_quando_filtros_sao_negados()
+    {
+        var sut = CreateGateway(new JsonHandler(
+            """{"exception":"required_capability_exception","errorcode":"nopermissions","message":"Sem permissao"}""",
+            """[{"id":2,"fullname":"Aluno ativo","suspended":false,"roles":[{"roleid":5,"shortname":"student","name":"Estudante"}],"groups":[]}]""",
+            """{"exception":"required_capability_exception","errorcode":"nopermissions","message":"Sem permissao"}""",
+            """[{"id":3,"fullname":"Aluno suspenso","suspended":true,"roles":[{"roleid":5,"shortname":"student","name":"Estudante"}],"groups":[]}]"""));
+
+        var result = await sut.GetCourseParticipantsAsync(
+            "42", "10", ParticipantStatusFilter.All, 1, 20, true, false, null, CancellationToken.None);
+
+        Assert.Equal(2, result.Participants.Count);
+        Assert.Contains(result.Participants, participant => participant.UserId == "2" && participant.EnrollmentStatus == "active");
+        Assert.Contains(result.Participants, participant => participant.UserId == "3" && participant.EnrollmentStatus == "suspended");
+        Assert.True(result.ClassificationDiagnostics!.UsedStatusFilterFallback);
+    }
+
     private static MoodleParticipantsGateway CreateGateway(JsonHandler handler)
     {
         return new MoodleParticipantsGateway(

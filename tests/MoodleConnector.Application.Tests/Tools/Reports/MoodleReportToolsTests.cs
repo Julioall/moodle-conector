@@ -43,8 +43,46 @@ public sealed class MoodleReportToolsTests
         Assert.NotNull(archive.GetEntry("xl/worksheets/sheet1.xml"));
     }
 
-    private static MoodleReportTools CreateTool(GenerateCourseGradesReportResult report) =>
-        new(new FakeMediator(report), new FakeSelection(), new FakeUserResolver());
+    [Fact]
+    public async Task Marca_freshness_live_quando_snapshot_nao_tem_heads()
+    {
+        var snapshot = new CourseReadSnapshot(
+            "101",
+            Activities: null,
+            Students: null,
+            Groups: null,
+            Submissions: null,
+            Gradebook: null,
+            new CourseReadSnapshotMetadata(
+                [MoodleSnapshotDatasets.Students, MoodleSnapshotDatasets.Gradebook],
+                [MoodleSnapshotDatasets.Students, MoodleSnapshotDatasets.Gradebook],
+                [],
+                [],
+                OldestUpdatedAt: null,
+                NewestUpdatedAt: null,
+                SkewSeconds: null,
+                IsComplete: false,
+                RefreshQueued: true));
+        var tool = CreateTool(CreateReport(), new FakeSnapshotCoordinator(snapshot));
+
+        var result = await tool.GerarRelatorioNotasCursoAsync("101");
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var freshness = structured.GetProperty("freshness");
+        Assert.Equal("live", freshness.GetProperty("source").GetString());
+        Assert.Equal(JsonValueKind.Null, freshness.GetProperty("snapshotAt").ValueKind);
+        Assert.Equal(0, freshness.GetProperty("recordCount").GetInt32());
+        Assert.True(freshness.GetProperty("refreshQueued").GetBoolean());
+    }
+
+    private static MoodleReportTools CreateTool(
+        GenerateCourseGradesReportResult report,
+        IMoodleCourseReadSnapshotCoordinator? snapshotCoordinator = null) =>
+        new(
+            new FakeMediator(report),
+            new FakeSelection(),
+            new FakeUserResolver(),
+            snapshotCoordinator: snapshotCoordinator);
 
     private static GenerateCourseGradesReportResult CreateReport() =>
         new(
@@ -69,6 +107,15 @@ public sealed class MoodleReportToolsTests
     {
         public Task<long?> ResolveMoodleUserIdAsync(CancellationToken cancellationToken) =>
             Task.FromResult<long?>(42);
+    }
+
+    private sealed class FakeSnapshotCoordinator(CourseReadSnapshot snapshot)
+        : IMoodleCourseReadSnapshotCoordinator
+    {
+        public Task<CourseReadSnapshot?> ReadAsync(
+            CourseReadSnapshotRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<CourseReadSnapshot?>(snapshot);
     }
 
     private sealed class FakeMediator(GenerateCourseGradesReportResult report) : IMediator

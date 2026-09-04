@@ -355,6 +355,7 @@ public sealed class MoodleReportTools(
         CourseParticipantsPage? prefetchedParticipants = null;
         var effectiveCourseId = courseId;
         ToolFreshness? freshness = null;
+        var freshnessWarnings = new List<string>();
         if (requirements != CourseReadSnapshotRequirements.None)
         {
             try
@@ -379,19 +380,40 @@ public sealed class MoodleReportTools(
                             prefetchedParticipants = participants;
                         }
 
-                        var updatedAt = courseRead.Metadata.OldestUpdatedAt;
-                        var recordCount = (courseRead.Students?.RecordCount ?? 0) +
-                            (courseRead.Gradebook?.RecordCount ?? 0);
-                        freshness = new ToolFreshness(
-                            "snapshot",
-                            updatedAt,
-                            updatedAt.HasValue
-                                ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
-                                : null,
-                            courseRead.Metadata.StaleDatasets.Count > 0,
-                            courseRead.Metadata.RefreshQueued,
-                            courseRead.Metadata.IsComplete,
-                            recordCount);
+                        var hasSnapshotData = prefetchedParticipants is not null ||
+                            prefetchedGradebook is not null;
+                        if (hasSnapshotData)
+                        {
+                            var updatedAt = courseRead.Metadata.OldestUpdatedAt;
+                            var recordCount = (courseRead.Students?.RecordCount ?? 0) +
+                                (courseRead.Gradebook?.RecordCount ?? 0);
+                            freshness = new ToolFreshness(
+                                "snapshot",
+                                updatedAt,
+                                updatedAt.HasValue
+                                    ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
+                                    : null,
+                                courseRead.Metadata.StaleDatasets.Count > 0,
+                                courseRead.Metadata.RefreshQueued,
+                                courseRead.Metadata.IsComplete,
+                                recordCount);
+                        }
+                        else
+                        {
+                            // A missing head triggers a live/bulk read below;
+                            // do not label that result as an empty snapshot.
+                            freshness = new ToolFreshness(
+                                "live",
+                                null,
+                                null,
+                                false,
+                                courseRead.Metadata.RefreshQueued,
+                                false,
+                                0);
+                        }
+
+                        freshnessWarnings.AddRange(courseRead.Metadata.IncompleteDatasets
+                            .Select(dataset => $"O snapshot '{dataset}' esta incompleto; a resposta pode combinar snapshot e leitura live."));
                     }
                 }
             }
@@ -410,7 +432,7 @@ public sealed class MoodleReportTools(
             return ToolResultHelper.Error<TResult>("Não foi possível gerar o relatório neste momento.");
         }
 
-        var response = new ToolResponse<TResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
+        var response = new ToolResponse<TResult>("ok", data, freshnessWarnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = narrate(data) }],

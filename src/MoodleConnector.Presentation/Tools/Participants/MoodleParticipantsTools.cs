@@ -509,6 +509,11 @@ public sealed class MoodleParticipantsTools(
             warnings.Add("O Moodle retornou participantes sem grupos; o curso pode nao usar grupos ou a informacao pode estar indisponivel.");
         }
 
+        if (diagnostics.UsedStatusFilterFallback)
+        {
+            warnings.Add("O Moodle nao autorizou o filtro de status; a populacao visivel foi usada e o status de matricula pode estar incompleto.");
+        }
+
         return warnings;
     }
 

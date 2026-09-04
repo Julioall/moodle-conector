@@ -65,29 +65,65 @@ internal sealed class MoodleParticipantsGateway(
         var excludedKnownStaffCount = 0;
         var hasEmptyRoles = false;
         var hasEmptyGroups = false;
+        var usedStatusFilterFallback = false;
 
         while (participants.Count < pageSize + 1)
         {
-            var moodleParticipants = await GetParticipantsBatchAsync(
-                credentials,
-                normalizedCourseId,
-                statusFilter,
-                includeEmail,
-                normalizedGroupId,
-                fetchOffset,
-                ParticipantFetchBatchSize,
-                cancellationToken);
+            IReadOnlyList<ParticipantDto> moodleParticipants;
+            var statusFilterApplied = true;
+            try
+            {
+                moodleParticipants = await GetParticipantsBatchAsync(
+                    credentials,
+                    normalizedCourseId,
+                    statusFilter,
+                    includeEmail,
+                    normalizedGroupId,
+                    fetchOffset,
+                    ParticipantFetchBatchSize,
+                    cancellationToken);
+            }
+            catch (MoodleApiException exception) when (
+                statusFilter != ParticipantStatusFilter.All &&
+                IsPermissionDenied(exception))
+            {
+                // Some Moodle roles can read the enrolled population but are
+                // denied the onlyactive/onlysuspended option. Retry the same
+                // page without that option and keep the limitation explicit.
+                usedStatusFilterFallback = true;
+                statusFilterApplied = false;
+                moodleParticipants = await GetParticipantsBatchAsync(
+                    credentials,
+                    normalizedCourseId,
+                    ParticipantStatusFilter.All,
+                    includeEmail,
+                    normalizedGroupId,
+                    fetchOffset,
+                    ParticipantFetchBatchSize,
+                    cancellationToken);
+            }
 
             if (moodleParticipants.Count == 0)
             {
                 break;
             }
 
-            foreach (var participant in moodleParticipants.Select(dto => ToParticipant(dto, includeEmail, statusFilter)))
+            foreach (var participant in moodleParticipants.Select(dto => ToParticipant(
+                dto,
+                includeEmail,
+                statusFilter,
+                statusFilterApplied)))
             {
                 evaluatedCount++;
                 hasEmptyRoles |= participant.Roles.Count == 0;
                 hasEmptyGroups |= participant.Groups.Count == 0;
+
+                if (!statusFilterApplied &&
+                    (statusFilter == ParticipantStatusFilter.Active && participant.Suspended == true ||
+                     statusFilter == ParticipantStatusFilter.Suspended && participant.Suspended != true))
+                {
+                    continue;
+                }
 
                 var classification = ParticipantClassification.Classify(participant);
                 if (studentsOnly && classification == ParticipantClassificationKind.KnownStaff)
@@ -159,7 +195,8 @@ internal sealed class MoodleParticipantsGateway(
                 ResolveClassificationMode(
                     evaluatedCount,
                     includedByStudentRoleCount,
-                    includedByFallbackCount)));
+                    includedByFallbackCount),
+                usedStatusFilterFallback));
     }
 
     private async Task<CourseParticipantsPage> GetParticipantsAcrossEnrollmentStatusesAsync(
@@ -174,6 +211,7 @@ internal sealed class MoodleParticipantsGateway(
     {
         var active = await ReadAllPagesForStatusAsync(
             userExternalId, courseId, ParticipantStatusFilter.Active, studentsOnly, includeEmail, groupId, cancellationToken);
+
         var suspended = await ReadAllPagesForStatusAsync(
             userExternalId, courseId, ParticipantStatusFilter.Suspended, studentsOnly, includeEmail, groupId, cancellationToken);
 
@@ -261,7 +299,8 @@ internal sealed class MoodleParticipantsGateway(
             diagnostics.Sum(item => item.ExcludedKnownStaffCount),
             diagnostics.Any(item => item.HasEmptyRoles),
             diagnostics.Any(item => item.HasEmptyGroups),
-            ResolveClassificationMode(evaluated, roleBased, fallback));
+            ResolveClassificationMode(evaluated, roleBased, fallback),
+            diagnostics.Any(item => item.UsedStatusFilterFallback));
     }
 
     public async Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(
@@ -429,7 +468,8 @@ internal sealed class MoodleParticipantsGateway(
     private static CourseParticipantSummary ToParticipant(
         ParticipantDto dto,
         bool includeEmail,
-        ParticipantStatusFilter requestedStatus)
+        ParticipantStatusFilter requestedStatus,
+        bool statusFilterApplied = true)
     {
         var reportedSuspended = ToBool(dto.Suspended);
         // onlyactive/onlysuspended are course-enrolment filters and therefore
@@ -437,7 +477,8 @@ internal sealed class MoodleParticipantsGateway(
         var suspended = requestedStatus switch
         {
             ParticipantStatusFilter.Active => reportedSuspended ?? false,
-            ParticipantStatusFilter.Suspended => reportedSuspended ?? true,
+            ParticipantStatusFilter.Suspended when statusFilterApplied => reportedSuspended ?? true,
+            ParticipantStatusFilter.Suspended => reportedSuspended,
             _ => reportedSuspended
         };
 
