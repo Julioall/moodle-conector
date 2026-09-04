@@ -1,4 +1,4 @@
 interface:
   display_name: "Moodle Grading"
-  short_description: "Review and confirm Moodle grade changes"
-  default_prompt: "Use $moodle-grading to read grades, prepare grading review, or execute a human-confirmed Moodle grade change."
+  short_description: "Generate grading corrections as CSV"
+  default_prompt: "Use $moodle-grading to read submissions, generate grades and feedback, and export a CSV without changing Moodle."

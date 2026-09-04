@@ -1,11 +1,11 @@
 ---
 name: moodle-grading
-description: Ler notas, descobrir capabilities de correcao, preparar revisao assistida, editar rascunhos, gerar previas e confirmar lancamentos de nota com auditoria.
+description: Ler notas, descobrir capabilities de correcao, gerar notas e feedbacks assistidos e exportar correcoes para CSV sem publicar alteracoes no Moodle.
 ---
 
 # moodle-grading
 
-Separe leitura, preparacao, revisao e escrita. A decisao pedagogica permanece humana.
+Separe leitura, preparacao e exportacao. A decisao pedagogica permanece humana e o Moodle nao e alterado por este fluxo.
 
 ## Leitura e descoberta
 
@@ -14,15 +14,10 @@ Separe leitura, preparacao, revisao e escrita. A decisao pedagogica permanece hu
 - Submissao vem de `moodle-assignments`; identidade vem de `moodle-students`; orientacao de avaliacao vem de `moodle-pedagogy`.
 - Antes de propor nota, aplique `references/grading-evidence-matrix.md` e mantenha estados de extracao, cobertura e incerteza visiveis.
 
-## Correcao assistida
+## Geracao de Correcoes (CSV)
 
 1. Crie o lote limitado com estudantes, tarefas, criterios e valores propostos.
-2. Use `prepare_ai_grading_batch`/`save_ai_grading_batch`, `update_grading_draft` ou `update_grading_drafts_batch` apenas para o estado de revisao definido pelo produto.
-3. Revise com `review_batch_feedbacks`, `get_batch_grading_ui_state`, `get_assisted_grading_item` e os auditores do lote.
-4. Exporte `export_grading_coordination_report` quando necessario.
-
-## Escrita Moodle
-
-Use `create_batch_grade_launch_preview` ou o fluxo individual `prepare_individual_grade_launch`, depois confirme com `confirm_batch_grade_launch` ou `confirm_individual_grade_launch`. A confirmacao exige pending action vigente, hash/contagem/escopo da previa, texto literal, mesmo usuario/conexao, `CanWrite`, escopo `moodle.write`, capability `mod_assign_save_grade`, feature flag e auditoria.
-
-Nunca execute `mod_assign_save_grade` por `moodle_execute_read`, nunca substitua revisao humana por decisao do modelo e reporte sucesso parcial/falha por item sem declarar lote completo.
+2. Use `prepare_ai_grading_batch` (ou `prepare_submission_grading` para um item) para obter o contexto e gerar nota/feedback no chat.
+3. Use `save_ai_grading_batch` para persistir somente os rascunhos locais.
+4. Use `export_grading_corrections_csv` para retornar o CSV UTF-8 separado por ponto e virgula com as colunas `nome`, `nota`, `feedback` e `situacao`.
+5. Nao utilize `review_batch_feedbacks`, `create_batch_grade_launch_preview`, `confirm_batch_grade_launch` ou qualquer fluxo de envio ao Moodle. O CSV e a saida final deste fluxo.

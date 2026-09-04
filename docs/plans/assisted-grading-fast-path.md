@@ -2,6 +2,11 @@
 
 Referência: [SPEC-0024](../specs/spec-0024-assisted-grading-fast-path.md).
 
+> Decisão vigente: o caminho operacional de correção assistida termina após gerar e salvar
+> os rascunhos e exportar `export_grading_corrections_csv`. A UI, a prévia, a confirmação e o
+> envio do lote permanecem apenas como código legado não registrado no MCP; as etapas abaixo
+> que tratam de publicação não fazem parte deste caminho.
+
 ## Resultado esperado
 
 Entregar uma correção assistida que consulte o Moodle apenas nas fronteiras necessárias e

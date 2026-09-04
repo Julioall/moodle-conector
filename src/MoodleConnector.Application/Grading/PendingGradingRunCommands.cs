@@ -12,8 +12,8 @@ namespace MoodleConnector.Application.Grading;
 
 /// <summary>
 /// Inicia a preparacao de correcoes pendentes em todos os cursos acessiveis.
-/// Cada curso recebe um sublote proprio para preservar a revisao e o escopo
-/// de confirmacao de escrita no Moodle.
+/// Cada curso recebe um sublote proprio para preservar o escopo de processamento
+/// e permitir uma exportacao CSV independente por lote.
 /// </summary>
 public sealed record StartPendingGradingRunCommand(
     string UserExternalId,
@@ -276,7 +276,7 @@ public sealed class StartPendingGradingRunCommandHandler(
             Warnings: warnings,
             NextStep: batches.Count == 0
                 ? "Nao ha entregas pendentes elegiveis para iniciar a correcao. Consulte os cursos com falha para ajuste manual."
-                : "Para cada batchJobId, prepare o pacote de IA, gere os rascunhos, revise-os com o professor e confirme o lancamento no Moodle. Ao final, use export_pending_grading_run_report com todos os batchJobIds para obter a lista consolidada de corrigidos e nao corrigidos.");
+                : "Para cada batchJobId, prepare o pacote de IA, gere nota e feedback, salve os rascunhos e use export_grading_corrections_csv para receber o CSV. Nao chame ferramentas de revisao, confirmacao ou envio ao Moodle.");
     }
 
     private async Task<IReadOnlyList<CourseSummary>> LoadCoursesFromSnapshotAsync(

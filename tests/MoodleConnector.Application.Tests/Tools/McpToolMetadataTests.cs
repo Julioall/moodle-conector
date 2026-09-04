@@ -29,7 +29,7 @@ public sealed class McpToolMetadataTests
                 "confirm_recovery_message" or "confirm_closing_message" or "confirm_followup_message" or
                 "manage_user_memory" or "save_user_memory_document" or "remove_user_memory_document" or
                 "cancel_assisted_grading_batch" or "update_grading_draft" or "update_grading_drafts_batch" or
-                "save_ai_grading_batch" or "moodle_confirm_write")
+                "moodle_confirm_write")
             {
                 Assert.True(attribute.Destructive, $"{toolName} deve declarar Destructive=true.");
             }

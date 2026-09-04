@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using ModelContextProtocol.Server;
+using MoodleConnector.Application.Grading;
 using MoodleConnector.Presentation.Tools.Grading;
 using Xunit;
 
@@ -34,7 +35,7 @@ public sealed class FeedbackOnlyToolContractTests
     }
 
     [Fact]
-    public void PrepareAndPreview_FeedbackOnlyGradesAreNullableInOutputSchemas()
+    public void PrepareAndExport_FeedbackOnlyGradesAreNullableInOutputSchemas()
     {
         var batchSchema = RequireOutputSchema(CreateTool(nameof(MoodleGradingTools.PrepararLoteCorrecaoIaAsync)));
         var batchItem = batchSchema["properties"]?["data"]?["properties"]?["items"]?["items"];
@@ -46,9 +47,26 @@ public sealed class FeedbackOnlyToolContractTests
             individualSchema,
             "data.maxGrade");
 
-        var previewSchema = RequireOutputSchema(CreateTool(nameof(MoodleGradingTools.CriarPreviaLancamentoLoteAsync)));
-        var launchItem = previewSchema["properties"]?["data"]?["properties"]?["launches"]?["items"];
-        AssertAllowsNull(launchItem?["properties"]?["grade"], previewSchema, "data.launches[].grade");
+        var exportSchema = RequireOutputSchema(CreateTool(nameof(MoodleGradingTools.ExportarCorrecoesCsvAsync)));
+        Assert.NotNull(exportSchema["properties"]?["data"]?["properties"]?["fileName"]);
+    }
+
+    [Fact]
+    public void ExportCsv_EscapesFieldsAndUsesBrazilianDecimalFormat()
+    {
+        var csv = MoodleGradingTools.BuildCorrectionsCsv(
+        [
+            new GradingCorrectionsCsvRow(
+                "Ana; Silva",
+                7.5m,
+                $"Bom \"trabalho\"{Environment.NewLine}Continue assim",
+                "gerado"),
+            new GradingCorrectionsCsvRow("Bruno", null, null, "pendente")
+        ]);
+
+        Assert.StartsWith("nome;nota;feedback;situacao", csv, StringComparison.Ordinal);
+        Assert.Contains($"\"Ana; Silva\";7,5;\"Bom \"\"trabalho\"\"{Environment.NewLine}Continue assim\";\"gerado\"", csv, StringComparison.Ordinal);
+        Assert.Contains($"\"Bruno\";;\"\";\"pendente\"", csv, StringComparison.Ordinal);
     }
 
     private static McpServerTool CreateTool(string methodName)

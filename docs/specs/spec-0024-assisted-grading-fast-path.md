@@ -4,6 +4,11 @@
 
 Implementação concluída; homologação de desempenho e rollout pendentes.
 
+> A implementação atual aplica uma decisão posterior de produto: o caminho rápido exposto ao
+> MCP termina em `export_grading_corrections_csv` e não publica notas/feedbacks no Moodle.
+> As referências desta especificação a revisão UI, prévia e confirmação descrevem o desenho
+> legado e não devem ser usadas para iniciar esse fluxo.
+
 ## Objetivo
 
 Reduzir a latência e a fragilidade de rede da correção assistida sem remover seus guardrails

@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using MediatR;
@@ -17,6 +19,31 @@ using MoodleConnector.Presentation.Tools;
 using MoodleConnector.Presentation.Configuration;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
+
+public sealed record GradingCorrectionsCsvExportResult(
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("generatedAt")] DateTimeOffset GeneratedAt,
+    [property: JsonPropertyName("fileName")] string FileName,
+    [property: JsonPropertyName("contentType")] string ContentType,
+    [property: JsonPropertyName("fileSizeBytes")] long FileSizeBytes,
+    [property: JsonPropertyName("totalItems")] int TotalItems,
+    [property: JsonPropertyName("generatedItems")] int GeneratedItems,
+    [property: JsonPropertyName("pendingItems")] int PendingItems,
+    [property: JsonPropertyName("blockedItems")] int BlockedItems,
+    [property: JsonPropertyName("columns")] IReadOnlyList<string> Columns);
+
+[AttributeUsage(AttributeTargets.Method)]
+internal sealed class McpServerToolDisabledAttribute : Attribute
+{
+    public string? Name { get; set; }
+    public string? Title { get; set; }
+    public bool ReadOnly { get; set; }
+    public bool Destructive { get; set; }
+    public bool Idempotent { get; set; }
+    public bool OpenWorld { get; set; }
+    public bool UseStructuredContent { get; set; }
+    public Type? OutputSchemaType { get; set; }
+}
 
 [McpServerToolType]
 public sealed class MoodleGradingTools(
@@ -216,7 +243,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<StartPendingGradingRunResult>))]
-    [Description("Inicia o fluxo de correcao de entregas pendentes. Quando courseId for informado, limita toda a descoberta e os sublotes a esse curso; quando omitido, percorre os cursos acessiveis. Nao gera nota nem escreve no Moodle. Para cada batchJobId retornado, prepare a IA, salve rascunhos, revise com o professor e confirme o lancamento. Ao final use export_pending_grading_run_report com todos os batchJobIds.")]
+    [Description("Inicia o fluxo de correcao de entregas pendentes. Quando courseId for informado, limita toda a descoberta e os sublotes a esse curso; quando omitido, percorre os cursos acessiveis. Nao escreve no Moodle. Para cada batchJobId retornado, prepare o pacote IA, gere nota e feedback, salve os rascunhos e use export_grading_corrections_csv para receber o CSV final. Nao chame ferramentas de revisao, confirmacao ou envio.")]
     public Task<CallToolResult> IniciarFluxoCorrecaoPendentesAsync(
         [Description("Identificador opcional do curso a processar. Quando informado, nenhum outro curso e consultado.")]
         string? courseId = null,
@@ -273,7 +300,7 @@ public sealed class MoodleGradingTools(
         return GetBatchStatusCoreAsync(batchJobId, pagina, tamanhoPagina, cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "export_grading_coordination_report",
         Title = "Export Grading Coordination Report",
         ReadOnly = true,
@@ -291,7 +318,7 @@ public sealed class MoodleGradingTools(
         return GetCoordinationReportCoreAsync(batchJobId, cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "export_pending_grading_run_report",
         Title = "Export Pending Grading Run Report",
         ReadOnly = true,
@@ -347,7 +374,7 @@ public sealed class MoodleGradingTools(
         };
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "cancel_assisted_grading_batch",
         Title = "Cancel Assisted Grading Batch",
         ReadOnly = false,
@@ -365,7 +392,7 @@ public sealed class MoodleGradingTools(
         return CancelBatchCoreAsync(batchJobId, cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "get_assisted_grading_item",
         Title = "Get Assisted Grading Item",
         ReadOnly = true,
@@ -385,7 +412,7 @@ public sealed class MoodleGradingTools(
         return GetGradingItemCoreAsync(gradingItemId, batchJobId, cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "update_grading_draft",
         Title = "Update Grading Draft",
         ReadOnly = false,
@@ -423,7 +450,7 @@ public sealed class MoodleGradingTools(
             cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "update_grading_drafts_batch",
         Title = "Update Grading Drafts Batch",
         ReadOnly = false,
@@ -491,7 +518,7 @@ public sealed class MoodleGradingTools(
         };
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "create_batch_grade_launch_preview",
         Title = "Create Batch Grade Launch Preview",
         ReadOnly = false,
@@ -520,7 +547,7 @@ public sealed class MoodleGradingTools(
             cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "confirm_batch_grade_launch",
         Title = "Confirm Batch Grade Launch",
         ReadOnly = false,
@@ -540,7 +567,7 @@ public sealed class MoodleGradingTools(
         return ConfirmLaunchCoreAsync(pendingActionId, confirmationText, cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "get_grading_audit",
         Title = "Get Grading Audit",
         ReadOnly = true,
@@ -562,7 +589,7 @@ public sealed class MoodleGradingTools(
         return GetAuditCoreAsync(auditId, pagina, tamanhoPagina, cancellationToken);
     }
 
-    [McpServerTool(
+    [McpServerToolDisabled(
         Name = "get_grading_batch_audit",
         Title = "Get Grading Batch Audit",
         ReadOnly = true,
@@ -597,7 +624,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
-    [Description("Retorna o pacote estruturado de um lote para correcao via IA: textos extraidos das entregas, enunciado, criterios e nota maxima por aluno. Use apos criar_lote_correcao_assistida para obter o contexto completo e gerar nota e feedback no chat. Nao escreve no Moodle.")]
+    [Description("Retorna o pacote estruturado de um lote para correcao via IA: textos extraidos das entregas, enunciado, criterios e nota maxima por aluno. Use apos criar_lote_correcao_assistida para obter o contexto completo, gerar nota e feedback no chat, salvar os resultados e exportar o CSV. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
         [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
         Guid batchJobId,
@@ -657,12 +684,12 @@ public sealed class MoodleGradingTools(
         Name = "save_ai_grading_batch",
         Title = "Save AI Grading Batch",
         ReadOnly = false,
-        Destructive = true,
+        Destructive = false,
         Idempotent = true,
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<SaveAiGradingBatchResult>))]
-    [Description("Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote. Nao escreve no Moodle. OBRIGATORIO: apos salvar, sempre chame revisar_feedbacks_lote para exibir a interface de revisao humana. Nunca pule a revisao.")]
+    [Description("Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote. Nao escreve no Moodle. Apos salvar, chame export_grading_corrections_csv para receber o arquivo com nome, nota, feedback e situacao. Nao chame revisar_feedbacks_lote nem ferramentas de confirmacao ou envio.")]
     public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
         [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
         Guid batchJobId,
@@ -717,6 +744,92 @@ public sealed class MoodleGradingTools(
             StructuredContent = JsonSerializer.SerializeToElement(response),
             // Falhas de itens são reportadas em warnings/updatedItems para o
             // cliente reconciliar, sem virar RuntimeException no bridge MCP.
+            IsError = false
+        };
+    }
+
+    [McpServerTool(
+        Name = "export_grading_corrections_csv",
+        Title = "Export Grading Corrections CSV",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<GradingCorrectionsCsvExportResult>))]
+    [Description("Gera e entrega um CSV UTF-8 com as correcoes do lote local: nome, nota, feedback e situacao. Use apos salvar_correcoes_ia_lote. Esta ferramenta somente le rascunhos locais e nunca confirma nem envia dados ao Moodle.")]
+    public async Task<CallToolResult> ExportarCorrecoesCsvAsync(
+        [Description("Identificador do lote retornado por criar_lote_correcao_assistida ou iniciar_fluxo_correcao_pendentes.")]
+        Guid batchJobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return ToolResultHelper.Error<GradingCorrectionsCsvExportResult>("Informe um identificador de lote valido.");
+        }
+
+        GradingCorrectionsCsvResult data;
+        try
+        {
+            data = await mediator.Send(
+                new GetGradingCorrectionsCsvQuery(batchJobId),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolResultHelper.Error<GradingCorrectionsCsvExportResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ToolResultHelper.Error<GradingCorrectionsCsvExportResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<GradingCorrectionsCsvExportResult>("Nao foi possivel gerar o CSV de correcoes neste momento.");
+        }
+
+        var generatedAt = data.GeneratedAt;
+        var fileName = $"correcoes_{data.BatchJobId:N}_{generatedAt:yyyyMMdd-HHmmss}.csv";
+        var contentType = "text/csv; charset=utf-8";
+        var csvBytes = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true)
+            .GetBytes(BuildCorrectionsCsv(data.Rows));
+        var export = new GradingCorrectionsCsvExportResult(
+            data.BatchJobId,
+            generatedAt,
+            fileName,
+            contentType,
+            csvBytes.LongLength,
+            data.TotalItems,
+            data.GeneratedItems,
+            data.PendingItems,
+            data.BlockedItems,
+            ["nome", "nota", "feedback", "situacao"]);
+        var response = new ToolResponse<GradingCorrectionsCsvExportResult>(
+            "ok",
+            export,
+            [],
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+        var resource = BlobResourceContents.FromBytes(
+            csvBytes,
+            $"mcp://moodle-connector/grading-corrections/{Guid.NewGuid():N}/{fileName}",
+            contentType);
+
+        return new CallToolResult
+        {
+            Content =
+            [
+                new TextContentBlock
+                {
+                    Text = $"CSV de correcoes gerado: {fileName} ({data.GeneratedItems} gerada(s), {data.PendingItems} pendente(s), {data.BlockedItems} bloqueada(s))."
+                },
+                new EmbeddedResourceBlock { Resource = resource }
+            ],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
     }
@@ -2216,12 +2329,12 @@ public sealed class MoodleGradingTools(
     {
         var suffix = response.HasMore ? " Ha mais itens para consultar." : string.Empty;
         var metrics = response.ProcessingMetrics;
-        var canLaunchNote = metrics.CanLaunch ? " Pronto para lancamento." : string.Empty;
+        var canExportNote = metrics.CanLaunch ? " Ha itens prontos para exportacao." : string.Empty;
         var awaitingAiCount = response.Items.Count(item => item.Status == "AwaitingAiAnalysis");
         var awaitingAiNote = awaitingAiCount > 0
-            ? $" {awaitingAiCount} item(ns) aguardam analise da IA. Use preparar_lote_correcao_ia para gerar nota e feedback."
+            ? $" {awaitingAiCount} item(ns) aguardam analise da IA. Use prepare_ai_grading_batch para gerar nota e feedback."
             : string.Empty;
-        return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is). Prontos: {response.ReadyItems}, bloqueados: {response.BlockedItems}, falhos: {response.FailedItems}, progresso: {metrics.ProgressPercent}%.{awaitingAiNote}{canLaunchNote}{suffix}";
+        return $"Lote {response.BatchJobId}: status {response.Status}, {response.Items.Count} item(ns) nesta pagina de {response.TotalItems} total(is). Prontos: {response.ReadyItems}, bloqueados: {response.BlockedItems}, falhos: {response.FailedItems}, progresso: {metrics.ProgressPercent}%.{awaitingAiNote}{canExportNote}{suffix}";
     }
 
     private static string BuildCoordinationReportNarration(AssistedGradingCoordinationReportResult response)
@@ -2342,6 +2455,28 @@ public sealed class MoodleGradingTools(
         }
         return sb.ToString();
     }
+
+    internal static string BuildCorrectionsCsv(IReadOnlyList<GradingCorrectionsCsvRow> rows)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("nome;nota;feedback;situacao");
+        foreach (var row in rows)
+        {
+            builder.Append(CsvField(row.Nome));
+            builder.Append(';');
+            builder.Append(row.Nota?.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR")) ?? string.Empty);
+            builder.Append(';');
+            builder.Append(CsvField(row.Feedback));
+            builder.Append(';');
+            builder.Append(CsvField(row.Situacao));
+            builder.AppendLine();
+        }
+
+        return builder.ToString();
+    }
+
+    private static string CsvField(string? value) =>
+        $"\"{(value ?? string.Empty).Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
 
 
 

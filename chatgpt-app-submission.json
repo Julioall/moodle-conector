@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Moodle Connector",
     "subtitle": "Moodle course tools",
-    "description": "Moodle Connector helps authorized educators and academic teams search Moodle courses, inspect participants, activities, submissions, grades, completion data, student risk signals, and assisted grading workflows through ChatGPT. Write workflows use private previews, pending actions, and explicit confirmation before committing grade or feedback changes to Moodle.",
+    "description": "Moodle Connector helps authorized educators and academic teams search Moodle courses, inspect participants, activities, submissions, grades, completion data, student risk signals, and generate assisted-grading corrections as local CSV files. Assisted grading stops after generating and saving feedback and notes locally; it does not confirm or send grade changes to Moodle.",
     "category": "EDUCATION"
   },
   "tools": {
@@ -36,20 +36,6 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
-    "cancel_assisted_grading_batch": {
-      "annotations": {
-        "title": "Cancel Assisted Grading Batch",
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
-      }
-    },
     "confirm_access_reminder": {
       "annotations": {
         "title": "Confirm Access Reminder",
@@ -69,20 +55,6 @@
         "title": "Confirm Activity Reminder",
         "destructiveHint": true,
         "idempotentHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
-      }
-    },
-    "confirm_batch_grade_launch": {
-      "annotations": {
-        "title": "Confirm Batch Grade Launch",
-        "destructiveHint": true,
-        "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false
       },
@@ -190,20 +162,6 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
-    "create_batch_grade_launch_preview": {
-      "annotations": {
-        "title": "Create Batch Grade Launch Preview",
-        "destructiveHint": false,
-        "idempotentHint": false,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
     "create_forum_post_preview": {
       "annotations": {
         "title": "Create Forum Post Preview",
@@ -232,23 +190,9 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
-    "export_grading_coordination_report": {
+    "export_grading_corrections_csv": {
       "annotations": {
-        "title": "Export Grading Coordination Report",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
-    "export_pending_grading_run_report": {
-      "annotations": {
-        "title": "Export Pending Grading Run Report",
+        "title": "Export Grading Corrections CSV",
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
@@ -372,34 +316,6 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
-    "get_assisted_grading_item": {
-      "annotations": {
-        "title": "Get Assisted Grading Item",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
-    "get_batch_grading_ui_state": {
-      "annotations": {
-        "title": "Get Batch Grading UI State",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
     "get_course": {
       "annotations": {
         "title": "Get Course",
@@ -431,34 +347,6 @@
     "get_course_module": {
       "annotations": {
         "title": "Get Course Module",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
-    "get_grading_audit": {
-      "annotations": {
-        "title": "Get Grading Audit",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
-    "get_grading_batch_audit": {
-      "annotations": {
-        "title": "Get Grading Batch Audit",
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
@@ -1226,24 +1114,10 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
-    "review_batch_feedbacks": {
-      "annotations": {
-        "title": "Review Batch Feedbacks",
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
-      }
-    },
     "save_ai_grading_batch": {
       "annotations": {
         "title": "Save AI Grading Batch",
-        "destructiveHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false
@@ -1251,7 +1125,7 @@
       "justifications": {
         "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
         "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
     "save_user_memory_document": {
@@ -1309,34 +1183,6 @@
         "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
-    },
-    "update_grading_draft": {
-      "annotations": {
-        "title": "Update Grading Draft",
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
-      }
-    },
-    "update_grading_drafts_batch": {
-      "annotations": {
-        "title": "Update Grading Drafts Batch",
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
-        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
-        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
-      }
     }
   },
   "test_cases": [
@@ -1373,11 +1219,11 @@
       "expected_output_url": null
     },
     {
-      "description": "Prepare a human-confirmed Moodle grade and feedback launch preview.",
-      "user_prompt": "Create a launch preview for reviewed feedback in assisted grading batch 00000000-0000-0000-0000-000000000001.",
+      "description": "Generate an assisted-grading CSV with names, grades, feedback, and status without publishing changes to Moodle.",
+      "user_prompt": "Generate the assisted-grading CSV for batch 00000000-0000-0000-0000-000000000001.",
       "file_attachment_urls": null,
-      "tools_triggered": "create_batch_grade_launch_preview",
-      "expected_output": "Returns a pending action preview with ready item counts, warnings if any, and exact confirmation text required before Moodle is changed.",
+      "tools_triggered": "export_grading_corrections_csv",
+      "expected_output": "Returns a UTF-8 semicolon-delimited CSV with name, grade, feedback, and status; no Moodle grade or feedback changes are sent.",
       "expected_output_url": null
     }
   ],

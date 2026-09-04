@@ -2171,7 +2171,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             }
             else
             {
-                warnings.Add("Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
+                warnings.Add("Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada; sinalize a situacao no CSV para ajuste manual.");
             }
 
             // Override assignmentName with the real Moodle name when available
@@ -2186,7 +2186,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         }
         catch
         {
-            warnings.Add("Falha ao buscar nota maxima via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
+            warnings.Add("Falha ao buscar nota maxima via API Moodle. Sugestao numerica bloqueada; sinalize a situacao no CSV para ajuste manual.");
         }
 
         // Critérios extraídos (se existirem do processamento anterior)
@@ -2199,7 +2199,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             ? $"A nota maxima desta atividade e {knownMax} pontos. Sugira uma nota de 0 a {knownMax}."
             : isGradable == false
                 ? "Esta atividade nao possui avaliacao numerica no Moodle. Produza somente feedback qualitativo e nao sugira nota."
-            : "A escala de notas desta atividade nao foi confirmada. Nao sugira nem calcule nota numerica; produza somente feedback qualitativo e sinalize a necessidade de confirmacao manual.";
+            : "A escala de notas desta atividade nao foi confirmada. Nao sugira nem calcule nota numerica; produza somente feedback qualitativo e sinalize a situacao no CSV para ajuste manual.";
         var instructions = AiGradingPromptPolicy.AppendUntrustedEvidenceRules(
             $"Voce e um tutor educacional. Analise a entrega do aluno comparando com o enunciado da atividade. " +
             gradeInstruction + " " +
@@ -2209,7 +2209,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             (maxGrade is not null ? "3) Sugira uma nota somente dentro da escala confirmada. " : "3) Nao inclua nota numerica. ") +
             $"O feedback deve ser adequado para colar diretamente no Moodle. " +
             $"Nao exija saudacao nominal: este contexto fornece apenas studentId, que nao e um nome. " +
-            $"Apos gerar, apresente ao tutor para revisao antes de salvar.");
+            $"Apos gerar, use salvar_correcoes_ia_lote para salvar o rascunho e export_grading_corrections_csv para receber o CSV. Nao use ferramentas de revisao, confirmacao ou envio ao Moodle.");
 
         return new GradingContextForChatResult(
             item.Id,
@@ -2449,7 +2449,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             {
                 itemWarnings.Add(isGradable == false
                     ? "Atividade sem avaliacao numerica no Moodle. Gere somente feedback, sem nota."
-                    : "Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada ate confirmar a escala.");
+                    : "Nota maxima nao encontrada via API Moodle. Sugestao numerica bloqueada; sinalize a situacao no CSV para ajuste manual.");
             }
 
             packageItems.Add(new AiGradingBatchItemPackage(
@@ -2492,7 +2492,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
-            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida SEMPRE chame revisar_feedbacks_lote para que o professor revise e edite os feedbacks na interface antes de lancar. Nunca pule a revisao.");
+            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida chame export_grading_corrections_csv para receber o CSV com nome, nota, feedback e situacao. Nao chame revisar_feedbacks_lote, ferramentas de confirmacao ou envio ao Moodle.");
 
         var result = new AiGradingBatchPackageResult(
             batch.Id,
@@ -2524,8 +2524,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         "Blocked" => "bloqueado(s)",
         "Failed" => "falho(s)",
         "Pending" => "aguardando processamento",
-        "DraftReady" => "com rascunho para revisao",
-        "ReadyToCommit" => "aguardando lancamento",
+        "DraftReady" => "com rascunho pronto para CSV",
+        "ReadyToCommit" => "pronto para CSV",
         "Committed" => "ja lancado(s) no Moodle",
         _ => status
     };
@@ -2923,12 +2923,12 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     confidence: proposal?.Confidence ?? LegacyAiProposalConfidence,
                     draftFeedback: proposal?.Feedback ?? input.Feedback,
                     privateNotesToTeacher: proposal is null && input.Nota is null
-                        ? "Proposta IA legada sem evidencias ou confianca calculada; escala numerica nao confirmada. Revisao humana e confirmacao da escala obrigatorias."
+                        ? "Proposta IA legada sem evidencias ou confianca calculada; escala numerica nao confirmada. Revise a escala no CSV antes de qualquer uso posterior."
                         : proposal is null
-                            ? "Proposta IA legada sem evidencias ou confianca calculada. Revisao humana obrigatoria antes do lancamento."
+                            ? "Proposta IA legada sem evidencias ou confianca calculada. Revise o resultado no CSV antes de qualquer uso posterior."
                             : proposal.ReviewRequired
-                                ? $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao humana: {string.Join(", ", proposal.UncertaintyReasons)}."
-                                : $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao humana antes do lancamento.",
+                                ? $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao manual no CSV: {string.Join(", ", proposal.UncertaintyReasons)}."
+                                : $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao manual no CSV antes de qualquer uso posterior.",
                     maxGrade: maxGrade);
 
                 savedCount++;
@@ -2965,7 +2965,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
             CorrelationId = $"grading-batch-{batch.Id:N}",
             BatchJobId = batch.Id,
             ToolName = "salvar_correcoes_ia_lote",
-            RiskLevel = ToolRiskLevel.HumanConfirmedWrite,
+            RiskLevel = ToolRiskLevel.DraftOnly,
             ActorSubject = currentUser.Subject,
             ActorEmail = currentUser.Email,
             ActorMoodleUserId = moodleUserId,
@@ -2994,7 +2994,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
             request.Items.Count,
             warnings,
             NextStep: savedCount > 0
-                ? "IMPORTANTE: agora chame revisar_feedbacks_lote para exibir a interface de revisao ao professor. O professor precisa revisar e editar nota e feedback antes do lancamento. Nunca pule esta etapa."
+                ? "Agora chame export_grading_corrections_csv para receber o CSV com nome, nota, feedback e situacao. O lote permanece apenas como rascunho local e nao sera enviado ao Moodle."
                 : "Nenhum item foi salvo. Verifique os avisos.",
             updatedItems);
         telemetry?.RecordPhase(

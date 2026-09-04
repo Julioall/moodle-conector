@@ -15,7 +15,7 @@ using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Presentation.Tools.Grading;
 
-[McpServerToolType]
+// [McpServerToolType] Disabled to avoid showing confirmation UI
 public sealed class MoodleGradingReviewAppTools(
     IMediator mediator,
     IGradingOperationTelemetry? telemetry = null)

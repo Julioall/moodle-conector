@@ -36,6 +36,7 @@ public static class ChatGptSubmissionToolCatalog
         var assignmentWrites = new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true };
         var contracts = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(featureOptions, assignmentWrites))
+            .Where(container => container.GetCustomAttribute<McpServerToolTypeAttribute>() is not null)
             .SelectMany(container => container.GetMethods())
             .SelectMany(method => method.GetCustomAttributes(typeof(McpServerToolAttribute), inherit: true)
                 .Cast<McpServerToolAttribute>())

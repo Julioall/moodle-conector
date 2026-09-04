@@ -565,7 +565,6 @@ var mcpServerBuilder = builder.Services
             // Post-process remaining tools for metadata and security schemes
             foreach (var tool in result.Tools)
             {
-                AddGradingReviewToolMetadata(tool);
 
                 if (security.RequireJwt)
                 {
@@ -582,7 +581,6 @@ var mcpServerBuilder = builder.Services
 // The same explicit catalog drives MCP registration and metadata registration.
 mcpServerBuilder
     .WithTools((IEnumerable<Type>)RegisteredMcpToolContainers.All, JsonSerializerOptions.Default)
-    .WithResources<MoodleGradingReviewAppResources>()
     .WithResources<MoodleSubmissionResources>();
 
 // ToolMetadataRegistry was pre-populated and registered above; do not build temporary providers here.
@@ -2703,19 +2701,6 @@ static JsonArray CreateOAuthSecuritySchemesNode(IEnumerable<string> requiredScop
             ["scopes"] = scopes
         }
     };
-}
-
-static void AddGradingReviewToolMetadata(ModelContextProtocol.Protocol.Tool tool)
-{
-    if (!string.Equals(tool.Name, MoodleGradingReviewAppMetadata.ToolName, StringComparison.Ordinal))
-    {
-        return;
-    }
-
-    tool.Meta ??= new JsonObject();
-    var toolMeta = MoodleGradingReviewAppMetadata.CreateToolMeta();
-    tool.Meta["ui"] = toolMeta["ui"]?.DeepClone();
-    tool.Meta["openai/outputTemplate"] = MoodleGradingReviewAppMetadata.ResourceUri;
 }
 
 static string BuildMcpOauthAuthenticateChallenge(

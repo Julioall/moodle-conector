@@ -1,6 +1,6 @@
 # Catálogo de Tools MCP
 
-Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`. O catálogo completo possui 136 tools; `Production` expõe 130 com flags condicionais de escrita habilitadas, ocultando cinco tools de diagnóstico técnico por `ExposureStatus=Diagnostic`. O perfil `Full` mantém todas as tools registradas para suporte e migração.
+Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`. O caminho de correção assistida termina na geração de um CSV local; as ferramentas de revisão, prévia, confirmação, auditoria e envio do lote foram retiradas do catálogo MCP.
 
 ## Memória e orientações pedagógicas
 
@@ -169,18 +169,19 @@ humana e minimização de dados.
 | `list_all_gradable_submissions` | Listar Todas as Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
 | `create_assisted_grading_batch` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
 | `get_grading_batch_status` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `export_grading_coordination_report` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Implementada |
-| `cancel_assisted_grading_batch` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Implementada |
-| `get_assisted_grading_item` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
+| `export_grading_coordination_report` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Desativada no MCP |
+| `cancel_assisted_grading_batch` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Desativada no MCP |
+| `get_assisted_grading_item` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Desativada no MCP |
 | `get_grading_item_context` | Consultar Contexto Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
-| `update_grading_draft` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Implementada |
-| `prepare_submission_grading` | Preparar Correcao Entrega | `DraftOnly` | Não | Escrita interna | Implementada |
+| `update_grading_draft` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Desativada no MCP |
+| `prepare_submission_grading` | Preparar Correcao Entrega | `ReadOnly` | Sim | Não | Implementada |
 | `prepare_ai_grading_batch` | Preparar Lote Correcao IA | `ReadOnly` | Sim | Não | Implementada |
-| `save_ai_grading_batch` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Escrita interna | Implementada |
-| `review_batch_feedbacks` | Revisar Feedbacks Lote | `ReadOnly` | Sim | Não | Implementada |
-| `get_grading_batch_audit` | Consultar Auditoria Correcao Lote | `ReadOnly` | Sim | Não | Implementada |
-| `create_batch_grade_launch_preview` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada |
-| `confirm_batch_grade_launch` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada |
+| `save_ai_grading_batch` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Rascunho interno | Implementada; sem confirmação |
+| `export_grading_corrections_csv` | Exportar Correcoes para CSV | `ReadOnly` | Sim | Não | Implementada |
+| `review_batch_feedbacks` | Revisar Feedbacks Lote | `ReadOnly` | Sim | Não | Desativada no MCP |
+| `get_grading_batch_audit` | Consultar Auditoria Correcao Lote | `ReadOnly` | Sim | Não | Desativada no MCP |
+| `create_batch_grade_launch_preview` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Desativada no MCP |
+| `confirm_batch_grade_launch` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Desativada no MCP |
 | `prepare_welcome_message` / `confirm_welcome_message` | Mensagem Boas Vindas | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_access_reminder` / `confirm_access_reminder` | Mensagem Cobranca Acesso | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_activity_reminder` / `confirm_activity_reminder` | Mensagem Cobranca SA | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
@@ -189,8 +190,8 @@ humana e minimização de dados.
 | `prepare_followup_message` / `confirm_followup_message` | Mensagem Acompanhamento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_individual_grade_launch` / `prepare_individual_grade_launch` | Preparar Nota Individual | `CriticalHumanConfirmedWrite` | Nota atual/prévia | Cria ação pendente | Implementadas (aliases PT/EN) |
 | `confirm_individual_grade_launch` / `confirm_individual_grade_launch` | Confirmar Nota Individual | `CriticalHumanConfirmedWrite` | Não | Nota/feedback individual no Moodle | Implementadas (aliases PT/EN) |
-| `get_grading_audit` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `grading-review-app-v2` | Grading Review App | `ReadOnly` | Sim | Não | Implementada (MCP Resource) |
+| `get_grading_audit` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Desativada no MCP |
+| `grading-review-app-v2` | Grading Review App | `ReadOnly` | Sim | Não | Desativada no MCP |
 
 ## Mensagens tipificadas do tutor
 
@@ -933,6 +934,8 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
+> As seções de revisão, prévia e confirmação abaixo documentam código legado mantido para compatibilidade interna. Elas não são registradas no MCP e não fazem parte do caminho CSV.
+
 ## `update_grading_draft`
 
 Descricao:
@@ -1020,6 +1023,7 @@ Metadados MCP:
 
 Descricao:
 
+- Mantida no codigo legado, mas nao registrada no MCP no caminho CSV.
 - Consulta eventos sanitizados de auditoria por `auditId`/correlation id.
 - Retorna eventos paginados de criacao/confirmacao/commit vinculados ao mesmo fluxo.
 - Nao escreve no Moodle e nao altera estado interno.
@@ -1218,7 +1222,7 @@ Descricao:
 
 - Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote.
 - Nao escreve no Moodle.
-- Apos salvar, o fluxo obrigatorio e chamar `review_batch_feedbacks` para exibir a interface de revisao humana. Nunca pular a revisao.
+- Depois de salvar, chame `export_grading_corrections_csv` para obter o arquivo com nome, nota, feedback e situacao.
 
 Parametros:
 
@@ -1236,13 +1240,28 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
+## `export_grading_corrections_csv`
+
+Descricao:
+
+- Le os itens persistidos do lote autorizado sem consultar ou alterar notas no Moodle.
+- Retorna um recurso CSV UTF-8, separado por ponto e virgula, com as colunas `nome`, `nota`, `feedback` e `situacao`.
+- E a saida final do caminho rapido; nao abre interface, cria previa ou solicita confirmacao.
+
+Metadados MCP:
+
+| Campo | Valor |
+| --- | --- |
+| `ReadOnly` | `true` |
+| `Destructive` | `false` |
+| `Idempotent` | `true` |
+| `OpenWorld` | `false` |
+
 ## `review_batch_feedbacks`
 
 Descricao:
 
-- Retorna a interface de revisao humana dos feedbacks gerados por IA para um lote.
-- Deve ser chamada apos `save_ai_grading_batch` e antes de `create_batch_grade_launch_preview`.
-- Nao escreve no Moodle.
+- Não é registrada no MCP. A interface de revisão e o fluxo de confirmação foram desativados para este caminho.
 
 Metadados MCP:
 
@@ -1279,6 +1298,7 @@ Metadados MCP:
 
 Descricao:
 
+- Mantida no codigo legado, mas nao registrada no MCP no caminho CSV.
 - Consulta eventos de auditoria de um lote completo de correcao por `batchJobId`.
 - Complementa `get_grading_audit` que busca por `auditId` individual.
 - Retorna eventos paginados vinculados ao lote.
@@ -1305,9 +1325,8 @@ Metadados MCP:
 
 Descricao:
 
-- MCP Resource (nao tool): expoe a interface SPA de revisao de correcao assistida como HTML servido pelo servidor.
-- Acessivel via URI `ui://grading-review/v2/app.html`.
-- Nao executa escrita no Moodle e nao requer autenticacao adicional alem do token MCP.
+- Recurso legado nao registrado no MCP.
+- A interface SPA de revisao e o caminho de confirmacao nao fazem parte da saida CSV.
 
 ## Planejado
 

@@ -43,7 +43,6 @@ public static class RegisteredMcpToolContainers
         typeof(MoodleAccessMonitoringTools),
         typeof(MoodleRiskAnalysisTools),
         typeof(MoodleGradingContextDiagnosticsTools),
-        typeof(MoodleGradingReviewAppTools),
         typeof(MoodleReportTools),
         typeof(MoodleMonitorTools),
         typeof(MoodleMemoryTools),

@@ -15,7 +15,7 @@ public sealed class McpGradingResourceTransportTests : IClassFixture<McpTestWebA
     }
 
     [Fact]
-    public async Task ResourcesListAndRead_ExposeTheReviewAppUri()
+    public async Task ResourcesList_DoesNotExposeTheReviewAppUri()
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Mcp-Api-Key", await RegisterClientAsync(client));
@@ -35,7 +35,7 @@ public sealed class McpGradingResourceTransportTests : IClassFixture<McpTestWebA
         var listed = await SendAsync(client, "resources/list", new JsonObject(), "resource-list", sessionId);
         var resources = listed.Body?["result"]?["resources"]?.AsArray();
         Assert.NotNull(resources);
-        Assert.Contains(resources!, resource =>
+        Assert.DoesNotContain(resources!, resource =>
             resource?["uri"]?.GetValue<string>() == "ui://grading-review/v2/app.html");
         Assert.DoesNotContain(resources!, resource =>
             resource?["uri"]?.GetValue<string>() == "ui://grading-review/app.html");
@@ -45,17 +45,6 @@ public sealed class McpGradingResourceTransportTests : IClassFixture<McpTestWebA
         Assert.NotNull(resourceTemplates);
         Assert.Contains(resourceTemplates!, template =>
             template?["uriTemplate"]?.GetValue<string>() == "moodle://resource/{resourceId}");
-
-        var read = await SendAsync(client, "resources/read", new JsonObject
-        {
-            ["uri"] = "ui://grading-review/v2/app.html"
-        }, "resource-read", sessionId);
-        var contents = read.Body?["result"]?["contents"]?.AsArray();
-        Assert.NotNull(contents);
-        Assert.Contains(contents!, content =>
-            content?["uri"]?.GetValue<string>() == "ui://grading-review/v2/app.html" &&
-            content?["mimeType"]?.GetValue<string>() == "text/html;profile=mcp-app" &&
-            content?["text"]?.ToString().Contains("id=\"app\"", StringComparison.Ordinal) == true);
 
     }
 
