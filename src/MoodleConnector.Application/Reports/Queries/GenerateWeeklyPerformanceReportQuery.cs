@@ -265,6 +265,10 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
             {
                 var pending = submissionState.PendingFor(student.UserId);
                 var awaiting = submissionState.AwaitingFor(student.UserId);
+                if (submissionState.IsComplete || submissionState.ActiveAssignmentCount > 0)
+                {
+                    totalAssignments = submissionState.ActiveAssignmentCount;
+                }
                 pendingCount = pending.Count;
                 pendingNames = pending.Select(item => item.AssignmentName).ToList();
                 awaitingGradingNames = awaiting.Select(item => item.AssignmentName).ToList();

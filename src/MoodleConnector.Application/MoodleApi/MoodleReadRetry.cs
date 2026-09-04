@@ -26,8 +26,15 @@ public static class MoodleReadRetry
             {
                 throw;
             }
-            catch (Exception exception) when (IsTransient(exception) && attempt < MaxAttempts)
+            catch (Exception exception) when (IsTransient(exception))
             {
+                if (attempt >= MaxAttempts)
+                {
+                    // Preserve the original transport/Moodle error so callers
+                    // can still return its structured error code and audit id.
+                    throw;
+                }
+
                 onRetry?.Invoke(exception, attempt);
                 await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt), cancellationToken);
             }

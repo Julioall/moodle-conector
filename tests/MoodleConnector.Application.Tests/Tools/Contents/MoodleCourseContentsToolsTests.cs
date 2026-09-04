@@ -144,6 +144,21 @@ public class MoodleCourseContentsToolsTests
     }
 
     [Fact]
+    public async Task Deve_repetir_auditoria_quando_falha_de_rede_e_transitoria()
+    {
+        var mediator = new FakeMediator { AuditTransientFailures = 1 };
+        var sut = new MoodleCourseContentsTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.AuditarEstruturaCursoAsync("CURSO");
+
+        Assert.False(result.IsError ?? false);
+        Assert.Equal(2, mediator.AuditCalls);
+    }
+
+    [Fact]
     public async Task ListarConteudosCursoAsync_NuncaDeixaFalhaDeAliasEscaparAoMcp()
     {
         var sut = new MoodleCourseContentsTools(
@@ -193,6 +208,10 @@ public class MoodleCourseContentsToolsTests
 
         public bool ThrowOnContents { get; init; }
 
+        public int AuditTransientFailures { get; init; }
+
+        public int AuditCalls { get; private set; }
+
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -226,6 +245,11 @@ public class MoodleCourseContentsToolsTests
             if (request is AuditCourseStructureQuery audit)
             {
                 LastAuditQuery = audit;
+                AuditCalls++;
+                if (AuditCalls <= AuditTransientFailures)
+                {
+                    throw new MoodleApiException(MoodleErrorContract.NetworkError, "Falha transitoria simulada.");
+                }
                 return Task.FromResult((TResponse)(object)CreateAudit());
             }
 
@@ -254,6 +278,11 @@ public class MoodleCourseContentsToolsTests
             if (request is AuditCourseStructureQuery audit)
             {
                 LastAuditQuery = audit;
+                AuditCalls++;
+                if (AuditCalls <= AuditTransientFailures)
+                {
+                    throw new MoodleApiException(MoodleErrorContract.NetworkError, "Falha transitoria simulada.");
+                }
                 return Task.FromResult<object?>(CreateAudit());
             }
 

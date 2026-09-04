@@ -444,8 +444,16 @@ public sealed class MoodleCourseContentsTools(
         CourseStructureAuditSummary? audit;
         try
         {
-            audit = await mediator.Send(
-                new AuditCourseStructureQuery(moodleUserId.Value.ToString(), courseId, includeHidden),
+            audit = await MoodleReadRetry.ExecuteAsync(
+                ct => mediator.Send(
+                    new AuditCourseStructureQuery(moodleUserId.Value.ToString(), courseId, includeHidden),
+                    ct),
+                (exception, attempt) => logger?.LogWarning(
+                    exception,
+                    "Transient Moodle read failure while auditing course structure; retrying. Attempt={Attempt} Alias={Alias} CourseId={CourseId}",
+                    attempt,
+                    MoodleConnectionAlias.Normalize(moodleAlias),
+                    courseId),
                 cancellationToken);
         }
         catch (OperationCanceledException)

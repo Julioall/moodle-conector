@@ -79,6 +79,8 @@ public sealed record GetStudentsWithPendingSubmissionsResult(
 ///
 /// DueDaysAhead = 0 → inclui todas as atividades sem entrega, independente do prazo.
 /// DueDaysAhead > 0 → inclui apenas atividades cujo prazo está nos próximos N dias (ou já vencido).
+/// ExcludeFutureActivities = true → remove atividades cuja data de abertura
+/// ainda está no futuro, mesmo quando DueDaysAhead = 0.
 /// </summary>
 public sealed record GetStudentsWithPendingSubmissionsQuery(
     string CourseId,
@@ -89,7 +91,8 @@ public sealed record GetStudentsWithPendingSubmissionsQuery(
     CourseContentsSummary? PrefetchedContents = null,
     CourseParticipantsPage? PrefetchedParticipants = null,
     CourseAssignmentSubmissionsSnapshot? PrefetchedSubmissions = null,
-    CourseGradebookSnapshot? PrefetchedGradebook = null) : IRequest<GetStudentsWithPendingSubmissionsResult>;
+    CourseGradebookSnapshot? PrefetchedGradebook = null,
+    bool ExcludeFutureActivities = false) : IRequest<GetStudentsWithPendingSubmissionsResult>;
 
 public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -176,15 +179,15 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
         var assignmentContexts = modulesToProcess
             .Select(module => new AssignmentContext(
                 module,
-                module.Dates
-                    .FirstOrDefault(d =>
-                        d.Label.Contains("due", StringComparison.OrdinalIgnoreCase) ||
-                        d.Label.Contains("prazo", StringComparison.OrdinalIgnoreCase) ||
-                        d.Label.Contains("entrega", StringComparison.OrdinalIgnoreCase))
-                    ?.Date))
-            .Where(context => request.DueDaysAhead <= 0 ||
-                !context.DueDate.HasValue ||
-                (context.DueDate.Value - now).TotalDays <= request.DueDaysAhead)
+                FindModuleDate(module, IsDueDateLabel),
+                FindModuleDate(module, IsOpenDateLabel)))
+            .Where(context =>
+                (!request.ExcludeFutureActivities ||
+                 !context.OpenDate.HasValue ||
+                 context.OpenDate.Value <= now) &&
+                (request.DueDaysAhead <= 0 ||
+                 !context.DueDate.HasValue ||
+                 (context.DueDate.Value - now).TotalDays <= request.DueDaysAhead))
             .ToArray();
 
         // Uma atividade sem nota ainda pode exigir feedback. O grau da
@@ -681,7 +684,32 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     private static bool ResolveIsGradable(AssignmentSettingsSummary settings) =>
         settings.IsGradable ?? settings.MaxGrade > 0;
 
-    private sealed record AssignmentContext(CourseModuleSummary Module, DateTimeOffset? DueDate);
+    private static DateTimeOffset? FindModuleDate(
+        CourseModuleSummary module,
+        Func<string, bool> labelMatcher) =>
+        module.Dates
+            .FirstOrDefault(date => labelMatcher(date.Label))
+            ?.Date;
+
+    private static bool IsDueDateLabel(string label) =>
+        label.Contains("due", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("prazo", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("entrega", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("vencimento", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("cut-off", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("cutoff", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsOpenDateLabel(string label) =>
+        label.Contains("open", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("abre", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("aberto", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("disponivel de", StringComparison.OrdinalIgnoreCase) ||
+        label.Contains("available from", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record AssignmentContext(
+        CourseModuleSummary Module,
+        DateTimeOffset? DueDate,
+        DateTimeOffset? OpenDate);
 
     private sealed record GradebookReadResult(
         IReadOnlyDictionary<string, CourseGradebook> Gradebooks,

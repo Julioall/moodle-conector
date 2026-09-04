@@ -303,12 +303,46 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         Assert.Equal(0, fixture.SubmissionReads);
     }
 
+    [Fact]
+    public async Task ExcludeFutureActivities_ignora_assign_ainda_nao_aberto()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(
+                ModuleWithDates("assign-open", "assign", new CourseModuleDate("Abre:", DateTimeOffset.UtcNow.AddHours(-1))),
+                ModuleWithDates("assign-future", "assign", new CourseModuleDate("Abre:", DateTimeOffset.UtcNow.AddDays(3)))),
+            Submissions =
+            [
+                new AssignmentSubmissionsBatch("assign-open", []),
+                new AssignmentSubmissionsBatch("assign-future", [])
+            ]
+        };
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery(
+                "course-1",
+                IncludeAwaitingGrading: true,
+                ExcludeFutureActivities: true),
+            CancellationToken.None);
+
+        var student = Assert.Single(result.Students);
+        var pending = Assert.Single(student.PendingAssignments);
+        Assert.Equal("assign-open", pending.AssignmentId);
+        Assert.DoesNotContain(result.Evaluations, item => item.AssignmentId == "assign-future");
+    }
+
     private static CourseContentsSummary Contents(params CourseModuleSummary[] modules) =>
         new("course-1", ["assign"], false, false,
         [new CourseSectionSummary("section-1", 1, "Seção 1", null, true, modules.Length, modules.Length == 0, modules)]);
 
     private static CourseModuleSummary Module(string instanceId, string type) =>
         new($"module-{instanceId}", instanceId, type, "Atividade", null, true, true, null, null, [], []);
+
+    private static CourseModuleSummary ModuleWithDates(
+        string instanceId,
+        string type,
+        params CourseModuleDate[] dates) =>
+        new($"module-{instanceId}", instanceId, type, "Atividade", null, true, true, null, null, dates, []);
 
     private sealed class Fixture
     {

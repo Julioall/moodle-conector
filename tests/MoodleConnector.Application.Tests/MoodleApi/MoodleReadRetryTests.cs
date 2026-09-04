@@ -46,4 +46,24 @@ public sealed class MoodleReadRetryTests
 
         Assert.Equal(1, calls);
     }
+
+    [Fact]
+    public async Task Preserva_ultimo_erro_transitorio_quando_todas_as_tentativas_falham()
+    {
+        var calls = 0;
+        var expected = new HttpRequestException("transport down");
+
+        var actual = await Assert.ThrowsAsync<HttpRequestException>(async () =>
+            await MoodleReadRetry.ExecuteAsync<string>(
+                _ =>
+                {
+                    calls++;
+                    throw expected;
+                },
+                null,
+                CancellationToken.None));
+
+        Assert.Same(expected, actual);
+        Assert.Equal(3, calls);
+    }
 }

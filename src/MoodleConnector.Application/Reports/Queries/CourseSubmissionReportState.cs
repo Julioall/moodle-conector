@@ -14,7 +14,8 @@ internal sealed record CourseSubmissionReportState(
     IReadOnlyDictionary<string, IReadOnlyList<PendingSubmissionItem>> PendingByStudent,
     IReadOnlyDictionary<string, IReadOnlyList<AwaitingGradingSubmission>> AwaitingByStudent,
     IReadOnlyDictionary<string, IReadOnlyList<SubmissionEvaluationItem>> EvaluationsByStudent,
-    string? Warning)
+    string? Warning,
+    IReadOnlyCollection<string> ActiveAssignmentIds)
 {
     public static CourseSubmissionReportState Unavailable { get; } = new(
         false,
@@ -22,7 +23,8 @@ internal sealed record CourseSubmissionReportState(
         new Dictionary<string, IReadOnlyList<PendingSubmissionItem>>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, IReadOnlyList<AwaitingGradingSubmission>>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, IReadOnlyList<SubmissionEvaluationItem>>(StringComparer.OrdinalIgnoreCase),
-        "O estado de entrega não estava disponível; pendências não foram inferidas apenas pela ausência de nota.");
+        "O estado de entrega não estava disponível; pendências não foram inferidas apenas pela ausência de nota.",
+        []);
 
     public static async Task<CourseSubmissionReportState> LoadAsync(
         IMediator? mediator,
@@ -42,8 +44,15 @@ internal sealed record CourseSubmissionReportState(
                     courseId,
                     DueDaysAhead: 0,
                     MaxStudentsToAnalyze: maxStudentsToAnalyze,
-                    IncludeAwaitingGrading: true),
+                    IncludeAwaitingGrading: true,
+                    ExcludeFutureActivities: true),
                 cancellationToken);
+
+            var activeAssignmentIds = result.Evaluations
+                .Select(item => item.AssignmentId)
+                .Concat(result.AwaitingGrading.Select(item => item.AssignmentId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
             return new CourseSubmissionReportState(
                 true,
@@ -64,7 +73,8 @@ internal sealed record CourseSubmissionReportState(
                         group => group.Key,
                         group => (IReadOnlyList<SubmissionEvaluationItem>)group.ToArray(),
                         StringComparer.OrdinalIgnoreCase),
-                result.Warning);
+                result.Warning,
+                activeAssignmentIds);
         }
         catch (OperationCanceledException)
         {
@@ -84,4 +94,6 @@ internal sealed record CourseSubmissionReportState(
 
     public int CountFor(string studentId, SubmissionEvaluationState state) =>
         (EvaluationsByStudent.GetValueOrDefault(studentId) ?? []).Count(item => item.State == state);
+
+    public int ActiveAssignmentCount => ActiveAssignmentIds.Count;
 }
