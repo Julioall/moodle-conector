@@ -241,7 +241,7 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                 // Compatibility fallback for unit hosts that do not register
                 // MediatR. Production uses the assignment submission state
                 // below, which is authoritative for delivery vs. grading.
-                if (!submissionState.IsAvailable)
+                if (!submissionState.IsAvailable && submissionState.AllowGradebookFallback)
                 {
                     var pending = activityItems
                         .Where(GradebookMappingHelper.IsConfirmedPending)
@@ -272,6 +272,16 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
                 pendingCount = pending.Count;
                 pendingNames = pending.Select(item => item.AssignmentName).ToList();
                 awaitingGradingNames = awaiting.Select(item => item.AssignmentName).ToList();
+            }
+            else if (!submissionState.AllowGradebookFallback)
+            {
+                // Do not publish gradebook-derived pending/submitted counts
+                // after the authoritative delivery read failed. The gradebook
+                // has no opening dates and can reintroduce future activities.
+                totalAssignments = 0;
+                pendingCount = 0;
+                pendingNames = [];
+                awaitingGradingNames = [];
             }
 
             int submittedCount = totalAssignments - pendingCount;
@@ -334,9 +344,11 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandler(
         var gradebookWarning = gradebookIncompleteCount > 0
             ? $"A cobertura do gradebook está incompleta para {gradebookIncompleteCount} estudante(s); estados de ausência e erro foram preservados."
             : null;
-        var warning = submissionState.IsAvailable && !submissionState.IsComplete
-            ? $"{LimitationMessage} {submissionState.Warning ?? "A cobertura de entregas está incompleta."}"
-            : LimitationMessage;
+        var warning = submissionState.IsAvailable
+            ? submissionState.IsComplete
+                ? LimitationMessage
+                : $"{LimitationMessage} {submissionState.Warning ?? "A cobertura de entregas está incompleta."}"
+            : $"{LimitationMessage} {submissionState.Warning ?? "A leitura de entregas não ficou disponível; as contagens de entrega foram omitidas."}";
         if (gradebookWarning is not null)
         {
             warning = $"{warning} {gradebookWarning}";

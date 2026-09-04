@@ -1,4 +1,5 @@
 using MoodleConnector.Application.Abstractions;
+using MediatR;
 using MoodleConnector.Application.Reports.Queries;
 using MoodleConnector.Domain;
 
@@ -216,6 +217,30 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandlerTests
         Assert.DoesNotContain("active1", result.SuggestedRecipientIdsForAccess);
     }
 
+    [Fact]
+    public async Task Handle_Nao_reintroduz_pendencias_do_gradebook_quando_leitura_de_entregas_falha()
+    {
+        var students = new[] { MakeStudent("6", "Ana", DateTimeOffset.UtcNow.AddDays(-1)) };
+        var grades = new Dictionary<string, IReadOnlyList<GradebookItem>>
+        {
+            ["6"] = [MakeGradeItem("future", "Atividade futura", gradeRaw: null)]
+        };
+        var handler = new GenerateWeeklyPerformanceReportQueryHandler(
+            new FakeParticipantsGateway(students),
+            new FakeGradebookGateway(grades),
+            new FakeCurrentUserGateway(),
+            new ThrowingMediator());
+
+        var result = await handler.Handle(
+            new GenerateWeeklyPerformanceReportQuery("course1"), CancellationToken.None);
+
+        var row = Assert.Single(result.Students);
+        Assert.Equal(0, row.TotalAssignments);
+        Assert.Equal(0, row.PendingCount);
+        Assert.Empty(row.PendingAssignmentNames);
+        Assert.Contains("leitura de entregas não ficou disponível", result.Warning, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── Fakes ─────────────────────────────────────────────────────────────────────
 
     private sealed class FakeParticipantsGateway(IReadOnlyList<CourseParticipantSummary> students)
@@ -249,5 +274,35 @@ public sealed class GenerateWeeklyPerformanceReportQueryHandlerTests
     {
         public Task<long> GetCurrentUserIdAsync(CancellationToken cancellationToken) =>
             Task.FromResult(42L);
+    }
+
+    private sealed class ThrowingMediator : IMediator
+    {
+        public Task<TResponse> Send<TResponse>(
+            IRequest<TResponse> request,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("falha simulada na leitura de entregas");
+
+        public Task<object?> Send(object request, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("falha simulada na leitura de entregas");
+
+        public Task Send<TRequest>(TRequest request, CancellationToken cancellationToken = default)
+            where TRequest : IRequest => Task.CompletedTask;
+
+        public Task Publish(object notification, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task Publish<TNotification>(TNotification notification, CancellationToken cancellationToken = default)
+            where TNotification : INotification => Task.CompletedTask;
+
+        public IAsyncEnumerable<TResponse> CreateStream<TResponse>(
+            IStreamRequest<TResponse> request,
+            CancellationToken cancellationToken = default) =>
+            AsyncEnumerable.Empty<TResponse>();
+
+        public IAsyncEnumerable<object?> CreateStream(
+            object request,
+            CancellationToken cancellationToken = default) =>
+            AsyncEnumerable.Empty<object?>();
     }
 }

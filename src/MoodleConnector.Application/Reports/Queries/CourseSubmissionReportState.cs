@@ -1,4 +1,5 @@
 using MediatR;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions.Queries;
 using MoodleConnector.Domain;
 
@@ -15,7 +16,8 @@ internal sealed record CourseSubmissionReportState(
     IReadOnlyDictionary<string, IReadOnlyList<AwaitingGradingSubmission>> AwaitingByStudent,
     IReadOnlyDictionary<string, IReadOnlyList<SubmissionEvaluationItem>> EvaluationsByStudent,
     string? Warning,
-    IReadOnlyCollection<string> ActiveAssignmentIds)
+    IReadOnlyCollection<string> ActiveAssignmentIds,
+    bool AllowGradebookFallback)
 {
     public static CourseSubmissionReportState Unavailable { get; } = new(
         false,
@@ -24,7 +26,8 @@ internal sealed record CourseSubmissionReportState(
         new Dictionary<string, IReadOnlyList<AwaitingGradingSubmission>>(StringComparer.OrdinalIgnoreCase),
         new Dictionary<string, IReadOnlyList<SubmissionEvaluationItem>>(StringComparer.OrdinalIgnoreCase),
         "O estado de entrega não estava disponível; pendências não foram inferidas apenas pela ausência de nota.",
-        []);
+        [],
+        true);
 
     public static async Task<CourseSubmissionReportState> LoadAsync(
         IMediator? mediator,
@@ -39,13 +42,16 @@ internal sealed record CourseSubmissionReportState(
 
         try
         {
-            var result = await mediator.Send(
-                new GetStudentsWithPendingSubmissionsQuery(
-                    courseId,
-                    DueDaysAhead: 0,
-                    MaxStudentsToAnalyze: maxStudentsToAnalyze,
-                    IncludeAwaitingGrading: true,
-                    ExcludeFutureActivities: true),
+            var result = await MoodleReadRetry.ExecuteAsync(
+                ct => mediator.Send(
+                    new GetStudentsWithPendingSubmissionsQuery(
+                        courseId,
+                        DueDaysAhead: 0,
+                        MaxStudentsToAnalyze: maxStudentsToAnalyze,
+                        IncludeAwaitingGrading: true,
+                        ExcludeFutureActivities: true),
+                    ct),
+                onRetry: null,
                 cancellationToken);
 
             var activeAssignmentIds = result.Evaluations
@@ -74,15 +80,25 @@ internal sealed record CourseSubmissionReportState(
                         group => (IReadOnlyList<SubmissionEvaluationItem>)group.ToArray(),
                         StringComparer.OrdinalIgnoreCase),
                 result.Warning,
-                activeAssignmentIds);
+                activeAssignmentIds,
+                false);
         }
         catch (OperationCanceledException)
         {
             throw;
         }
-        catch
+        catch (Exception exception)
         {
-            return Unavailable;
+            var failure = MoodleErrorContract.Describe(exception);
+            return new CourseSubmissionReportState(
+                false,
+                false,
+                new Dictionary<string, IReadOnlyList<PendingSubmissionItem>>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, IReadOnlyList<AwaitingGradingSubmission>>(StringComparer.OrdinalIgnoreCase),
+                new Dictionary<string, IReadOnlyList<SubmissionEvaluationItem>>(StringComparer.OrdinalIgnoreCase),
+                $"A leitura de entregas não ficou disponível ({failure.Message})",
+                [],
+                false);
         }
     }
 
