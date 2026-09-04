@@ -111,13 +111,43 @@ public sealed class GenerateCourseGradesReportQueryHandlerTests
         Assert.Equal(GradebookCoverageStates.Error, result.Students.Single(row => row.StudentId == "2").GradebookStatus);
     }
 
+    [Fact]
+    public async Task Handle_Enriquece_snapshot_existente_com_o_maximo_do_curso()
+    {
+        var student = MakeStudent("4", "Ana Souza");
+        var prefetched = new CourseGradebookSnapshot(
+            "course-1",
+            new Dictionary<string, CourseGradebook>(StringComparer.OrdinalIgnoreCase)
+            {
+                [student.UserId] = new CourseGradebook("course-1", student.UserId, [
+                    new GradebookItem("quiz-1", "Quiz", "mod", "quiz", null, 24m, "24", 0m, null, null, null, null, null, null, "19008", "1108048"),
+                    new GradebookItem("course-total", "Total", "course", string.Empty, null, 34m, "34", 0m, null, null, null, null, null, null, null),
+                ]),
+            },
+            new GradebookSnapshotCoverage("bulk", 1, 1, true, false, [], []));
+
+        var handler = CreateHandler(
+            [student],
+            [],
+            new FixedCourseGradeMaxGateway(49m));
+        var result = await handler.Handle(
+            new GenerateCourseGradesReportQuery("course-1", PrefetchedGradebook: prefetched),
+            CancellationToken.None);
+
+        var row = Assert.Single(result.Students);
+        Assert.Equal(49m, row.TotalGradeMax);
+        Assert.Equal(Math.Round(34m / 49m * 100m, 2), row.TotalGradePercentage);
+    }
+
     private static GenerateCourseGradesReportQueryHandler CreateHandler(
         IReadOnlyList<CourseParticipantSummary> students,
-        Dictionary<string, IReadOnlyList<GradebookItem>> gradesByStudent) =>
+        Dictionary<string, IReadOnlyList<GradebookItem>> gradesByStudent,
+        IMoodleCourseGradeMaxGateway? courseGradeMaxGateway = null) =>
         new(
             new FakeParticipantsGateway(students),
             new FakeGradebookGateway(gradesByStudent),
-            new FakeCurrentUserGateway());
+            new FakeCurrentUserGateway(),
+            courseGradeMaxGateway);
 
     private static CourseParticipantSummary MakeStudent(string id, string name, DateTimeOffset? lastAccessAt = null) =>
         new(id, name, null, false, null, lastAccessAt, null, [], []);
@@ -156,5 +186,14 @@ public sealed class GenerateCourseGradesReportQueryHandlerTests
     {
         public Task<long> GetCurrentUserIdAsync(CancellationToken cancellationToken) =>
             Task.FromResult(42L);
+    }
+
+    private sealed class FixedCourseGradeMaxGateway(decimal max) : IMoodleCourseGradeMaxGateway
+    {
+        public Task<CourseGradeMaxResolution> ResolveAsync(
+            string courseId,
+            IReadOnlyCollection<GradebookItem> items,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CourseGradeMaxResolution(max, "test", null));
     }
 }

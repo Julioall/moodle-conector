@@ -71,13 +71,45 @@ public sealed class MoodleSubmissionGradingPackageTools(
         if (actorMoodleId is null) return ToolResultHelper.Error<SubmissionGradingPackage>("Usuario nao autenticado para consultar a submissao.");
         try
         {
-            var page = await mediator.Send(new ListAssignmentSubmissionsQuery(actorMoodleId.Value.ToString(), courseId!, assignmentId!, AssignmentSubmissionFilter.All, 1, 100, null, null, true, true), cancellationToken);
+            var page = await MoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => mediator.Send(
+                    new ListAssignmentSubmissionsQuery(
+                        actorMoodleId.Value.ToString(),
+                        courseId!,
+                        assignmentId!,
+                        AssignmentSubmissionFilter.All,
+                        1,
+                        100,
+                        null,
+                        null,
+                        true,
+                        true),
+                    retryCancellationToken),
+                (_, attempt) => telemetry?.RecordPhase(
+                    "resource_delivery",
+                    "submission_read",
+                    "retry",
+                    0,
+                    itemCount: attempt),
+                cancellationToken);
             if (page is null) return ToolResultHelper.Error<SubmissionGradingPackage>("Nao foi possivel carregar as entregas da atividade.");
             var submission = page.Submissions.SingleOrDefault(item => string.Equals(item.UserId, studentId, StringComparison.Ordinal));
             if (submission is null) return ToolResultHelper.Error<SubmissionGradingPackage>("Submissao do estudante nao encontrada no curso e atividade informados.");
             if (!string.IsNullOrWhiteSpace(submissionId) && !string.Equals(submission.SubmissionId, submissionId, StringComparison.Ordinal)) return ToolResultHelper.Error<SubmissionGradingPackage>("O submissionId informado nao corresponde ao estudante e atividade.");
             if ((submission.Files?.Count ?? 0) > Math.Max(1, limits.Value.MaxFilesPerSubmission)) return ToolResultHelper.Error<SubmissionGradingPackage>("A submissao excede o limite configurado de arquivos.");
-            var settings = await settingsGateway.GetAssignmentSettingsAsync(actorMoodleId.Value.ToString(), courseId!, assignmentId!, cancellationToken);
+            var settings = await MoodleReadRetry.ExecuteAsync(
+                retryCancellationToken => settingsGateway.GetAssignmentSettingsAsync(
+                    actorMoodleId.Value.ToString(),
+                    courseId!,
+                    assignmentId!,
+                    retryCancellationToken),
+                (_, attempt) => telemetry?.RecordPhase(
+                    "resource_delivery",
+                    "assignment_settings_read",
+                    "retry",
+                    0,
+                    itemCount: attempt),
+                cancellationToken);
             var attachments = new List<SubmissionResourceLink>();
             // Acumula sha256 de cada resource final (após expansão de ZIP) para o hash da submissão.
             // O SHA-256 aqui é o registrado via Moodle no RegisterAsync; o hash definitivo do binário

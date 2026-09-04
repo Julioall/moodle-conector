@@ -176,6 +176,7 @@ public static class DependencyInjection
             .AddMoodleResilience(moodleApiResilience);
 
         services.AddScoped<IMoodleAssignmentSettingsGateway, MoodleAssignmentSettingsGateway>();
+        services.AddScoped<IMoodleCourseGradeMaxGateway, MoodleCourseGradeMaxGateway>();
         services.AddScoped<IMoodleCompletionGateway, MoodleCompletionGateway>();
         services.AddScoped<IMoodleMessageGateway, MoodleMessageGateway>();
 

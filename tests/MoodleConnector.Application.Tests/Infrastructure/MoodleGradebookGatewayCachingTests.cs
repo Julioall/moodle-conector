@@ -187,6 +187,24 @@ public sealed class MoodleGradebookGatewayCachingTests
         Assert.Equal("1108049", item.CourseModuleId);
     }
 
+    [Fact]
+    public async Task Aplica_o_maximo_resolvido_ao_item_total_sem_alterar_a_nota()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var gateway = new MoodleGradebookGateway(
+            Options.Create(new MoodleApiOptions()),
+            new CredentialsProvider(),
+            new CourseTotalRestClient(),
+            cache,
+            courseGradeMaxGateway: new FixedCourseGradeMaxGateway(49m));
+
+        var result = await gateway.GetStudentGradebookAsync("10824", "7", CancellationToken.None);
+        var courseTotal = Assert.Single(result.Items, item => item.ItemType == "course");
+
+        Assert.Equal(34m, courseTotal.GradeRaw);
+        Assert.Equal(49m, courseTotal.GradeMax);
+    }
+
     private sealed class CredentialsProvider : IMoodleConnectorCredentialsProvider
     {
         public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken) =>
@@ -298,6 +316,36 @@ public sealed class MoodleGradebookGatewayCachingTests
             using var document = JsonDocument.Parse(json);
             return Task.FromResult(document.RootElement.Clone());
         }
+    }
+
+    private sealed class CourseTotalRestClient : IMoodleRestClient
+    {
+        public Task<JsonElement> CallAsync(
+            MoodleConnectorCredentials connection,
+            string functionName,
+            IReadOnlyDictionary<string, object?> parameters,
+            CancellationToken cancellationToken) =>
+            CallAsync(connection, functionName, parameters, true, cancellationToken);
+
+        public Task<JsonElement> CallAsync(
+            MoodleConnectorCredentials connection,
+            string functionName,
+            IReadOnlyDictionary<string, object?> parameters,
+            bool allowServiceToken,
+            CancellationToken cancellationToken)
+        {
+            using var document = JsonDocument.Parse("{\"usergrades\":[{\"userid\":7,\"gradeitems\":[{\"id\":1,\"itemname\":\"Questionário 1\",\"itemtype\":\"mod\",\"itemmodule\":\"quiz\",\"graderaw\":24,\"grademin\":0},{\"id\":99,\"itemname\":\"Total\",\"itemtype\":\"course\",\"graderaw\":34,\"grademin\":0}]}]}");
+            return Task.FromResult(document.RootElement.Clone());
+        }
+    }
+
+    private sealed class FixedCourseGradeMaxGateway(decimal max) : IMoodleCourseGradeMaxGateway
+    {
+        public Task<CourseGradeMaxResolution> ResolveAsync(
+            string courseId,
+            IReadOnlyCollection<GradebookItem> items,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new CourseGradeMaxResolution(max, "test", null));
     }
 
     private sealed class FakeFunctionCatalog(IReadOnlyList<MoodleFunctionDescriptor> functions) : IMoodleFunctionCatalog

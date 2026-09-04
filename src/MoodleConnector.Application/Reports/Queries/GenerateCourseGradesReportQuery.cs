@@ -46,7 +46,8 @@ public sealed record GenerateCourseGradesReportQuery(
 public sealed class GenerateCourseGradesReportQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
     IMoodleGradebookGateway gradebookGateway,
-    IMoodleCurrentUserIdGateway currentUserIdGateway)
+    IMoodleCurrentUserIdGateway currentUserIdGateway,
+    IMoodleCourseGradeMaxGateway? courseGradeMaxGateway = null)
     : IRequestHandler<GenerateCourseGradesReportQuery, GenerateCourseGradesReportResult>
 {
     public async Task<GenerateCourseGradesReportResult> Handle(
@@ -118,6 +119,44 @@ public sealed class GenerateCourseGradesReportQueryHandler(
             catch
             {
                 // The per-student path below remains the compatibility fallback.
+            }
+        }
+
+        // A prefetched snapshot can predate the course-scale fallback. Apply
+        // the same resolver here so reports do not keep returning null merely
+        // because the snapshot head was reused.
+        if (bulkGradebook is not null && courseGradeMaxGateway is not null)
+        {
+            try
+            {
+                var resolution = await courseGradeMaxGateway.ResolveAsync(
+                    request.CourseId,
+                    bulkGradebook.Gradebooks.Values.SelectMany(gradebook => gradebook.Items).ToArray(),
+                    cancellationToken);
+                if (resolution.MaxGrade is > 0m)
+                {
+                    var gradebooks = bulkGradebook.Gradebooks.ToDictionary(
+                        item => item.Key,
+                        item => item.Value with
+                        {
+                            Items = item.Value.Items
+                                .Select(gradebookItem => IsCourseTotalItem(gradebookItem) && gradebookItem.GradeMax is not > 0m
+                                    ? gradebookItem with { GradeMax = resolution.MaxGrade }
+                                    : gradebookItem)
+                                .ToArray(),
+                        },
+                        StringComparer.OrdinalIgnoreCase);
+                    bulkGradebook = (bulkGradebook with { Gradebooks = gradebooks }).WithCanonicalProjection();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // Scale enrichment is best effort. The report still exposes
+                // the raw course grade when a module capability is absent.
             }
         }
 

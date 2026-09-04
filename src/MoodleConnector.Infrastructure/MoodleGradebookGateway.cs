@@ -18,7 +18,8 @@ internal sealed class MoodleGradebookGateway(
     IMemoryCache? memoryCache = null,
     IOptions<MoodleSnapshotOptions>? snapshotOptions = null,
     MoodleSnapshotMetrics? metrics = null,
-    IMoodleFunctionCatalog? functionCatalog = null) : IMoodleGradebookGateway
+    IMoodleFunctionCatalog? functionCatalog = null,
+    IMoodleCourseGradeMaxGateway? courseGradeMaxGateway = null) : IMoodleGradebookGateway
 {
     private const string MoodleFunction = "gradereport_user_get_grade_items";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(24);
@@ -49,6 +50,7 @@ internal sealed class MoodleGradebookGateway(
         }, cancellationToken);
 
         var gradebook = ParseGradebook(payload.GetRawText(), courseId, studentId, studentIdNumber);
+        gradebook = await EnrichCourseGradeMaxAsync(gradebook, cancellationToken);
         memoryCache?.Set(cacheKey, gradebook, CacheDuration);
         metrics?.RecordGradebookRead("individual");
         return gradebook;
@@ -151,6 +153,7 @@ internal sealed class MoodleGradebookGateway(
                     $"O payload bulk do gradebook excede o limite configurado de {_snapshotOptions.MaxPayloadBytes} bytes.");
             }
             parsed = ParseBulkGradebook(rawPayload, courseId, payloadBytes);
+            parsed = await EnrichCourseGradeMaxAsync(parsed, cancellationToken);
             var cells = parsed.Gradebooks.Sum(item => item.Value.Items.Count);
             if (cells > _snapshotOptions.MaxBulkGradebookCells)
             {
@@ -231,6 +234,7 @@ internal sealed class MoodleGradebookGateway(
                     ["userid"] = studentIdNumber.ToString(CultureInfo.InvariantCulture)
                 }, cancellationToken);
                 var gradebook = ParseGradebook(payload.GetRawText(), courseId, studentId, studentIdNumber);
+                gradebook = await EnrichCourseGradeMaxAsync(gradebook, cancellationToken);
                 memoryCache?.Set(cacheKey, gradebook, CacheDuration);
                 lock (gradebooks) gradebooks[studentId] = gradebook;
                 metrics?.RecordGradebookRead("individual_fallback");
@@ -251,7 +255,7 @@ internal sealed class MoodleGradebookGateway(
             }
         });
         await Task.WhenAll(reads);
-        return new CourseGradebookSnapshot(
+        var snapshot = new CourseGradebookSnapshot(
             courseId,
             gradebooks,
             new GradebookSnapshotCoverage(
@@ -267,6 +271,77 @@ internal sealed class MoodleGradebookGateway(
                 ErrorStudentIds = errors,
             })
             .WithCanonicalProjection();
+        return await EnrichCourseGradeMaxAsync(snapshot, cancellationToken);
+    }
+
+    private async Task<CourseGradebook> EnrichCourseGradeMaxAsync(
+        CourseGradebook gradebook,
+        CancellationToken cancellationToken)
+    {
+        if (courseGradeMaxGateway is null || gradebook.Items.Count == 0)
+        {
+            return gradebook;
+        }
+
+        var resolution = await courseGradeMaxGateway.ResolveAsync(
+            gradebook.CourseId,
+            gradebook.Items,
+            cancellationToken);
+        return ApplyResolvedCourseMax(gradebook, resolution.MaxGrade);
+    }
+
+    private async Task<CourseGradebookSnapshot> EnrichCourseGradeMaxAsync(
+        CourseGradebookSnapshot snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (courseGradeMaxGateway is null || snapshot.Gradebooks.Count == 0)
+        {
+            return snapshot;
+        }
+
+        var allItems = snapshot.Gradebooks.Values
+            .SelectMany(gradebook => gradebook.Items)
+            .ToArray();
+        var resolution = await courseGradeMaxGateway.ResolveAsync(
+            snapshot.CourseId,
+            allItems,
+            cancellationToken);
+        var gradebooks = snapshot.Gradebooks.ToDictionary(
+            item => item.Key,
+            item => ApplyResolvedCourseMax(item.Value, resolution.MaxGrade),
+            StringComparer.OrdinalIgnoreCase);
+        var warnings = snapshot.Coverage.Warnings ?? [];
+        if (!string.IsNullOrWhiteSpace(resolution.Warning))
+        {
+            warnings = warnings
+                .Append(resolution.Warning)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+
+        return (snapshot with
+        {
+            Gradebooks = gradebooks,
+            Coverage = snapshot.Coverage with { Warnings = warnings },
+        }).WithCanonicalProjection();
+    }
+
+    private static CourseGradebook ApplyResolvedCourseMax(
+        CourseGradebook gradebook,
+        decimal? resolvedMax)
+    {
+        if (resolvedMax is not > 0m)
+        {
+            return gradebook;
+        }
+
+        var items = gradebook.Items
+            .Select(item => string.Equals(item.ItemType, "course", StringComparison.OrdinalIgnoreCase) &&
+                            item.GradeMax is not > 0m
+                ? item with { GradeMax = resolvedMax }
+                : item)
+            .ToArray();
+        return gradebook with { Items = items };
     }
 
     private static CourseGradebookSnapshot Merge(
