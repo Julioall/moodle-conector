@@ -56,10 +56,13 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
 
             try
             {
-                var payload = await restClient.CallAsync(
-                    credentials,
-                    "mod_assign_get_submissions",
-                    parameters,
+                var payload = await MoodleReadRetry.ExecuteAsync(
+                    ct => restClient.CallAsync(
+                        credentials,
+                        "mod_assign_get_submissions",
+                        parameters,
+                        ct),
+                    null,
                     cancellationToken);
                 var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
                 var returnedAssignments = (submissions?.Assignments ?? [])
@@ -199,10 +202,13 @@ internal sealed class MoodleAssignmentSubmissionsGateway(
 
         try
         {
-            var payload = await restClient.CallAsync(
-                credentials,
-                "mod_assign_get_submissions",
-                parameters,
+            var payload = await MoodleReadRetry.ExecuteAsync(
+                ct => restClient.CallAsync(
+                    credentials,
+                    "mod_assign_get_submissions",
+                    parameters,
+                    ct),
+                null,
                 cancellationToken);
             var submissions = JsonSerializer.Deserialize<GetSubmissionsResponseDto>(payload.GetRawText());
             var assignment = (submissions?.Assignments ?? [])
