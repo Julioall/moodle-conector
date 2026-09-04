@@ -35,6 +35,8 @@ public sealed class ParticipantComparisonProfile : IShadowComparisonProfile
             CompareField(userId, "firstaccess", legacyParticipant, registryParticipant, differences);
             CompareField(userId, "lastaccess", legacyParticipant, registryParticipant, differences);
             CompareField(userId, "lastcourseaccess", legacyParticipant, registryParticipant, differences);
+            CompareCollectionField(userId, "roles", legacyParticipant, registryParticipant, differences);
+            CompareCollectionField(userId, "groups", legacyParticipant, registryParticipant, differences);
         }
 
         foreach (var userId in registryById.Keys)
@@ -112,4 +114,39 @@ public sealed class ParticipantComparisonProfile : IShadowComparisonProfile
                 $"User {userId} field '{fieldName}' differs: Legacy='{legacyValue}', Registry='{registryValue}'");
         }
     }
+
+    private static void CompareCollectionField(
+        string userId,
+        string fieldName,
+        JsonNode legacyParticipant,
+        JsonNode registryParticipant,
+        List<string> differences)
+    {
+        // Older shadow fixtures may not request these optional fields. Only
+        // compare them when the legacy payload contains the field, while live
+        // participant probes request both roles and groups explicitly.
+        if (legacyParticipant[fieldName] is null)
+        {
+            return;
+        }
+
+        var legacyValue = CanonicalJson(legacyParticipant[fieldName]);
+        var registryValue = CanonicalJson(registryParticipant[fieldName]);
+        if (!string.Equals(legacyValue, registryValue, StringComparison.Ordinal))
+        {
+            differences.Add($"User {userId} field '{fieldName}' differs");
+        }
+    }
+
+    private static string CanonicalJson(JsonNode? node) => node switch
+    {
+        null => "null",
+        JsonObject obj => "{" + string.Join(",", obj
+            .OrderBy(property => property.Key, StringComparer.Ordinal)
+            .Select(property => $"{property.Key}:{CanonicalJson(property.Value)}")) + "}",
+        JsonArray array => "[" + string.Join(",", array
+            .Select(CanonicalJson)
+            .OrderBy(value => value, StringComparer.Ordinal)) + "]",
+        _ => node.ToJsonString(),
+    };
 }

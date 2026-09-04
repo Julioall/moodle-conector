@@ -409,7 +409,7 @@ Validação executada nesta implementação:
 ```text
 dotnet build MoodleConnector.sln --no-restore                         # 0 erros, 0 avisos
 dotnet vstest .../MoodleConnector.Application.Tests.dll `
-  --TestCaseFilter:"FullyQualifiedName!~Integration"                  # 949 aprovados
+  --TestCaseFilter:"FullyQualifiedName!~Integration"                  # 950 aprovados
 dotnet vstest .../MoodleConnector.Application.Tests.dll `
   --TestCaseFilter:"FullyQualifiedName~MoodleGradebookGatewayCachingTests" # 7 aprovados após a projeção
 dotnet test ... --filter "MoodleAssignmentGradeReadGatewayTests"       # 4 aprovados
@@ -420,6 +420,8 @@ dotnet test tests/MoodleConnector.Application.Tests --no-build `
   --filter "FullyQualifiedName~GradebookLiveShadowTests"              # 2 aprovados; paridade bulk/individual nas conexões canário
 dotnet test tests/MoodleConnector.Application.Tests --no-build `
   --filter "FullyQualifiedName~AssignmentGradesLiveShadowTests"        # 2 aprovados; lote de duas assignments nas conexões canário
+dotnet test tests/MoodleConnector.Application.Tests --no-build `
+  --filter "FullyQualifiedName~ParticipantsLiveShadowTests"            # 2 aprovados; roles/groups e população reconciliados
 $env:MOODLEBENCH_SCHEMA_ONLY='true'
 dotnet run --project src/MoodleConnector.Benchmarks/MoodleConnector.Benchmarks.csproj --no-build # A/B 90, Production 70, C 87
 ```
