@@ -416,6 +416,12 @@ dotnet test ... --filter "MoodleAssignmentGradeReadGatewayTests"       # 4 aprov
 dotnet test ... --filter "MoodleReportToolsTests|...ReportQuery..."     # 29 aprovados
 dotnet vstest .../MoodleConnector.Application.Tests.dll `
   --TestCaseFilter:"FullyQualifiedName~McpJwtClaimsIntegrationTests.Deve_retornar_401_quando_api_key_estiver_ausente" # 1 aprovado
+dotnet test tests/MoodleConnector.Application.Tests --no-build `
+  --filter "FullyQualifiedName~GradebookLiveShadowTests"              # 2 aprovados; paridade bulk/individual nas conexões canário
+dotnet test tests/MoodleConnector.Application.Tests --no-build `
+  --filter "FullyQualifiedName~AssignmentGradesLiveShadowTests"        # 2 aprovados; lote de duas assignments nas conexões canário
+$env:MOODLEBENCH_SCHEMA_ONLY='true'
+dotnet run --project src/MoodleConnector.Benchmarks/MoodleConnector.Benchmarks.csproj --no-build # A/B 90, Production 70, C 87
 ```
 
 Os critérios que dependem de MoodleBench, permissões reais, duas réplicas ou PostgreSQL ainda
