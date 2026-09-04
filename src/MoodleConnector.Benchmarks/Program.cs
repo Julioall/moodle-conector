@@ -737,7 +737,8 @@ class Program
 
                 using var factory = BuildFactory(
                     new BenchmarkProfile(exposure, model, exposure != ToolExposureProfile.Full),
-                    includeAllCatalogTools);
+                    includeAllCatalogTools,
+                    useStubMoodle: true);
                 var mcpClient = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
                 await SeedBenchmarkConnectionsAsync(factory.Services);
                 mcpClient.DefaultRequestHeaders.Add("X-Mcp-Api-Key", "test-key");
@@ -990,7 +991,8 @@ class Program
 
     private static WebApplicationFactory<global::Program> BuildFactory(
         BenchmarkProfile profile,
-        bool includeAllCatalogTools = false)
+        bool includeAllCatalogTools = false,
+        bool useStubMoodle = false)
     {
         return new WebApplicationFactory<global::Program>()
             .WithWebHostBuilder(builder =>
@@ -1017,7 +1019,11 @@ class Program
                         { "McpServerSecurity:RequireApiKey", "true" },
                         { "McpServerSecurity:RequireJwt", "false" },
                         { "ConnectorSecrets:EncryptionKeyBase64", "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=" },
-                        { "Features:AssignmentGradeWriteEnabled", "true" }
+                        { "Features:AssignmentGradeWriteEnabled", "true" },
+                        { "Features:MessagesWriteEnabled", includeAllCatalogTools.ToString() },
+                        { "Features:UniversalMoodleWriteEnabled", includeAllCatalogTools.ToString() },
+                        { "Features:UniversalMoodleFileDownloadEnabled", includeAllCatalogTools.ToString() },
+                        { "MoodleApi:UseStubData", useStubMoodle.ToString() }
                     });
                 });
 
