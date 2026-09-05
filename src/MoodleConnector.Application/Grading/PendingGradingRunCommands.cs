@@ -291,7 +291,7 @@ public sealed class StartPendingGradingRunCommandHandler(
             cancellationToken);
         if (snapshot is null)
         {
-            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Courses, null, force: false, cancellationToken);
+            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Courses, null, force: true, cancellationToken);
             warnings.Add(
                 queued
                     ? "O snapshot de cursos ainda não está disponível; a atualização foi agendada e nenhuma consulta live foi feita."
@@ -330,7 +330,7 @@ public sealed class StartPendingGradingRunCommandHandler(
             cancellationToken);
         if (snapshot is null)
         {
-            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Submissions, course.CourseId, force: false, cancellationToken);
+            var queued = await QueueSnapshotAsync(request, MoodleSnapshotDatasets.Submissions, course.CourseId, force: true, cancellationToken);
             var message = queued
                 ? "O snapshot de entregas ainda não está disponível; a atualização foi agendada."
                 : "O snapshot de entregas ainda não está disponível e não foi possível agendar a atualização.";

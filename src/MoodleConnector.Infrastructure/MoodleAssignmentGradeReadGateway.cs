@@ -183,7 +183,7 @@ internal sealed class MoodleAssignmentGradeReadGateway(
             MoodleFunction,
             parameters,
             cancellationToken);
-        return ParseGrades(payload.GetRawText(), requestedStudentIds);
+        return ParseGrades(payload.GetRawText(), requestedStudentIds, assignmentIds);
     }
 
     private async Task<IReadOnlyList<AssignmentGradesBatch>> ReadSingleGradesConcurrentlyAsync(
@@ -236,7 +236,8 @@ internal sealed class MoodleAssignmentGradeReadGateway(
 
     private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>> ParseGrades(
         string payload,
-        IReadOnlySet<long> requestedStudentIds)
+        IReadOnlySet<long> requestedStudentIds,
+        IReadOnlyCollection<string> requestedAssignmentIds)
     {
         var result = new Dictionary<string, IReadOnlyDictionary<string, AssignmentExistingGrade>>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(payload))
@@ -288,6 +289,30 @@ internal sealed class MoodleAssignmentGradeReadGateway(
             // An assignment with no grades is a successful empty set. This
             // differs from an assignment omitted from the response.
             result[assignmentId.ToString(CultureInfo.InvariantCulture)] = assignmentGrades;
+        }
+
+        // Moodle emits warning code 3 ("No grades found") instead of an
+        // assignment entry when an activity has no grade rows yet. That is a
+        // valid, complete empty grade set—not an omitted/inaccessible
+        // assignment. Preserve it as an empty batch so snapshot coverage can
+        // still be complete and pending submissions remain eligible for review.
+        if (document.RootElement.TryGetProperty("warnings", out var warnings) &&
+            warnings.ValueKind == JsonValueKind.Array)
+        {
+            var requested = requestedAssignmentIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var warning in warnings.EnumerateArray())
+            {
+                if (!TryReadLongProperty(warning, "itemid", out var itemId) ||
+                    !requested.Contains(itemId.ToString(CultureInfo.InvariantCulture)) ||
+                    !string.Equals(ReadTextProperty(warning, "warningcode"), "3", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                result.TryAdd(
+                    itemId.ToString(CultureInfo.InvariantCulture),
+                    new Dictionary<string, AssignmentExistingGrade>(StringComparer.OrdinalIgnoreCase));
+            }
         }
 
         return result;

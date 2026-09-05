@@ -87,6 +87,33 @@ public sealed class MoodleAssignmentGradeReadGatewayTests
         Assert.Equal(-1m, grades["440730"].Grade);
     }
 
+    [Fact]
+    public async Task Trata_aviso_sem_notas_como_lote_vazio_completo()
+    {
+        var sut = new MoodleAssignmentGradeReadGateway(
+            Options.Create(new MoodleApiOptions()),
+            new FakeCredentialsProvider(),
+            new FakeRestClient("""
+            {
+              "assignments": [],
+              "warnings": [
+                { "item": "assignment", "itemid": 116124, "warningcode": "3", "message": "No grades found" }
+              ]
+            }
+            """));
+
+        var batches = await sut.GetExistingGradesBatchAsync(
+            "teacher-1",
+            ["116124"],
+            ["440752"],
+            CancellationToken.None);
+
+        var batch = Assert.Single(batches);
+        Assert.Equal("116124", batch.AssignmentId);
+        Assert.Empty(batch.Grades);
+        Assert.Null(batch.ErrorCode);
+    }
+
         [Fact]
         public async Task Preserva_grader_e_timemodified_para_atividade_sem_nota()
         {
