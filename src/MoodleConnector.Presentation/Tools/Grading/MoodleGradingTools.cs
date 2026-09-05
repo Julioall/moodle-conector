@@ -565,7 +565,8 @@ public sealed class MoodleGradingTools(
             return $"Nenhuma entrega pendente elegivel foi encontrada em {response.CoursesScanned} curso(s).";
         }
 
-        return $"Fluxo de correcoes pendentes iniciado: {response.TotalItems} entrega(s) em {response.Batches.Count} curso(s). " +
+        return $"Fluxo de correcoes pendentes iniciado: {response.TotalItems} entrega(s) em {response.CoursesScanned} curso(s), " +
+               $"distribuidas em {response.Batches.Count} sublote(s). " +
                "Prossiga pelos batchJobIds retornados, sem interromper o fluxo pelos cursos ou itens bloqueados.";
     }
 
