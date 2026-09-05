@@ -63,6 +63,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "056_grading_submission_integrity.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "057_moodle_resource_owner_subject.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "058_rename_nacional_alias_to_senai.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "059_rename_dashboard_nacional_alias_to_senai.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(
