@@ -181,7 +181,6 @@ public static class DependencyInjection
 
         services.AddScoped<IMoodleAssignmentSettingsGateway, MoodleAssignmentSettingsGateway>();
         services.AddScoped<IMoodleCourseGradeMaxGateway, MoodleCourseGradeMaxGateway>();
-        services.AddScoped<IMoodleCompletionGateway, MoodleCompletionGateway>();
         services.AddScoped<IMoodleMessageGateway, MoodleMessageGateway>();
 
         services.AddSingleton<IDocumentExtractionService, DocumentExtractionService>();
