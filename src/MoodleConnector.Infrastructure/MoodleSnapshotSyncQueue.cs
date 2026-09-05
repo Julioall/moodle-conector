@@ -255,6 +255,7 @@ internal sealed class MoodleSnapshotSyncQueue(
                           item.NextSyncAt <= now &&
                           (item.Status != "running" || item.LeaseUntil == null || item.LeaseUntil <= now))
             .OrderBy(item => item.Priority)
+            .ThenByDescending(item => item.ForceRequested)
             .ThenBy(item => item.NextSyncAt)
             .Take(32)
             .ToArrayAsync(cancellationToken);
