@@ -2,7 +2,7 @@
   {
     "id": "students.list.001",
     "category": "students",
-    "prompt": "No SENAI Nacional, liste os estudantes matriculados no curso 8887.",
+    "prompt": "No SENAI, liste os estudantes matriculados no curso 8887.",
     "expectedIntent": "students.list",
     "allowedOperations": [ "list_course_students", "list_course_participants", "core_enrol_get_enrolled_users" ],
     "forbiddenOperations": [],
@@ -24,7 +24,7 @@
   {
     "id": "students.groups.001",
     "category": "students",
-    "prompt": "No SENAI Nacional, liste os grupos do curso 8887.",
+    "prompt": "No SENAI, liste os grupos do curso 8887.",
     "expectedIntent": "students.groups",
     "allowedOperations": [ "list_course_groups", "core_group_get_course_groups" ],
     "forbiddenOperations": [],
@@ -46,7 +46,7 @@
   {
     "id": "students.activity.001",
     "category": "students",
-    "prompt": "No SENAI Nacional, identifique estudantes sem acesso recente ao curso 8887.",
+    "prompt": "No SENAI, identifique estudantes sem acesso recente ao curso 8887.",
     "expectedIntent": "students.activity",
     "allowedOperations": [ "list_students_without_recent_access", "core_enrol_get_enrolled_users" ],
     "forbiddenOperations": [],

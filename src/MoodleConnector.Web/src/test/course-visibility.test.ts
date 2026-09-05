@@ -40,15 +40,15 @@ describe('course visibility preferences', () => {
 
   it('does not share ignored courses between connections', async () => {
     const fiegGateway = createGateway();
-    const nacionalGateway = createGateway();
+    const senaiGateway = createGateway();
     const { result: fieg } = renderHook(() => useIgnoredCourses('fieg', fiegGateway));
-    const { result: nacional } = renderHook(() => useIgnoredCourses('nacional', nacionalGateway));
+    const { result: senai } = renderHook(() => useIgnoredCourses('senai', senaiGateway));
     await waitFor(() => expect(fiegGateway.listIgnored).toHaveBeenCalledTimes(1));
 
     act(() => fieg.current.ignoreCourse('30585'));
 
     expect(fieg.current.ignoredCourseIds.has('30585')).toBe(true);
-    expect(nacional.current.ignoredCourseIds.has('30585')).toBe(false);
+    expect(senai.current.ignoredCourseIds.has('30585')).toBe(false);
   });
 
   it('migrates an existing browser preference to the backend once', async () => {

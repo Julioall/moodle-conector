@@ -5,13 +5,16 @@ public sealed class MoodleSnapshotOptions
     public const string SectionName = "MoodleSnapshots";
 
     public int QueueCapacity { get; init; } = 256;
-    public int GlobalConcurrency { get; init; } = 4;
+    // Moodle installations often protect the REST endpoint with a small
+    // worker pool. Keep the default conservative; operators can raise it per
+    // environment after observing the upstream error rate.
+    public int GlobalConcurrency { get; init; } = 2;
     public int PerConnectionConcurrency { get; init; } = 1;
-    public int FeedbackReadConcurrency { get; init; } = 4;
+    public int FeedbackReadConcurrency { get; init; } = 1;
     public bool BulkGradebookEnabled { get; init; } = true;
     public int MaxBulkGradebookStudents { get; init; } = 200;
     public int MaxBulkGradebookCells { get; init; } = 20_000;
-    public int IndividualGradebookConcurrency { get; init; } = 4;
+    public int IndividualGradebookConcurrency { get; init; } = 2;
     public int GradebookFreshMinutes { get; init; } = 15;
     public int GradebookStaleMinutes { get; init; } = 120;
     public int MaxAnalyticalSnapshotSkewMinutes { get; init; } = 15;

@@ -2,7 +2,7 @@
   {
     "id": "assignments.activities.001",
     "category": "assignments",
-    "prompt": "No SENAI Nacional, liste as atividades de tarefa do curso 8887.",
+    "prompt": "No SENAI, liste as atividades de tarefa do curso 8887.",
     "expectedIntent": "assignments.activities",
     "allowedOperations": [ "list_course_assignments", "list_course_activities", "mod_assign_get_assignments" ],
     "forbiddenOperations": [],
@@ -24,7 +24,7 @@
   {
     "id": "assignments.activities.003",
     "category": "assignments",
-    "prompt": "No SENAI Nacional, consulte os detalhes da tarefa 1 no curso 8887 usando o identificador da atividade.",
+    "prompt": "No SENAI, consulte os detalhes da tarefa 1 no curso 8887 usando o identificador da atividade.",
     "expectedIntent": "assignments.activities",
     "allowedOperations": [ "get_assignment", "get_course_activity", "list_course_assignments", "mod_assign_get_assignments" ],
     "forbiddenOperations": [ "list_assignment_submissions", "mod_assign_get_submissions" ],
@@ -35,7 +35,7 @@
   {
     "id": "assignments.submissions.001",
     "category": "assignments",
-    "prompt": "No SENAI Nacional, liste as submissões da tarefa 1 no curso 8887.",
+    "prompt": "No SENAI, liste as submissões da tarefa 1 no curso 8887.",
     "expectedIntent": "assignments.submissions",
     "allowedOperations": [ "list_assignment_submissions", "mod_assign_get_submissions" ],
     "forbiddenOperations": [],
@@ -57,7 +57,7 @@
   {
     "id": "assignments.submissions.003",
     "category": "assignments",
-    "prompt": "No SENAI Nacional, encontre as entregas atrasadas da tarefa 1 no curso 8887.",
+    "prompt": "No SENAI, encontre as entregas atrasadas da tarefa 1 no curso 8887.",
     "expectedIntent": "assignments.submissions",
     "allowedOperations": [ "list_late_submissions", "list_assignment_submissions", "mod_assign_get_submissions" ],
     "forbiddenOperations": [],
@@ -79,7 +79,7 @@
   {
     "id": "assignments.pagination.001",
     "category": "assignments",
-    "prompt": "No SENAI Nacional, liste todas as submissoes da tarefa 1 no curso 8887 e informe se ainda existem paginas.",
+    "prompt": "No SENAI, liste todas as submissoes da tarefa 1 no curso 8887 e informe se ainda existem paginas.",
     "expectedIntent": "assignments.submissions",
     "allowedOperations": [ "list_assignment_submissions", "mod_assign_get_submissions" ],
     "forbiddenOperations": [],
@@ -101,7 +101,7 @@
   {
     "id": "assignments.connection.001",
     "category": "assignments",
-    "prompt": "Use somente a conexao SENAI Nacional para consultar as tarefas do curso 8887.",
+    "prompt": "Use somente a conexao SENAI para consultar as tarefas do curso 8887.",
     "expectedIntent": "assignments.activities",
     "allowedOperations": [ "list_course_assignments", "list_course_activities", "mod_assign_get_assignments" ],
     "forbiddenOperations": [],
@@ -112,7 +112,7 @@
   {
     "id": "assignments.negative.001",
     "category": "assignments",
-    "prompt": "No SENAI Nacional, consulte a tarefa 999999 no curso 8887. Se ela nao existir, informe que nao foi encontrada sem inventar uma submissao.",
+    "prompt": "No SENAI, consulte a tarefa 999999 no curso 8887. Se ela nao existir, informe que nao foi encontrada sem inventar uma submissao.",
     "expectedIntent": "assignments.submissions",
     "allowedOperations": [ "get_submission_status", "get_student_submission", "list_assignment_submissions", "mod_assign_get_submission_status", "mod_assign_get_submissions" ],
     "forbiddenOperations": [],

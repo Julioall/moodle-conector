@@ -29,7 +29,7 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
 
             var response = form["wstoken"] == "token-goias"
                 ? "{\"sitename\":\"Goiás\",\"release\":\"4.5\",\"userid\":7,\"functions\":[{\"name\":\"core_course_get_courses_by_field\"},{\"name\":\"core_course_get_enrolled_courses_by_timeline_classification\"},{\"name\":\"mod_assign_get_assignments\"}]}"
-                : "{\"sitename\":\"Nacional\",\"release\":\"5.1.2\",\"userid\":8,\"functions\":[{\"name\":\"core_enrol_get_users_courses\"},{\"name\":\"mod_assign_get_assignments\"},{\"name\":\"mod_assign_get_submissions\"}]}";
+                : "{\"sitename\":\"SENAI\",\"release\":\"5.1.2\",\"userid\":8,\"functions\":[{\"name\":\"core_enrol_get_users_courses\"},{\"name\":\"mod_assign_get_assignments\"},{\"name\":\"mod_assign_get_submissions\"}]}";
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(response, Encoding.UTF8);
         });
@@ -48,18 +48,18 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
 
         credentials.Current = "goias";
         var goias = await catalog.GetCurrentAsync(false, CancellationToken.None);
-        credentials.Current = "nacional";
-        var nacional = await catalog.GetCurrentAsync(false, CancellationToken.None);
+        credentials.Current = "senai";
+        var senai = await catalog.GetCurrentAsync(false, CancellationToken.None);
 
         Assert.Equal("4.5", goias.Release);
         Assert.Contains(goias.Functions, function => function.Name == "core_course_get_enrolled_courses_by_timeline_classification");
-        Assert.Equal("5.1.2", nacional.Release);
-        Assert.Contains(nacional.Functions, function => function.Name == "core_enrol_get_users_courses");
+        Assert.Equal("5.1.2", senai.Release);
+        Assert.Contains(senai.Functions, function => function.Name == "core_enrol_get_users_courses");
 
         var flows = new MoodleBusinessFlowRegistry();
         Assert.Equal("timeline", flows.Evaluate("listar_cursos_ativos", goias).SelectedStrategy);
-        Assert.Equal("enrolled_courses_fallback", flows.Evaluate("listar_cursos_ativos", nacional).SelectedStrategy);
-        Assert.True(flows.Evaluate("listar_entregas_aguardando_correcao", nacional).IsAvailable);
+        Assert.Equal("enrolled_courses_fallback", flows.Evaluate("listar_cursos_ativos", senai).SelectedStrategy);
+        Assert.True(flows.Evaluate("listar_entregas_aguardando_correcao", senai).IsAvailable);
     }
 
     private sealed class SwitchingCredentialsProvider : IMoodleConnectorCredentialsProvider
@@ -75,7 +75,7 @@ public sealed class MoodleCapabilitiesTransportIntegrationTests
         public Task<string> GetAccessTokenAsync(
             MoodleConnectorCredentials connection,
             CancellationToken cancellationToken) =>
-            Task.FromResult(connection.Alias == "goias" ? "token-goias" : "token-nacional");
+            Task.FromResult(connection.Alias == "goias" ? "token-goias" : "token-senai");
 
         public void Invalidate(MoodleConnectorCredentials connection)
         {

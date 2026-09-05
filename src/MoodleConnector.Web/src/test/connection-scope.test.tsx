@@ -11,7 +11,7 @@ vi.mock('../features/connections/connections-gateway', () => ({
 
 const connections = [
   { connectionRef: 'goias', alias: 'Goiás', host: 'https://goias.example', status: 'active', isDefault: true, capabilities: ['read'] },
-  { connectionRef: 'nacional', alias: 'Nacional', host: 'https://nacional.example', status: 'active', isDefault: false, capabilities: ['read'] },
+  { connectionRef: 'senai', alias: 'SENAI', host: 'https://senai.example', status: 'active', isDefault: false, capabilities: ['read'] },
 ];
 
 function wrapperFor(entry: string) {
@@ -43,8 +43,8 @@ describe('useConnectionScope', () => {
     });
     await waitFor(() => expect(myCourses.result.current.connectionRef).toBe('goias'));
 
-    act(() => dashboard.result.current.selectConnection('nacional'));
-    await waitFor(() => expect(myCourses.result.current.connectionRef).toBe('nacional'));
-    expect(window.localStorage.getItem('app:selected-connection')).toBe('nacional');
+    act(() => dashboard.result.current.selectConnection('senai'));
+    await waitFor(() => expect(myCourses.result.current.connectionRef).toBe('senai'));
+    expect(window.localStorage.getItem('app:selected-connection')).toBe('senai');
   });
 });

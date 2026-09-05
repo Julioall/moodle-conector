@@ -44,7 +44,7 @@ public sealed class HttpContextMoodleConnectorCredentialsProviderTests
         await db.SaveChangesAsync();
 
         var error = await Assert.ThrowsAsync<MoodleApiException>(() =>
-            CreateSut(db, "nacional").GetCurrentCredentialsAsync(CancellationToken.None));
+            CreateSut(db, "senai").GetCurrentCredentialsAsync(CancellationToken.None));
 
         Assert.Equal(MoodleErrorContract.ConnectionNotFound, error.ErrorCode);
         Assert.False(string.IsNullOrWhiteSpace(error.AuditId));
@@ -68,7 +68,7 @@ public sealed class HttpContextMoodleConnectorCredentialsProviderTests
     {
         await using var db = CreateDb();
         db.ConnectorClients.AddRange(
-            Connection(alias: "nacional", isDefault: false, id: "nacional-connection"),
+            Connection(alias: "senai", isDefault: false, id: "senai-connection"),
             Connection(alias: "goias", isDefault: true));
         await db.SaveChangesAsync();
 

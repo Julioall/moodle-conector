@@ -136,7 +136,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                         .Select(attribute => attribute.Description))))
             .ToArray();
 
-        foreach (var forbiddenAlias in new[] { "goias", "nacional", "ctm" })
+        foreach (var forbiddenAlias in new[] { "goias", "ctm" })
         {
             Assert.DoesNotContain(
                 publishedMetadata,

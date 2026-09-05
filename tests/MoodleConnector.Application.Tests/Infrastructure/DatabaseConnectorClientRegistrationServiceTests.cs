@@ -15,7 +15,7 @@ public sealed class DatabaseConnectorClientRegistrationServiceTests
         await using var dbContext = new ConnectorDbContext(options);
         dbContext.ConnectorClients.AddRange(
             Connection("client-1:legacy-goias", "client-1", "Goiás", isDefault: false),
-            Connection("client-1:nacional", "client-1", "nacional", isDefault: true));
+            Connection("client-1:senai", "client-1", "senai", isDefault: true));
         await dbContext.SaveChangesAsync();
         var sut = new DatabaseConnectorClientRegistrationService(dbContext, new TestSecretProtector());
 
@@ -54,7 +54,7 @@ public sealed class DatabaseConnectorClientRegistrationServiceTests
         dbContext.ConnectorClients.AddRange(
             Connection("client-1:legacy-a", "client-1", "Goiás", isDefault: false),
             Connection("client-1:legacy-b", "client-1", " GOIAS ", isDefault: false),
-            Connection("client-1:nacional", "client-1", "nacional", isDefault: true));
+            Connection("client-1:senai", "client-1", "senai", isDefault: true));
         await dbContext.SaveChangesAsync();
         var sut = new DatabaseConnectorClientRegistrationService(dbContext, new TestSecretProtector());
 

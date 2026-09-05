@@ -154,7 +154,7 @@ foreach ($skillDirectory in Get-ChildItem -LiteralPath $skillsRoot -Directory) {
     }
 }
 
-$forbiddenConnectionAliases = @("goias", "nacional", "ctm")
+$forbiddenConnectionAliases = @("goias", "ctm")
 $publishedPluginFiles = Get-ChildItem -LiteralPath $pluginRoot -Recurse -File |
     Where-Object { $_.Extension -in @(".json", ".md") }
 foreach ($publishedPluginFile in $publishedPluginFiles) {

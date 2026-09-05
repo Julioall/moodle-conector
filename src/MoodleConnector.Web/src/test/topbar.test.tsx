@@ -25,7 +25,7 @@ describe('TopBar', () => {
     vi.mocked(connectionsGateway.list).mockResolvedValue({
       data: [
         { connectionRef: 'goias', alias: 'SENAI Goiás', host: 'https://goias.example', status: 'unknown', isDefault: true, capabilities: ['read'] },
-        { connectionRef: 'nacional', alias: 'SENAI Nacional', host: 'https://nacional.example', status: 'offline', isDefault: false, capabilities: ['read'] },
+        { connectionRef: 'senai', alias: 'SENAI', host: 'https://senai.example', status: 'offline', isDefault: false, capabilities: ['read'] },
       ],
       meta: { generatedAt: '2026-08-10T00:00:00Z' },
     });
@@ -37,9 +37,9 @@ describe('TopBar', () => {
     expect((await screen.findAllByText('SENAI Goiás')).length).toBeGreaterThan(0);
     expect(screen.getByRole('combobox', { name: 'Selecionar Moodle' })).toBeInTheDocument();
     await user.click(screen.getByRole('combobox', { name: 'Selecionar Moodle' }));
-    expect(await screen.findByText('SENAI Nacional')).toBeInTheDocument();
-    await user.click(screen.getByText('SENAI Nacional'));
-    await waitFor(() => expect(window.localStorage.getItem('app:selected-connection')).toBe('nacional'));
+    expect(await screen.findByText('SENAI')).toBeInTheDocument();
+    await user.click(screen.getByText('SENAI'));
+    await waitFor(() => expect(window.localStorage.getItem('app:selected-connection')).toBe('senai'));
   });
 });
 

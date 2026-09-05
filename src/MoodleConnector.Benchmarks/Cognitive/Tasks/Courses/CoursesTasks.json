@@ -2,7 +2,7 @@
   {
     "id": "courses.list.001",
     "category": "courses",
-    "prompt": "Liste meus cursos no SENAI Nacional.",
+    "prompt": "Liste meus cursos no SENAI.",
     "expectedIntent": "courses.list",
     "allowedOperations": [ "list_my_courses", "get_my_courses", "get_enrolled_courses" ],
     "forbiddenOperations": [],
@@ -24,7 +24,7 @@
   {
     "id": "courses.search.001",
     "category": "courses",
-    "prompt": "No SENAI Nacional, procure o curso com ID 8887.",
+    "prompt": "No SENAI, procure o curso com ID 8887.",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search" ],
     "forbiddenOperations": [],
@@ -35,7 +35,7 @@
   {
     "id": "courses.search.002",
     "category": "courses",
-    "prompt": "No SENAI Nacional, localize o curso Introducao a Qualidade e Produtividade - TEC0015.2026.1-00037 - SENAI - Porto Alegre - RS.",
+    "prompt": "No SENAI, localize o curso Introducao a Qualidade e Produtividade - TEC0015.2026.1-00037 - SENAI - Porto Alegre - RS.",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search" ],
     "forbiddenOperations": [],
@@ -57,7 +57,7 @@
   {
     "id": "courses.search.004",
     "category": "courses",
-    "prompt": "No SENAI Nacional, procure o curso com código da turma 1071963.",
+    "prompt": "No SENAI, procure o curso com código da turma 1071963.",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search" ],
     "forbiddenOperations": [],
@@ -90,7 +90,7 @@
   {
     "id": "courses.details.002",
     "category": "courses",
-    "prompt": "No SENAI Nacional, exiba as informações do curso 8887.",
+    "prompt": "No SENAI, exiba as informações do curso 8887.",
     "expectedIntent": "courses.details",
     "allowedOperations": [ "get_course", "get_course_by_id", "get_course_info", "search_courses" ],
     "forbiddenOperations": [],
@@ -178,7 +178,7 @@
   {
     "id": "courses.structure.005",
     "category": "courses",
-    "prompt": "No SENAI Nacional, exiba a estrutura completa do curso 8887.",
+    "prompt": "No SENAI, exiba a estrutura completa do curso 8887.",
     "expectedIntent": "courses.structure",
     "allowedOperations": [ "list_course_contents", "get_course_contents", "list_course_resources", "get_course_resources" ],
     "forbiddenOperations": [],
@@ -189,7 +189,7 @@
   {
     "id": "courses.ambiguity.001",
     "category": "courses",
-    "prompt": "No SENAI Nacional, tenho algum curso chamado Comunicação?",
+    "prompt": "No SENAI, tenho algum curso chamado Comunicação?",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search", "list_my_courses" ],
     "forbiddenOperations": [],
@@ -222,7 +222,7 @@
   {
     "id": "courses.ambiguity.004",
     "category": "courses",
-    "prompt": "No SENAI Nacional, estou matriculado no curso Introducao a Qualidade e Produtividade?",
+    "prompt": "No SENAI, estou matriculado no curso Introducao a Qualidade e Produtividade?",
     "expectedIntent": "courses.search",
     "allowedOperations": [ "search_courses", "find_course", "get_course", "search", "list_my_courses" ],
     "forbiddenOperations": [],
@@ -244,7 +244,7 @@
   {
     "id": "courses.pagination.001",
     "category": "courses",
-    "prompt": "Mostre todos os meus cursos no SENAI Nacional, não apenas os primeiros.",
+    "prompt": "Mostre todos os meus cursos no SENAI, não apenas os primeiros.",
     "expectedIntent": "courses.list",
     "allowedOperations": [ "list_my_courses", "get_my_courses", "get_enrolled_courses" ],
     "forbiddenOperations": [],
@@ -266,7 +266,7 @@
   {
     "id": "courses.pagination.003",
     "category": "courses",
-    "prompt": "Estou matriculado em mais de 50 disciplinas no SENAI Nacional?",
+    "prompt": "Estou matriculado em mais de 50 disciplinas no SENAI?",
     "expectedIntent": "courses.list",
     "allowedOperations": [ "list_my_courses", "get_my_courses", "get_enrolled_courses" ],
     "forbiddenOperations": [],
@@ -299,7 +299,7 @@
   {
     "id": "courses.connection.001",
     "category": "courses",
-    "prompt": "No SENAI Nacional, mostre os detalhes do curso com ID 8887.",
+    "prompt": "No SENAI, mostre os detalhes do curso com ID 8887.",
     "expectedIntent": "courses.details",
     "allowedOperations": [ "get_course", "get_course_by_id", "get_course_info", "search_courses" ],
     "forbiddenOperations": [],

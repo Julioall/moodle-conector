@@ -15,7 +15,6 @@ internal sealed class MoodleAssignmentGradeReadGateway(
     IOptions<MoodleSnapshotOptions>? snapshotOptions = null) : IMoodleAssignmentGradeReadGateway
 {
     private const string MoodleFunction = "mod_assign_get_grades";
-    private const int MaxConcurrentFallbackReads = 4;
     private readonly MoodleApiOptions _options = options.Value;
     private readonly MoodleSnapshotOptions _snapshotOptions =
         (snapshotOptions?.Value ?? new MoodleSnapshotOptions()).Normalize();
@@ -193,7 +192,9 @@ internal sealed class MoodleAssignmentGradeReadGateway(
         IReadOnlySet<long> requestedStudentIds,
         CancellationToken cancellationToken)
     {
-        using var gate = new SemaphoreSlim(MaxConcurrentFallbackReads, MaxConcurrentFallbackReads);
+        using var gate = new SemaphoreSlim(
+            _snapshotOptions.FeedbackReadConcurrency,
+            _snapshotOptions.FeedbackReadConcurrency);
         var batches = await Task.WhenAll(assignmentIds.Select(async assignmentId =>
         {
             await gate.WaitAsync(cancellationToken);

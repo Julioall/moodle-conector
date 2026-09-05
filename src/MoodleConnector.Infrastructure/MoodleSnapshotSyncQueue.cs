@@ -1320,7 +1320,16 @@ internal sealed class MoodleSnapshotSyncQueue(
 
         entity.ConnectionId = work.ConnectionId;
         entity.ConnectionAlias = work.ConnectionAlias;
-        var json = JsonSerializer.Serialize(payload, JsonOptions);
+        var serialized = MoodleJsonbSerializer.Serialize(payload, JsonOptions);
+        var json = serialized.Json;
+        if (serialized.SanitizedCharacters > 0)
+        {
+            logger.LogWarning(
+                "Caracteres incompatíveis com PostgreSQL jsonb removidos do snapshot. Dataset={Dataset} CourseId={CourseId} Count={Count}",
+                type,
+                courseId,
+                serialized.SanitizedCharacters);
+        }
         var payloadSize = Encoding.UTF8.GetByteCount(json);
         metrics.RecordPayloadBytes(type, payloadSize);
         if (payloadSize > _options.MaxPayloadBytes)

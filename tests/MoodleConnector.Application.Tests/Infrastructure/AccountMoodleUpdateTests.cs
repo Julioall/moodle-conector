@@ -24,7 +24,7 @@ public sealed class AccountMoodleUpdateTests
             ConnectorClientId = clientId
         });
         dbContext.ConnectorClients.AddRange(
-            Connection("connection-a", clientId, "nacional", isDefault: true),
+            Connection("connection-a", clientId, "senai", isDefault: true),
             Connection("connection-b", clientId, "Goiás", isDefault: false));
         await dbContext.SaveChangesAsync();
         var sut = new AccountService(
@@ -47,7 +47,7 @@ public sealed class AccountMoodleUpdateTests
                 CancellationToken.None));
 
         Assert.Contains("alias 'goias'", exception.Message, StringComparison.Ordinal);
-        Assert.Equal("nacional", (await dbContext.ConnectorClients.FindAsync("connection-a"))!.MoodleAlias);
+        Assert.Equal("senai", (await dbContext.ConnectorClients.FindAsync("connection-a"))!.MoodleAlias);
     }
 
     private static ConnectorClientCredentialEntity Connection(
