@@ -142,7 +142,7 @@ public sealed partial class StructuredGradingAnalysisService : IGradingAnalysisS
             notes.Append("Nota maxima nao identificada. ");
         }
 
-        notes.Append("Item pronto para analise via IA. Use preparar_lote_correcao_ia para gerar nota e feedback.");
+        notes.Append("Item pronto para analise via IA. Use prepare_ai_grading_batch para gerar nota e feedback.");
         return notes.ToString();
     }
 

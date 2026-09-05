@@ -132,7 +132,7 @@ public sealed class MoodleGradingTools(
     }
 
     // ============================================================
-    // Tool: preparar_lote_correcao_ia
+    // Tool: prepare_ai_grading_batch
     // ============================================================
 
     [McpServerTool(
@@ -144,9 +144,9 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
-    [Description("Retorna o pacote estruturado de um lote para correcao via IA: textos extraidos das entregas, enunciado, criterios e nota maxima por aluno. Use apos criar_lote_correcao_assistida para obter o contexto completo, gerar nota e feedback no chat, salvar os resultados e exportar o CSV. Nao escreve no Moodle.")]
+    [Description("Retorna o pacote estruturado de um lote para correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. Leia os resources antes de gerar nota e feedback; depois use save_ai_grading_batch e export_grading_corrections_csv. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
-        [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
+        [Description("Identificador do lote retornado por start_pending_grading_run.")]
         Guid batchJobId,
         CancellationToken cancellationToken = default)
     {
@@ -197,7 +197,7 @@ public sealed class MoodleGradingTools(
     }
 
     // ============================================================
-    // Tool: salvar_correcoes_ia_lote
+    // Tool: save_ai_grading_batch
     // ============================================================
 
     [McpServerTool(
@@ -211,7 +211,7 @@ public sealed class MoodleGradingTools(
         OutputSchemaType = typeof(ToolResponse<SaveAiGradingBatchResult>))]
     [Description("Salva nota e feedback gerados pela IA como correcoes internas para cada aluno do lote. Nao escreve no Moodle. Depois de salvar, escolha somente um destino: export_grading_corrections_csv para gerar CSV externo ou create_batch_grade_launch_preview para revisar uma publicacao no Moodle.")]
     public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
-        [Description("Identificador do lote retornado por criar_lote_correcao_assistida.")]
+        [Description("Identificador do lote retornado por start_pending_grading_run.")]
         Guid batchJobId,
         [Description("Array de correcoes. O formato legado usa gradingItemId, nota e feedback. Quando disponivel, proposal deve conter a versao/hash do contexto, criterios, evidencias, cobertura e feedback estruturado; a escala numerica continua sendo validada pelo Moodle.")]
         AiGradingItemInput[] items,
@@ -277,9 +277,9 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GradingCorrectionsCsvExportResult>))]
-    [Description("Gera e entrega um CSV UTF-8 com as correcoes do lote local no formato nome;nota;feedback. Use apos salvar_correcoes_ia_lote. Esta ferramenta somente le rascunhos locais e nunca confirma nem envia dados ao Moodle.")]
+    [Description("Gera e entrega um CSV UTF-8 com as correcoes do lote local no formato nome;nota;feedback. Use apos save_ai_grading_batch. Esta ferramenta somente le rascunhos locais e nunca confirma nem envia dados ao Moodle.")]
     public async Task<CallToolResult> ExportarCorrecoesCsvAsync(
-        [Description("Identificador do lote retornado por criar_lote_correcao_assistida ou iniciar_fluxo_correcao_pendentes.")]
+        [Description("Identificador do lote retornado por start_pending_grading_run.")]
         Guid batchJobId,
         CancellationToken cancellationToken = default)
     {

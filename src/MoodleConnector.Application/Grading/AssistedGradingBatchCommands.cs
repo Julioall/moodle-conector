@@ -1686,7 +1686,7 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
 
         if (item.Status == GradingItemStatus.AwaitingAiAnalysis)
         {
-            reasons.Add("Aguardando analise pela IA. Use preparar_lote_correcao_ia.");
+            reasons.Add("Aguardando analise pela IA. Use prepare_ai_grading_batch.");
             priority = Math.Min(priority, 3);
         }
 
@@ -1838,7 +1838,7 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         builder.AppendLine();
         if (report.StatusCounts.TryGetValue("AwaitingAiAnalysis", out var awaitingAi) && awaitingAi > 0)
         {
-            builder.AppendLine($"- Aguardando IA: {awaitingAi} — use `preparar_lote_correcao_ia` para gerar nota e feedback.");
+            builder.AppendLine($"- Aguardando IA: {awaitingAi} — use `prepare_ai_grading_batch` para gerar nota e feedback.");
         }
         var aiGenerated = report.StatusCounts
             .Where(kv => kv.Key is "DraftReady" or "ReadyToCommit")
@@ -2178,7 +2178,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             (maxGrade is not null ? "3) Sugira uma nota somente dentro da escala confirmada. " : "3) Nao inclua nota numerica. ") +
             $"O feedback deve ser adequado para colar diretamente no Moodle. " +
             $"Nao exija saudacao nominal: este contexto fornece apenas studentId, que nao e um nome. " +
-            $"Apos gerar, use salvar_correcoes_ia_lote para salvar o rascunho e export_grading_corrections_csv para receber o CSV. Nao use ferramentas de revisao, confirmacao ou envio ao Moodle.");
+            $"Apos gerar, use save_ai_grading_batch para salvar o rascunho e export_grading_corrections_csv para receber o CSV. Nao use ferramentas de revisao, confirmacao ou envio ao Moodle.");
 
         return new GradingContextForChatResult(
             item.Id,
@@ -2467,7 +2467,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
-            "Apos gerar, use a tool salvar_correcoes_ia_lote para salvar os resultados e em seguida chame export_grading_corrections_csv para receber o CSV com nome, nota, feedback e situacao. Nao chame revisar_feedbacks_lote, ferramentas de confirmacao ou envio ao Moodle.");
+            "Apos gerar, use a tool save_ai_grading_batch para salvar os resultados e em seguida chame export_grading_corrections_csv para receber o CSV com nome, nota, feedback e situacao. Nao chame ferramentas de confirmacao ou envio ao Moodle.");
 
         var result = new AiGradingBatchPackageResult(
             batch.Id,

@@ -300,7 +300,7 @@ public sealed class GradingAnalysisServiceTests
 
         Assert.Equal(AnalysisStatus.AwaitingAiAnalysis, result.AnalysisStatus);
         Assert.Contains("Nota maxima: 10", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("preparar_lote_correcao_ia", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("prepare_ai_grading_batch", result.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
