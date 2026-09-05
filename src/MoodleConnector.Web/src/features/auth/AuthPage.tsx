@@ -3,7 +3,7 @@ import { Eye, EyeOff } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ClarisLogo } from '@/components/ui/claris-logo';
+import { MoodleConnectorLogo } from '@/components/ui/moodle-connector-logo';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
@@ -99,16 +99,16 @@ export function AuthPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4">
       <div className="w-full max-w-md space-y-6 animate-fade-in">
-        <ClarisLogo className="mx-auto w-60 text-primary" />
+        <MoodleConnectorLogo className="mx-auto w-72" />
         <Card className="border-0 shadow-lg">
           <CardHeader className="space-y-1 pb-4">
-            <CardTitle className="text-xl">{isMoodle ? 'Conectar o primeiro Moodle' : isRegister ? 'Criar conta na Claris' : 'Entrar na Claris'}</CardTitle>
+            <CardTitle className="text-xl">{isMoodle ? 'Conectar o primeiro Moodle' : isRegister ? 'Criar conta no Moodle Conector' : 'Entrar no Moodle Conector'}</CardTitle>
             <CardDescription>
               {isMoodle
                 ? 'A conexão será usada somente pelo Moodle Connector e começa em modo de leitura.'
                 : isRegister
                   ? 'Crie sua conta para acessar o portal operacional.'
-                  : 'Use o e-mail e a senha exclusivos da sua conta Claris.'}
+                  : 'Use o e-mail e a senha exclusivos da sua conta Moodle Conector.'}
             </CardDescription>
           </CardHeader>
           <CardContent>

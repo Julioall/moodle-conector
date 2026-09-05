@@ -214,7 +214,7 @@
     animation: background-activity-line 1.5s ease-in-out infinite;
   }
 
-  /* Claris page primitives used by the operational modules. Keeping these
+  /* Shared page primitives used by the operational modules. Keeping these
      tokens here avoids page-specific CSS and keeps the visual rhythm stable. */
   .content-frame {
     @apply mx-auto w-full max-w-7xl space-y-6;

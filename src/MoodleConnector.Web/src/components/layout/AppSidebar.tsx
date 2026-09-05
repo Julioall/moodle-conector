@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { Button } from '@/components/ui/button';
-import { ClarisIcon } from '@/components/ui/claris-logo';
+import { MoodleConnectorLogo } from '@/components/ui/moodle-connector-logo';
 import { Separator } from '@/components/ui/separator';
 import {
   Sidebar,
@@ -90,15 +90,10 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg text-primary">
-            <ClarisIcon className="h-full w-full" />
-          </div>
           {!isCollapsed && (
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate font-semibold text-primary">Claris</span>
-              <span className="text-xs text-sidebar-foreground/60">Central de Tutoria</span>
-            </div>
+            <MoodleConnectorLogo className="h-auto w-full max-w-[210px]" />
           )}
+          {isCollapsed && <BookOpen className="h-6 w-6 text-primary" aria-label="Moodle Conector" />}
         </div>
       </SidebarHeader>
 

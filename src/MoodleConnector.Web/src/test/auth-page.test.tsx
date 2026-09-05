@@ -26,13 +26,13 @@ describe('AuthPage', () => {
 
     render(<AuthPage />);
 
-    await user.type(screen.getByLabelText('Nome'), 'Tutor Claris');
+    await user.type(screen.getByLabelText('Nome'), 'Tutor Moodle Conector');
     await user.type(screen.getByLabelText('E-mail'), 'tutor@example.com');
     await user.type(screen.getByLabelText('Senha'), 'senha-segura-123');
     await user.type(screen.getByLabelText('Confirmar senha'), 'senha-segura-123');
     await user.click(screen.getByRole('button', { name: 'Criar conta' }));
 
-    await expect(authGateway.register).toHaveBeenCalledWith('Tutor Claris', 'tutor@example.com', 'senha-segura-123');
+    await expect(authGateway.register).toHaveBeenCalledWith('Tutor Moodle Conector', 'tutor@example.com', 'senha-segura-123');
     expect(await screen.findByRole('heading', { name: 'Conectar o primeiro Moodle' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Conectar Moodle' })).toBeInTheDocument();
   });

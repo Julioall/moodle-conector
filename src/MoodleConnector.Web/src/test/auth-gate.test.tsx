@@ -18,10 +18,10 @@ const renderWithQuery = (children: React.ReactNode) => render(
 describe('AuthGate', () => {
   beforeEach(() => { cleanup(); getSession.mockReset(); });
 
-  it('keeps the operational shell behind the Claris auth page when anonymous', async () => {
+  it('keeps the operational shell behind the Moodle Conector auth page when anonymous', async () => {
     getSession.mockResolvedValue({ data: { authenticated: false }, meta: { generatedAt: new Date().toISOString() } });
     renderWithQuery(<AuthGate><h1>Resumo protegido</h1></AuthGate>);
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Entrar na Claris' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Entrar no Moodle Conector' })).toBeInTheDocument());
     expect(screen.queryByRole('heading', { name: 'Resumo protegido' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Entrar' })).toBeInTheDocument();
   });

@@ -13,7 +13,7 @@ const renderWithProviders = (ui: React.ReactElement) => render(
   </QueryClientProvider>
 );
 
-describe('Claris-first shell', () => {
+describe('Moodle Conector shell', () => {
   it('renders the foundation navigation', () => {
     renderWithProviders(<AppSidebar />);
     expect(screen.getByText('Meus Cursos')).toBeInTheDocument();

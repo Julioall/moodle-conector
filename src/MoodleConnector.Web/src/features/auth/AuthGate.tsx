@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ClarisLogo } from '@/components/ui/claris-logo';
+import { MoodleConnectorLogo } from '@/components/ui/moodle-connector-logo';
 import { sessionGateway } from '../../integrations/auth/session-gateway';
 import { AppHttpError } from '../../integrations/http/api-client';
 import { AuthPage } from './AuthPage';
@@ -12,7 +12,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const session = useQuery({ queryKey: ['app', 'session'], queryFn: sessionGateway.getSession, retry: false });
 
   if (session.isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4"><ClarisLogo className="w-60 animate-pulse text-primary" /></div>;
+    return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4"><MoodleConnectorLogo className="w-72 animate-pulse" /></div>;
   }
 
   const sessionStatus = session.error instanceof AppHttpError
@@ -26,7 +26,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-accent/20 p-4">
         <Card className="w-full max-w-md">
           <CardContent className="space-y-4 p-6">
-            <ClarisLogo className="mx-auto w-48 text-primary" />
+            <MoodleConnectorLogo className="mx-auto w-64" />
             <h1 className="text-xl font-semibold">Sessão indisponível</h1>
             <p className="text-sm text-muted-foreground">Não foi possível validar sua sessão.</p>
             <Button variant="outline" onClick={() => void session.refetch()}>Tentar novamente</Button>

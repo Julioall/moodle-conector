@@ -17,7 +17,7 @@ export function ThemeCard() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg"><Sun className="h-5 w-5" />Aparência</CardTitle>
-        <CardDescription>Escolha o modo de exibição da interface Claris.</CardDescription>
+        <CardDescription>Escolha o modo de exibição da interface Moodle Conector.</CardDescription>
       </CardHeader>
       <CardContent className="grid grid-cols-3 gap-3">
         {modes.map(({ value, label, icon: Icon }) => (
