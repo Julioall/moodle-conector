@@ -12,7 +12,7 @@ public sealed class MoodleProxyOptions
 
     public int HttpTimeoutSeconds { get; init; } = 30;
 
-    public int HttpRetryCount { get; init; } = 2;
+    public int HttpRetryCount { get; init; } = 4;
 
     public int CircuitBreakerHandledEventsAllowedBeforeBreaking { get; init; } = 5;
 
