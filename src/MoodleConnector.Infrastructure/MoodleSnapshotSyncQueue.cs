@@ -259,8 +259,8 @@ internal sealed class MoodleSnapshotSyncQueue(
             // anything that has been overdue past the starvation window so a
             // low-priority connection/courses refresh cannot wait forever
             // behind a stream of high-priority submission jobs.
-            .OrderByDescending(item => item.ForceRequested)
-            .ThenBy(item => item.NextSyncAt < starvationCutoff ? 0 : 1)
+            .OrderBy(item => item.NextSyncAt < starvationCutoff ? 0 : 1)
+            .ThenByDescending(item => item.ForceRequested)
             .ThenBy(item => item.Priority)
             .ThenBy(item => item.NextSyncAt)
             .Take(32)
