@@ -114,4 +114,5 @@ O endpoint administrativo `/admin/connector-clients/register` também registra o
 - Use contas Moodle com o menor privilégio necessário.
 - Não compartilhe uma conta administrativa para uso cotidiano do conector.
 - Revogue tokens/credenciais se uma API key for exposta.
-- Separe aliases por ambiente, por exemplo `senai`, `fieg`, `ctm` ou `default`.
+- Separe os aliases por ambiente conforme o cadastro de cada usuário; o
+  conector não deve assumir nomes globais para essas conexões.

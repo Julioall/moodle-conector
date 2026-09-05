@@ -215254,14 +215254,14 @@ alter table public.scheduled_messages
 FILE: supabase/migrations/20260329080000_add_moodle_source_to_courses_and_students.sql
 --------------------------------------------------------------------------------
 -- Adiciona coluna moodle_source em courses e students para suporte a múltiplas
--- origens de sincronização Moodle (ex: 'goias', 'senai').
--- O valor padrão 'goias' garante retrocompatibilidade com registros existentes.
+-- origens de sincronização Moodle (ex: 'fieg', 'senai').
+-- O valor padrão 'fieg' garante retrocompatibilidade com registros existentes.
 
 ALTER TABLE public.courses
-  ADD COLUMN IF NOT EXISTS moodle_source TEXT NOT NULL DEFAULT 'goias';
+  ADD COLUMN IF NOT EXISTS moodle_source TEXT NOT NULL DEFAULT 'fieg';
 
 ALTER TABLE public.students
-  ADD COLUMN IF NOT EXISTS moodle_source TEXT NOT NULL DEFAULT 'goias';
+  ADD COLUMN IF NOT EXISTS moodle_source TEXT NOT NULL DEFAULT 'fieg';
 
 ================================================================================
 

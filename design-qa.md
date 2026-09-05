@@ -3,7 +3,7 @@
 ## Comparison target
 
 - Source visuals: `docs/specs/assets/agenda-professional/task-list-detail-reference.png`, `event-edit-modal-reference.png`, `task-modal-reference.png`, `agenda-list-detail-reference.png`.
-- Implementation URLs: `http://localhost:8787/tarefas?connectionRef=goias` and `http://localhost:8787/agenda?connectionRef=goias`.
+- Implementation URLs: `http://localhost:8787/tarefas?connectionRef=fieg` and `http://localhost:8787/agenda?connectionRef=fieg`.
 - Implementation captures: `.audit-screenshots/tasks-final.png` and `.audit-screenshots/agenda-final.png`.
 
 ## Normalization
