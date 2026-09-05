@@ -21,7 +21,9 @@ permissions:
 
 concurrency:
   group: vps-moodle-connector
-  cancel-in-progress: true
+  # Never interrupt a remote deploy after it has started replacing services.
+  # A cancelled SSH step could otherwise leave the stack between down/up.
+  cancel-in-progress: false
 
 env:
   DOTNET_VERSION: ${{ vars.DOTNET_VERSION || '10.0.x' }}
@@ -56,12 +58,12 @@ env:
   RATE_LIMIT_ADMIN_API_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_ADMIN_API_PERMIT_LIMIT || '30' }}
   RATE_LIMIT_MCP_PERMIT_LIMIT: ${{ vars.RATE_LIMIT_MCP_PERMIT_LIMIT || '120' }}
   MOODLE_API_HTTP_TIMEOUT_SECONDS: ${{ vars.MOODLE_API_HTTP_TIMEOUT_SECONDS || '30' }}
-  MOODLE_API_HTTP_RETRY_COUNT: ${{ vars.MOODLE_API_HTTP_RETRY_COUNT || '2' }}
+  MOODLE_API_HTTP_RETRY_COUNT: ${{ vars.MOODLE_API_HTTP_RETRY_COUNT || '4' }}
   MOODLE_API_CIRCUIT_BREAKER_HANDLED_EVENTS: ${{ vars.MOODLE_API_CIRCUIT_BREAKER_HANDLED_EVENTS || '5' }}
   MOODLE_API_CIRCUIT_BREAKER_DURATION_SECONDS: ${{ vars.MOODLE_API_CIRCUIT_BREAKER_DURATION_SECONDS || '30' }}
   MOODLE_API_TRUSTED_PRIVATE_ENDPOINT_HOST_0: ${{ vars.MOODLE_API_TRUSTED_PRIVATE_ENDPOINT_HOST_0 || '' }}
   MOODLE_PROXY_HTTP_TIMEOUT_SECONDS: ${{ vars.MOODLE_PROXY_HTTP_TIMEOUT_SECONDS || '30' }}
-  MOODLE_PROXY_HTTP_RETRY_COUNT: ${{ vars.MOODLE_PROXY_HTTP_RETRY_COUNT || '2' }}
+  MOODLE_PROXY_HTTP_RETRY_COUNT: ${{ vars.MOODLE_PROXY_HTTP_RETRY_COUNT || '4' }}
   MOODLE_PROXY_CIRCUIT_BREAKER_HANDLED_EVENTS: ${{ vars.MOODLE_PROXY_CIRCUIT_BREAKER_HANDLED_EVENTS || '5' }}
   MOODLE_PROXY_CIRCUIT_BREAKER_DURATION_SECONDS: ${{ vars.MOODLE_PROXY_CIRCUIT_BREAKER_DURATION_SECONDS || '30' }}
   POSTGRES_DB: ${{ vars.POSTGRES_DB || 'moodle_connector' }}
@@ -542,9 +544,9 @@ jobs:
             DOCKER='sudo docker'
           fi
 
-          \$DOCKER compose --env-file .env.production down --remove-orphans || true
           if [ '$RESET_DATABASE_ON_DEPLOY' = 'true' ]; then
             echo 'Development data policy: resetting the PostgreSQL volume before deploy.'
+            \$DOCKER compose --env-file .env.production down --remove-orphans || true
             DB_VOLUMES="\$(\$DOCKER volume ls -q --filter label=com.docker.compose.project='$COMPOSE_PROJECT_NAME' --filter label=com.docker.compose.volume=postgres-data)"
             if [ -z "\$DB_VOLUMES" ]; then
               DB_VOLUMES="'$COMPOSE_PROJECT_NAME'_postgres-data"
@@ -553,7 +555,8 @@ jobs:
               \$DOCKER volume rm "\$DB_VOLUME" >/dev/null 2>&1 || true
             done
           fi
-          \$DOCKER rm -f moodle-connector-app moodle-connector-caddy >/dev/null 2>&1 || true
+          # Compose recreates only services whose image/config changed. Keeping
+          # the existing stack avoids an avoidable MCP outage during deploy.
           if ! timeout 1800s \$DOCKER compose --env-file .env.production up -d --build --remove-orphans; then
             echo 'Container startup failed. Recent compose status and logs:'
             \$DOCKER compose --env-file .env.production ps || true
