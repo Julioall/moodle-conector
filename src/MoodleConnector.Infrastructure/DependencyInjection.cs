@@ -21,6 +21,10 @@ public static class DependencyInjection
     private static readonly TimeSpan PooledConnectionLifetime = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan HandlerLifetime = TimeSpan.FromMinutes(5);
+    // FIEG closes excess concurrent TLS connections intermittently. Keep the
+    // per-origin pool bounded so retries do not turn an upstream slowdown into
+    // a connection-reset storm; this applies equally to every user alias.
+    private const int MaxConnectionsPerServer = 4;
 
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
@@ -297,7 +301,8 @@ public static class DependencyInjection
         {
             AllowAutoRedirect = false,
             PooledConnectionLifetime = PooledConnectionLifetime,
-            PooledConnectionIdleTimeout = PooledConnectionIdleTimeout
+            PooledConnectionIdleTimeout = PooledConnectionIdleTimeout,
+            MaxConnectionsPerServer = MaxConnectionsPerServer
         };
     }
 
