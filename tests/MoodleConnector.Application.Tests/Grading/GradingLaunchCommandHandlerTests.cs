@@ -107,6 +107,58 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreview_ExplicaQuandoContextoAtualBloqueadoNaoFoiSelado()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        AttachBlockedVersionedContext(item, batch);
+        await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
+        await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: false),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.ReadyItems);
+        Assert.Equal(1, result.BlockedItems);
+        Assert.Contains(result.Warnings, warning => warning.Contains("nao foi selado", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.Warnings, warning => warning.Contains("ausente ou legado", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CreatePreview_AceitaContextoAtualBloqueadoQuandoRascunhoFoiSelado()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        AttachBlockedVersionedContext(item, batch);
+        item.RecordSubmissionIntegrity(new string('a', 64), [new string('b', 32)]);
+        await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
+        await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: false),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.ReadyItems);
+        Assert.Equal(0, result.BlockedItems);
+        Assert.Equal(new string('a', 64), Assert.Single(result.Launches).SubmissionContentHash);
+    }
+
+    [Fact]
     public async Task CreatePreview_PermiteLancamentoSomenteFeedback()
     {
         var fixture = new Fixture();
@@ -1080,6 +1132,34 @@ public sealed class GradingLaunchCommandHandlerTests
             item.RecordContextSnapshot(snapshot);
         }
 
+        return snapshot;
+    }
+
+    private static GradingContextSnapshot AttachBlockedVersionedContext(
+        AssistedGradingItem item,
+        AssistedGradingBatch batch)
+    {
+        var context = GradingContext.Build(
+            item.Id,
+            batch.Id,
+            "10",
+            "501",
+            "9001",
+            "101",
+            assignmentStatement: null,
+            criteria: null,
+            rubricDescription: null,
+            maxGrade: 10m,
+            gradeScale: null,
+            submissionText: "Entrega de teste",
+            attachedFiles: [],
+            courseMaterials: null,
+            teacherInstructions: null);
+        var snapshot = GradingContextSnapshotFactory.Create(
+            item,
+            context,
+            new GradingContextOptions());
+        item.RecordContextSnapshot(snapshot);
         return snapshot;
     }
 

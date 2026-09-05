@@ -144,7 +144,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
-    [Description("Retorna o pacote estruturado de um lote para correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. Leia os resources antes de gerar nota e feedback; depois use save_ai_grading_batch e export_grading_corrections_csv. Nao escreve no Moodle.")]
+    [Description("Retorna o pacote estruturado de um lote para correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. Leia os resources antes de gerar nota e feedback. Ao salvar, copie todas e somente as URIs com resourceType 'submission' para proposal.resourceUris; resources de 'assignment_context' podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e export_grading_corrections_csv. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
         [Description("Identificador do lote retornado por start_pending_grading_run.")]
         Guid batchJobId,
@@ -213,7 +213,7 @@ public sealed class MoodleGradingTools(
     public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
         [Description("Identificador do lote retornado por start_pending_grading_run.")]
         Guid batchJobId,
-        [Description("Array de correcoes. O formato legado usa gradingItemId, nota e feedback. Quando disponivel, proposal deve conter a versao/hash do contexto, criterios, evidencias, cobertura e feedback estruturado; a escala numerica continua sendo validada pelo Moodle.")]
+    [Description("Array de correcoes. O formato legado usa gradingItemId, nota e feedback. Quando disponivel, proposal deve conter a versao/hash do contexto, criterios, evidencias, cobertura e feedback estruturado. Para um rascunho MCP que possa gerar previa de lancamento, proposal.resourceUris deve conter todas e somente as URIs do pacote com resourceType 'submission'; nao inclua recursos de contexto. A escala numerica continua sendo validada pelo Moodle.")]
         AiGradingItemInput[] items,
         CancellationToken cancellationToken = default)
     {

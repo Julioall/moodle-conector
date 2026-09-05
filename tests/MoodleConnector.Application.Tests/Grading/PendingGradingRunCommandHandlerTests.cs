@@ -376,6 +376,82 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task SaveAiBatch_ComDraftMcpSelaSomenteAnexosDaSubmissao()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        var context = GradingContext.Build(
+            item.Id, batch.Id, "10", "501", "9001", "101", "Enunciado", "Criterio", null,
+            10m, null, "Texto", [], null, null);
+        var snapshot = GradingContextSnapshotFactory.Create(item, context, new GradingContextOptions());
+        item.RecordContextSnapshot(snapshot);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        repository.AddSnapshot(snapshot);
+
+        const string submissionResourceId = "0123456789abcdef0123456789abcdef";
+        const string contextResourceId = "fedcba9876543210fedcba9876543210";
+        var resources = new RunMoodleResourceRepository([
+            new MoodleResource
+            {
+                ResourceId = submissionResourceId,
+                ResourceType = "submission_attachment",
+                SubmissionId = 9001,
+                Sha256 = new string('a', 64),
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
+            },
+            new MoodleResource
+            {
+                ResourceId = contextResourceId,
+                ResourceType = "assignment_context_attachment",
+                SubmissionId = 9001,
+                Sha256 = new string('b', 64),
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
+            }
+        ]);
+        var sut = new SaveAiGradingBatchCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunMoodleUserResolver(),
+            new RunAuditLogRepository(),
+            new RunAssignmentSettingsGateway(maxGrade: 10m),
+            resourceRepository: resources,
+            submissionContentHashResolver: new RunSubmissionContentHashResolver(new string('c', 64)),
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpGradingDraftEnabled = true
+            }));
+
+        var result = await sut.Handle(
+            new SaveAiGradingBatchCommand(
+                batch.Id,
+                [new AiGradingItemInput(
+                    item.Id,
+                    null,
+                    null,
+                    "Feedback estruturado",
+                    new AiGradingProposalInput(
+                        1,
+                        item.ContextHash,
+                        8m,
+                        "Feedback estruturado",
+                        [],
+                        [new AiGradingEvidenceInput(Guid.NewGuid(), "Material de contexto", null, $"moodle://resource/{contextResourceId}")],
+                        [$"moodle://resource/{submissionResourceId}"],
+                        [],
+                        .9m,
+                        new GradingExtractionSummary("succeeded", 1, false, 5, 5, null),
+                        new GradingEvidenceCoverage(1, 1, 1, 1, 5, 5, false)))]),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.SavedItems);
+        Assert.Equal(new string('c', 64), item.SubmissionContentHash);
+        Assert.Equal([submissionResourceId], item.GetSubmissionResourceIds());
+    }
+
+    [Fact]
     public async Task PrepareAiBatch_ExcluiItensBloqueadosDoPacoteDeCorrecao()
     {
         var repository = new RunRepository();
@@ -515,6 +591,8 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Equal("mcp_resource", result.ResourceDeliveryMode);
         Assert.Null(result.ExtractedText);
         Assert.Equal("moodle://resource/0123456789abcdef0123456789abcdef", Assert.Single(result.Resources!).Uri);
+        Assert.Equal("submission", Assert.Single(result.Resources!).ResourceType);
+        Assert.Contains("resourceType", package.Instructions, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -634,6 +712,31 @@ public sealed class PendingGradingRunCommandHandlerTests
         public Task<MoodleResourceDescriptor> RegisterAsync(MoodleResourceRegistration request, CancellationToken cancellationToken) => Task.FromResult(new MoodleResourceDescriptor("moodle://resource/0123456789abcdef0123456789abcdef", request.Filename, request.MimeType, request.SizeBytes, request.Sha256));
         public Task<MoodleResourceReadResult> ReadAsync(string uri, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<MoodleResourceDescriptor>> ExpandZipAsync(string uri, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MoodleResourceDescriptor>>([]);
+    }
+
+    private sealed class RunMoodleResourceRepository(IReadOnlyList<MoodleResource> resources) : IMoodleResourceRepository
+    {
+        public Task RegisterAsync(MoodleResource resource, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<MoodleResource?> FindAsync(string resourceId, CancellationToken cancellationToken) =>
+            Task.FromResult(resources.SingleOrDefault(resource => resource.ResourceId == resourceId));
+        public Task<IReadOnlyList<MoodleResource>> ListBySubmissionAsync(string clientId, string connectionId, long submissionId, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MoodleResource>>(resources.Where(resource => resource.SubmissionId == submissionId).ToArray());
+        public Task<bool> ExistsAndNotExpiredAsync(string resourceId, DateTimeOffset now, CancellationToken cancellationToken) =>
+            Task.FromResult(resources.Any(resource => resource.ResourceId == resourceId && !resource.IsExpired(now)));
+        public Task<int> RemoveExpiredAsync(DateTimeOffset now, CancellationToken cancellationToken) => Task.FromResult(0);
+        public Task SaveChangesAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class RunSubmissionContentHashResolver(string hash) : ISubmissionContentHashResolver
+    {
+        public Task<SubmissionContentHashSnapshot> ResolveAsync(
+            string userExternalId,
+            string assignmentId,
+            string studentId,
+            long submissionId,
+            IReadOnlyCollection<string> attachmentHashes,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new SubmissionContentHashSnapshot(hash, 0, DateTimeOffset.UtcNow, attachmentHashes.Count));
     }
 
     private sealed class RunCourseContentsGateway : IMoodleCourseContentsGateway

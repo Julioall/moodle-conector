@@ -2062,7 +2062,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
                     descriptor.Uri,
                     descriptor.Filename,
                     descriptor.MimeType,
-                    descriptor.SizeBytes));
+                    descriptor.SizeBytes,
+                    ResourceType: "submission"));
             }
 
             warnings.Add("Entrega fornecida por MCP Resource; leia os arquivos originais antes de propor a correção.");
@@ -2095,7 +2096,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
                     descriptor.Uri,
                     descriptor.Filename,
                     descriptor.MimeType,
-                    descriptor.SizeBytes));
+                    descriptor.SizeBytes,
+                    ResourceType: "assignment_context"));
             }
             catch (OperationCanceledException)
             {
@@ -2252,7 +2254,8 @@ public sealed record AiGradingResourceLink(
     [property: JsonPropertyName("uri")] string Uri,
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("mimeType")] string MimeType,
-    [property: JsonPropertyName("size")] long? Size);
+    [property: JsonPropertyName("size")] long? Size,
+    [property: JsonPropertyName("resourceType")] string ResourceType = "submission");
 
 public sealed class PrepareAiGradingBatchQueryHandler(
     IGradingReviewRepository repository,
@@ -2345,7 +2348,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                         descriptor.Uri,
                         descriptor.Filename,
                         descriptor.MimeType,
-                        descriptor.SizeBytes));
+                        descriptor.SizeBytes,
+                        ResourceType: "submission"));
                 }
 
                 foreach (var artifact in artifacts.Where(a =>
@@ -2372,7 +2376,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                             descriptor.Uri,
                             descriptor.Filename,
                             descriptor.MimeType,
-                            descriptor.SizeBytes));
+                            descriptor.SizeBytes,
+                            ResourceType: "assignment_context"));
                     }
                     catch (OperationCanceledException)
                     {
@@ -2466,6 +2471,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- Escreva em paragrafos (nao use listas com marcadores).\n" +
             "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
+            "- Ao chamar save_ai_grading_batch, preencha proposal.resourceUris com todas e somente as URIs em resources cujo resourceType seja 'submission'. Nunca inclua resources de 'assignment_context' nesse campo; eles podem ser citados somente em proposal.evidence[].resourceUri. Sem todas as URIs de submission, o rascunho nao pode gerar uma previa de lancamento.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
             "Apos gerar, use a tool save_ai_grading_batch para salvar os resultados e em seguida chame export_grading_corrections_csv para receber o CSV com nome, nota, feedback e situacao. Nao chame ferramentas de confirmacao ou envio ao Moodle.");
 
@@ -2819,12 +2825,13 @@ public sealed class SaveAiGradingBatchCommandHandler(
                             throw new InvalidOperationException("A submissao Moodle nao esta identificada para selar o draft.");
 
                         var resourceUris = (input.Proposal.ResourceUris ?? [])
-                            .Concat((input.Proposal.Evidence ?? [])
-                                .Select(evidence => evidence.ResourceUri)
-                                .Where(uri => !string.IsNullOrWhiteSpace(uri))
-                                .Select(uri => uri!))
+                            .Where(uri => !string.IsNullOrWhiteSpace(uri))
+                            .Select(uri => uri!)
                             .Distinct(StringComparer.Ordinal)
                             .ToArray();
+                        if (resourceUris.Length == 0)
+                            throw new InvalidOperationException("O draft MCP exige as URIs de todos os anexos originais da submissao em proposal.resourceUris.");
+
                         var resources = new Dictionary<string, MoodleResource>(StringComparer.Ordinal);
                         foreach (var uri in resourceUris)
                         {
@@ -2838,6 +2845,8 @@ public sealed class SaveAiGradingBatchCommandHandler(
                                 resource = await resourceRepository.FindAsync(resource.ParentResourceId, cancellationToken)
                                     ?? throw new InvalidOperationException("O resource ZIP pai nao esta mais disponivel.");
                             }
+                            if (!string.Equals(resource.ResourceType, "submission_attachment", StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidOperationException("proposal.resourceUris deve conter somente os anexos originais da submissao.");
                             if (resource.IsExpired(DateTimeOffset.UtcNow) || string.IsNullOrWhiteSpace(resource.Sha256))
                                 throw new InvalidOperationException("Todos os resources da proposta devem ser lidos e validados antes de salvar o draft.");
                             resources[resource.ResourceId] = resource;
@@ -2856,10 +2865,13 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         submissionContentHash = integrity.Hash;
                         item.RecordSubmissionIntegrity(submissionContentHash, resources.Keys.ToArray());
                     }
-                    else if (resourceRepository is not null)
+
+                    if (resourceRepository is not null)
                     {
-                        // Mesmo no modo legado, URIs de evidência são sempre
-                        // verificadas; o ID opaco não é uma autorização.
+                        // URIs de evidência são sempre verificadas; o ID opaco
+                        // não é uma autorização. Elas podem apontar para o
+                        // anexo da submissão ou para material de contexto, mas
+                        // nunca participam do selo da submissão.
                         foreach (var evidence in input.Proposal.Evidence ?? [])
                         {
                             if (string.IsNullOrWhiteSpace(evidence.ResourceUri)) continue;

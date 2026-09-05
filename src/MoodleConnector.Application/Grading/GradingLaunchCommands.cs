@@ -147,10 +147,17 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 }
             }
 
-            if (!HasVersionedContext(item))
+            if (!HasVersionedContextIdentity(item))
             {
                 contextWarnings.Add(
                     $"Item {item.Id}: contexto de correcao ausente ou legado; gere uma nova previa antes do lancamento.");
+                continue;
+            }
+
+            if (!HasSealedSubmissionForBlockedContext(item))
+            {
+                contextWarnings.Add(
+                    $"Item {item.Id}: contexto versionado, mas o rascunho nao foi selado com todos os anexos originais da submissao. Gere um novo pacote e salve a proposta incluindo as resourceUris de tipo submission.");
                 continue;
             }
 
@@ -374,13 +381,15 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         decimal? Grade,
         string FeedbackText);
 
-    private static bool HasVersionedContext(AssistedGradingItem item) =>
+    private static bool HasVersionedContextIdentity(AssistedGradingItem item) =>
         item.ContextVersion is > 0 &&
         !string.IsNullOrWhiteSpace(item.ContextHash) &&
         !string.IsNullOrWhiteSpace(item.ContextStatus) &&
-        (!string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase) &&
-            (!string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) ||
-             !string.IsNullOrWhiteSpace(item.SubmissionContentHash)));
+        !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasSealedSubmissionForBlockedContext(AssistedGradingItem item) =>
+        !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) ||
+        !string.IsNullOrWhiteSpace(item.SubmissionContentHash);
 
     private static bool NeedsContextIdentityRestore(AssistedGradingItem item) =>
         item.ContextVersion is null or <= 0 ||
@@ -475,9 +484,11 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 continue;
             }
 
-            if (!HasVersionedContext(item))
+            if (!HasVersionedContextIdentity(item) || !HasSealedSubmissionForBlockedContext(item))
             {
-                var message = "O contexto versionado da correcao nao esta disponivel. Gere uma nova previa antes de lancar no Moodle.";
+                var message = HasVersionedContextIdentity(item)
+                    ? "O rascunho nao foi selado com os anexos originais da submissao. Gere um novo pacote e uma nova previa antes de lancar no Moodle."
+                    : "O contexto versionado da correcao nao esta disponivel. Gere uma nova previa antes de lancar no Moodle.";
                 item.MarkCommitFailed(message);
                 failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, message));
                 await RecordCommitAuditAsync(
@@ -832,13 +843,15 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         }
     }
 
-    private static bool HasVersionedContext(AssistedGradingItem item) =>
+    private static bool HasVersionedContextIdentity(AssistedGradingItem item) =>
         item.ContextVersion is > 0 &&
         !string.IsNullOrWhiteSpace(item.ContextHash) &&
         !string.IsNullOrWhiteSpace(item.ContextStatus) &&
-        (!string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase) &&
-            (!string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) ||
-             !string.IsNullOrWhiteSpace(item.SubmissionContentHash)));
+        !string.Equals(item.ContextStatus, "legacy_unversioned", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasSealedSubmissionForBlockedContext(AssistedGradingItem item) =>
+        !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) ||
+        !string.IsNullOrWhiteSpace(item.SubmissionContentHash);
 
     private async Task<CapabilityValidationFailure?> ValidateSubmissionIntegrityAsync(
         string userExternalId,
