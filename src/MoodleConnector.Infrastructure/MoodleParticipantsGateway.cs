@@ -381,11 +381,41 @@ internal sealed class MoodleParticipantsGateway(
 
         AddMoodleOptions(parameters, options);
 
-        var payload = await restClient.CallAsync(
-            credentials,
-            "core_enrol_get_enrolled_users",
-            parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
-            cancellationToken);
+        JsonElement payload;
+        try
+        {
+            payload = await restClient.CallAsync(
+                credentials,
+                "core_enrol_get_enrolled_users",
+                parameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value),
+                cancellationToken);
+        }
+        catch (MoodleApiException) when (groupId is not null)
+        {
+            // A number of Moodle installations expose group membership in the
+            // enrolled-user payload but reject the optional `groupid`
+            // parameter. Retry the authoritative population without that
+            // parameter and apply the group filter locally instead of turning
+            // a valid group lookup into an opaque connector error.
+            var unfiltered = await GetParticipantsBatchAsync(
+                credentials,
+                courseId,
+                statusFilter,
+                includeEmail,
+                groupId: null,
+                limitFrom: limitFrom,
+                limitNumber: limitNumber,
+                cancellationToken: cancellationToken);
+
+            var normalizedGroupId = groupId.Value.ToString(CultureInfo.InvariantCulture);
+            return unfiltered
+                .Where(participant => (participant.Groups ?? [])
+                    .Any(group => string.Equals(
+                        ToIdString(group.Id),
+                        normalizedGroupId,
+                        StringComparison.Ordinal)))
+                .ToArray();
+        }
 
         return JsonSerializer.Deserialize<List<ParticipantDto>>(payload.GetRawText()) ?? [];
     }

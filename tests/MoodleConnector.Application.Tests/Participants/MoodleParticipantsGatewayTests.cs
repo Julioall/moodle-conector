@@ -47,6 +47,22 @@ public sealed class MoodleParticipantsGatewayTests
     }
 
     [Fact]
+    public async Task Filtra_grupo_localmente_quando_Moodle_rejeita_parametro_groupid()
+    {
+        var handler = new JsonHandler(
+            "{\"exception\":\"invalid_parameter_exception\",\"errorcode\":\"invalidparameter\",\"message\":\"groupid nao suportado\"}",
+            "[{\"id\":123,\"fullname\":\"Aluno\",\"suspended\":false,\"roles\":[],\"groups\":[{\"id\":9,\"name\":\"Turma A\"}]}]");
+        var sut = CreateGateway(handler);
+
+        var result = await sut.GetCourseParticipantsAsync(
+            "42", "10", ParticipantStatusFilter.Active, 1, 20, false, false, "9", CancellationToken.None);
+
+        Assert.Single(result.Participants);
+        Assert.Equal("123", result.Participants[0].UserId);
+        Assert.DoesNotContain("groupid", Uri.UnescapeDataString(handler.LastRequestBody), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Usa_onlysuspended_do_Moodle_mesmo_quando_campo_suspended_nao_esta_disponivel()
     {
         var handler = new JsonHandler("[{\"id\":123,\"fullname\":\"Aluno suspenso\",\"roles\":[],\"groups\":[]}]");
