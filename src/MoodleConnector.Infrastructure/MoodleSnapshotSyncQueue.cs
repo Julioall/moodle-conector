@@ -248,14 +248,20 @@ internal sealed class MoodleSnapshotSyncQueue(
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ConnectorDbContext>();
         var now = DateTimeOffset.UtcNow;
+        var starvationCutoff = now.AddHours(-_options.QueueStarvationHours);
         var states = await db.MoodleSyncStates
             .AsNoTracking()
             .Where(item => item.ClientId != string.Empty &&
                           item.NextSyncAt != null &&
                           item.NextSyncAt <= now &&
                           (item.Status != "running" || item.LeaseUntil == null || item.LeaseUntil <= now))
-            .OrderBy(item => item.Priority)
-            .ThenByDescending(item => item.ForceRequested)
+            // Manual refreshes always win. Among automatic work, promote
+            // anything that has been overdue past the starvation window so a
+            // low-priority connection/courses refresh cannot wait forever
+            // behind a stream of high-priority submission jobs.
+            .OrderByDescending(item => item.ForceRequested)
+            .ThenBy(item => item.NextSyncAt < starvationCutoff ? 0 : 1)
+            .ThenBy(item => item.Priority)
             .ThenBy(item => item.NextSyncAt)
             .Take(32)
             .ToArrayAsync(cancellationToken);

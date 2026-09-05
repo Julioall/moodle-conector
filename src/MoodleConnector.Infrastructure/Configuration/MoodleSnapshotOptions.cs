@@ -27,6 +27,7 @@ public sealed class MoodleSnapshotOptions
     public int AssignmentGradeBatchSize { get; init; } = 50;
     public int RunRetentionDays { get; init; } = 30;
     public int CleanupIntervalMinutes { get; init; } = 60;
+    public int QueueStarvationHours { get; init; } = 24;
     public int LeaseMinutes { get; init; } = 30;
 
     public MoodleSnapshotOptions Normalize() => new()
@@ -53,6 +54,7 @@ public sealed class MoodleSnapshotOptions
         AssignmentGradeBatchSize = Math.Clamp(AssignmentGradeBatchSize, 1, 50),
         RunRetentionDays = Math.Clamp(RunRetentionDays, 1, 3650),
         CleanupIntervalMinutes = Math.Clamp(CleanupIntervalMinutes, 5, 24 * 60),
+        QueueStarvationHours = Math.Clamp(QueueStarvationHours, 1, 24 * 30),
         LeaseMinutes = Math.Clamp(LeaseMinutes, 5, 180),
     };
 }
