@@ -38,7 +38,10 @@ internal sealed class MoodleSnapshotSyncQueue(
             // Reject a full write so TryEnqueueSignal can remove the in-memory
             // marker and let the durable polling loop schedule it again.
             FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
+            // Multiple consumers are used below to honor GlobalConcurrency.
+            // Per-connection semaphores still serialize calls to the same
+            // Moodle installation.
+            SingleReader = false,
             SingleWriter = false,
             AllowSynchronousContinuations = false,
         });
@@ -156,6 +159,10 @@ internal sealed class MoodleSnapshotSyncQueue(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("MoodleSnapshotSyncQueue iniciada.");
+        var workers = Enumerable
+            .Range(0, _options.GlobalConcurrency)
+            .Select(_ => ConsumeQueueAsync(stoppingToken))
+            .ToArray();
 
         try
         {
@@ -163,11 +170,6 @@ internal sealed class MoodleSnapshotSyncQueue(
             await RecoverOrphanedStatesAsync(stoppingToken);
             while (!stoppingToken.IsCancellationRequested)
             {
-                while (_queue.Reader.TryRead(out var request))
-                {
-                    await ProcessRequestAsync(request, stoppingToken);
-                }
-
                 await EnqueueDueStatesAsync(stoppingToken);
 
                 if (DateTimeOffset.UtcNow - _lastCleanupAt >= TimeSpan.FromMinutes(_options.CleanupIntervalMinutes))
@@ -176,16 +178,41 @@ internal sealed class MoodleSnapshotSyncQueue(
                     await CleanupRunsAsync(stoppingToken);
                 }
 
-                var signal = _queue.Reader.WaitToReadAsync(stoppingToken).AsTask();
-                var tick = Task.Delay(PollInterval, stoppingToken);
-                await Task.WhenAny(signal, tick);
+                await Task.Delay(PollInterval, stoppingToken);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
+        finally
+        {
+            try
+            {
+                await Task.WhenAll(workers);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+            }
+        }
 
         logger.LogInformation("MoodleSnapshotSyncQueue encerrada.");
+    }
+
+    private async Task ConsumeQueueAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (await _queue.Reader.WaitToReadAsync(cancellationToken))
+            {
+                while (_queue.Reader.TryRead(out var request))
+                {
+                    await ProcessRequestAsync(request, cancellationToken);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
     }
 
     private async Task RemoveLegacyEagerPrefetchStatesAsync(CancellationToken cancellationToken)
@@ -718,9 +745,17 @@ internal sealed class MoodleSnapshotSyncQueue(
             }
 
             var now = DateTimeOffset.UtcNow;
-            var seconds = Math.Min(3600, 30 * Math.Pow(2, Math.Max(0, state.AttemptCount - 1))) * (0.75 + Random.Shared.NextDouble() * 0.5);
+            var descriptor = MoodleErrorContract.Describe(exception);
+            var permanentFailure = IsPermanentSyncFailure(descriptor.ErrorCode);
+            var retryCapSeconds = permanentFailure
+                ? TimeSpan.FromHours(24).TotalSeconds
+                : TimeSpan.FromHours(1).TotalSeconds;
+            var exponentialSeconds = 30 * Math.Pow(2, Math.Max(0, state.AttemptCount - 1));
+            var seconds = permanentFailure
+                ? retryCapSeconds
+                : Math.Min(retryCapSeconds, exponentialSeconds) * (0.75 + Random.Shared.NextDouble() * 0.5);
             state.Status = "failed";
-            var safeError = MoodleErrorContract.Describe(exception).Message;
+            var safeError = descriptor.Message;
             state.LastError = safeError.Length > 4000 ? safeError[..4000] : safeError;
             state.NextSyncAt = now.AddSeconds(seconds);
             state.LeaseUntil = null;
@@ -755,6 +790,19 @@ internal sealed class MoodleSnapshotSyncQueue(
             logger.LogError(persistenceException, "Falha ao persistir o estado de erro da sincronização Moodle.");
         }
     }
+
+    private static bool IsPermanentSyncFailure(string errorCode) => errorCode switch
+    {
+        MoodleErrorContract.ConnectionNotFound or
+        MoodleErrorContract.ConnectionDisabled or
+        MoodleErrorContract.TokenMissing or
+        MoodleErrorContract.TokenDecryptionFailed or
+        MoodleErrorContract.AuthenticationFailed or
+        MoodleErrorContract.FunctionNotAllowed or
+        MoodleErrorContract.PermissionDenied or
+        MoodleErrorContract.CourseNotFound => true,
+        _ => false,
+    };
 
     private async Task<SnapshotSyncResult> SyncAsync(
         IServiceProvider services,
