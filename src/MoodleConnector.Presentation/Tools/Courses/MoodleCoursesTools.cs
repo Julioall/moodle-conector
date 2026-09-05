@@ -82,6 +82,7 @@ public sealed class MoodleCoursesTools(
                         MoodleSnapshotDatasets.Courses,
                         courseId: null,
                         priority: 20,
+                        force: true,
                         cancellationToken: cancellationToken);
 
                 paged = new PagedCourses(pageItems, courses.Count, pagina, limite);
@@ -235,6 +236,7 @@ public sealed class MoodleCoursesTools(
                         MoodleSnapshotDatasets.Courses,
                         courseId: null,
                         priority: 20,
+                        force: true,
                         cancellationToken: cancellationToken);
                 }
             }
@@ -342,6 +344,7 @@ public sealed class MoodleCoursesTools(
                         MoodleSnapshotDatasets.Courses,
                         courseId: null,
                         priority: 20,
+                        force: true,
                         cancellationToken: cancellationToken);
                 }
             }
@@ -433,6 +436,7 @@ public sealed class MoodleCoursesTools(
                         MoodleSnapshotDatasets.Courses,
                         courseId: null,
                         priority: 20,
+                        force: true,
                         cancellationToken: cancellationToken);
                 freshness = new ToolFreshness(
                     "snapshot",
@@ -535,6 +539,7 @@ public sealed class MoodleCoursesTools(
                         MoodleSnapshotDatasets.Courses,
                         courseId: null,
                         priority: 20,
+                        force: true,
                         cancellationToken: cancellationToken);
                 freshness = new ToolFreshness(
                     "snapshot",

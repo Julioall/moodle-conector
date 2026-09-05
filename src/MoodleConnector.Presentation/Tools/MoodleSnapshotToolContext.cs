@@ -178,6 +178,7 @@ public sealed class MoodleSnapshotToolContext(
             dataset,
             courseId,
             priority: 20,
+            force: envelope?.IsStale == true,
             cancellationToken: cancellationToken);
     }
 
