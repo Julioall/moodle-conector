@@ -112,14 +112,18 @@ public sealed class MoodleSnapshotToolContext(
                 scope, request.UserExternalId, MoodleSnapshotDatasets.Gradebook, courseId, gradebook, cancellationToken);
         }
 
-        var heads = new[]
+        var datasetHeads = new[]
         {
-            activities?.UpdatedAt,
-            students?.UpdatedAt,
-            groups?.UpdatedAt,
-            submissions?.UpdatedAt,
-            gradebook?.UpdatedAt,
-        }.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+            (Dataset: MoodleSnapshotDatasets.Activities, UpdatedAt: activities?.UpdatedAt),
+            (Dataset: MoodleSnapshotDatasets.Students, UpdatedAt: students?.UpdatedAt),
+            (Dataset: MoodleSnapshotDatasets.Groups, UpdatedAt: groups?.UpdatedAt),
+            (Dataset: MoodleSnapshotDatasets.Submissions, UpdatedAt: submissions?.UpdatedAt),
+            (Dataset: MoodleSnapshotDatasets.Gradebook, UpdatedAt: gradebook?.UpdatedAt),
+        };
+        var heads = datasetHeads
+            .Where(item => item.UpdatedAt.HasValue)
+            .Select(item => item.UpdatedAt!.Value)
+            .ToArray();
         var missingDatasets = requiredDatasets
             .Where(dataset => !HasDataset(dataset, activities, students, groups, submissions, gradebook))
             .ToArray();
@@ -137,6 +141,22 @@ public sealed class MoodleSnapshotToolContext(
         if (skewSeconds > TimeSpan.FromMinutes(options.MaxAnalyticalSnapshotSkewMinutes).TotalSeconds)
         {
             incompleteDatasets = [.. incompleteDatasets, "snapshot_skew"];
+
+            // A dataset can be individually fresh and complete while still
+            // being much older than the other datasets used by one analytical
+            // response. Refresh the oldest heads explicitly so the warning is
+            // self-healing instead of waiting for their independent schedule.
+            foreach (var dataset in datasetHeads.Where(item => item.UpdatedAt == oldest))
+            {
+                refreshQueued |= await QueueAsync(
+                    scope,
+                    request.UserExternalId,
+                    dataset.Dataset,
+                    courseId,
+                    priority: 20,
+                    force: true,
+                    cancellationToken: cancellationToken);
+            }
         }
 
         return new CourseReadSnapshot(
