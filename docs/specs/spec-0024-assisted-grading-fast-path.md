@@ -4,10 +4,10 @@
 
 Implementação concluída; homologação de desempenho e rollout pendentes.
 
-> A implementação atual aplica uma decisão posterior de produto: o caminho rápido exposto ao
-> MCP termina em `export_grading_corrections_csv` e não publica notas/feedbacks no Moodle.
-> As referências desta especificação a revisão UI, prévia e confirmação descrevem o desenho
-> legado e não devem ser usadas para iniciar esse fluxo.
+> Decisão posterior de produto: o caminho rápido exposto ao MCP salva primeiro as correções
+> internamente e então oferece dois destinos mutuamente exclusivos: CSV externo ou prévia de
+> publicação no Moodle. A prévia não exige UI; a escrita requer o texto literal
+> `CONFIRMAR_PUBLICACAO` e mantém os guardrails de integridade e confirmação humana.
 
 ## Objetivo
 

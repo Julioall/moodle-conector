@@ -36,9 +36,7 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(batch.Id, result.BatchJobId);
         Assert.Equal(1, result.ReadyItems);
         Assert.Equal(0, result.BlockedItems);
-        Assert.StartsWith("CONFIRMO O LANCAMENTO DE 1 CORRECAO NO MOODLE PARA O LOTE", result.ConfirmationText, StringComparison.Ordinal);
-        Assert.Contains(batch.Id.ToString(), result.ConfirmationText, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("CURSO 10", result.ConfirmationText, StringComparison.Ordinal);
+        Assert.Equal("CONFIRMAR_PUBLICACAO", result.ConfirmationText);
         Assert.NotNull(fixture.PendingActions.LastPayload);
         Assert.Single(fixture.PendingActions.LastPayload!.Items);
         Assert.Equal("501", fixture.PendingActions.LastPayload.Items[0].AssignmentId);
@@ -75,7 +73,37 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(0, result.ReadyItems);
         Assert.Equal(1, result.BlockedItems);
         Assert.Null(fixture.PendingActions.LastPayload);
-        Assert.Contains(result.Warnings, warning => warning.Contains("Nenhum item revisado", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Warnings, warning => warning.Contains("Nenhuma correcao salva", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task CreatePreview_IncluiRascunhoSalvoSemExigirUiDeRevisao()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0, "Ana Silva");
+        item.SetDraft(8m, 0.8m, "Bom trabalho.");
+        AttachVersionedContext(item, batch);
+        await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
+        await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: false),
+            CancellationToken.None);
+
+        Assert.Equal("CONFIRMAR_PUBLICACAO", result.ConfirmationText);
+        var preview = Assert.Single(result.Launches);
+        Assert.Equal("Ana Silva", preview.StudentName);
+        Assert.Equal(8m, preview.Grade);
+        Assert.Equal("Bom trabalho.", preview.FeedbackText);
+        Assert.Equal("rascunho_aguardando_confirmacao", preview.Situation);
+        Assert.Equal(GradingReviewStatus.NotReviewed, item.ReviewStatus);
+        Assert.Equal(GradingItemStatus.DraftReady, item.Status);
     }
 
     [Fact]
@@ -101,7 +129,7 @@ public sealed class GradingLaunchCommandHandlerTests
 
         Assert.NotEqual(Guid.Empty, result.PendingActionId);
         Assert.Equal(1, result.ReadyItems);
-        Assert.Contains("SOMENTE_FEEDBACK", result.ConfirmationText, StringComparison.Ordinal);
+        Assert.Equal("CONFIRMAR_PUBLICACAO", result.ConfirmationText);
         Assert.Null(Assert.Single(fixture.PendingActions.LastPayload!.Items).Grade);
     }
 
@@ -128,7 +156,7 @@ public sealed class GradingLaunchCommandHandlerTests
             CancellationToken.None);
 
         Assert.Equal(1, result.ReadyItems);
-        Assert.Contains("SOMENTE_FEEDBACK", result.ConfirmationText, StringComparison.Ordinal);
+        Assert.Equal("CONFIRMAR_PUBLICACAO", result.ConfirmationText);
         Assert.Equal(snapshot.ContextHash, item.ContextHash);
         Assert.Equal(snapshot.Version, item.ContextVersion);
         Assert.Null(Assert.Single(fixture.PendingActions.LastPayload!.Items).Grade);
@@ -188,7 +216,7 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(0, result.ReadyItems);
         Assert.Equal(1, result.BlockedItems);
         Assert.Null(fixture.PendingActions.LastPayload);
-        Assert.Contains(result.Warnings, warning => warning.Contains("nota final 12", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.Warnings, warning => warning.Contains("nota 12", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(result.Warnings, warning => warning.Contains("nota maxima 10", StringComparison.OrdinalIgnoreCase));
     }
 

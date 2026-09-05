@@ -40,7 +40,9 @@ public sealed record GradingLaunchPreviewItem(
     [property: JsonPropertyName("grade")] decimal? Grade,
     [property: JsonPropertyName("feedbackText")] string FeedbackText,
     [property: JsonPropertyName("contextHash")] string? ContextHash = null,
-    [property: JsonPropertyName("submissionContentHash")] string? SubmissionContentHash = null);
+    [property: JsonPropertyName("submissionContentHash")] string? SubmissionContentHash = null,
+    [property: JsonPropertyName("studentName")] string? StudentName = null,
+    [property: JsonPropertyName("situation")] string Situation = "pronta_para_publicacao");
 
 public sealed record ConfirmMoodleBatchLaunchCommand(
     Guid PendingActionId,
@@ -115,18 +117,21 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             ? allItems
             : allItems.Where(item => selectedIds.Contains(item.Id)).ToArray();
         var launchable = selected
-            .Where(item => IsReadyForLaunch(item, request.OnlyReviewed))
+            .Select(item => ToLaunchCandidate(item, request.OnlyReviewed))
+            .Where(candidate => candidate is not null)
+            .Select(candidate => candidate!)
             .ToArray();
         var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(
-            launchable.Select(item => item.Id).ToArray(),
+            launchable.Select(candidate => candidate.Item.Id).ToArray(),
             cancellationToken);
         var restoredContextIdentity = false;
         var scaleWarnings = new List<string>();
         var contextWarnings = new List<string>();
-        var ready = new List<AssistedGradingItem>();
+        var ready = new List<GradingLaunchCandidate>();
         var settingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
-        foreach (var item in launchable)
+        foreach (var candidate in launchable)
         {
+            var item = candidate.Item;
             if (NeedsContextIdentityRestore(item) &&
                 snapshotsByItem.TryGetValue(item.Id, out var snapshotDocument))
             {
@@ -149,7 +154,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 continue;
             }
 
-            if (item.FinalGrade is not null)
+            if (candidate.Grade is not null)
             {
                 var maxGrade = await GetKnownMaxGradeAsync(batch, item, settingsCache, cancellationToken);
                 if (maxGrade is null)
@@ -159,15 +164,15 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     continue;
                 }
 
-                if (item.FinalGrade > maxGrade)
+                if (candidate.Grade > maxGrade)
                 {
                     scaleWarnings.Add(
-                        $"Item {item.Id}: nota final {FormatGrade(item.FinalGrade!.Value)} excede nota maxima {FormatGrade(maxGrade.Value)} identificada pelos criterios.");
+                        $"Item {item.Id}: nota {FormatGrade(candidate.Grade!.Value)} excede nota maxima {FormatGrade(maxGrade.Value)} identificada pelos criterios.");
                     continue;
                 }
             }
 
-            ready.Add(item);
+            ready.Add(candidate);
         }
 
         if (restoredContextIdentity)
@@ -189,8 +194,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 ConfirmationText: string.Empty,
                 ExpiresAt: null,
                 Warnings: scaleWarnings.Count > 0 || contextWarnings.Count > 0
-                    ? [.. contextWarnings, .. scaleWarnings]
-                    : ["Nenhum item revisado e pronto para lancamento foi encontrado."]);
+            ? [.. contextWarnings, .. scaleWarnings]
+                    : ["Nenhuma correcao salva e pronta para lancamento foi encontrada."]);
         }
 
         var payload = new GradingLaunchPayload(
@@ -198,18 +203,9 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             ready.Select(ToPayloadItem).ToArray(),
             request.AllowOverwriteExisting);
         var previewItems = ready.Select(ToPreviewItem).ToArray();
-        var itemLabel = ready.Count == 1 ? "CORRECAO" : "CORRECOES";
-        var activityScope = string.Join(
-            ",",
-            ready
-                .Select(item => item.AssignmentId.ToString(CultureInfo.InvariantCulture))
-                .Distinct(StringComparer.Ordinal)
-                .Take(10));
-        var overwriteScope = request.AllowOverwriteExisting
-            ? " E AUTORIZO SOBRESCREVER NOTAS E FEEDBACKS EXISTENTES"
-            : string.Empty;
-        var confirmationText =
-            $"CONFIRMO O LANCAMENTO DE {ready.Count} {itemLabel} NO MOODLE PARA O LOTE {batch.Id} DO CURSO {batch.CourseId} NAS ATIVIDADES {activityScope} COM ESCOPO {(ready.All(item => item.FinalGrade is null) ? "SOMENTE_FEEDBACK" : "NOTA_E_FEEDBACK")}{overwriteScope}";
+        // A previa traz todo o escopo e os avisos; a decisao humana fica em um
+        // comando curto e constante, sem exigir que o ChatGPT reproduza IDs.
+        var confirmationText = "CONFIRMAR_PUBLICACAO";
         var pending = await pendingActions.CreatePendingActionAsync(
             ToolName,
             ToolRiskLevel.CriticalHumanConfirmedWrite,
@@ -227,6 +223,12 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             batch.CourseId,
             cancellationToken);
 
+        var warnings = BuildWarnings(blocked, scaleWarnings, contextWarnings).ToList();
+        if (request.AllowOverwriteExisting)
+        {
+            warnings.Add("Esta previa autoriza sobrescrever notas ou feedbacks que ja existam no Moodle.");
+        }
+
         return new CreateGradingLaunchPreviewResult(
             pending.PendingActionId,
             batch.Id,
@@ -236,7 +238,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             previewItems,
             pending.ConfirmationText,
             pending.ExpiresAt,
-            Warnings: BuildWarnings(blocked, scaleWarnings, contextWarnings));
+            Warnings: warnings);
     }
 
     private async Task<IReadOnlyList<AssistedGradingItem>> LoadBatchItemsAsync(
@@ -290,12 +292,25 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         return maxPoints.Length == 0 ? null : maxPoints.Sum();
     }
 
-    private static bool IsReadyForLaunch(AssistedGradingItem item, bool onlyReviewed)
+    private static GradingLaunchCandidate? ToLaunchCandidate(AssistedGradingItem item, bool onlyReviewed)
     {
-        return (!onlyReviewed || item.ReviewStatus == GradingReviewStatus.Reviewed) &&
+        if (item.ReviewStatus == GradingReviewStatus.Reviewed &&
             item.Status == GradingItemStatus.ReadyToCommit &&
             item.CommitStatus == GradingCommitStatus.Pending &&
-            !string.IsNullOrWhiteSpace(item.FinalFeedback);
+            !string.IsNullOrWhiteSpace(item.FinalFeedback))
+        {
+            return new GradingLaunchCandidate(item, item.FinalGrade, item.FinalFeedback!);
+        }
+
+        if (!onlyReviewed &&
+            item.Status == GradingItemStatus.DraftReady &&
+            item.CommitStatus == GradingCommitStatus.NotReady &&
+            !string.IsNullOrWhiteSpace(item.DraftFeedback))
+        {
+            return new GradingLaunchCandidate(item, item.SuggestedGrade, item.DraftFeedback!);
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<string> BuildWarnings(
@@ -321,32 +336,43 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
     }
 
 
-    private static GradingLaunchPayloadItem ToPayloadItem(AssistedGradingItem item)
+    private static GradingLaunchPayloadItem ToPayloadItem(GradingLaunchCandidate candidate)
     {
+        var item = candidate.Item;
         return new GradingLaunchPayloadItem(
             item.Id,
             item.CourseId.ToString(CultureInfo.InvariantCulture),
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
-            item.FinalGrade,
-            item.FinalFeedback ?? string.Empty,
+            candidate.Grade,
+            candidate.FeedbackText,
             item.AttemptNumber,
             GradingDraftVersionHash.Compute(item),
             item.ContextHash,
             item.SubmissionContentHash);
     }
 
-    private static GradingLaunchPreviewItem ToPreviewItem(AssistedGradingItem item)
+    private static GradingLaunchPreviewItem ToPreviewItem(GradingLaunchCandidate candidate)
     {
+        var item = candidate.Item;
         return new GradingLaunchPreviewItem(
             item.Id,
             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
-            item.FinalGrade,
-            item.FinalFeedback ?? string.Empty,
+            candidate.Grade,
+            candidate.FeedbackText,
             item.ContextHash,
-            item.SubmissionContentHash);
+            item.SubmissionContentHash,
+            item.StudentDisplayName,
+            candidate.Item.ReviewStatus == GradingReviewStatus.Reviewed
+                ? "revisada"
+                : "rascunho_aguardando_confirmacao");
     }
+
+    private sealed record GradingLaunchCandidate(
+        AssistedGradingItem Item,
+        decimal? Grade,
+        string FeedbackText);
 
     private static bool HasVersionedContext(AssistedGradingItem item) =>
         item.ContextVersion is > 0 &&
@@ -646,6 +672,19 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
 
             try
             {
+                // Rascunhos da IA permanecem apenas internos ate a confirmacao
+                // explicita. A confirmacao e o ato de revisao/aprovacao que os
+                // promove para o mesmo estado usado pelo caminho em lote legado.
+                if (item.ReviewStatus != GradingReviewStatus.Reviewed)
+                {
+                    item.ApplyTeacherReview(
+                        payloadItem.Grade,
+                        payloadItem.FeedbackText,
+                        action.CreatedBySubject,
+                        action.CreatedByMoodleUserId,
+                        teacherDecision: "confirmed_for_publication");
+                }
+
                 var writeResult = await mediator.Send(
                     new SaveAssignmentGradeCommand(
                         userExternalId,

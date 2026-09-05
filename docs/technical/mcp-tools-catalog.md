@@ -163,47 +163,23 @@ humana e minimização de dados.
 | `get_student_gradebook` | Get Student Gradebook | `SensitiveRead` | Sim | Não | Implementada |
 | `report_students_at_risk` | Gerar Relatorio Risco Estudantes | `SensitiveRead` | Sim | Não | Implementada |
 | `report_students_at_risk` | Report Students at Risk | `SensitiveRead` | Sim | Não | Implementada |
-| `discover_grading_functions` | Descobrir Funcoes Moodle Correcao | `ReadOnly` | Sim | Não | Implementada; diagnóstico técnico, oculta em `Production` |
-| `discover_moodle_grading_functions` | Discover Moodle Grading Functions | `ReadOnly` | Sim | Não | Não registrada; referência histórica |
-| `execute_grading_discovery` | Executar Descoberta Tecnica Correcao | `ReadOnly` | Sim | Não | Implementada; diagnóstico técnico, oculta em `Production` |
-| `list_all_gradable_submissions` | Listar Todas as Entregas Corrigiveis | `SensitiveRead` | Sim | Não | Implementada |
-| `create_assisted_grading_batch` | Criar Lote Correcao Assistida | `DraftOnly` | Não | Cria job interno | Implementada |
-| `get_grading_batch_status` | Consultar Status Lote Correcao | `ReadOnly` | Sim | Não | Implementada |
-| `export_grading_coordination_report` | Exportar Relatorio Correcao Coordenacao | `ReadOnly` | Sim | Não | Desativada no MCP |
-| `cancel_assisted_grading_batch` | Cancelar Lote Correcao Assistida | `DraftOnly` | Não | Escrita interna | Desativada no MCP |
-| `get_assisted_grading_item` | Consultar Item Correcao Assistida | `ReadOnly` | Sim | Não | Desativada no MCP |
-| `get_grading_item_context` | Consultar Contexto Item Correcao Assistida | `ReadOnly` | Sim | Não | Implementada |
-| `update_grading_draft` | Atualizar Rascunho Correcao | `DraftOnly` | Não | Escrita interna | Desativada no MCP |
-| `prepare_submission_grading` | Preparar Correcao Entrega | `ReadOnly` | Sim | Não | Implementada |
 | `prepare_ai_grading_batch` | Preparar Lote Correcao IA | `ReadOnly` | Sim | Não | Implementada |
 | `save_ai_grading_batch` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Rascunho interno | Implementada; sem confirmação |
-| `export_grading_corrections_csv` | Exportar Correcoes para CSV | `ReadOnly` | Sim | Não | Implementada |
-| `review_batch_feedbacks` | Revisar Feedbacks Lote | `ReadOnly` | Sim | Não | Desativada no MCP |
-| `get_grading_batch_audit` | Consultar Auditoria Correcao Lote | `ReadOnly` | Sim | Não | Desativada no MCP |
-| `create_batch_grade_launch_preview` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Desativada no MCP |
-| `confirm_batch_grade_launch` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Desativada no MCP |
+| `export_grading_corrections_csv` | Exportar Correcoes para CSV | `ReadOnly` | Sim | Não | Implementada; saída externa `nome;nota;feedback` |
+| `create_batch_grade_launch_preview` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada; inclui rascunhos internos e dispensa UI |
+| `confirm_batch_grade_launch` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada; exige `CONFIRMAR_PUBLICACAO` |
 | `prepare_welcome_message` / `confirm_welcome_message` | Mensagem Boas Vindas | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_access_reminder` / `confirm_access_reminder` | Mensagem Cobranca Acesso | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_activity_reminder` / `confirm_activity_reminder` | Mensagem Cobranca SA | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_recovery_message` / `confirm_recovery_message` | Mensagem Recuperacao | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_closing_message` / `confirm_closing_message` | Mensagem Encerramento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_followup_message` / `confirm_followup_message` | Mensagem Acompanhamento | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
-| `prepare_individual_grade_launch` / `prepare_individual_grade_launch` | Preparar Nota Individual | `CriticalHumanConfirmedWrite` | Nota atual/prévia | Cria ação pendente | Implementadas (aliases PT/EN) |
-| `confirm_individual_grade_launch` / `confirm_individual_grade_launch` | Confirmar Nota Individual | `CriticalHumanConfirmedWrite` | Não | Nota/feedback individual no Moodle | Implementadas (aliases PT/EN) |
-| `get_grading_audit` | Consultar Auditoria Correcao | `ReadOnly` | Sim | Não | Desativada no MCP |
-| `grading-review-app-v2` | Grading Review App | `ReadOnly` | Sim | Não | Desativada no MCP |
 
 ## Mensagens tipificadas do tutor
 
 `MoodleTutorMessageTools.cs` expõe seis pares `preparar_*` / `confirmar_*`: boas-vindas, cobrança de acesso, cobrança de SA, recuperação, encerramento e acompanhamento. A preparação recebe `courseId`, `recipientIds`, texto opcional e alias, resolve nomes quando possível e cria `PendingAction` com prévia, riscos, expiração e texto literal. A confirmação recebe `pendingActionId`, texto literal e alias, exige escopo `moodle.write`; a conexão precisa de `CanWrite=true`, e o gateway usa `core_message_send_instant_messages` para cada destinatário.
 
 Limitações: são mensagens instantâneas individuais, sem broadcast atômico, agendamento ou garantia de leitura. O resultado pode ter sucessos e falhas por destinatário. A flag `MessagesWriteEnabled` fica desabilitada por padrão no `appsettings.json`; deve ser habilitada explicitamente por ambiente e bloqueia a preparação e a confirmação quando definida como `false`.
-
-## Nota individual confirmada
-
-`MoodleIndividualGradeTools.cs` expõe o par em português `prepare_individual_grade_launch` / `confirm_individual_grade_launch` e os aliases em inglês `prepare_individual_grade_launch` / `confirm_individual_grade_launch`. A preparação recebe curso, tarefa, estudante, nota proposta, justificativa, feedback opcional e alias; consulta a nota atual e cria `PendingAction` com prévia e confirmação literal que inclui a nota. A confirmação exige `moodle.write.assignments.grade`, conexão `CanWrite=true`, `AssignmentGradeWriteEnabled=true`, pending action válida e `mod_assign_save_grade` disponível.
-
-Limitações: a escrita é individual e imediatamente visível ao estudante; não decide nota nem substitui revisão pedagógica. A flag `AssignmentGradeWriteEnabled` fica desabilitada por padrão no `appsettings.json`; deve ser habilitada explicitamente por ambiente e, quando `false`, a confirmação é recusada.
 
 ## `list_my_courses` / `list_courses`
 
@@ -736,244 +712,14 @@ Descrição:
 - O nome permanece registrado e exposto enquanto não houver telemetria
   suficiente para ocultá-lo com segurança da superfície `Production`.
 
-## `discover_grading_functions`
-
-Descricao:
-
-- Consulta `core_webservice_get_site_info` no Moodle atual e classifica as funcoes necessarias para o MVP de correcao assistida.
-- Verifica leitura de submissoes, status de submissao, notas, arquivos e escrita de notas individual/lote.
-- Nao baixa anexos, nao lista estudantes e nao executa escrita no Moodle.
-- Nao retorna token, senha, URL privada com token ou dados pessoais de estudantes.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `execute_grading_discovery`
-
-Descricao:
-
-- Consolida a descoberta técnica para correção assistida; a rastreabilidade da antiga Fase 0 está na tabela de migração de `docs/roadmap.md`.
-- Consulta o catalogo de funcoes Moodle e classifica disponibilidade de leitura de entregas, leitura de notas, anexos, `mod_assign_save_grade`, `mod_assign_save_grades`, rubricas/escalas e modo de token de escrita.
-- Relata `CanWrite`, feature flags de escrita e que a escrita sempre usa o token do usuario do tenant correspondente, sem retornar o valor do token.
-- Nao baixa anexos, nao lista estudantes e nao executa escrita no Moodle.
-- Campos como permissao real de professor/tutor, acesso efetivo a pluginfile, rubricas e escalas ficam marcados como prova pendente quando dependem de curso/tarefa Moodle real.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
-
-Resposta estruturada:
-
-- `overallStatus`: `blocked` ou `requires_real_moodle_probe`.
-- `functions[]`: funcoes Moodle avaliadas e disponibilidade.
-- `attachments`, `gradeWrite`, `permissions`, `rubricsAndScales`: area, status, evidencias e proximos passos.
-- `writeToken`: modo `user_token` ou `write_service_token`, flags de escrita e permissao da conexao.
-- `blockingIssues` e `warnings`: motivos que bloqueiam ou exigem prova em sandbox.
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `create_assisted_grading_batch`
-
-Descricao:
-
-- Cria um job interno em `grading_batch` e itens em `grading_item` a partir das entregas retornadas pelas queries de submissao existentes.
-- Quando `includeSubmissionFiles=true`, preserva os metadados e a referencia `fileUrl` dos anexos retornados pela submissao. Com `McpResourceSubmissionDeliveryEnabled`, o anexo segue como resource/file original e nao depende de download/extracao durante a criacao do lote.
-- `prepare_submission_grading`, `prepare_ai_grading_batch` e `get_submission_grading_package` registram os anexos como resources MCP opacos com nome, MIME, tamanho e URI segura. A leitura do resource revalida autorizacao, vinculo, limite e integridade antes de devolver os bytes.
-- A correção não executa extração local. RTF, DOC/XLS/PPT, OpenDocument, imagens, ZIP e formatos desconhecidos seguem como resources MCP originais; estados históricos de extração não bloqueiam nem substituem a leitura do resource.
-- Quando `includeRubric=true` ou `includeCourseMaterials=true`, escaneia a secao da tarefa, persiste candidatos de contexto como `assignment_context` e usa selecao heuristica para escolher o provavel enunciado/material principal.
-- O orquestrador inline do MVP processa itens pendentes logo apos a criacao do lote e marca o item como aguardando leitura pela IA via MCP Resource. Sem resource utilizável, bloqueia a correção.
-- Nota sugerida confiavel continua dependente de rubrica/criterios e escala disponiveis.
-- Nao escreve nota ou feedback no Moodle.
-- Limita `maxItems` entre 1 e 400 e retorna warnings quando o lote foi truncado ou alguma tarefa nao foi encontrada.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `courseId` | `string` | Identificador numerico do curso nesta versao inicial. |
-| `assignmentIds` | `string[]` | Identificadores numericos das tarefas Moodle. |
-| `submissionIds` | `string[]?` | Submissoes especificas a incluir. Quando vazio, usa o filtro de entregas. |
-| `maxItems` | `int` | Limite do lote, de 1 a 400. |
-| `onlyAwaitingGrading` | `bool` | Quando true, cria itens apenas para entregas aguardando correcao. |
-| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `false` |
-| `Destructive` | `false` |
-| `Idempotent` | `false` |
-| `OpenWorld` | `false` |
-
-## `get_grading_batch_status`
-
-Descricao:
-
-- Consulta um lote interno criado por `create_assisted_grading_batch`.
-- Retorna contadores do lote e uma pagina de itens sem anexar template de UI.
-- Nao consulta o Moodle e nao executa escrita.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote. |
-| `pagina` | `int` | Pagina de itens, iniciando em 1. |
-| `tamanhoPagina` | `int` | Tamanho da pagina, de 1 a 100. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `export_grading_coordination_report`
-
-Descricao:
-
-- Gera um relatorio consolidado de um lote interno de correcao assistida para coordenacao.
-- Retorna contadores de processamento, revisao, commit, baixa confianca, medias de confianca/nota, itens que exigem atencao e criterios com lacunas.
-- Inclui `reportMarkdown` para exportacao/copiar em atas, acompanhamentos ou documentos internos.
-- Nao retorna anexos completos, e-mail de estudante ou feedback completo de submissao.
-- Nao consulta nem escreve no Moodle.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote retornado por `create_assisted_grading_batch`. |
-
-Campos principais de resposta:
-
-| Campo | Tipo | Descricao |
-| --- | --- | --- |
-| `statusCounts` | `object` | Contagem por status interno do item. |
-| `reviewStatusCounts` | `object` | Contagem por status de revisao humana. |
-| `commitStatusCounts` | `object` | Contagem por status de lancamento Moodle. |
-| `attentionItems` | `array` | Ate 25 itens que exigem atencao, com estudante, tarefa, status e motivo resumido. |
-| `criteriaNeedingReview` | `array` | Ate 10 criterios com lacunas ou revisao obrigatoria. |
-| `reportMarkdown` | `string` | Relatorio em Markdown, sem textos completos de feedback/anexo. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `cancel_assisted_grading_batch`
-
-Descricao:
-
-- Cancela um lote interno de correcao assistida ainda nao finalizado.
-- Nao escreve no Moodle e nao altera nota/feedback de estudantes.
-- Usa o orquestrador de lote para aplicar cancelamento de forma retry-safe por `batchJobId`.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote retornado por `create_assisted_grading_batch`. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `false` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `get_assisted_grading_item`
-
-Descricao:
-
-- Consulta os dados minimos de um item de correcao assistida salvo em `grading_item`.
-- Retorna status, revisao, nota sugerida/final, feedback de rascunho/final e observacoes privadas do rascunho quando existirem.
-- Nao retorna anexos completos, e-mail do estudante ou dados sensiveis desnecessarios.
-- Nao executa escrita no Moodle.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `gradingItemId` | `Guid` | Identificador do item retornado por `get_grading_batch_status`. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-> As seções de revisão, prévia e confirmação abaixo documentam código legado mantido para compatibilidade interna. Elas não são registradas no MCP e não fazem parte do caminho CSV.
-
-## `update_grading_draft`
-
-Descricao:
-
-- Salva a revisao humana de nota, feedback, decisao e observacoes internas em `grading_item`.
-- Nao escreve no Moodle; apenas prepara o item para uma futura previa/confirmacao de lancamento.
-- Usa `expectedReviewStatus` para evitar sobrescrita acidental. Repetir o mesmo payload apos uma primeira gravacao retorna o mesmo resultado sem nova persistencia.
-- Se o item foi revisado com conteudo diferente desde a ultima leitura, a tool retorna erro controlado e orienta consultar novamente.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `gradingItemId` | `Guid` | Identificador do item de correcao. |
-| `finalGrade` | `decimal?` | Nota final revisada. |
-| `finalFeedback` | `string` | Feedback final revisado. |
-| `teacherDecision` | `string` | Decisao do professor/tutor, por exemplo `approved` ou `needs_changes`. |
-| `reviewNotes` | `string?` | Observacoes internas da revisao. |
-| `expectedReviewStatus` | `string` | Status visto antes da edicao; use `NotReviewed` para rascunho ainda nao revisado. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `false` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
 ## `create_batch_grade_launch_preview`
 
 Descricao:
 
-- Gera a previa consolidada dos itens revisados e prontos para lancamento.
-- Cria uma `PendingMoodleAction` com texto de confirmacao literal e expiracao curta.
+- Gera a previa consolidada de rascunhos salvos ou itens já revisados e prontos para lancamento.
+- Inclui aluno, nota, feedback, situacao e avisos, e cria uma `PendingMoodleAction` de expiracao curta.
 - Nao escreve no Moodle; a escrita oficial fica bloqueada ate a chamada de confirmacao.
-- Filtra itens sem revisao final, sem nota final ou sem feedback final e retorna avisos.
+- Filtra itens sem correcao salva, contexto valido ou feedback e retorna avisos.
 
 Parametros:
 
@@ -981,7 +727,7 @@ Parametros:
 | --- | --- | --- |
 | `batchJobId` | `Guid` | Identificador do lote de correcao assistida. |
 | `gradingItemIds` | `IReadOnlyCollection<Guid>?` | Subconjunto opcional de itens do lote. |
-| `onlyReviewed` | `bool` | Quando verdadeiro, inclui somente itens revisados e prontos. |
+| `onlyReviewed` | `bool` | Quando verdadeiro, inclui somente itens revisados; o padrão também inclui rascunhos salvos. |
 
 Metadados MCP:
 
@@ -997,7 +743,7 @@ Metadados MCP:
 Descricao:
 
 - Confirma uma acao pendente criada por `create_batch_grade_launch_preview`.
-- Exige o texto literal de confirmacao e o escopo server-side `moodle.write`.
+- Exige o texto literal `CONFIRMAR_PUBLICACAO` e o escopo server-side de escrita de notas.
 - Exige `Features:AssignmentGradeWriteEnabled=true`; quando houver feedback, exige tambem `Features:AssignmentFeedbackWriteEnabled=true`.
 - Bloqueia o envio se `mod_assign_save_grade` nao estiver disponivel no catalogo de funcoes do servico Moodle autorizado.
 - Envia cada item por `mod_assign_save_grade` usando `IMoodleAssignmentGradingGateway`.
@@ -1017,33 +763,6 @@ Metadados MCP:
 | --- | --- |
 | `ReadOnly` | `false` |
 | `Destructive` | `true` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `get_grading_audit`
-
-Descricao:
-
-- Mantida no codigo legado, mas nao registrada no MCP no caminho CSV.
-- Consulta eventos sanitizados de auditoria por `auditId`/correlation id.
-- Retorna eventos paginados de criacao/confirmacao/commit vinculados ao mesmo fluxo.
-- Nao escreve no Moodle e nao altera estado interno.
-- Nesta versao, a consulta por `batchJobId` ainda nao foi implementada.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `auditId` | `string` | AuditId/correlation id retornado pela confirmacao de lancamento. |
-| `pagina` | `int` | Pagina de eventos, iniciando em 1. |
-| `tamanhoPagina` | `int` | Tamanho da pagina, de 1 a 100. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
@@ -1151,55 +870,6 @@ Metadados MCP:
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
 
-## `list_all_gradable_submissions`
-
-Descricao:
-
-- Lista entregas corrigiveis diretamente do snapshot persistente, sem consultar o Moodle nesta chamada.
-- Quando `assignmentIds` fica vazio, lista todas as tarefas disponíveis no snapshot.
-- Usada como passo de preparo antes de `create_assisted_grading_batch`.
-- Aceita filtro por status e flag `onlyAwaitingGrading`.
-- Nao baixa anexos nem retorna conteudo integral de submissoes.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `courseId` | `string` | Identificador do curso Moodle. |
-| `assignmentIds` | `string[]?` | Identificadores opcionais das tarefas; vazio significa todas as tarefas do snapshot. |
-| `status` | `string` | Filtro: `all`, `submitted`, `pending`, `late`, `awaiting_grading`. Padrao: `awaiting_grading`. |
-| `onlyAwaitingGrading` | `bool` | Quando true, forca filtro apenas para aguardando correcao. |
-| `includeLate` | `bool` | Quando false, remove entregas atrasadas da lista. |
-| `page` | `int` | Pagina de resultados, iniciando em 1. |
-| `perPage` | `int` | Tamanho da pagina, de 1 a 100. Padrao: 25. |
-| `moodleAlias` | `string?` | Alias da conexao Moodle. Quando omitido, usa a conexao padrao. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `prepare_submission_grading`
-
-Descricao:
-
-- Prepara o contexto de correcao de uma entrega individual fora de um lote.
-- Retorna os anexos originais como `resource/file` com nome, MIME, tamanho e URI segura. Se o MCP Resource estiver desabilitado, a correção fica bloqueada; não há fallback de texto extraído.
-- Nao escreve nota ou feedback no Moodle.
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `false` |
-| `Destructive` | `false` |
-| `Idempotent` | `false` |
-| `OpenWorld` | `false` |
-
 ## `prepare_ai_grading_batch`
 
 Descricao:
@@ -1223,13 +893,13 @@ Descricao:
 
 - Salva nota e feedback gerados pela IA como rascunho interno para cada aluno do lote.
 - Nao escreve no Moodle.
-- Depois de salvar, chame `export_grading_corrections_csv` para obter o arquivo com nome, nota, feedback e situacao.
+- Depois de salvar, escolha `export_grading_corrections_csv` para CSV externo ou `create_batch_grade_launch_preview` para publicação no Moodle.
 
 Parametros:
 
 | Nome | Tipo | Descricao |
 | --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote retornado por `create_assisted_grading_batch`. |
+| `batchJobId` | `Guid` | Identificador do lote retornado por `start_pending_grading_run`. |
 | `items` | `AiGradingItemInput[]` | Array de correcoes. Cada item deve conter `gradingItemId`, nota e feedback. |
 
 Metadados MCP:
@@ -1246,8 +916,8 @@ Metadados MCP:
 Descricao:
 
 - Le os itens persistidos do lote autorizado sem consultar ou alterar notas no Moodle.
-- Retorna um recurso CSV UTF-8, separado por ponto e virgula, com as colunas `nome`, `nota`, `feedback` e `situacao`.
-- E a saida final do caminho rapido; nao abre interface, cria previa ou solicita confirmacao.
+- Retorna um recurso CSV UTF-8, separado por ponto e virgula, com as colunas `nome`, `nota` e `feedback`.
+- É uma saída externa final: não abre interface, cria prévia ou solicita confirmação.
 
 Metadados MCP:
 
@@ -1257,77 +927,6 @@ Metadados MCP:
 | `Destructive` | `false` |
 | `Idempotent` | `true` |
 | `OpenWorld` | `false` |
-
-## `review_batch_feedbacks`
-
-Descricao:
-
-- Não é registrada no MCP. A interface de revisão e o fluxo de confirmação foram desativados para este caminho.
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `get_grading_item_context`
-
-Descricao:
-
-- Consulta o contexto de correcao de um item individual, incluindo artefatos de assignment_context e selecao heuristica do enunciado.
-- Nao retorna anexos completos nem escreve no Moodle.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `gradingItemId` | `Guid` | Identificador do item retornado pelo status do lote. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `get_grading_batch_audit`
-
-Descricao:
-
-- Mantida no codigo legado, mas nao registrada no MCP no caminho CSV.
-- Consulta eventos de auditoria de um lote completo de correcao por `batchJobId`.
-- Complementa `get_grading_audit` que busca por `auditId` individual.
-- Retorna eventos paginados vinculados ao lote.
-- Nao escreve no Moodle.
-
-Parametros:
-
-| Nome | Tipo | Descricao |
-| --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote de correcao assistida. |
-| `pagina` | `int` | Pagina de eventos, iniciando em 1. |
-| `tamanhoPagina` | `int` | Tamanho da pagina, de 1 a 100. |
-
-Metadados MCP:
-
-| Campo | Valor |
-| --- | --- |
-| `ReadOnly` | `true` |
-| `Destructive` | `false` |
-| `Idempotent` | `true` |
-| `OpenWorld` | `false` |
-
-## `grading-review-app-v2`
-
-Descricao:
-
-- Recurso legado nao registrado no MCP.
-- A interface SPA de revisao e o caminho de confirmacao nao fazem parte da saida CSV.
 
 ## Planejado
 

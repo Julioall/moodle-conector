@@ -63,16 +63,6 @@ public static class ChatGptSubmissionToolCatalog
     {
         var (readOnlyJustification, destructiveJustification) = name switch
         {
-            "prepare_individual_grade_launch" =>
-            (
-                "Creates a private pending action and preview in the authenticated Moodle or connector context; it does not write the grade to Moodle.",
-                "Does not write, delete, overwrite, revoke access, cancel state or send an irreversible action; a separate confirmation is required."
-            ),
-            "confirm_individual_grade_launch" =>
-            (
-                "Creates or updates a grade in the authenticated Moodle context after the server verifies authorization and explicit confirmation.",
-                "Writes a grade that may affect an academic record; the server requires a pending action, authorization and the exact confirmation text."
-            ),
             _ =>
             (
                 contract.ReadOnly ? ReadOnlyJustification : StatefulJustification,

@@ -192,7 +192,7 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
         Assert.DoesNotContain("get_course", toolsC);
         Assert.Contains("search", toolsC);
         Assert.Contains("audit_course_structure", toolsC);
-        Assert.Contains("create_assisted_grading_batch", toolsC);
+        Assert.Contains("start_pending_grading_run", toolsC);
     }
 
     [Theory]

@@ -2677,7 +2677,6 @@ PortalAccountEndpoints.MapAccountsAndAccessControl(app, AppAuthRateLimitPolicy);
 AdminMetricsEndpoints.Map(app, AppAuthRateLimitPolicy);
 PortalAuthenticationEndpoints.MapLoginAndLogout(app, AppAuthRateLimitPolicy);
 
-PortalGradingEndpoints.MapGrading(app, AppAuthRateLimitPolicy);
 PortalForumEndpoints.MapForums(app, AppAuthRateLimitPolicy);
 AdminEndpoints.MapConnectorClientRegistration(app, AdminApiRateLimitPolicy);
 
@@ -3290,18 +3289,5 @@ public sealed record PermissionGroupMemberInput(Guid UserId);
 public sealed record UpdateIgnoredCoursesInput(string? ConnectionRef, IReadOnlyList<string>? CourseIds, bool Ignored);
 public sealed record UpdateTrackedCoursesInput(string? ConnectionRef, IReadOnlyList<string>? CourseIds, bool Tracked);
 public sealed record SetUserPermissionInput(string Permission, bool IsAllowed);
-
-public sealed record ReviewGradingItemInput(
-    decimal? FinalGrade,
-    string? FinalFeedback,
-    string? TeacherDecision,
-    string? ReviewNotes,
-    string? ExpectedReviewStatus,
-    string? ExpectedDraftVersionHash);
-public sealed record PreviewGradingBatchInput(
-    Guid[]? GradingItemIds,
-    bool OnlyReviewed = true,
-    bool AllowOverwriteExisting = false);
-public sealed record ConfirmGradingBatchInput(Guid PendingActionId, string ConfirmationText);
 
 

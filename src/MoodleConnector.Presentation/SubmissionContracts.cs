@@ -44,20 +44,6 @@ public sealed record AppSubmissionsPageDto(
     bool HasMore,
     IReadOnlyList<AppSubmissionDto> Submissions);
 
-public sealed record PrepareIndividualGradeInput(
-    string ConnectionRef,
-    string CourseId,
-    string AssignmentId,
-    string StudentId,
-    decimal ProposedGrade,
-    string? FeedbackText,
-    string JustificationText);
-
-public sealed record ConfirmIndividualGradeInput(
-    string? ConnectionRef,
-    Guid PendingActionId,
-    string ConfirmationText);
-
 public static class AppSubmissionContractMapper
 {
     public static AppSubmissionDto ToDto(AssignmentSubmissionSummary item, MoodleConnector.Application.Grading.AssignmentExistingGrade? existingGrade = null) => new(

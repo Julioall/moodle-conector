@@ -5,8 +5,8 @@ Use esta referencia quando uma tarefa depender de anexos, formato, integridade, 
 ## Pipeline atual do conector
 
 1. A submissao e resolvida pelo Moodle Connector; o agente nao baixa `pluginfile.php` diretamente.
-2. `create_assisted_grading_batch` persiste metadados e referencias dos anexos; no caminho MCP, o download pesado e a extracao nao sao pre-requisitos.
-3. `prepare_submission_grading`, `prepare_ai_grading_batch` e `get_submission_grading_package` registram os anexos como resources opacos com `name`, `mimeType`, `size` e URI `moodle://resource/...`.
+2. O fluxo unificado de lotes persiste metadados e referencias dos anexos; no caminho MCP, o download pesado e a extracao nao sao pre-requisitos.
+3. `prepare_ai_grading_batch` registra os anexos do lote como resources opacos com `name`, `mimeType`, `size` e URI `moodle://resource/...`.
 4. O cliente le o resource/file original pelo gateway seguro, que revalida identidade, conexao, escopo, vinculo, tamanho e integridade antes de devolver os bytes.
 5. A correção assistida não executa extração local: o chat recebe os arquivos originais como resources e decide como lê-los.
 

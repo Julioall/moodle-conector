@@ -99,7 +99,16 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.DoesNotContain("moodle_check_function", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("discover_grading_functions", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("execute_grading_discovery", tools, StringComparer.OrdinalIgnoreCase);
-        Assert.Contains("list_all_gradable_submissions", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("list_all_gradable_submissions", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("start_pending_grading_run", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("prepare_ai_grading_batch", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("save_ai_grading_batch", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("export_grading_corrections_csv", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("create_batch_grade_launch_preview", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("confirm_batch_grade_launch", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("create_assisted_grading_batch", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("get_grading_batch_status", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("prepare_submission_grading", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("list_gradable_submissions", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("search", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("fetch", tools, StringComparer.OrdinalIgnoreCase);
@@ -181,7 +190,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                                exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
 
-        Assert.Equal(84, contracts.Count);
+        Assert.Equal(78, contracts.Count);
         Assert.Equal(
             contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
             submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));

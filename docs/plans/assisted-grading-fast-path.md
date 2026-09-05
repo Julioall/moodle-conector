@@ -2,10 +2,11 @@
 
 Referência: [SPEC-0024](../specs/spec-0024-assisted-grading-fast-path.md).
 
-> Decisão vigente: o caminho operacional de correção assistida termina após gerar e salvar
-> os rascunhos e exportar `export_grading_corrections_csv`. A UI, a prévia, a confirmação e o
-> envio do lote permanecem apenas como código legado não registrado no MCP; as etapas abaixo
-> que tratam de publicação não fazem parte deste caminho.
+> Decisão vigente: após gerar e salvar os rascunhos internos, o usuário escolhe o destino.
+> `export_grading_corrections_csv` entrega CSV externo; `create_batch_grade_launch_preview`
+> apresenta a prévia e `confirm_batch_grade_launch` publica somente após
+> `CONFIRMAR_PUBLICACAO`. A UI e os adaptadores de revisão foram removidos; o caminho é
+> exclusivamente o lote unificado.
 
 ## Resultado esperado
 

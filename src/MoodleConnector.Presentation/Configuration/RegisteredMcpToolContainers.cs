@@ -37,12 +37,10 @@ public static class RegisteredMcpToolContainers
         typeof(MoodleAssignmentSubmissionsTools),
         typeof(MoodlePendingSubmissionsTools),
         typeof(MoodleGradingTools),
-        typeof(MoodleSubmissionGradingPackageTools),
         typeof(MoodleGradebookTools),
         typeof(MoodleStudentPerformanceTools),
         typeof(MoodleAccessMonitoringTools),
         typeof(MoodleRiskAnalysisTools),
-        typeof(MoodleGradingContextDiagnosticsTools),
         typeof(MoodleReportTools),
         typeof(MoodleMonitorTools),
         typeof(MoodleMemoryTools),
@@ -52,7 +50,6 @@ public static class RegisteredMcpToolContainers
 
     public static IReadOnlyList<ConditionalMcpToolContainer> Conditional { get; } =
     [
-        new(typeof(MoodleIndividualGradeTools), "AssignmentGradeWriteEnabled"),
         new(typeof(MoodleTutorMessageTools), "MessagesWriteEnabled"),
         new(typeof(MoodleUniversalWriteTools), "UniversalMoodleWriteEnabled"),
         new(typeof(MoodleDownloadFileTools), "UniversalMoodleFileDownloadEnabled")

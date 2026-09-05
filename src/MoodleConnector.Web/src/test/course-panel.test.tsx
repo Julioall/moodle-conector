@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../features/courses/courses-gateway', () => ({ coursesGateway: { get: vi.fn() } }));
 vi.mock('../features/students/students-gateway', () => ({ studentsGateway: { byCourse: vi.fn() } }));
-vi.mock('../features/corrections/PendingCorrectionsPage', () => ({ PendingCorrectionsPage: () => <section><h2>Correções pendentes</h2><p>Fila rápida de correções</p></section> }));
 
 import { CoursePanelPage } from '../features/courses/CoursePanelPage';
 import { coursesGateway } from '../features/courses/courses-gateway';
@@ -32,29 +31,24 @@ describe('CoursePanelPage', () => {
     return render(<QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[initialEntry]}><Routes><Route path="/cursos/:connectionRef/:courseId" element={<CoursePanelPage />} /></Routes></MemoryRouter></QueryClientProvider>);
   }
 
-  it('opens directly on the quick corrections view without priorities', async () => {
+  it('shows the student list without the retired corrections view', async () => {
     renderPage();
 
     await screen.findByRole('heading', { name: 'Curso de demonstração' });
-    expect(screen.getByRole('tab', { name: 'Correções' })).toHaveAttribute('data-state', 'active');
-    expect(screen.getByText('Fila rápida de correções')).toBeInTheDocument();
-    expect(screen.queryByText('Prioridades')).not.toBeInTheDocument();
+    expect(await screen.findByText('Aluno teste')).toBeInTheDocument();
+    expect(screen.queryByText('Correções pendentes')).not.toBeInTheDocument();
   });
 
-  it('loads the student list only when its tab is opened', async () => {
+  it('loads the student list for the selected course', async () => {
     renderPage();
 
     await screen.findByRole('heading', { name: 'Curso de demonstração' });
-    expect(studentsGateway.byCourse).not.toHaveBeenCalled();
-
-    await userEvent.click(screen.getByRole('tab', { name: 'Alunos' }));
-
     await waitFor(() => expect(studentsGateway.byCourse).toHaveBeenCalledWith('demo', '42', 1, 25));
     expect(screen.getByText('Aluno teste')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Ver notas' })).toHaveAttribute('href', '/cursos/demo/42/alunos/student-1');
   });
 
-  it('refreshes the selected course and the compact correction data', async () => {
+  it('refreshes the selected course data', async () => {
     renderPage();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Atualizar' }));

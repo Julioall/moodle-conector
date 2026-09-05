@@ -29,9 +29,8 @@ Resolva alias e capabilities antes da leitura. Use `SafeReadExecutor` para uma l
 
 Leituras coletivas nao devem expor o texto integral das entregas. Quando o usuario pedir leitura de anexos, contexto ou correcao, encaminhe a `moodle-grading`:
 
-1. Crie um lote limitado com `create_assisted_grading_batch`, usando `includeSubmissionFiles`, `includeRubric` e `includeCourseMaterials` somente quando necessarios.
-2. Consulte `get_grading_batch_status` e `get_grading_item_context` para cobertura e artefatos.
-3. Use `prepare_submission_grading` para obter enunciado, arquivos originais como `resource/file`, nota maxima, instrucoes e status de cada entrega.
+1. Inicie o lote unificado de pendencias, usando arquivos, rubrica e materiais do curso somente quando necessarios.
+2. Para correção, encaminhe a entrega pelo lote unificado e use `prepare_ai_grading_batch` para obter enunciado, arquivos originais como `resource/file`, nota máxima, instruções e status.
 4. Trate o resource original como a fonte da entrega; MIME desconhecido não é motivo para bloqueio.
 5. Bloqueie somente se o arquivo não puder ser obtido, registrado, lido, autorizado ou validado pelo gateway; marque critérios não verificáveis para revisão humana.
 

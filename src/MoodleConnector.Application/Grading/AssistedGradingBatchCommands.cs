@@ -2969,7 +2969,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
             request.Items.Count,
             warnings,
             NextStep: savedCount > 0
-                ? "Agora chame export_grading_corrections_csv para receber o CSV com nome, nota, feedback e situacao. O lote permanece apenas como rascunho local e nao sera enviado ao Moodle."
+                ? "Correcoes salvas internamente. Para CSV externo, chame export_grading_corrections_csv. Para publicar no Moodle, chame create_batch_grade_launch_preview, revise a previa e aguarde a confirmacao explicita."
                 : "Nenhum item foi salvo. Verifique os avisos.",
             updatedItems);
         telemetry?.RecordPhase(
