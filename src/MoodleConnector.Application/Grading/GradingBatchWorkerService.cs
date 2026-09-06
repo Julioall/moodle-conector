@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,7 @@ public sealed class GradingBatchWorkerService(
     private const int CheckpointInterval = 25;
     private readonly ConcurrentDictionary<Guid, byte> activeBatches = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> connectionGates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly AdaptiveConcurrencyGate concurrencyGate = new(initialTarget: 1);
 
     private static readonly string WorkerId =
         $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
@@ -31,6 +33,16 @@ public sealed class GradingBatchWorkerService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("GradingBatchWorkerService iniciado.");
+        var maxConcurrency = ResolveMaximumConcurrency();
+        var initialConcurrency = ResolveInitialConcurrency(maxConcurrency);
+        concurrencyGate.SetTarget(initialConcurrency);
+        logger.LogInformation(
+            "Pool adaptativo de correção: inicial={InitialConcurrency}, minimo={MinimumConcurrency}, maximo={MaximumConcurrency}, cpuAlvo={CpuTarget}%, memoriaAlvo={MemoryTarget}%.",
+            initialConcurrency,
+            ResolveMinimumConcurrency(),
+            maxConcurrency,
+            ResolveCpuTargetPercent(),
+            ResolveMemoryTargetPercent());
 
         if (!IsDurableJobStoreAvailable())
         {
@@ -39,7 +51,8 @@ public sealed class GradingBatchWorkerService(
             // grande de lotes Processing não bloqueie o startup no buffer.
             await Task.WhenAll(
                 ProcessChannelConsumersAsync(stoppingToken),
-                ResumeInProgressBatchesAsync(stoppingToken));
+                ResumeInProgressBatchesAsync(stoppingToken),
+                AdaptConcurrencyAsync(stoppingToken));
             return;
         }
 
@@ -64,7 +77,8 @@ public sealed class GradingBatchWorkerService(
         {
             await Task.WhenAll(
                 ProcessChannelConsumersAsync(stoppingToken),
-                PollDurableBatchesAsync(stoppingToken));
+                PollDurableBatchesAsync(stoppingToken),
+                AdaptConcurrencyAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -76,15 +90,48 @@ public sealed class GradingBatchWorkerService(
 
     private Task ProcessChannelConsumersAsync(CancellationToken cancellationToken)
     {
-        var consumerCount = Math.Clamp(limits.Value.BatchWorkerConcurrency, 1, 32);
+        var consumerCount = limits.Value.AdaptiveBatchWorkerConcurrency
+            ? ResolveMaximumConcurrency()
+            : ResolveInitialConcurrency(ResolveMaximumConcurrency());
         return Task.WhenAll(Enumerable.Range(0, consumerCount)
             .Select(_ => ProcessChannelAsync(cancellationToken)));
     }
 
     private async Task ProcessChannelAsync(CancellationToken cancellationToken)
     {
-        await foreach (var workItem in channel.ReadAllAsync(cancellationToken))
+        while (!cancellationToken.IsCancellationRequested)
         {
+            try
+            {
+                // Acquire the adaptive slot before removing work from the
+                // channel. This prevents low-demand operation from holding
+                // durable leases for batches waiting behind the connection
+                // gate.
+                await concurrencyGate.EnterAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            if (!channel.TryRead(out var workItem))
+            {
+                concurrencyGate.Exit();
+                try
+                {
+                    if (!await channel.WaitToReadAsync(cancellationToken))
+                    {
+                        break;
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                continue;
+            }
+
             try
             {
                 await ProcessBatchAsync(workItem.BatchId, cancellationToken);
@@ -100,13 +147,17 @@ public sealed class GradingBatchWorkerService(
                     "Falha fatal ao processar lote {BatchId} do worker.",
                     workItem.BatchId);
             }
+            finally
+            {
+                concurrencyGate.Exit();
+            }
         }
     }
 
     private async Task PollDurableBatchesAsync(CancellationToken cancellationToken)
     {
         var pollSeconds = Math.Clamp(limits.Value.DurableBatchPollSeconds, 1, 300);
-        var claimSize = Math.Clamp(limits.Value.DurableBatchClaimSize, 1, 100);
+        var configuredClaimSize = Math.Clamp(limits.Value.DurableBatchClaimSize, 1, 100);
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(pollSeconds));
 
         try
@@ -118,6 +169,13 @@ public sealed class GradingBatchWorkerService(
                     using var scope = scopeFactory.CreateScope();
                     var jobStore = scope.ServiceProvider.GetRequiredService<IGradingBatchJobStore>();
                     var now = DateTimeOffset.UtcNow;
+                    // Claim only as many durable jobs as the current pool can
+                    // start. Remaining Pending jobs stay visible to the next
+                    // cycle and are not stranded behind a long lease.
+                    var claimSize = Math.Clamp(
+                        Math.Min(configuredClaimSize, concurrencyGate.Target),
+                        1,
+                        100);
                     var claims = await jobStore.ClaimDueBatchesAsync(
                         WorkerId,
                         now,
@@ -651,6 +709,156 @@ public sealed class GradingBatchWorkerService(
             connectionGate.Release();
         }
     }
+
+    private async Task AdaptConcurrencyAsync(CancellationToken cancellationToken)
+    {
+        if (!limits.Value.AdaptiveBatchWorkerConcurrency)
+        {
+            return;
+        }
+
+        var intervalSeconds = Math.Clamp(limits.Value.BatchWorkerScaleIntervalSeconds, 2, 60);
+        var idleScaleDown = TimeSpan.FromSeconds(
+            Math.Clamp(limits.Value.BatchWorkerIdleScaleDownSeconds, intervalSeconds, 3600));
+        var minimum = ResolveMinimumConcurrency();
+        var maximum = ResolveMaximumConcurrency();
+        var cpuTarget = ResolveCpuTargetPercent();
+        var memoryTarget = ResolveMemoryTargetPercent();
+        TimeSpan? previousCpu = null;
+        DateTimeOffset? previousSampleAt = null;
+        DateTimeOffset? idleSince = null;
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(intervalSeconds));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                var now = DateTimeOffset.UtcNow;
+                var (cpuPercent, memoryPercent, currentCpu) = ReadCapacitySample();
+                var elapsed = previousSampleAt is null ? TimeSpan.Zero : now - previousSampleAt.Value;
+                var cpu = cpuPercent;
+                if (previousCpu is not null && currentCpu is not null && elapsed > TimeSpan.Zero)
+                {
+                    cpu = Math.Clamp(
+                        (currentCpu.Value - previousCpu.Value).TotalMilliseconds /
+                        (elapsed.TotalMilliseconds * Math.Max(1, Environment.ProcessorCount)) * 100d,
+                        0d,
+                        100d);
+                }
+
+                previousCpu = currentCpu;
+                previousSampleAt = now;
+
+                var backlog = channel.PendingCount + activeBatches.Count;
+                var currentTarget = concurrencyGate.Target;
+                var desiredTarget = currentTarget;
+                var cpuPressure = cpu.HasValue && cpu.Value >= Math.Min(100, cpuTarget + 5);
+                var memoryPressure = memoryPercent.HasValue && memoryPercent.Value >= Math.Min(100, memoryTarget + 5);
+                var cpuComfortable = cpu is null || cpu <= Math.Max(0, cpuTarget - 10);
+                var memoryComfortable = memoryPercent is null || memoryPercent <= Math.Max(0, memoryTarget - 10);
+
+                if (backlog == 0 && concurrencyGate.Active == 0)
+                {
+                    idleSince ??= now;
+                    if (now - idleSince >= idleScaleDown && currentTarget > minimum)
+                    {
+                        desiredTarget = currentTarget - 1;
+                    }
+                }
+                else
+                {
+                    idleSince = null;
+                    if ((cpuPressure || memoryPressure) && currentTarget > minimum)
+                    {
+                        desiredTarget = currentTarget - 1;
+                    }
+                    else if (backlog >= currentTarget && cpuComfortable && memoryComfortable && currentTarget < maximum)
+                    {
+                        desiredTarget = currentTarget + 1;
+                    }
+                }
+
+                if (desiredTarget == currentTarget)
+                {
+                    continue;
+                }
+
+                concurrencyGate.SetTarget(desiredTarget);
+                logger.LogInformation(
+                    "Pool adaptativo ajustado de {PreviousConcurrency} para {CurrentConcurrency}; fila={Backlog}, ativos={ActiveBatches}, cpu={CpuPercent:F1}%, memoria={MemoryPercent:F1}%.",
+                    currentTarget,
+                    desiredTarget,
+                    backlog,
+                    concurrencyGate.Active,
+                    cpu ?? -1,
+                    memoryPercent ?? -1);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Encerramento normal do host.
+        }
+    }
+
+    private (double? CpuPercent, double? MemoryPercent, TimeSpan? CurrentCpu) ReadCapacitySample()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var currentCpu = process.TotalProcessorTime;
+            var memory = GC.GetGCMemoryInfo();
+            var memoryPercent = memory.TotalAvailableMemoryBytes > 0
+                ? Math.Clamp(
+                    memory.MemoryLoadBytes * 100d / memory.TotalAvailableMemoryBytes,
+                    0d,
+                    100d)
+                : (double?)null;
+            return (null, memoryPercent, currentCpu);
+        }
+        catch
+        {
+            return (null, null, null);
+        }
+    }
+
+    private int ResolveMinimumConcurrency() =>
+        Math.Clamp(limits.Value.BatchWorkerMinConcurrency, 1, 32);
+
+    private int ResolveMaximumConcurrency()
+    {
+        var minimum = ResolveMinimumConcurrency();
+        if (limits.Value.BatchWorkerMaxConcurrency > 0)
+        {
+            return Math.Clamp(limits.Value.BatchWorkerMaxConcurrency, minimum, 32);
+        }
+
+        // Environment.ProcessorCount respects the CPU quota of the Linux
+        // container/VPS. Four async-heavy batches per logical processor is a
+        // safe upper bound; CPU/memory feedback still keeps the actual target
+        // near the configured 80% budget.
+        var cpuMaximum = Math.Clamp(
+            Math.Max(1, Environment.ProcessorCount) * 4,
+            minimum,
+            32);
+        var memoryMaximum = cpuMaximum;
+        var totalMemory = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        var memoryPerWorker = Math.Max(64L, limits.Value.BatchWorkerMemoryPerWorkerMb) * 1024L * 1024L;
+        if (totalMemory > 0)
+        {
+            memoryMaximum = (int)Math.Clamp(totalMemory / memoryPerWorker, minimum, 32L);
+        }
+
+        return Math.Clamp(Math.Min(cpuMaximum, memoryMaximum), minimum, 32);
+    }
+
+    private int ResolveInitialConcurrency(int maximum) =>
+        Math.Clamp(limits.Value.BatchWorkerConcurrency, ResolveMinimumConcurrency(), maximum);
+
+    private int ResolveCpuTargetPercent() =>
+        Math.Clamp(limits.Value.BatchWorkerCpuTargetPercent, 20, 95);
+
+    private int ResolveMemoryTargetPercent() =>
+        Math.Clamp(limits.Value.BatchWorkerMemoryTargetPercent, 20, 95);
 
     private static string ResolveConnectionKey(AssistedGradingBatch batch) =>
         !string.IsNullOrWhiteSpace(batch.MoodleConnectionId)

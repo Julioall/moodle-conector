@@ -33,6 +33,16 @@ public sealed class GradingBatchChannel
         return _channel.Writer.TryWrite(workItem);
     }
 
+    public bool TryRead(out GradingBatchWorkItem workItem)
+    {
+        return _channel.Reader.TryRead(out workItem!);
+    }
+
+    public ValueTask<bool> WaitToReadAsync(CancellationToken cancellationToken = default)
+    {
+        return _channel.Reader.WaitToReadAsync(cancellationToken);
+    }
+
     public IAsyncEnumerable<GradingBatchWorkItem> ReadAllAsync(CancellationToken cancellationToken = default)
     {
         return _channel.Reader.ReadAllAsync(cancellationToken);

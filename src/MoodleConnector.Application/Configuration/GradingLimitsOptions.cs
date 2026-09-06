@@ -64,11 +64,39 @@ public sealed class GradingLimitsOptions
     public int DurableBatchClaimSize { get; init; } = 8;
 
     /// <summary>
-    /// Número máximo de lotes processados em paralelo por instância. Cada
-    /// lote continua protegido por lease PostgreSQL e por um limite separado
-    /// por conexão Moodle.
+    /// Concorrência inicial do pool adaptativo. O pool pode subir ou descer
+    /// entre BatchWorkerMinConcurrency e BatchWorkerMaxConcurrency.
     /// </summary>
-    public int BatchWorkerConcurrency { get; init; } = 8;
+    public int BatchWorkerConcurrency { get; init; } = 2;
+
+    /// <summary>Ativa o ajuste automático conforme fila, CPU e memória.</summary>
+    public bool AdaptiveBatchWorkerConcurrency { get; init; } = true;
+
+    /// <summary>Menor número de slots mantidos pelo pool quando há demanda.</summary>
+    public int BatchWorkerMinConcurrency { get; init; } = 1;
+
+    /// <summary>
+    /// Teto explícito do pool. Zero calcula o teto a partir de CPU e memória
+    /// disponíveis no processo/container (com limite absoluto de 32).
+    /// </summary>
+    public int BatchWorkerMaxConcurrency { get; init; }
+
+    /// <summary>Utilização alvo de CPU do processo, normalmente 80%.</summary>
+    public int BatchWorkerCpuTargetPercent { get; init; } = 80;
+
+    /// <summary>Utilização alvo de memória disponível, normalmente 80%.</summary>
+    public int BatchWorkerMemoryTargetPercent { get; init; } = 80;
+
+    /// <summary>Intervalo entre decisões de escala do pool.</summary>
+    public int BatchWorkerScaleIntervalSeconds { get; init; } = 5;
+
+    /// <summary>Tempo sem fila antes de reduzir slots até o mínimo.</summary>
+    public int BatchWorkerIdleScaleDownSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// Reserva conservadora de memória por lote para calcular o teto automático.
+    /// </summary>
+    public int BatchWorkerMemoryPerWorkerMb { get; init; } = 256;
 
     /// <summary>
     /// Evita que vários lotes do mesmo Moodle saturem a API enquanto permite
