@@ -136,6 +136,28 @@ public sealed class AssistedGradingItem
         };
     }
 
+    /// <summary>
+    /// Define a chave determinística da entrega antes da persistência. Ela é
+    /// usada pelo índice único para fechar a janela de corrida entre duas
+    /// solicitações simultâneas que leem a mesma submissão.
+    /// </summary>
+    public void SetIdempotencyKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key) || key.Trim().Length > 64)
+        {
+            throw new ArgumentException("A chave de idempotência do item é inválida.", nameof(key));
+        }
+
+        var normalized = key.Trim();
+        if (IdempotencyKey is not null && !string.Equals(IdempotencyKey, normalized, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("A chave de idempotência do item não pode ser alterada.");
+        }
+
+        IdempotencyKey = normalized;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void SetDraft(
         decimal? suggestedGrade,
         decimal? confidence,

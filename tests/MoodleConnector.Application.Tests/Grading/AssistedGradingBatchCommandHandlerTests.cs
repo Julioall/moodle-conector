@@ -58,8 +58,32 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         Assert.True(repository.Batches.Single().IncludeCourseMaterials);
         Assert.Equal(2, repository.Items.Count);
         Assert.All(repository.Items, item => Assert.Equal(GradingItemStatus.Pending, item.Status));
+        Assert.All(repository.Items, item => Assert.False(string.IsNullOrWhiteSpace(item.IdempotencyKey)));
         Assert.Null(mediator.LastListQuery);
         Assert.Equal(result.BatchJobId, orchestrator.LastEnqueuedBatchId);
+    }
+
+    [Fact]
+    public async Task CreateBatch_IgnoraEntregaJaPresenteEmOutroLote()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var existingBatch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var existingItem = AssistedGradingItem.Create(existingBatch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(existingBatch, CancellationToken.None);
+        await repository.AddItemAsync(existingItem, CancellationToken.None);
+
+        var sut = CreateHandler(repository, new FakeMediator());
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                "321", "10", ["501"], ["9001"], 25, OnlyAwaitingGrading: true),
+            CancellationToken.None);
+
+        Assert.Equal(Guid.Empty, result.BatchJobId);
+        Assert.Equal("AlreadyQueued", result.Status);
+        Assert.Equal(0, result.AcceptedItems);
+        Assert.Single(repository.Batches);
+        Assert.Single(repository.Items);
+        Assert.Contains(result.Warnings, warning => warning.Contains("evitadas", StringComparison.OrdinalIgnoreCase) || warning.Contains("duplicidade", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -1296,6 +1320,30 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             Task.FromResult(Batches.SingleOrDefault(batch =>
                 batch.CreatedBySubject == createdBySubject &&
                 batch.IdempotencyKey == idempotencyKey));
+
+        public Task<IReadOnlyList<GradingSubmissionIdentity>> ListExistingSubmissionIdentitiesAsync(
+            IReadOnlyCollection<GradingSubmissionIdentity> identities,
+            string? moodleConnectionId,
+            string? connectorClientId,
+            string? connectionAlias,
+            CancellationToken cancellationToken)
+        {
+            var expected = identities.ToHashSet();
+            var batches = Batches
+                .Where(batch => batch.Status != GradingBatchStatus.Cancelled)
+                .ToDictionary(batch => batch.Id);
+            var matches = Items
+                .Where(item => item.SubmissionId is not null && batches.ContainsKey(item.BatchId))
+                .Select(item => new GradingSubmissionIdentity(
+                    item.CourseId,
+                    item.AssignmentId,
+                    item.SubmissionId!.Value,
+                    item.AttemptNumber))
+                .Where(expected.Contains)
+                .Distinct()
+                .ToArray();
+            return Task.FromResult<IReadOnlyList<GradingSubmissionIdentity>>(matches);
+        }
 
         public Task AddItemAsync(AssistedGradingItem item, CancellationToken cancellationToken)
         {

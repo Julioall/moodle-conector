@@ -92,6 +92,35 @@ public sealed class MoodleResourceGatewayTests
     }
 
     [Fact]
+    public async Task RegisterAsync_NaoReutilizaReferenciaQuandoHashMudou()
+    {
+        await using var db = CreateDb();
+        var credentials = new Credentials("client-a", "connection-a");
+        var gateway = CreateGateway(db, new FileGateway(), credentials, user: new User("teacher-a"));
+        var reference = "https://moodle.example/pluginfile.php/1/enunciado.pdf";
+        var first = await gateway.RegisterAsync(
+            new MoodleResourceRegistration(
+                "assignment_context_attachment", "enunciado.pdf", "application/pdf", reference,
+                CourseId: 10, AssignmentId: 501, Sha256: new string('a', 64)),
+            CancellationToken.None);
+
+        var changed = await gateway.RegisterAsync(
+            new MoodleResourceRegistration(
+                "assignment_context_attachment", "enunciado.pdf", "application/pdf", reference,
+                CourseId: 10, AssignmentId: 501, Sha256: new string('b', 64)),
+            CancellationToken.None);
+        var same = await gateway.RegisterAsync(
+            new MoodleResourceRegistration(
+                "assignment_context_attachment", "enunciado.pdf", "application/pdf", reference,
+                CourseId: 10, AssignmentId: 501, Sha256: new string('a', 64)),
+            CancellationToken.None);
+
+        Assert.NotEqual(first.Uri, changed.Uri);
+        Assert.Equal(first.Uri, same.Uri);
+        Assert.Equal(2, await db.MoodleResources.CountAsync());
+    }
+
+    [Fact]
     public async Task ReadAsync_DeliversBytesWithoutInspectingMimeOrSignature()
     {
         await using var db = CreateDb();

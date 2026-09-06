@@ -645,6 +645,61 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task PrepareAiBatch_NaoEscopaEnunciadoPorAluno()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 2);
+        var first = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var second = AssistedGradingItem.Create(batch.Id, 10, 501, 9002, 102, 0);
+        first.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        second.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(first, CancellationToken.None);
+        await repository.AddItemAsync(second, CancellationToken.None);
+        foreach (var item in new[] { first, second })
+        {
+            await repository.AddArtifactAsync(new GradingArtifact(
+                Guid.NewGuid(), item.Id, "submission_file", "entrega.pdf", "application/pdf",
+                null, 12, ExtractionStatus.Pending, null, "pending_resource", DateTimeOffset.UtcNow,
+                $"https://moodle.example/pluginfile.php/{item.SubmissionId}/entrega.pdf"), CancellationToken.None);
+            await repository.AddArtifactAsync(new GradingArtifact(
+                Guid.NewGuid(), item.Id, "assignment_context", "enunciado.pdf", "application/pdf",
+                null, 12, ExtractionStatus.Pending, null, "pending_resource", DateTimeOffset.UtcNow,
+                "https://moodle.example/pluginfile.php/501/enunciado.pdf"), CancellationToken.None);
+        }
+
+        var resources = new RunResourceGateway();
+        var sut = new PrepareAiGradingBatchQueryHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunAssignmentSettingsGateway(),
+            resourceGateway: resources,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
+
+        var result = await sut.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None);
+
+        Assert.Equal(2, result.TotalItems);
+        var contextRequests = resources.Requests
+            .Where(request => request.ResourceType == "assignment_context_attachment")
+            .ToArray();
+        Assert.Equal(2, contextRequests.Length);
+        Assert.All(contextRequests, request =>
+        {
+            Assert.Null(request.SubmissionId);
+            Assert.Null(request.StudentId);
+            Assert.Equal(501, request.AssignmentId);
+        });
+        var submissionRequests = resources.Requests
+            .Where(request => request.ResourceType == "submission_attachment")
+            .ToArray();
+        Assert.Equal(2, submissionRequests.Length);
+        Assert.All(submissionRequests, request => Assert.NotNull(request.SubmissionId));
+    }
+
+    [Fact]
     public async Task PrepareAiBatch_ComMcpDesligado_NaoUsaTextoHistoricoNemFallback()
     {
         var repository = new RunRepository();
@@ -758,7 +813,13 @@ public sealed class PendingGradingRunCommandHandlerTests
 
     private sealed class RunResourceGateway : IMoodleResourceGateway
     {
-        public Task<MoodleResourceDescriptor> RegisterAsync(MoodleResourceRegistration request, CancellationToken cancellationToken) => Task.FromResult(new MoodleResourceDescriptor("moodle://resource/0123456789abcdef0123456789abcdef", request.Filename, request.MimeType, request.SizeBytes, request.Sha256));
+        public List<MoodleResourceRegistration> Requests { get; } = [];
+
+        public Task<MoodleResourceDescriptor> RegisterAsync(MoodleResourceRegistration request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return Task.FromResult(new MoodleResourceDescriptor("moodle://resource/0123456789abcdef0123456789abcdef", request.Filename, request.MimeType, request.SizeBytes, request.Sha256));
+        }
         public Task<MoodleResourceReadResult> ReadAsync(string uri, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<IReadOnlyList<MoodleResourceDescriptor>> ExpandZipAsync(string uri, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<MoodleResourceDescriptor>>([]);
     }

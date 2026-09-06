@@ -18,6 +18,9 @@ internal sealed class MoodleResourceRepository(ConnectorDbContext dbContext) : I
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
+        var requestedHash = string.IsNullOrWhiteSpace(request.Sha256)
+            ? null
+            : request.Sha256.Trim().ToLowerInvariant();
         return dbContext.MoodleResources
             .AsNoTracking()
             .Where(resource =>
@@ -31,6 +34,7 @@ internal sealed class MoodleResourceRepository(ConnectorDbContext dbContext) : I
                 resource.StudentId == request.StudentId &&
                 resource.Filename == Path.GetFileName(request.Filename.Trim()) &&
                 resource.RemoteFileReference == normalizedRemoteFileReference &&
+                (requestedHash == null || resource.Sha256 == requestedHash) &&
                 resource.RevokedAt == null &&
                 resource.ExpiresAt > now &&
                 resource.ParentResourceId == null)

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -602,6 +603,64 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             moodleConnectionId = credentials.ConnectionId;
         }
 
+        // A mesma submissão pode aparecer novamente quando o professor repete
+        // a solicitação, quando dois usuários disparam o curso ao mesmo tempo
+        // ou quando um worker perde a resposta. Reaproveite o item já criado
+        // antes de abrir outro lote. O índice único da chave abaixo fecha a
+        // janela residual entre esta leitura e duas gravações concorrentes.
+        var existingSubmissionIdentities = selectedItems
+            .Where(seed => !string.IsNullOrWhiteSpace(seed.SubmissionId))
+            .Select(seed => new GradingSubmissionIdentity(
+                courseId,
+                ParsePositiveLong(seed.AssignmentId, "assignmentId"),
+                ParsePositiveLong(seed.SubmissionId!, "submissionId"),
+                seed.AttemptNumber))
+            .Distinct()
+            .ToArray();
+        if (existingSubmissionIdentities.Length > 0)
+        {
+            var alreadyQueued = await repository.ListExistingSubmissionIdentitiesAsync(
+                existingSubmissionIdentities,
+                moodleConnectionId,
+                connectorClientId,
+                connectionAlias,
+                cancellationToken);
+            if (alreadyQueued.Count > 0)
+            {
+                var alreadyQueuedSet = alreadyQueued.ToHashSet();
+                var beforeFilterCount = selectedItems.Count;
+                selectedItems.RemoveAll(seed =>
+                {
+                    if (string.IsNullOrWhiteSpace(seed.SubmissionId)) return false;
+                    var identity = new GradingSubmissionIdentity(
+                        courseId,
+                        ParsePositiveLong(seed.AssignmentId, "assignmentId"),
+                        ParsePositiveLong(seed.SubmissionId!, "submissionId"),
+                        seed.AttemptNumber);
+                    return alreadyQueuedSet.Contains(identity);
+                });
+                var skippedCount = beforeFilterCount - selectedItems.Count;
+                if (skippedCount > 0)
+                {
+                    warnings.Add($"{skippedCount} entrega(s) já estavam em correção ou concluídas e foram ignoradas para evitar duplicidade.");
+                }
+            }
+        }
+
+        if (selectedItems.Count == 0)
+        {
+            return new CreateAssistedGradingBatchResult(
+                Guid.Empty,
+                courseId.ToString(CultureInfo.InvariantCulture),
+                assignmentIds,
+                TotalItems: 0,
+                AcceptedItems: 0,
+                BlockedItems: 0,
+                Status: "AlreadyQueued",
+                Warnings: warnings,
+                DiscoveryFailures: discoveryFailures);
+        }
+
         var batch = AssistedGradingBatch.Create(
             courseId,
             assignmentIdsAsLong,
@@ -633,6 +692,18 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 ParsePositiveLong(seed.StudentId, "studentId"),
                 seed.AttemptNumber,
                 seed.StudentDisplayName);
+
+            if (item.SubmissionId is long submissionId)
+            {
+                item.SetIdempotencyKey(BuildSubmissionIdempotencyKey(
+                    connectorClientId,
+                    moodleConnectionId,
+                    connectionAlias,
+                    item.CourseId,
+                    item.AssignmentId,
+                    submissionId,
+                    item.AttemptNumber));
+            }
 
             await repository.AddItemAsync(item, cancellationToken);
             if (request.IncludeSubmissionFiles)
@@ -1060,6 +1131,25 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         }
 
         return $"student:{normalizedAssignmentId}:{submission.UserId.Trim()}:{submission.AttemptNumber?.ToString(CultureInfo.InvariantCulture) ?? "-"}";
+    }
+
+    private static string BuildSubmissionIdempotencyKey(
+        string? connectorClientId,
+        string? moodleConnectionId,
+        string? connectionAlias,
+        long courseId,
+        long assignmentId,
+        long submissionId,
+        int? attemptNumber)
+    {
+        var source = string.Join('|',
+            connectorClientId?.Trim() ?? "_",
+            moodleConnectionId?.Trim() ?? connectionAlias?.Trim() ?? "_",
+            courseId.ToString(CultureInfo.InvariantCulture),
+            assignmentId.ToString(CultureInfo.InvariantCulture),
+            submissionId.ToString(CultureInfo.InvariantCulture),
+            attemptNumber?.ToString(CultureInfo.InvariantCulture) ?? "-");
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
     }
 
     private static ContextArtifactTemplate ContextDiagnosticTemplate(
@@ -2288,8 +2378,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
                         artifact.SourceUrl!,
                         item.CourseId,
                         item.AssignmentId,
-                        item.SubmissionId,
-                        item.MoodleUserId,
+                        SubmissionId: null,
+                        StudentId: null,
                         SizeBytes: artifact.SizeBytes,
                         Sha256: artifact.Sha256),
                     cancellationToken);
@@ -2635,8 +2725,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                         artifact.SourceUrl!,
                         item.CourseId,
                         item.AssignmentId,
-                        item.SubmissionId,
-                        item.MoodleUserId,
+                        SubmissionId: null,
+                        StudentId: null,
                         SizeBytes: artifact.SizeBytes,
                         Sha256: artifact.Sha256))));
         }

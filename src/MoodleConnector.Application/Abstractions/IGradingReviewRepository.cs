@@ -24,6 +24,17 @@ public sealed record GradingRunScope(
     string Destination,
     GradingRunStatus Status);
 
+/// <summary>
+/// Identidade estável de uma entrega Moodle para evitar que uma nova leitura
+/// do mesmo curso crie outro item de correção. O conteúdo da entrega nunca
+/// participa desta chave.
+/// </summary>
+public sealed record GradingSubmissionIdentity(
+    long CourseId,
+    long AssignmentId,
+    long SubmissionId,
+    int? AttemptNumber);
+
 public interface IGradingReviewRepository
 {
     Task AddGradingRunAsync(GradingRun run, CancellationToken cancellationToken) =>
@@ -92,6 +103,18 @@ public interface IGradingReviewRepository
 
     Task<AssistedGradingItem?> FindItemBySubmissionAsync(long submissionId, CancellationToken cancellationToken) =>
         Task.FromResult<AssistedGradingItem?>(null);
+
+    /// <summary>
+    /// Localiza entregas já presentes em lotes não cancelados. A implementação
+    /// padrão mantém compatibilidade com stores de teste/legados.
+    /// </summary>
+    Task<IReadOnlyList<GradingSubmissionIdentity>> ListExistingSubmissionIdentitiesAsync(
+        IReadOnlyCollection<GradingSubmissionIdentity> identities,
+        string? moodleConnectionId,
+        string? connectorClientId,
+        string? connectionAlias,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<GradingSubmissionIdentity>>([]);
 
     async Task<IReadOnlyDictionary<Guid, AssistedGradingItem>> GetItemsAsync(
         IReadOnlyCollection<Guid> ids,

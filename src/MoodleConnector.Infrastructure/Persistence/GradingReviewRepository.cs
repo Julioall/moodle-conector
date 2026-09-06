@@ -329,6 +329,67 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         dbContext.GradingItems.OrderByDescending(item => item.UpdatedAt)
             .FirstOrDefaultAsync(item => item.SubmissionId == submissionId, cancellationToken);
 
+    public async Task<IReadOnlyList<GradingSubmissionIdentity>> ListExistingSubmissionIdentitiesAsync(
+        IReadOnlyCollection<GradingSubmissionIdentity> identities,
+        string? moodleConnectionId,
+        string? connectorClientId,
+        string? connectionAlias,
+        CancellationToken cancellationToken)
+    {
+        if (identities.Count == 0)
+        {
+            return [];
+        }
+
+        var courseIds = identities.Select(identity => identity.CourseId).Distinct().ToArray();
+        var assignmentIds = identities.Select(identity => identity.AssignmentId).Distinct().ToArray();
+        var submissionIds = identities.Select(identity => identity.SubmissionId).Distinct().ToArray();
+
+        var query = from item in dbContext.GradingItems.AsNoTracking()
+                    join batch in dbContext.GradingBatches.AsNoTracking()
+                        on item.BatchId equals batch.Id
+                    where item.SubmissionId.HasValue &&
+                          courseIds.Contains(item.CourseId) &&
+                          assignmentIds.Contains(item.AssignmentId) &&
+                          submissionIds.Contains(item.SubmissionId.Value) &&
+                          batch.Status != GradingBatchStatus.Cancelled
+                    select new { item.CourseId, item.AssignmentId, item.SubmissionId, item.AttemptNumber, batch };
+
+        // Prefer the stable connection id. During rollout, old batches may
+        // only have client/alias (or no connection metadata), so retain those
+        // legacy rows as a safe duplicate barrier as well.
+        if (!string.IsNullOrWhiteSpace(moodleConnectionId))
+        {
+            var normalizedConnectionId = moodleConnectionId.Trim();
+            var normalizedClientId = string.IsNullOrWhiteSpace(connectorClientId) ? null : connectorClientId.Trim();
+            var normalizedAlias = string.IsNullOrWhiteSpace(connectionAlias) ? null : connectionAlias.Trim();
+            query = query.Where(row =>
+                row.batch.MoodleConnectionId == normalizedConnectionId ||
+                (row.batch.MoodleConnectionId == null &&
+                 (normalizedClientId == null || row.batch.ConnectorClientId == normalizedClientId) &&
+                 (normalizedAlias == null || row.batch.ConnectionAlias == normalizedAlias)));
+        }
+        else if (!string.IsNullOrWhiteSpace(connectorClientId) || !string.IsNullOrWhiteSpace(connectionAlias))
+        {
+            var normalizedClientId = string.IsNullOrWhiteSpace(connectorClientId) ? null : connectorClientId.Trim();
+            var normalizedAlias = string.IsNullOrWhiteSpace(connectionAlias) ? null : connectionAlias.Trim();
+            query = query.Where(row =>
+                (normalizedClientId == null || row.batch.ConnectorClientId == normalizedClientId) &&
+                (normalizedAlias == null || row.batch.ConnectionAlias == normalizedAlias));
+        }
+
+        var rows = await query
+            .Select(row => new GradingSubmissionIdentity(
+                row.CourseId,
+                row.AssignmentId,
+                row.SubmissionId!.Value,
+                row.AttemptNumber))
+            .ToArrayAsync(cancellationToken);
+
+        var expected = identities.ToHashSet();
+        return rows.Where(expected.Contains).Distinct().ToArray();
+    }
+
     public async Task<IReadOnlyDictionary<Guid, AssistedGradingItem>> GetItemsAsync(
         IReadOnlyCollection<Guid> ids,
         CancellationToken cancellationToken)
