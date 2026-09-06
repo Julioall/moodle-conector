@@ -333,6 +333,12 @@ public sealed class StartPendingGradingRunCommandHandler(
                         continue;
                     }
 
+                    // Mesmo quando a deduplicação retorna zero itens, preserve
+                    // o motivo no resultado agregado. Sem isso, uma segunda
+                    // solicitação concorrente parecia simplesmente "sem
+                    // pendências", escondendo que as entregas já estavam em
+                    // outro lote.
+                    warnings.AddRange(batch.Warnings.Select(warning => $"Curso {course.CourseId}: {warning}"));
                     if (batch.BatchJobId == Guid.Empty || batch.AcceptedItems == 0)
                     {
                         continue;
@@ -345,7 +351,6 @@ public sealed class StartPendingGradingRunCommandHandler(
                         batch.AssignmentIds,
                         batch.AcceptedItems,
                         batch.BlockedItems));
-                    warnings.AddRange(batch.Warnings.Select(warning => $"Curso {course.CourseId}: {warning}"));
                 }
             }
 
