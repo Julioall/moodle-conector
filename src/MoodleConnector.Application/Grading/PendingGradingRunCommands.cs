@@ -107,7 +107,12 @@ public sealed class StartPendingGradingRunCommandHandler(
             await gradingRepository.AddGradingRunAsync(run, cancellationToken);
             await gradingRepository.SaveChangesAsync(cancellationToken);
         }
-        var useSnapshots = request.UseSubmissionSnapshots &&
+        // Quando o usuário informa um curso explicitamente, a leitura de
+        // entregas deve ser live. Um snapshot parcial pode não conter todas as
+        // atividades e faria uma turma com pendências parecer vazia. Snapshots
+        // continuam sendo usados somente na varredura ampla de cursos.
+        var useSnapshots = string.IsNullOrWhiteSpace(request.CourseId) &&
+            request.UseSubmissionSnapshots &&
             request.SnapshotOwnerId is not null &&
             !string.IsNullOrWhiteSpace(request.SnapshotClientId) &&
             !string.IsNullOrWhiteSpace(request.SnapshotConnectionAlias) &&
