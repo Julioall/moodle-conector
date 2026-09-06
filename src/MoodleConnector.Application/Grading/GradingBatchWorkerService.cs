@@ -35,8 +35,11 @@ public sealed class GradingBatchWorkerService(
         if (!IsDurableJobStoreAvailable())
         {
             // Compatibilidade para hosts que ainda não registraram o job store.
-            await ResumeInProgressBatchesAsync(stoppingToken);
-            await ProcessChannelConsumersAsync(stoppingToken);
+            // Inicie os consumidores antes do catch-up para que uma fila
+            // grande de lotes Processing não bloqueie o startup no buffer.
+            await Task.WhenAll(
+                ProcessChannelConsumersAsync(stoppingToken),
+                ResumeInProgressBatchesAsync(stoppingToken));
             return;
         }
 
@@ -52,8 +55,10 @@ public sealed class GradingBatchWorkerService(
         {
             logger.LogWarning(ex, "Não foi possível recuperar leases expirados no startup; o polling tentará novamente.");
         }
-        // Catch-up: retoma lotes que ficaram em Processing após queda do processo.
-        await ResumeInProgressBatchesAsync(stoppingToken);
+        // O polling durável retoma apenas lotes elegíveis (com itens Pending)
+        // depois que os consumidores já estão ativos. Reenfileirar todos os
+        // lotes Processing antes de iniciar os consumidores pode bloquear em
+        // um canal cheio e impedir o próprio polling de iniciar.
 
         try
         {
@@ -122,9 +127,24 @@ public sealed class GradingBatchWorkerService(
 
                     foreach (var claim in claims)
                     {
-                        await channel.EnqueueAsync(
-                            new GradingBatchWorkItem(claim.BatchId, now, WorkerId),
+                        if (channel.TryEnqueue(new GradingBatchWorkItem(claim.BatchId, now, WorkerId)))
+                        {
+                            continue;
+                        }
+
+                        // A fila local é apenas uma aceleração. Se ela estiver
+                        // cheia, devolvemos o lease imediatamente para que o
+                        // próximo ciclo (ou outra réplica) possa tentar de novo.
+                        await jobStore.ReleaseBatchLeaseAsync(
+                            claim.BatchId,
+                            WorkerId,
+                            now,
+                            errorCode: null,
+                            nextAttemptAt: now,
                             cancellationToken);
+                        logger.LogDebug(
+                            "Canal local cheio; lease do lote {BatchId} devolvido ao polling durável.",
+                            claim.BatchId);
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

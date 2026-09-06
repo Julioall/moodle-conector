@@ -63,7 +63,8 @@ public sealed class StartPendingGradingRunCommandHandler(
     IMoodleSnapshotStore? snapshotStore = null,
     IMoodleSnapshotSyncQueue? snapshotSyncQueue = null,
     IGradingReviewRepository? gradingRepository = null,
-    ICurrentUserContext? currentUser = null)
+    ICurrentUserContext? currentUser = null,
+    IMoodleAssignmentSubmissionsGateway? submissionsGateway = null)
     : IRequestHandler<StartPendingGradingRunCommand, StartPendingGradingRunResult>
 {
     private const int CoursePageSize = 100;
@@ -222,6 +223,29 @@ public sealed class StartPendingGradingRunCommandHandler(
 
             var batchesBeforeCourse = batches.Count;
             var courseMessages = new List<string>();
+            IReadOnlyDictionary<string, IReadOnlyList<AssignmentSubmissionSummary>>? batchedPendingSubmissions = null;
+            if (submissionsGateway is not null)
+            {
+                try
+                {
+                    batchedPendingSubmissions = await LoadPendingSubmissionsByAssignmentsAsync(
+                        request.UserExternalId,
+                        assignmentIds,
+                        MaxAggregateRunItems - batches.Sum(batch => batch.TotalItems),
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Preserve the legacy mediator path as a safety net for
+                    // Moodle installations that reject the bulk endpoint.
+                    warnings.Add($"Curso {course.CourseId}: leitura em lote das entregas falhou; usando fallback por atividade: {ex.Message}");
+                }
+            }
+
             foreach (var assignmentId in assignmentIds)
             {
                 var remainingRunItemsBeforeAssignment = MaxAggregateRunItems -
@@ -235,12 +259,15 @@ public sealed class StartPendingGradingRunCommandHandler(
                 IReadOnlyList<AssignmentSubmissionSummary> submissions;
                 try
                 {
-                    submissions = await LoadPendingSubmissionsAsync(
-                        request.UserExternalId,
-                        course.CourseId,
-                        assignmentId,
-                        remainingRunItemsBeforeAssignment,
-                        cancellationToken);
+                    submissions = batchedPendingSubmissions is not null &&
+                        batchedPendingSubmissions.TryGetValue(assignmentId, out var batchedSubmissions)
+                        ? batchedSubmissions.Take(remainingRunItemsBeforeAssignment).ToArray()
+                        : await LoadPendingSubmissionsAsync(
+                            request.UserExternalId,
+                            course.CourseId,
+                            assignmentId,
+                            remainingRunItemsBeforeAssignment,
+                            cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -254,7 +281,9 @@ public sealed class StartPendingGradingRunCommandHandler(
                     continue;
                 }
 
-                foreach (var submissionChunk in submissions.Chunk(maxItemsPerBatch))
+                foreach (var (submissionChunk, chunkIndex) in submissions
+                    .Chunk(maxItemsPerBatch)
+                    .Select((chunk, index) => (chunk, index)))
                 {
                     var remainingRunItems = MaxAggregateRunItems - batches.Sum(batch => batch.TotalItems);
                     if (remainingRunItems <= 0)
@@ -284,6 +313,11 @@ public sealed class StartPendingGradingRunCommandHandler(
                                 Priority: request.Priority,
                                 CourseDisplayName: courseName,
                                 PrefetchedSubmissions: boundedSubmissionChunk,
+                                IdempotencyKey: BuildBatchIdempotencyKey(
+                                    gradingRunId,
+                                    course.CourseId,
+                                    assignmentId,
+                                    chunkIndex),
                                 GradingRunId: gradingRunId),
                             cancellationToken);
                     }
@@ -622,6 +656,115 @@ public sealed class StartPendingGradingRunCommandHandler(
 
         return submissions;
     }
+
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<AssignmentSubmissionSummary>>> LoadPendingSubmissionsByAssignmentsAsync(
+        string userExternalId,
+        IReadOnlyCollection<string> assignmentIds,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (submissionsGateway is null || maxItems <= 0 || assignmentIds.Count == 0)
+        {
+            return new Dictionary<string, IReadOnlyList<AssignmentSubmissionSummary>>(
+                StringComparer.OrdinalIgnoreCase);
+        }
+
+        // A single mod_assign_get_submissions call can cover up to 50
+        // activities. This removes the old N+1 chain (course, participants,
+        // settings, grades and submissions) from the request path and keeps
+        // a 400-item course within the MCP request budget.
+        var batches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
+            userExternalId,
+            assignmentIds,
+            status: "submitted",
+            since: null,
+            before: null,
+            cancellationToken);
+        var result = new Dictionary<string, IReadOnlyList<AssignmentSubmissionSummary>>(
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var assignmentId in assignmentIds)
+        {
+            var batch = batches.FirstOrDefault(candidate =>
+                string.Equals(candidate.AssignmentId, assignmentId, StringComparison.OrdinalIgnoreCase));
+            if (batch is null)
+            {
+                result[assignmentId] = [];
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(batch.ErrorCode))
+            {
+                throw new InvalidOperationException(
+                    $"A atividade {assignmentId} nao pode ser lida ({batch.ErrorCode}): {batch.ErrorMessage}");
+            }
+
+            result[assignmentId] = batch.Submissions
+                .Where(IsPendingDirectSubmission)
+                .Take(maxItems)
+                .Select(ToPendingSummary)
+                .ToArray();
+        }
+
+        return result;
+    }
+
+    private static bool IsPendingDirectSubmission(AssignmentSubmissionRecord submission)
+    {
+        if (string.Equals(submission.Status, "draft", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(submission.Status, "notsubmitted", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Use the same evidence-based resolver as the detailed submissions
+        // query so feedback-only assignments are included when unreviewed,
+        // but an existing feedback/grader timestamp is not requeued.
+        return SubmissionEvaluationStateResolver.NeedsGrading(ResolveDirectState(submission));
+    }
+
+    private static SubmissionEvaluationState ResolveDirectState(AssignmentSubmissionRecord submission) =>
+        SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(
+            HasSubmission: true,
+            GradeRaw: null,
+            GradedDateGraded: null,
+            Feedback: submission.CurrentFeedback,
+            ReviewEvidenceAvailable: true,
+            GradingStatus: submission.GradingStatus,
+            GraderId: submission.CurrentGraderId,
+            GradeTimeModified: submission.CurrentGradeTimeModified,
+            SubmissionTimeModified: submission.ModifiedAt?.ToUnixTimeSeconds()));
+
+    private static AssignmentSubmissionSummary ToPendingSummary(AssignmentSubmissionRecord submission) =>
+        new(
+            submission.UserId,
+            null,
+            submission.SubmissionId,
+            submission.Status,
+            submission.GradingStatus,
+            true,
+            false,
+            true,
+            submission.CreatedAt,
+            submission.ModifiedAt,
+            submission.AttemptNumber,
+            submission.FileCount,
+            submission.HasOnlineText,
+            submission.Files,
+            null,
+            submission.CurrentFeedback,
+            null,
+            ResolveDirectState(submission),
+            submission.OnlineText,
+            submission.CurrentGraderId,
+            submission.CurrentGradeTimeModified);
+
+    private static string BuildBatchIdempotencyKey(
+        Guid gradingRunId,
+        string courseId,
+        string assignmentId,
+        int chunkIndex) =>
+        $"pending-run:{gradingRunId:N}:course:{courseId}:assignment:{assignmentId}:chunk:{chunkIndex}";
 
     private async Task<IReadOnlyList<CourseSummary>> LoadCoursesAsync(
         string userExternalId,

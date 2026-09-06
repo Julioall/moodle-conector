@@ -113,11 +113,13 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
     IMoodleAssignmentGradeReadGateway? gradeReadGateway = null,
     IMoodleAssignmentSubmissionStatusGateway? submissionStatusGateway = null,
     IMoodleParticipantsGateway? participantsGateway = null,
-    IMoodleAssignmentSubmissionsGateway? submissionsGateway = null)
+    IMoodleAssignmentSubmissionsGateway? submissionsGateway = null,
+    IOptions<GradingLimitsOptions>? gradingLimits = null)
     : IRequestHandler<CreateGradingLaunchPreviewCommand, CreateGradingLaunchPreviewResult>
 {
     private const string ToolName = "criar_previa_lancamento_lote";
-    private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(15);
+    private readonly TimeSpan publicationReviewExpiration = TimeSpan.FromHours(
+        Math.Clamp(gradingLimits?.Value.PublicationReviewExpirationHours ?? 24, 1, 168));
 
     public async Task<CreateGradingLaunchPreviewResult> Handle(
         CreateGradingLaunchPreviewCommand request,
@@ -461,7 +463,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 candidate.Item.AssignmentId,
                 candidate.Item.MoodleUserId,
                 candidate.Item.AttemptNumber ?? 0)).ToArray(),
-            DateTimeOffset.UtcNow.Add(PendingActionExpiration),
+            DateTimeOffset.UtcNow.Add(publicationReviewExpiration),
             cancellationToken);
         var busyItemIds = claimResults
             .Where(result => !result.Claimed)
@@ -530,7 +532,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     launches = previewItems
                 },
                 confirmationText,
-                PendingActionExpiration,
+                publicationReviewExpiration,
                 batch.CourseId,
                 cancellationToken);
 

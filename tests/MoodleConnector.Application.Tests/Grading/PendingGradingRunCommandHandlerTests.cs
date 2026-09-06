@@ -109,6 +109,28 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task StartRun_UsaLeituraBulkEIgnoraEntregaJaRevisada()
+    {
+        var mediator = new RunMediator();
+        var submissionsGateway = new RunSubmissionGateway();
+        var sut = new StartPendingGradingRunCommandHandler(
+            mediator,
+            new RunCourseContentsGateway(),
+            submissionsGateway: submissionsGateway);
+
+        var result = await sut.Handle(
+            new StartPendingGradingRunCommand("321", MaxCourses: 0, MaxItemsPerBatch: 400, CourseId: "10"),
+            CancellationToken.None);
+
+        Assert.Equal(1, submissionsGateway.BatchCalls);
+        Assert.Equal(1, result.TotalItems);
+        var request = Assert.Single(mediator.CreateBatchRequests);
+        var prefetched = request.PrefetchedSubmissions!;
+        Assert.Single(prefetched);
+        Assert.Equal("submission-pending", prefetched[0].SubmissionId);
+    }
+
+    [Fact]
     public async Task StartRun_UsaSnapshotsSemLerCursosOuEntregasNoMoodle()
     {
         var mediator = new RunMediator(pendingSubmissionCount: 99);
@@ -818,6 +840,59 @@ public sealed class PendingGradingRunCommandHandlerTests
                 onlyWithFiles,
                 [new CourseSectionSummary("1", 1, "Topico", null, true, modules.Length, false, modules)]));
         }
+    }
+
+    private sealed class RunSubmissionGateway : IMoodleAssignmentSubmissionsGateway
+    {
+        public int BatchCalls { get; private set; }
+
+        public Task<IReadOnlyList<AssignmentSubmissionsBatch>> GetAssignmentSubmissionsBatchAsync(
+            string userExternalId,
+            IReadOnlyCollection<string> assignmentIds,
+            string? status,
+            DateTimeOffset? since,
+            DateTimeOffset? before,
+            CancellationToken cancellationToken)
+        {
+            BatchCalls++;
+            return Task.FromResult<IReadOnlyList<AssignmentSubmissionsBatch>>([
+                new AssignmentSubmissionsBatch(
+                    "501",
+                    [
+                        new AssignmentSubmissionRecord(
+                            "submission-pending",
+                            "9001",
+                            "submitted",
+                            "notgraded",
+                            DateTimeOffset.UtcNow,
+                            DateTimeOffset.UtcNow,
+                            1,
+                            1,
+                            false,
+                            []),
+                        new AssignmentSubmissionRecord(
+                            "submission-reviewed",
+                            "9002",
+                            "submitted",
+                            "graded",
+                            DateTimeOffset.UtcNow,
+                            DateTimeOffset.UtcNow,
+                            1,
+                            1,
+                            false,
+                            [])
+                    ])
+            ]);
+        }
+
+        public Task<IReadOnlyList<AssignmentSubmissionRecord>> GetAssignmentSubmissionsAsync(
+            string userExternalId,
+            string assignmentId,
+            string? status,
+            DateTimeOffset? since,
+            DateTimeOffset? before,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<AssignmentSubmissionRecord>>([]);
     }
 
     private sealed class ThrowingCourseContentsGateway : IMoodleCourseContentsGateway

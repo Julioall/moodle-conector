@@ -11,7 +11,12 @@ public sealed class GradingLimitsOptions
     /// <summary>Maximum binary size returned by a single MCP resource read.</summary>
     public int MaxResourceBytes { get; init; } = 25 * 1024 * 1024;
 
-    public int ResourceExpirationMinutes { get; init; } = 30;
+    /// <summary>
+    /// Mantém os recursos das entregas disponíveis enquanto uma correção
+    /// grande é revisada. A expiração do recurso é independente da expiração
+    /// da ação de publicação.
+    /// </summary>
+    public int ResourceExpirationMinutes { get; init; } = 24 * 60;
 
     public int MaxConcurrentResourceDownloads { get; init; } = 4;
 
@@ -52,18 +57,18 @@ public sealed class GradingLimitsOptions
     /// </summary>
     public bool DeferHeavyIngestion { get; init; }
 
-    public int BatchLeaseMinutes { get; init; } = 15;
+    public int BatchLeaseMinutes { get; init; } = 30;
 
     public int DurableBatchPollSeconds { get; init; } = 5;
 
-    public int DurableBatchClaimSize { get; init; } = 4;
+    public int DurableBatchClaimSize { get; init; } = 8;
 
     /// <summary>
     /// Número máximo de lotes processados em paralelo por instância. Cada
     /// lote continua protegido por lease PostgreSQL e por um limite separado
     /// por conexão Moodle.
     /// </summary>
-    public int BatchWorkerConcurrency { get; init; } = 4;
+    public int BatchWorkerConcurrency { get; init; } = 8;
 
     /// <summary>
     /// Evita que vários lotes do mesmo Moodle saturem a API enquanto permite
@@ -85,6 +90,12 @@ public sealed class GradingLimitsOptions
     /// Moodle dentro de uma instância do conector.
     /// </summary>
     public int PublicationWorkerPerConnectionConcurrency { get; init; } = 1;
+
+    /// <summary>
+    /// Janela para o professor revisar uma prévia antes de confirmá-la.
+    /// Nunca deve ser confundida com o timeout do request HTTP.
+    /// </summary>
+    public int PublicationReviewExpirationHours { get; init; } = 24;
 
     /// <summary>
     /// Orçamento total da chamada MCP de criação. Deve ficar abaixo do timeout

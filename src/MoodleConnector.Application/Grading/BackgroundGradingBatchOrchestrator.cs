@@ -15,7 +15,8 @@ public sealed class BackgroundGradingBatchOrchestrator(
     IGradingReviewRepository repository,
     IOptions<GradingLimitsOptions> limits,
     GradingBatchChannel channel,
-    ILogger<BackgroundGradingBatchOrchestrator> logger)
+    ILogger<BackgroundGradingBatchOrchestrator> logger,
+    IGradingBatchJobStore? jobStore = null)
     : IGradingBatchOrchestrator
 {
     public async Task EnqueueAsync(Guid batchId, CancellationToken cancellationToken)
@@ -46,9 +47,21 @@ public sealed class BackgroundGradingBatchOrchestrator(
                 $"O lote contém {totalItems} itens mas o limite configurado é {maxItems}.");
         }
 
-        await channel.EnqueueAsync(
-            new GradingBatchWorkItem(batchId, DateTimeOffset.UtcNow),
-            cancellationToken);
+        var workItem = new GradingBatchWorkItem(batchId, DateTimeOffset.UtcNow);
+        if (jobStore is null)
+        {
+            // Hosts sem persistência durável ainda dependem do canal para
+            // recuperar o trabalho em memória.
+            await channel.EnqueueAsync(workItem, cancellationToken);
+        }
+        else if (!channel.TryEnqueue(workItem))
+        {
+            // Não bloquear o request MCP quando houver uma fila grande. O
+            // lote permanece Pending e será capturado pelo polling durável.
+            logger.LogInformation(
+                "Canal local cheio para o lote {BatchId}; o polling durável fará o despacho.",
+                batchId);
+        }
 
         logger.LogInformation(
             "Lote {BatchId} com {TotalItems} itens enfileirado para processamento em background.",

@@ -24,6 +24,15 @@ public sealed class GradingBatchChannel
         return _channel.Writer.WriteAsync(workItem, cancellationToken);
     }
 
+    /// <summary>
+    /// Tenta publicar sem esperar espaço no buffer. O polling durável pode
+    /// reenfileirar o lote quando o canal estiver cheio.
+    /// </summary>
+    public bool TryEnqueue(GradingBatchWorkItem workItem)
+    {
+        return _channel.Writer.TryWrite(workItem);
+    }
+
     public IAsyncEnumerable<GradingBatchWorkItem> ReadAllAsync(CancellationToken cancellationToken = default)
     {
         return _channel.Reader.ReadAllAsync(cancellationToken);
