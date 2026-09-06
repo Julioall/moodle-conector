@@ -28,6 +28,21 @@ public sealed class AssistedGradingBatch
     public string? ConnectionAlias { get; private init; }
 
     /// <summary>
+    /// Identificador estável da conexão Moodle resolvida na criação do lote.
+    /// O alias permanece apenas como fallback de compatibilidade; locks de
+    /// publicação devem preferir esta identidade, que não muda quando um
+    /// alias é renomeado.
+    /// </summary>
+    public string? MoodleConnectionId { get; private init; }
+
+    /// <summary>
+    /// Execução agregadora que originou este sublote. Permanece opcional para
+    /// preservar lotes criados por clientes legados antes da introdução de
+    /// <c>gradingRunId</c>.
+    /// </summary>
+    public Guid? GradingRunId { get; private init; }
+
+    /// <summary>
     /// Chave fornecida pelo chamador para tornar segura uma nova tentativa
     /// depois de uma resposta perdida entre o conector e o cliente.
     /// </summary>
@@ -97,7 +112,9 @@ public sealed class AssistedGradingBatch
         string? connectorClientId = null,
         string? connectionAlias = null,
         string? idempotencyKey = null,
-        string? courseDisplayName = null)
+        string? courseDisplayName = null,
+        string? moodleConnectionId = null,
+        Guid? gradingRunId = null)
     {
         if (courseId <= 0)
         {
@@ -158,6 +175,8 @@ public sealed class AssistedGradingBatch
             CreatedByMoodleUserId = createdByMoodleUserId,
             ConnectorClientId = string.IsNullOrWhiteSpace(connectorClientId) ? null : connectorClientId.Trim(),
             ConnectionAlias = string.IsNullOrWhiteSpace(connectionAlias) ? null : connectionAlias.Trim(),
+            MoodleConnectionId = string.IsNullOrWhiteSpace(moodleConnectionId) ? null : moodleConnectionId.Trim(),
+            GradingRunId = gradingRunId is Guid runId && runId != Guid.Empty ? runId : null,
             IdempotencyKey = normalizedIdempotencyKey,
             TotalItems = totalItems,
             TeacherInstructions = normalizedTeacherInstructions,

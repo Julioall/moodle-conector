@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddScoped<IGradingBatchOrchestrator, BackgroundGradingBatchOrchestrator>();
         services.AddScoped<IGradingContextBuilder, GradingContextBuilder>();
         services.AddHostedService<GradingBatchWorkerService>();
+        services.AddHostedService<GradingPublicationWorkerService>();
         services.AddHostedService<GradingRetentionWorkerService>();
 
         return services;

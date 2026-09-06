@@ -47,7 +47,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<StartPendingGradingRunResult>))]
-    [Description("Inicia o fluxo de correcao de entregas pendentes. Quando courseId for informado, limita toda a descoberta e os sublotes a esse curso; quando omitido, percorre os cursos acessiveis. Nao escreve no Moodle. Para cada batchJobId, prepare o pacote, gere e salve as correcoes. Em seguida escolha um destino: export_grading_corrections_csv para CSV externo ou create_batch_grade_launch_preview para revisar a publicacao no Moodle.")]
+    [Description("Inicia o fluxo de correcao de entregas pendentes. Quando courseId for informado, limita toda a descoberta e os sublotes a esse curso; quando omitido, percorre os cursos acessiveis. Nao escreve no Moodle. Use o gradingRunId retornado para paginar, preparar e salvar todos os sublotes; batchJobIds continuam disponiveis para compatibilidade. Em seguida escolha um destino: export_grading_corrections_csv para CSV externo ou create_batch_grade_launch_preview para revisar a publicacao no Moodle.")]
     public Task<CallToolResult> IniciarFluxoCorrecaoPendentesAsync(
         [Description("Identificador opcional do curso a processar. Quando informado, nenhum outro curso e consultado.")]
         string? courseId = null,
@@ -93,7 +93,7 @@ public sealed class MoodleGradingTools(
         OutputSchemaType = typeof(ToolResponse<CreateGradingLaunchPreviewResult>))]
     [Description("Prepara uma unica previa revisavel para publicar as correcoes salvas no Moodle. Aceita tanto rascunhos de IA quanto correcoes ja revisadas, sem escrever no Moodle. A resposta lista aluno, nota, feedback e avisos; so confirm_batch_grade_launch pode efetivar o envio.")]
     public Task<CallToolResult> CriarPreviaLancamentoLoteAsync(
-        [Description("Identificador do lote de correcao assistida.")]
+        [Description("Identificador do lote de correcao assistida ou do gradingRunId agregado retornado por start_pending_grading_run.")]
         Guid batchJobId,
         [Description("Itens especificos a incluir. Quando vazio, inclui todos os itens prontos do lote.")]
         Guid[]? gradingItemIds = null,
@@ -120,7 +120,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ConfirmMoodleBatchLaunchResult>))]
-    [Description("Confirma uma previa pendente e publica nota/feedback no Moodle usando o texto literal de confirmacao. Revalida versao do rascunho, submissao, notas existentes e tentativa antes de cada escrita; itens inseguros nao sao sobrescritos.")]
+    [Description("Confirma uma previa pendente e autoriza a publicacao duravel usando o texto literal de confirmacao. A chamada nao espera os writes: um worker recuperavel revalida versao do rascunho, submissao, notas existentes e tentativa antes de cada escrita; itens inseguros nao sao sobrescritos.")]
     public Task<CallToolResult> ConfirmarLancamentoLoteMoodleAsync(
         [Description("Identificador da acao pendente retornada por criar_previa_lancamento_lote.")]
         Guid pendingActionId,
@@ -144,10 +144,14 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
-    [Description("Retorna o pacote estruturado de um lote para correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. Leia os resources antes de gerar nota e feedback. Ao salvar, copie todas e somente as URIs com resourceType 'submission' para proposal.resourceUris; resources de 'assignment_context' podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e export_grading_corrections_csv. Nao escreve no Moodle.")]
+    [Description("Retorna uma pagina do pacote estruturado de uma correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. O identificador aceita um batchJobId legado ou o gradingRunId agregado; use page/nextPage para percorrer ate 10.000 itens sem carregar tudo na resposta. Leia os resources antes de gerar nota e feedback. Ao salvar, copie todas e somente as URIs com resourceType 'submission' para proposal.resourceUris; resources de 'assignment_context' podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e escolha um destino: export_grading_corrections_csv se o usuario pediu CSV ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
-        [Description("Identificador do lote retornado por start_pending_grading_run.")]
+        [Description("Identificador retornado por start_pending_grading_run: pode ser batchJobId (compatibilidade) ou gradingRunId (recomendado para consolidar todos os sublotes).")]
         Guid batchJobId,
+        [Description("Pagina iniciando em 1. Use nextPage quando hasMore=true.")]
+        int page = 1,
+        [Description("Itens por pagina, de 1 a 400. O padrao 400 limita memoria e tamanho da resposta para execucoes grandes.")]
+        int pageSize = 400,
         CancellationToken cancellationToken = default)
     {
         if (batchJobId == Guid.Empty)
@@ -159,7 +163,7 @@ public sealed class MoodleGradingTools(
         try
         {
             data = await mediator.Send(
-                new PrepareAiGradingBatchQuery(batchJobId),
+                new PrepareAiGradingBatchQuery(batchJobId, page, pageSize),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -209,9 +213,9 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<SaveAiGradingBatchResult>))]
-    [Description("Salva nota e feedback gerados pela IA como correcoes internas para cada aluno do lote. Nao escreve no Moodle. Depois de salvar, escolha somente um destino: export_grading_corrections_csv para gerar CSV externo ou create_batch_grade_launch_preview para revisar uma publicacao no Moodle.")]
+    [Description("Salva nota e feedback gerados pela IA como correcoes internas. O identificador aceita batchJobId legado ou gradingRunId agregado e os itens podem vir de qualquer sublote autorizado da execucao. Nao escreve no Moodle. Depois de salvar, escolha somente um destino: export_grading_corrections_csv para gerar CSV externo ou create_batch_grade_launch_preview para revisar uma publicacao no Moodle.")]
     public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
-        [Description("Identificador do lote retornado por start_pending_grading_run.")]
+        [Description("Identificador retornado por start_pending_grading_run: batchJobId legado ou gradingRunId agregado (recomendado).")]
         Guid batchJobId,
     [Description("Array de correcoes. O formato legado usa gradingItemId, nota e feedback. Quando disponivel, proposal deve conter a versao/hash do contexto, criterios, evidencias, cobertura e feedback estruturado. Para um rascunho MCP que possa gerar previa de lancamento, proposal.resourceUris deve conter todas e somente as URIs do pacote com resourceType 'submission'; nao inclua recursos de contexto. A escala numerica continua sendo validada pelo Moodle.")]
         AiGradingItemInput[] items,
@@ -277,7 +281,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<GradingCorrectionsCsvExportResult>))]
-    [Description("Gera e entrega um CSV UTF-8 com as correcoes do lote local no formato nome;nota;feedback. Use apos save_ai_grading_batch. Esta ferramenta somente le rascunhos locais e nunca confirma nem envia dados ao Moodle.")]
+    [Description("Gera e entrega um CSV UTF-8 com as correcoes locais no formato nome;nota;feedback. O identificador aceita batchJobId legado ou gradingRunId agregado e consolida todos os sublotes autorizados. Use apos save_ai_grading_batch. Esta ferramenta somente le rascunhos locais e nunca confirma nem envia dados ao Moodle.")]
     public async Task<CallToolResult> ExportarCorrecoesCsvAsync(
         [Description("Identificador do lote retornado por start_pending_grading_run.")]
         Guid batchJobId,
@@ -327,7 +331,7 @@ public sealed class MoodleGradingTools(
             data.GeneratedItems,
             data.PendingItems,
             data.BlockedItems,
-            ["nome", "nota", "feedback", "situacao"]);
+            ["nome", "nota", "feedback"]);
         var response = new ToolResponse<GradingCorrectionsCsvExportResult>(
             "ok",
             export,
@@ -523,7 +527,10 @@ public sealed class MoodleGradingTools(
         try
         {
             data = await mediator.Send(
-                new ConfirmMoodleBatchLaunchCommand(pendingActionId, confirmationText),
+                new ConfirmMoodleBatchLaunchCommand(
+                    pendingActionId,
+                    confirmationText,
+                    ExecuteImmediately: false),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -540,7 +547,9 @@ public sealed class MoodleGradingTools(
         }
 
         var response = new ToolResponse<ConfirmMoodleBatchLaunchResult>(
-            data.FailedItems == 0 ? "ok" : "partial_failure",
+            data.Status == "authorized"
+                ? "authorized"
+                : data.FailedItems == 0 ? "ok" : "partial_failure",
             data,
             data.Failures.Select(failure => failure.Message).ToArray(),
             data.AuditId,
@@ -565,9 +574,9 @@ public sealed class MoodleGradingTools(
             return $"Nenhuma entrega pendente elegivel foi encontrada em {response.CoursesScanned} curso(s).";
         }
 
-        return $"Fluxo de correcoes pendentes iniciado: {response.TotalItems} entrega(s) em {response.CoursesScanned} curso(s), " +
+        return $"Fluxo de correcoes pendentes iniciado (gradingRunId: {response.GradingRunId}): {response.TotalItems} entrega(s) em {response.CoursesScanned} curso(s), " +
                $"distribuidas em {response.Batches.Count} sublote(s). " +
-               "Prossiga pelos batchJobIds retornados, sem interromper o fluxo pelos cursos ou itens bloqueados.";
+               "Use o gradingRunId para percorrer as paginas sem interromper o fluxo pelos cursos ou itens bloqueados.";
     }
 
 
@@ -612,6 +621,11 @@ public sealed class MoodleGradingTools(
 
     private static string BuildConfirmLaunchNarration(ConfirmMoodleBatchLaunchResult response)
     {
+        if (response.Status == "authorized")
+        {
+            return "Publicacao autorizada e colocada na fila duravel. Nenhuma alteracao foi feita no Moodle nesta chamada; o status sera atualizado conforme cada item for processado.";
+        }
+
         var outcome = response.FailedItems == 0
             ? "concluido"
             : response.SentItems == 0

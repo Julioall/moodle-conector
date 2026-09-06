@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Domain;
 using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Infrastructure;
@@ -7,6 +9,87 @@ namespace MoodleConnector.Infrastructure;
 public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGradingReviewRepository, IGradingBatchJobStore, IGradingContextSnapshotStore, IGradingProposalStore, IGradingRetentionStore
 {
     private static readonly TimeSpan FairnessAgingThreshold = TimeSpan.FromMinutes(30);
+
+    public async Task AddGradingRunAsync(GradingRun run, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        await dbContext.GradingRuns.AddAsync(run, cancellationToken);
+    }
+
+    public async Task<bool> TrySetGradingRunDestinationAsync(
+        Guid gradingRunId,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        var normalizedDestination = string.IsNullOrWhiteSpace(destination)
+            ? "undecided"
+            : destination.Trim().ToLowerInvariant();
+        if (normalizedDestination is not ("undecided" or "csv" or "publish"))
+        {
+            throw new ArgumentException("O destino deve ser undecided, csv ou publish.", nameof(destination));
+        }
+
+        if (IsInMemory)
+        {
+            var run = await dbContext.GradingRuns
+                .SingleOrDefaultAsync(candidate => candidate.Id == gradingRunId, cancellationToken);
+            if (run is null)
+            {
+                return false;
+            }
+
+            try
+            {
+                run.SetDestination(normalizedDestination);
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+
+        // The conditional predicate makes CSV vs publish a database-level
+        // mutex even when two requests load the same run concurrently.
+        var updated = await dbContext.GradingRuns
+            .Where(run => run.Id == gradingRunId &&
+                          (run.Destination == "undecided" || run.Destination == normalizedDestination))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(run => run.Destination, normalizedDestination)
+                .SetProperty(run => run.UpdatedAt, DateTimeOffset.UtcNow), cancellationToken);
+        if (updated == 1)
+        {
+            return true;
+        }
+
+        var observed = await dbContext.GradingRuns
+            .AsNoTracking()
+            .SingleOrDefaultAsync(run => run.Id == gradingRunId, cancellationToken);
+        return observed is not null && string.Equals(observed.Destination, normalizedDestination, StringComparison.Ordinal);
+    }
+
+    public Task<GradingRun?> GetGradingRunAsync(Guid id, CancellationToken cancellationToken)
+    {
+        return dbContext.GradingRuns.SingleOrDefaultAsync(run => run.Id == id, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByGradingRunAsync(
+        Guid gradingRunId,
+        CancellationToken cancellationToken)
+    {
+        if (gradingRunId == Guid.Empty)
+        {
+            return [];
+        }
+
+        return await dbContext.GradingBatches
+            .Where(batch => batch.GradingRunId == gradingRunId)
+            .OrderBy(batch => batch.CreatedAt)
+            .ThenBy(batch => batch.Id)
+            .ToArrayAsync(cancellationToken);
+    }
 
     public async Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
     {
@@ -264,7 +347,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         CancellationToken cancellationToken)
     {
         var safePage = Math.Max(1, page);
-        var safePageSize = Math.Clamp(pageSize, 1, 100);
+        var safePageSize = Math.Clamp(pageSize, 1, 400);
         return await dbContext.GradingItems
             .Where(item => item.BatchId == batchId)
             .OrderBy(item => item.CreatedAt)
@@ -277,6 +360,51 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
     public Task<int> CountItemsByBatchAsync(Guid batchId, CancellationToken cancellationToken)
     {
         return dbContext.GradingItems.CountAsync(item => item.BatchId == batchId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<AssistedGradingItem>> ListItemsByGradingRunAsync(
+        Guid gradingRunId,
+        int page,
+        int pageSize,
+        GradingItemStatus? status,
+        CancellationToken cancellationToken)
+    {
+        if (gradingRunId == Guid.Empty)
+        {
+            return [];
+        }
+
+        var query = dbContext.GradingItems
+            .AsNoTracking()
+            .Where(item => dbContext.GradingBatches.Any(batch =>
+                batch.Id == item.BatchId && batch.GradingRunId == gradingRunId));
+        if (status is not null)
+        {
+            query = query.Where(item => item.Status == status.Value);
+        }
+
+        return await query
+            .OrderBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id)
+            .Skip(Math.Max(0, page - 1) * Math.Max(1, pageSize))
+            .Take(Math.Clamp(pageSize, 1, 400))
+            .ToArrayAsync(cancellationToken);
+    }
+
+    public Task<int> CountItemsByGradingRunAsync(
+        Guid gradingRunId,
+        GradingItemStatus? status,
+        CancellationToken cancellationToken)
+    {
+        var query = dbContext.GradingItems
+            .Where(item => dbContext.GradingBatches.Any(batch =>
+                batch.Id == item.BatchId && batch.GradingRunId == gradingRunId));
+        if (status is not null)
+        {
+            query = query.Where(item => item.Status == status.Value);
+        }
+
+        return query.CountAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<GradingArtifact>> ListArtifactsByItemAsync(
@@ -376,6 +504,377 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return dbContext.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<GradingPublicationClaimResult>> TryClaimPublicationTargetsAsync(
+        Guid publicationId,
+        string connectionKey,
+        IReadOnlyCollection<GradingPublicationClaimRequest> requests,
+        DateTimeOffset expiresAt,
+        CancellationToken cancellationToken)
+    {
+        if (publicationId == Guid.Empty || string.IsNullOrWhiteSpace(connectionKey) || requests.Count == 0)
+        {
+            return requests.Select(request => new GradingPublicationClaimResult(
+                request.GradingItemId,
+                false,
+                "invalid_claim_request")).ToArray();
+        }
+
+        var normalizedConnectionKey = connectionKey.Trim();
+        var normalizedRequests = requests
+            .GroupBy(request => (request.AssignmentId, request.MoodleUserId, Attempt: request.AttemptNumber))
+            .Select(group => group.First())
+            .ToArray();
+        var requestedAssignmentIds = normalizedRequests
+            .Select(request => request.AssignmentId)
+            .Distinct()
+            .ToArray();
+        var requestedMoodleUserIds = normalizedRequests
+            .Select(request => request.MoodleUserId)
+            .Distinct()
+            .ToArray();
+        var activeStatuses = new[] { "AwaitingConfirmation", "Authorized", "Executing", "ExecutionUnknown" };
+
+        if (!IsInMemory)
+        {
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            try
+            {
+                // The partial unique index intentionally cannot encode
+                // ExpiresAt. Retire stale preview claims before inserting a
+                // replacement, otherwise an expired preview would remain a
+                // permanent mutex row.
+                await dbContext.GradingPublicationClaims
+                    .Where(claim =>
+                        claim.Status == "AwaitingConfirmation" && claim.ExpiresAt <= now &&
+                        (!claim.PendingActionId.HasValue ||
+                         !dbContext.PendingMoodleActions.Any(action =>
+                             action.Id == claim.PendingActionId.Value &&
+                             (action.Status == PendingActionStatus.Confirmed ||
+                              action.Status == PendingActionStatus.Authorized ||
+                              action.Status == PendingActionStatus.Executing ||
+                              action.Status == PendingActionStatus.ExecutionUnknown ||
+                              action.Status == PendingActionStatus.PartiallyCompleted))))
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(claim => claim.Status, "Released"), cancellationToken);
+
+                var existing = new List<GradingPublicationClaimEntity>();
+                // Keep each IN predicate bounded. A 10k-item run can contain
+                // thousands of distinct activities/students; one giant
+                // Cartesian filter could still pull unrelated claims from a
+                // busy connection. Chunking keeps each indexed lookup tied to
+                // at most 500 requested target pairs.
+                foreach (var requestChunk in normalizedRequests.Chunk(500))
+                {
+                    var chunkAssignmentIds = requestChunk
+                        .Select(request => request.AssignmentId)
+                        .Distinct()
+                        .ToArray();
+                    var chunkMoodleUserIds = requestChunk
+                        .Select(request => request.MoodleUserId)
+                        .Distinct()
+                        .ToArray();
+                    existing.AddRange(await dbContext.GradingPublicationClaims
+                        .AsNoTracking()
+                        .Where(claim => claim.ConnectionKey == normalizedConnectionKey &&
+                                        activeStatuses.Contains(claim.Status) &&
+                                        // Restrict the lookup to the current
+                                        // page chunk's activity/student sets.
+                                        chunkAssignmentIds.Contains(claim.AssignmentId) &&
+                                        chunkMoodleUserIds.Contains(claim.MoodleUserId) &&
+                                        (claim.ExpiresAt > now ||
+                                         (claim.Status == "AwaitingConfirmation" &&
+                                          claim.PendingActionId.HasValue &&
+                                          dbContext.PendingMoodleActions.Any(action =>
+                                              action.Id == claim.PendingActionId.Value &&
+                                              (action.Status == PendingActionStatus.Confirmed ||
+                                               action.Status == PendingActionStatus.Authorized ||
+                                               action.Status == PendingActionStatus.Executing ||
+                                               action.Status == PendingActionStatus.ExecutionUnknown)))) )
+                        .ToArrayAsync(cancellationToken));
+                }
+                var existingByKey = existing
+                    .GroupBy(claim => (claim.AssignmentId, claim.MoodleUserId, claim.AttemptNumber))
+                    .ToDictionary(group => group.Key, group => group.First());
+                // A large request may overlap another teacher on only a few
+                // targets. Keep the non-conflicting targets claimable instead
+                // of making an entire 10k-item preview appear busy.
+                var claimableRequests = normalizedRequests
+                    .Where(request => !existingByKey.TryGetValue(
+                                          (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                                          out var existingClaim) ||
+                                      existingClaim.PublicationId == publicationId)
+                    .ToArray();
+                if (claimableRequests.Length == 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return normalizedRequests.Select(request =>
+                        new GradingPublicationClaimResult(request.GradingItemId, false, "publication_target_busy"))
+                        .ToArray();
+                }
+
+                // A retry of a PartiallyCompleted publication may still own
+                // active rows. Renew those rows atomically instead of trying
+                // to insert a duplicate unique key.
+                var ownClaimIds = claimableRequests
+                    .Select(request => existingByKey.GetValueOrDefault(
+                        (request.AssignmentId, request.MoodleUserId, request.AttemptNumber)))
+                    .Where(claim => claim is not null && claim.PublicationId == publicationId)
+                    .Select(claim => claim!.Id)
+                    .ToArray();
+                if (ownClaimIds.Length > 0)
+                {
+                    await dbContext.GradingPublicationClaims
+                        .Where(claim => ownClaimIds.Contains(claim.Id))
+                        .ExecuteUpdateAsync(setters => setters.SetProperty(claim => claim.ExpiresAt, expiresAt), cancellationToken);
+                }
+
+                await dbContext.GradingPublicationClaims.AddRangeAsync(
+                    claimableRequests.Where(request => !existingByKey.TryGetValue(
+                            (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                            out var existingClaim) || existingClaim.PublicationId != publicationId)
+                        .Select(request => new GradingPublicationClaimEntity
+                    {
+                        PublicationId = publicationId,
+                        GradingItemId = request.GradingItemId,
+                        ConnectionKey = normalizedConnectionKey,
+                        AssignmentId = request.AssignmentId,
+                        MoodleUserId = request.MoodleUserId,
+                        AttemptNumber = request.AttemptNumber,
+                        Status = "AwaitingConfirmation",
+                        ExpiresAt = expiresAt,
+                        CreatedAt = DateTimeOffset.UtcNow
+                    }),
+                    cancellationToken);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return normalizedRequests.Select(request =>
+                    new GradingPublicationClaimResult(
+                        request.GradingItemId,
+                        !existingByKey.TryGetValue(
+                            (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                            out var existingClaim) || existingClaim.PublicationId == publicationId,
+                        existingByKey.TryGetValue(
+                            (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                            out existingClaim) && existingClaim.PublicationId != publicationId
+                            ? "publication_target_busy"
+                            : null))
+                    .ToArray();
+            }
+            catch (DbUpdateException exception)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                foreach (var entry in dbContext.ChangeTracker.Entries<GradingPublicationClaimEntity>()
+                             .Where(entry => entry.State == EntityState.Added))
+                {
+                    entry.State = EntityState.Detached;
+                }
+
+                // Two large previews can race on one target. The unique
+                // index correctly rejects the losing transaction, but free
+                // targets should still make progress. Split and retry only
+                // unique-key conflicts; a different database failure remains
+                // a conservative all-busy result.
+                if (!IsUniqueViolation(exception) || normalizedRequests.Length <= 1)
+                {
+                    return normalizedRequests.Select(request => new GradingPublicationClaimResult(
+                        request.GradingItemId,
+                        false,
+                        "publication_target_busy")).ToArray();
+                }
+
+                // The recursive retry opens a fresh transaction on the same
+                // DbContext; dispose the rolled-back transaction first.
+                await transaction.DisposeAsync();
+                var midpoint = normalizedRequests.Length / 2;
+                var left = await TryClaimPublicationTargetsAsync(
+                    publicationId,
+                    normalizedConnectionKey,
+                    normalizedRequests.Take(midpoint).ToArray(),
+                    expiresAt,
+                    cancellationToken);
+                var right = await TryClaimPublicationTargetsAsync(
+                    publicationId,
+                    normalizedConnectionKey,
+                    normalizedRequests.Skip(midpoint).ToArray(),
+                    expiresAt,
+                    cancellationToken);
+                return left.Concat(right).ToArray();
+            }
+        }
+
+        var inMemoryClaims = await dbContext.GradingPublicationClaims
+            .Where(claim => claim.ConnectionKey == normalizedConnectionKey &&
+                            requestedAssignmentIds.Contains(claim.AssignmentId) &&
+                            requestedMoodleUserIds.Contains(claim.MoodleUserId))
+            .ToArrayAsync(cancellationToken);
+        var nowInMemory = DateTimeOffset.UtcNow;
+        var protectedActionIds = await dbContext.PendingMoodleActions
+            .Where(action => action.Status == PendingActionStatus.Confirmed ||
+                             action.Status == PendingActionStatus.Authorized ||
+                             action.Status == PendingActionStatus.Executing ||
+                             action.Status == PendingActionStatus.ExecutionUnknown)
+            .Select(action => action.Id)
+            .ToHashSetAsync(cancellationToken);
+        foreach (var claim in inMemoryClaims.Where(claim =>
+                     claim.Status == "AwaitingConfirmation" && claim.ExpiresAt <= nowInMemory &&
+                     (!claim.PendingActionId.HasValue || !protectedActionIds.Contains(claim.PendingActionId.Value))))
+        {
+            claim.Status = "Released";
+        }
+
+        var localExistingByKey = inMemoryClaims
+            .Where(claim => activeStatuses.Contains(claim.Status) &&
+                            (claim.ExpiresAt > nowInMemory ||
+                             (claim.Status == "AwaitingConfirmation" &&
+                              claim.PendingActionId.HasValue && protectedActionIds.Contains(claim.PendingActionId.Value))))
+            .GroupBy(claim => (claim.AssignmentId, claim.MoodleUserId, claim.AttemptNumber))
+            .ToDictionary(group => group.Key, group => group.First());
+        var localClaimable = normalizedRequests
+            .Where(request => !localExistingByKey.TryGetValue(
+                                  (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                                  out var existingClaim) || existingClaim.PublicationId == publicationId)
+            .ToArray();
+        if (localClaimable.Length == 0)
+        {
+            return normalizedRequests.Select(request => new GradingPublicationClaimResult(
+                request.GradingItemId,
+                false,
+                "publication_target_busy")).ToArray();
+        }
+
+        foreach (var request in localClaimable)
+        {
+            if (localExistingByKey.TryGetValue(
+                    (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                    out var existingClaim) && existingClaim.PublicationId == publicationId)
+            {
+                existingClaim.ExpiresAt = expiresAt;
+            }
+        }
+
+        await dbContext.GradingPublicationClaims.AddRangeAsync(
+            localClaimable.Where(request => !localExistingByKey.TryGetValue(
+                    (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                    out var existingClaim) || existingClaim.PublicationId != publicationId)
+                .Select(request => new GradingPublicationClaimEntity
+            {
+                PublicationId = publicationId,
+                GradingItemId = request.GradingItemId,
+                ConnectionKey = normalizedConnectionKey,
+                AssignmentId = request.AssignmentId,
+                MoodleUserId = request.MoodleUserId,
+                AttemptNumber = request.AttemptNumber,
+                Status = "AwaitingConfirmation",
+                ExpiresAt = expiresAt,
+                CreatedAt = DateTimeOffset.UtcNow
+            }),
+            cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return normalizedRequests.Select(request => new GradingPublicationClaimResult(
+            request.GradingItemId,
+            !localExistingByKey.TryGetValue(
+                (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                out var existingClaim) || existingClaim.PublicationId == publicationId,
+            localExistingByKey.TryGetValue(
+                (request.AssignmentId, request.MoodleUserId, request.AttemptNumber),
+                out existingClaim) && existingClaim.PublicationId != publicationId
+                ? "publication_target_busy"
+                : null)).ToArray();
+    }
+
+    public async Task ReleasePublicationClaimsAsync(Guid publicationId, CancellationToken cancellationToken)
+    {
+        if (publicationId == Guid.Empty)
+        {
+            return;
+        }
+
+        if (IsInMemory)
+        {
+            var localClaims = await dbContext.GradingPublicationClaims
+                .Where(claim => claim.PublicationId == publicationId)
+                .ToArrayAsync(cancellationToken);
+            foreach (var claim in localClaims)
+            {
+                claim.Status = "Released";
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        await dbContext.GradingPublicationClaims
+            .Where(claim => claim.PublicationId == publicationId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(claim => claim.Status, "Released"), cancellationToken);
+    }
+
+    public async Task ActivatePublicationClaimsAsync(Guid publicationId, CancellationToken cancellationToken)
+    {
+        if (publicationId == Guid.Empty)
+        {
+            return;
+        }
+
+        // Authorization owns the target until execution reaches a terminal
+        // state; the row remains active even if the preview's 15-minute TTL
+        // has elapsed while a worker is being recovered.
+        var perpetualClaimExpiry = new DateTimeOffset(9999, 12, 31, 23, 59, 59, TimeSpan.Zero);
+        if (IsInMemory)
+        {
+            var localClaims = await dbContext.GradingPublicationClaims
+                .Where(claim => claim.PublicationId == publicationId &&
+                                (claim.Status == "AwaitingConfirmation" || claim.Status == "Authorized"))
+                .ToArrayAsync(cancellationToken);
+            foreach (var claim in localClaims)
+            {
+                claim.Status = "Authorized";
+                claim.ExpiresAt = perpetualClaimExpiry;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        await dbContext.GradingPublicationClaims
+            .Where(claim => claim.PublicationId == publicationId &&
+                            (claim.Status == "AwaitingConfirmation" || claim.Status == "Authorized"))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(claim => claim.Status, "Authorized")
+                .SetProperty(claim => claim.ExpiresAt, perpetualClaimExpiry),
+                cancellationToken);
+    }
+
+    public async Task BindPublicationClaimsAsync(
+        Guid publicationId,
+        Guid pendingActionId,
+        CancellationToken cancellationToken)
+    {
+        if (publicationId == Guid.Empty || pendingActionId == Guid.Empty)
+        {
+            return;
+        }
+
+        if (IsInMemory)
+        {
+            var localClaims = await dbContext.GradingPublicationClaims
+                .Where(claim => claim.PublicationId == publicationId)
+                .ToArrayAsync(cancellationToken);
+            foreach (var claim in localClaims)
+            {
+                claim.PendingActionId = pendingActionId;
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        await dbContext.GradingPublicationClaims
+            .Where(claim => claim.PublicationId == publicationId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(
+                claim => claim.PendingActionId,
+                (Guid?)pendingActionId), cancellationToken);
     }
 
     public async Task<IReadOnlyList<GradingBatchLeaseClaim>> ClaimDueBatchesAsync(
@@ -744,6 +1243,74 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             claimed.AttemptCount);
     }
 
+    public async Task<IReadOnlySet<Guid>> TryClaimItemsAsync(
+        Guid batchId,
+        IReadOnlyCollection<Guid> itemIds,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        if (batchId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(batchId));
+        }
+
+        ValidateJobArguments(workerId, leaseDuration);
+        var normalizedWorkerId = workerId.Trim();
+        var normalizedItemIds = itemIds
+            .Where(itemId => itemId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (normalizedItemIds.Length == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        if (IsInMemory)
+        {
+            var claimed = new HashSet<Guid>();
+            foreach (var itemId in normalizedItemIds)
+            {
+                if (await TryClaimItemAsync(
+                        batchId,
+                        itemId,
+                        normalizedWorkerId,
+                        now,
+                        leaseDuration,
+                        cancellationToken) is not null)
+                {
+                    claimed.Add(itemId);
+                }
+            }
+
+            return claimed;
+        }
+
+        var leaseUntil = now.Add(leaseDuration);
+        await dbContext.GradingItems
+            .Where(item => normalizedItemIds.Contains(item.Id) &&
+                           item.BatchId == batchId &&
+                           item.Status == GradingItemStatus.Pending &&
+                           (item.NextAttemptAt == null || item.NextAttemptAt <= now) &&
+                           (item.LeaseUntil == null || item.LeaseUntil <= now))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LeaseOwner, normalizedWorkerId)
+                .SetProperty(item => item.LeaseUntil, leaseUntil)
+                .SetProperty(item => item.AttemptCount, item => item.AttemptCount + 1)
+                .SetProperty(item => item.NextAttemptAt, (DateTimeOffset?)null)
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+
+        return await dbContext.GradingItems
+            .AsNoTracking()
+            .Where(item => normalizedItemIds.Contains(item.Id) &&
+                           item.BatchId == batchId &&
+                           item.LeaseOwner == normalizedWorkerId &&
+                           item.LeaseUntil != null && item.LeaseUntil > now)
+            .Select(item => item.Id)
+            .ToHashSetAsync(cancellationToken);
+    }
+
     public async Task<bool> RenewItemLeaseAsync(
         Guid batchId,
         Guid itemId,
@@ -783,6 +1350,61 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         }
 
         return updated;
+    }
+
+    public async Task<int> RenewItemLeasesAsync(
+        Guid batchId,
+        IReadOnlyCollection<Guid> itemIds,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        if (batchId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(batchId));
+        }
+
+        ValidateJobArguments(workerId, leaseDuration);
+        var normalizedWorkerId = workerId.Trim();
+        var normalizedItemIds = itemIds
+            .Where(itemId => itemId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (normalizedItemIds.Length == 0)
+        {
+            return 0;
+        }
+
+        if (IsInMemory)
+        {
+            var renewed = 0;
+            foreach (var itemId in normalizedItemIds)
+            {
+                if (await RenewItemLeaseAsync(
+                        batchId,
+                        itemId,
+                        normalizedWorkerId,
+                        now,
+                        leaseDuration,
+                        cancellationToken))
+                {
+                    renewed++;
+                }
+            }
+
+            return renewed;
+        }
+
+        return await dbContext.GradingItems
+            .Where(item => normalizedItemIds.Contains(item.Id) &&
+                           item.BatchId == batchId &&
+                           item.Status == GradingItemStatus.Pending &&
+                           item.LeaseOwner == normalizedWorkerId &&
+                           item.LeaseUntil != null && item.LeaseUntil > now)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LeaseUntil, now.Add(leaseDuration))
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
     }
 
     public async Task<bool> ReleaseItemLeaseAsync(
@@ -835,6 +1457,67 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         return updated;
     }
 
+    public async Task<int> ReleaseItemLeasesAsync(
+        Guid batchId,
+        IReadOnlyCollection<Guid> itemIds,
+        string workerId,
+        DateTimeOffset now,
+        string? errorCode,
+        DateTimeOffset? nextAttemptAt,
+        CancellationToken cancellationToken)
+    {
+        if (batchId == Guid.Empty || string.IsNullOrWhiteSpace(workerId))
+        {
+            return 0;
+        }
+
+        var normalizedItemIds = itemIds
+            .Where(itemId => itemId != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (normalizedItemIds.Length == 0)
+        {
+            return 0;
+        }
+
+        var normalizedWorkerId = workerId.Trim();
+        var normalizedErrorCode = string.IsNullOrWhiteSpace(errorCode)
+            ? null
+            : errorCode.Trim()[..Math.Min(120, errorCode.Trim().Length)];
+
+        if (IsInMemory)
+        {
+            var released = 0;
+            foreach (var itemId in normalizedItemIds)
+            {
+                if (await ReleaseItemLeaseAsync(
+                        batchId,
+                        itemId,
+                        normalizedWorkerId,
+                        now,
+                        normalizedErrorCode,
+                        nextAttemptAt,
+                        cancellationToken))
+                {
+                    released++;
+                }
+            }
+
+            return released;
+        }
+
+        return await dbContext.GradingItems
+            .Where(item => normalizedItemIds.Contains(item.Id) &&
+                           item.BatchId == batchId &&
+                           item.LeaseOwner == normalizedWorkerId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.LeaseOwner, (string?)null)
+                .SetProperty(item => item.LeaseUntil, (DateTimeOffset?)null)
+                .SetProperty(item => item.LastErrorCode, normalizedErrorCode)
+                .SetProperty(item => item.NextAttemptAt, nextAttemptAt)
+                .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+    }
+
     public async Task<int> RecoverExpiredItemLeasesAsync(
         DateTimeOffset now,
         CancellationToken cancellationToken)
@@ -863,6 +1546,9 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
                 .SetProperty(item => item.NextAttemptAt, now)
                 .SetProperty(item => item.UpdatedAt, now), cancellationToken);
     }
+
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation };
 
     private bool IsInMemory => string.Equals(
         dbContext.Database.ProviderName,

@@ -13,10 +13,10 @@ carga; esses itens pertencem a uma fase posterior.
 | 0. Contratos e limites | Concluída | Estados do lote/item, limites de arquivo, retenção e prioridade documentados. |
 | 1. Persistência durável | Concluída | Claims, leases, tentativas, checkpoint do lote e migrations 041–047. |
 | 2. Coordenação multi-réplica | Concluída | Claim de item, recuperação de leases expirados, fairness por aging e testes PostgreSQL. |
-| 3. Criação leve | Em implementação | Flag `DeferHeavyIngestion`, artifacts com referência normalizada e migration 048. |
-| 4. Worker de ingestão | Em implementação | Recuperação de conexão fora de HTTP, descoberta de referências MCP e checkpoint por estágio. |
+| 3. Criação leve | Concluída | Flag `DeferHeavyIngestion`, artifacts com referência normalizada e migration 048. |
+| 4. Worker de ingestão | Concluída | Recuperação de conexão fora de HTTP, descoberta de referências MCP, claims por janela e checkpoint por estágio. |
 | 5. Retenção e operação | Parcial | Worker de retenção e redaction implementados; métricas de backlog/idade e alertas ainda pendentes. |
-| 6. Certificação | Pendente | Cenário de 400 itens, restart, duas réplicas, idempotência e rollout gradual. |
+| 6. Certificação | Em andamento | Cenário de 400 itens, restart, duas réplicas, idempotência e rollout gradual; o gate PostgreSQL precisa ser executado no CI/ambiente efêmero. |
 
 ## Especificação operacional da etapa 3/4
 

@@ -37,6 +37,8 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Contains(result.Warnings, warning => warning.Contains("Curso 20", StringComparison.Ordinal));
         Assert.Single(mediator.CreateBatchRequests);
         Assert.Equal("10", mediator.CreateBatchRequests[0].CourseId);
+        Assert.NotEqual(Guid.Empty, result.GradingRunId);
+        Assert.Equal(result.GradingRunId, mediator.CreateBatchRequests[0].GradingRunId);
     }
 
     [Fact]
@@ -55,6 +57,8 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Equal(3, result.TotalItems);
         Assert.All(mediator.CreateBatchRequests, request =>
             Assert.InRange(request.PrefetchedSubmissions!.Count, 1, 2));
+        Assert.NotEqual(Guid.Empty, result.GradingRunId);
+        Assert.All(mediator.CreateBatchRequests, request => Assert.Equal(result.GradingRunId, request.GradingRunId));
     }
 
     [Fact]

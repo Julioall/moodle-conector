@@ -60,6 +60,37 @@ public interface IGradingBatchJobStore
         TimeSpan leaseDuration,
         CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Claims a set of pending items atomically where the backing store can
+    /// provide a bulk implementation. The default preserves compatibility
+    /// with lightweight stores by delegating to the single-item operation.
+    /// </summary>
+    async Task<IReadOnlySet<Guid>> TryClaimItemsAsync(
+        Guid batchId,
+        IReadOnlyCollection<Guid> itemIds,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        var claimed = new HashSet<Guid>();
+        foreach (var itemId in itemIds.Distinct())
+        {
+            if (await TryClaimItemAsync(
+                    batchId,
+                    itemId,
+                    workerId,
+                    now,
+                    leaseDuration,
+                    cancellationToken) is not null)
+            {
+                claimed.Add(itemId);
+            }
+        }
+
+        return claimed;
+    }
+
     Task<bool> RenewItemLeaseAsync(
         Guid batchId,
         Guid itemId,
@@ -67,6 +98,71 @@ public interface IGradingBatchJobStore
         DateTimeOffset now,
         TimeSpan leaseDuration,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Renews all still-pending items in a processing window. This prevents
+    /// queued items from expiring while an earlier item in the same window is
+    /// taking a long time to process. Implementations may optimize this to a
+    /// single conditional UPDATE; the default keeps lightweight stores
+    /// compatible.
+    /// </summary>
+    async Task<int> RenewItemLeasesAsync(
+        Guid batchId,
+        IReadOnlyCollection<Guid> itemIds,
+        string workerId,
+        DateTimeOffset now,
+        TimeSpan leaseDuration,
+        CancellationToken cancellationToken)
+    {
+        var renewed = 0;
+        foreach (var itemId in itemIds.Distinct())
+        {
+            if (await RenewItemLeaseAsync(
+                    batchId,
+                    itemId,
+                    workerId,
+                    now,
+                    leaseDuration,
+                    cancellationToken))
+            {
+                renewed++;
+            }
+        }
+
+        return renewed;
+    }
+
+    /// <summary>
+    /// Releases item leases in one operation when supported. The default is
+    /// intentionally conservative for compatibility stores.
+    /// </summary>
+    async Task<int> ReleaseItemLeasesAsync(
+        Guid batchId,
+        IReadOnlyCollection<Guid> itemIds,
+        string workerId,
+        DateTimeOffset now,
+        string? errorCode,
+        DateTimeOffset? nextAttemptAt,
+        CancellationToken cancellationToken)
+    {
+        var released = 0;
+        foreach (var itemId in itemIds.Distinct())
+        {
+            if (await ReleaseItemLeaseAsync(
+                    batchId,
+                    itemId,
+                    workerId,
+                    now,
+                    errorCode,
+                    nextAttemptAt,
+                    cancellationToken))
+            {
+                released++;
+            }
+        }
+
+        return released;
+    }
 
     Task<bool> ReleaseItemLeaseAsync(
         Guid batchId,

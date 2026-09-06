@@ -146,6 +146,24 @@ public sealed class PendingActionServicesTests
     }
 
     [Fact]
+    public async Task ConfirmAsync_PartiallyCompletedRequiresExplicitRetryAndReauthorizes()
+    {
+        var fixture = new Fixture();
+        var pending = await fixture.CreatePendingAsync("CONFIRMAR", "confirmar_lancamento_lote_moodle");
+        fixture.PendingRepository.Actions[0].MarkPartiallyCompleted("um item falhou");
+
+        var response = await fixture.ConfirmationService.ConfirmAsync(
+            pending.PendingActionId,
+            "CONFIRMAR",
+            requiredScope: null,
+            CancellationToken.None);
+
+        Assert.Equal("authorized", response.Status);
+        Assert.Equal(PendingActionStatus.Authorized, fixture.PendingRepository.Actions[0].Status);
+        Assert.Contains(fixture.AuditRepository.Logs, log => log.Status == "authorized");
+    }
+
+    [Fact]
     public async Task ConfirmAsync_ConcurrentRequests_HasOneClaimAndOneConfirmationAudit()
     {
         var fixture = new Fixture();
@@ -232,10 +250,12 @@ public sealed class PendingActionServicesTests
         public PendingActionService PendingService { get; }
         public ActionConfirmationService ConfirmationService { get; }
 
-        public Task<PendingActionResponse> CreatePendingAsync(string confirmationText)
+        public Task<PendingActionResponse> CreatePendingAsync(
+            string confirmationText,
+            string toolName = "demo_tool")
         {
             return PendingService.CreatePendingActionAsync(
-                "demo_tool",
+                toolName,
                 ToolRiskLevel.HumanConfirmedWrite,
                 new { value = "payload" },
                 new { value = "preview" },
@@ -285,6 +305,33 @@ public sealed class PendingActionServicesTests
                 }
 
                 action.Confirm(confirmedBySubject, confirmedAt);
+                AuditRepository?.Logs.Add(confirmationAudit);
+                return Task.FromResult(new PendingActionConfirmationClaimResult(true, action.Status, action.ConfirmedAt));
+            }
+        }
+
+        public Task<PendingActionConfirmationClaimResult> TryAuthorizeWithAuditAsync(
+            Guid id,
+            string confirmedBySubject,
+            DateTimeOffset confirmedAt,
+            MoodleAuditLog confirmationAudit,
+            CancellationToken cancellationToken)
+        {
+            lock (Actions)
+            {
+                var action = Actions.SingleOrDefault(candidate => candidate.Id == id)
+                    ?? throw new InvalidOperationException("Acao pendente nao encontrada.");
+                if (action.Status != PendingActionStatus.PartiallyCompleted)
+                {
+                    return TryConfirmWithAuditAsync(
+                        id,
+                        confirmedBySubject,
+                        confirmedAt,
+                        confirmationAudit,
+                        cancellationToken);
+                }
+
+                action.Authorize(confirmedBySubject, confirmedAt);
                 AuditRepository?.Logs.Add(confirmationAudit);
                 return Task.FromResult(new PendingActionConfirmationClaimResult(true, action.Status, action.ConfirmedAt));
             }

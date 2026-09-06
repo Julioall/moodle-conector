@@ -38,7 +38,8 @@ public sealed record StartPendingGradingRunResult(
     [property: JsonPropertyName("batches")] IReadOnlyList<PendingGradingRunBatch> Batches,
     [property: JsonPropertyName("courses")] IReadOnlyList<PendingGradingRunCourse> Courses,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
-    [property: JsonPropertyName("nextStep")] string NextStep);
+    [property: JsonPropertyName("nextStep")] string NextStep,
+    [property: JsonPropertyName("gradingRunId")] Guid? GradingRunId = null);
 
 public sealed record PendingGradingRunBatch(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -59,10 +60,13 @@ public sealed class StartPendingGradingRunCommandHandler(
     IMediator mediator,
     IMoodleCourseContentsGateway contentsGateway,
     IMoodleSnapshotStore? snapshotStore = null,
-    IMoodleSnapshotSyncQueue? snapshotSyncQueue = null)
+    IMoodleSnapshotSyncQueue? snapshotSyncQueue = null,
+    IGradingReviewRepository? gradingRepository = null,
+    ICurrentUserContext? currentUser = null)
     : IRequestHandler<StartPendingGradingRunCommand, StartPendingGradingRunResult>
 {
     private const int CoursePageSize = 100;
+    private const int MaxAggregateRunItems = 10_000;
 
     public async Task<StartPendingGradingRunResult> Handle(
         StartPendingGradingRunCommand request,
@@ -80,6 +84,27 @@ public sealed class StartPendingGradingRunCommandHandler(
 
         var maxCourses = request.MaxCourses == 0 ? int.MaxValue : Math.Clamp(request.MaxCourses, 1, 1000);
         var maxItemsPerBatch = Math.Clamp(request.MaxItemsPerBatch, 1, 400);
+        var gradingRunId = Guid.NewGuid();
+        if (gradingRepository is not null)
+        {
+            // O ID Moodle é local à instalação e não é necessariamente o
+            // subject autenticado do conector. O subject é a chave de posse
+            // usada pelo resolver em todas as consultas futuras.
+            var ownerSubject = string.IsNullOrWhiteSpace(currentUser?.Subject)
+                ? request.UserExternalId
+                : currentUser.Subject;
+            var run = GradingRun.Create(
+                ownerSubject,
+                createdByMoodleUserId: long.TryParse(request.UserExternalId, out var parsedMoodleUserId)
+                    ? parsedMoodleUserId
+                    : null,
+                courseIdScope: request.CourseId,
+                connectorClientId: request.SnapshotClientId,
+                connectionAlias: request.SnapshotConnectionAlias);
+            gradingRunId = run.Id;
+            await gradingRepository.AddGradingRunAsync(run, cancellationToken);
+            await gradingRepository.SaveChangesAsync(cancellationToken);
+        }
         var useSnapshots = request.UseSubmissionSnapshots &&
             request.SnapshotOwnerId is not null &&
             !string.IsNullOrWhiteSpace(request.SnapshotClientId) &&
@@ -117,6 +142,12 @@ public sealed class StartPendingGradingRunCommandHandler(
 
         foreach (var course in courses)
         {
+            if (batches.Sum(batch => batch.TotalItems) >= MaxAggregateRunItems)
+            {
+                AddAggregateLimitWarning(warnings);
+                break;
+            }
+
             var courseName = ResolveCourseName(course);
             if (useSnapshots)
             {
@@ -125,6 +156,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                     course,
                     courseName,
                     maxItemsPerBatch,
+                    gradingRunId,
                     batches,
                     warnings,
                     cancellationToken));
@@ -178,6 +210,14 @@ public sealed class StartPendingGradingRunCommandHandler(
             var courseMessages = new List<string>();
             foreach (var assignmentId in assignmentIds)
             {
+                var remainingRunItemsBeforeAssignment = MaxAggregateRunItems -
+                    batches.Sum(batch => batch.TotalItems);
+                if (remainingRunItemsBeforeAssignment <= 0)
+                {
+                    AddAggregateLimitWarning(warnings);
+                    break;
+                }
+
                 IReadOnlyList<AssignmentSubmissionSummary> submissions;
                 try
                 {
@@ -185,6 +225,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                         request.UserExternalId,
                         course.CourseId,
                         assignmentId,
+                        remainingRunItemsBeforeAssignment,
                         cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -201,6 +242,16 @@ public sealed class StartPendingGradingRunCommandHandler(
 
                 foreach (var submissionChunk in submissions.Chunk(maxItemsPerBatch))
                 {
+                    var remainingRunItems = MaxAggregateRunItems - batches.Sum(batch => batch.TotalItems);
+                    if (remainingRunItems <= 0)
+                    {
+                        AddAggregateLimitWarning(warnings);
+                        break;
+                    }
+
+                    var boundedSubmissionChunk = submissionChunk
+                        .Take(Math.Min(maxItemsPerBatch, remainingRunItems))
+                        .ToArray();
                     CreateAssistedGradingBatchResult batch;
                     try
                     {
@@ -218,7 +269,8 @@ public sealed class StartPendingGradingRunCommandHandler(
                                 TeacherInstructions: request.TeacherInstructions,
                                 Priority: request.Priority,
                                 CourseDisplayName: courseName,
-                                PrefetchedSubmissions: submissionChunk),
+                                PrefetchedSubmissions: boundedSubmissionChunk,
+                                GradingRunId: gradingRunId),
                             cancellationToken);
                     }
                     catch (OperationCanceledException)
@@ -266,6 +318,25 @@ public sealed class StartPendingGradingRunCommandHandler(
                         : "Nenhuma entrega aguardando correcao foi encontrada."));
         }
 
+        if (gradingRepository is not null)
+        {
+            var run = await gradingRepository.GetGradingRunAsync(gradingRunId, cancellationToken);
+            if (run is not null)
+            {
+                var childBatches = await gradingRepository.ListBatchesByGradingRunAsync(gradingRunId, cancellationToken);
+                var firstChild = childBatches.FirstOrDefault();
+                if (firstChild is not null)
+                {
+                    run.BindConnection(
+                        firstChild.MoodleConnectionId,
+                        firstChild.ConnectorClientId,
+                        firstChild.ConnectionAlias);
+                }
+                run.MarkReady();
+                await gradingRepository.SaveChangesAsync(cancellationToken);
+            }
+        }
+
         return new StartPendingGradingRunResult(
             CoursesDiscovered: courses.Count,
             CoursesScanned: courseResults.Count,
@@ -276,7 +347,8 @@ public sealed class StartPendingGradingRunCommandHandler(
             Warnings: warnings,
             NextStep: batches.Count == 0
                 ? "Nao ha entregas pendentes elegiveis para iniciar a correcao. Consulte os cursos com falha para ajuste manual."
-                : "Para cada batchJobId, prepare o pacote de IA, gere nota e feedback, salve os rascunhos e use export_grading_corrections_csv para receber o CSV. Nao chame ferramentas de revisao, confirmacao ou envio ao Moodle.");
+                : $"Use o gradingRunId {gradingRunId} para paginar o pacote de IA, salvar os rascunhos e exportar CSV. Se o usuario pediu publicacao, gere a previa e aguarde CONFIRMAR_PUBLICACAO antes de qualquer escrita no Moodle; os batchJobIds sao detalhes internos de compatibilidade.",
+            GradingRunId: gradingRunId);
     }
 
     private async Task<IReadOnlyList<CourseSummary>> LoadCoursesFromSnapshotAsync(
@@ -318,10 +390,22 @@ public sealed class StartPendingGradingRunCommandHandler(
         CourseSummary course,
         string courseName,
         int maxItemsPerBatch,
+        Guid gradingRunId,
         List<PendingGradingRunBatch> batches,
         List<string> warnings,
         CancellationToken cancellationToken)
     {
+        if (batches.Sum(batch => batch.TotalItems) >= MaxAggregateRunItems)
+        {
+            AddAggregateLimitWarning(warnings);
+            return new PendingGradingRunCourse(
+                course.CourseId,
+                courseName,
+                "aggregate_limit_reached",
+                null,
+                "O limite agregado de 10.000 itens desta execucao ja foi atingido.");
+        }
+
         var snapshot = await snapshotStore!.GetAsync<CourseAssignmentSubmissionsSnapshot>(
             request.SnapshotOwnerId!.Value,
             request.SnapshotConnectionAlias!,
@@ -373,6 +457,16 @@ public sealed class StartPendingGradingRunCommandHandler(
                 .ToArray();
             foreach (var submissionChunk in submissions.Chunk(maxItemsPerBatch))
             {
+                var remainingRunItems = MaxAggregateRunItems - batches.Sum(batch => batch.TotalItems);
+                if (remainingRunItems <= 0)
+                {
+                    AddAggregateLimitWarning(warnings);
+                    break;
+                }
+
+                var boundedSubmissionChunk = submissionChunk
+                    .Take(Math.Min(maxItemsPerBatch, remainingRunItems))
+                    .ToArray();
                 try
                 {
                     var batch = await mediator.Send(
@@ -389,7 +483,8 @@ public sealed class StartPendingGradingRunCommandHandler(
                             TeacherInstructions: request.TeacherInstructions,
                             Priority: request.Priority,
                             CourseDisplayName: courseName,
-                            PrefetchedSubmissions: submissionChunk),
+                            PrefetchedSubmissions: boundedSubmissionChunk,
+                            GradingRunId: gradingRunId),
                         cancellationToken);
 
                     if (batch.BatchJobId == Guid.Empty || batch.AcceptedItems == 0)
@@ -465,8 +560,14 @@ public sealed class StartPendingGradingRunCommandHandler(
         string userExternalId,
         string courseId,
         string assignmentId,
+        int maxItems,
         CancellationToken cancellationToken)
     {
+        if (maxItems <= 0)
+        {
+            return [];
+        }
+
         var submissions = new List<AssignmentSubmissionSummary>();
         var page = 1;
         while (true)
@@ -486,7 +587,17 @@ public sealed class StartPendingGradingRunCommandHandler(
                 cancellationToken)
                 ?? throw new InvalidOperationException("Tarefa nao encontrada para o usuario atual.");
 
-            submissions.AddRange(response.Submissions.Where(submission => submission.NeedsGrading));
+            foreach (var submission in response.Submissions)
+            {
+                if (submission.NeedsGrading)
+                {
+                    submissions.Add(submission);
+                    if (submissions.Count >= maxItems)
+                    {
+                        return submissions;
+                    }
+                }
+            }
             if (!response.HasMore)
             {
                 break;
@@ -537,6 +648,15 @@ public sealed class StartPendingGradingRunCommandHandler(
 
     private static string ResolveCourseName(CourseSummary course) =>
         course.DisplayName ?? course.FullName ?? course.ShortName ?? course.CourseId;
+
+    private static void AddAggregateLimitWarning(List<string> warnings)
+    {
+        const string warning = "A execucao agregada foi limitada a 10.000 itens; inicie uma nova execucao para o restante.";
+        if (!warnings.Contains(warning, StringComparer.Ordinal))
+        {
+            warnings.Add(warning);
+        }
+    }
 }
 
 public sealed record GetPendingGradingRunReportQuery(
@@ -593,8 +713,26 @@ public sealed class GetPendingGradingRunReportQueryHandler(
         var corrected = new List<PendingGradingRunItemOutcome>();
         var notCorrected = new List<PendingGradingRunItemOutcome>();
         var batchReports = new List<PendingGradingRunBatchReport>();
+        var expandedBatchIds = new List<Guid>();
+        foreach (var requestedId in batchIds)
+        {
+            var directBatch = await repository.GetBatchAsync(requestedId, cancellationToken);
+            if (directBatch is not null)
+            {
+                GradingAccessControl.EnsureCanAccessBatch(directBatch, currentUser);
+                expandedBatchIds.Add(directBatch.Id);
+                continue;
+            }
 
-        foreach (var batchId in batchIds)
+            var scope = await GradingBatchScopeResolver.ResolveAsync(
+                repository,
+                currentUser,
+                requestedId,
+                cancellationToken);
+            expandedBatchIds.AddRange(scope.Batches.Select(batch => batch.Id));
+        }
+
+        foreach (var batchId in expandedBatchIds.Distinct())
         {
             var batch = await repository.GetBatchAsync(batchId, cancellationToken)
                 ?? throw new InvalidOperationException($"Lote de correcao {batchId} nao encontrado.");

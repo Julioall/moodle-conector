@@ -30,6 +30,23 @@ internal sealed class MoodleResourceGateway(
         var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var remoteReference = SanitizeRemoteReference(request.RemoteFileReference);
         var now = DateTimeOffset.UtcNow;
+        var reusable = await repository.FindReusableAsync(
+            credentials.ClientId,
+            credentials.ConnectionId,
+            currentUser.Subject.Trim(),
+            request,
+            remoteReference,
+            now,
+            cancellationToken);
+        if (reusable is not null)
+        {
+            return new MoodleResourceDescriptor(
+                MoodleResourceUri.Create(reusable.ResourceId),
+                reusable.Filename,
+                reusable.MimeType,
+                reusable.SizeBytes,
+                reusable.Sha256);
+        }
         var resource = new MoodleResource
         {
             ClientId = credentials.ClientId,
@@ -58,6 +75,168 @@ internal sealed class MoodleResourceGateway(
         await AuditAsync(resource, "registered", null, now, cancellationToken, "moodle_resource_register");
         telemetry?.RecordPhase("moodle_resource", "register", "success", 0, itemCount: 1);
         return new MoodleResourceDescriptor(MoodleResourceUri.Create(resource.ResourceId), resource.Filename, resource.MimeType, resource.SizeBytes, resource.Sha256);
+    }
+
+    public async Task<IReadOnlyList<MoodleResourceDescriptor>> RegisterManyAsync(
+        IReadOnlyList<MoodleResourceRegistration> requests,
+        CancellationToken cancellationToken)
+    {
+        EnsureFeatureEnabled();
+        if (requests.Count == 0)
+        {
+            return [];
+        }
+
+        if (string.IsNullOrWhiteSpace(currentUser.Subject))
+        {
+            throw new MoodleResourceException("RESOURCE_FORBIDDEN", "O usuario autenticado e obrigatorio para registrar o resource Moodle.");
+        }
+
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var expiration = TimeSpan.FromMinutes(Math.Clamp(limits.Value.ResourceExpirationMinutes, 1, 24 * 60));
+        var descriptors = new MoodleResourceDescriptor[requests.Count];
+        var pending = new List<(int Index, string CacheKey, MoodleResourceRegistration Request, MoodleResource Resource)>();
+        var lookupRequests = new List<(int Index, string CacheKey, MoodleResourceRegistration Request)>();
+
+        for (var index = 0; index < requests.Count; index++)
+        {
+            var request = requests[index];
+            if (string.IsNullOrWhiteSpace(request.Filename) || string.IsNullOrWhiteSpace(request.RemoteFileReference))
+            {
+                throw new MoodleResourceException("RESOURCE_UNSUPPORTED", "O arquivo Moodle nao possui referencia valida.");
+            }
+
+            var remoteReference = SanitizeRemoteReference(request.RemoteFileReference);
+            var cacheKey = BuildRegistrationCacheKey(credentials.ClientId, credentials.ConnectionId, currentUser.Subject, request, remoteReference);
+            if (cache.TryGetValue(cacheKey, out MoodleResourceDescriptor? cached) && cached is not null)
+            {
+                descriptors[index] = cached;
+                continue;
+            }
+            var normalizedRequest = request with { RemoteFileReference = remoteReference };
+            lookupRequests.Add((index, cacheKey, normalizedRequest));
+
+            var resource = new MoodleResource
+            {
+                ClientId = credentials.ClientId,
+                ConnectionId = credentials.ConnectionId,
+                MoodleAlias = credentials.Alias,
+                OwnerSubject = currentUser.Subject.Trim(),
+                ResourceType = string.IsNullOrWhiteSpace(request.ResourceType) ? "submission_attachment" : request.ResourceType.Trim(),
+                CourseId = request.CourseId,
+                AssignmentId = request.AssignmentId,
+                SubmissionId = request.SubmissionId,
+                StudentId = request.StudentId,
+                ContextId = request.ContextId,
+                Component = request.Component,
+                FileArea = request.FileArea,
+                ItemId = request.ItemId,
+                Filename = Path.GetFileName(request.Filename.Trim()),
+                MimeType = NormalizeMimeType(request.MimeType),
+                SizeBytes = request.SizeBytes,
+                Sha256 = NormalizeHash(request.Sha256),
+                RemoteFileReference = remoteReference,
+                CreatedAt = now,
+                ExpiresAt = now.Add(expiration)
+            };
+            pending.Add((index, cacheKey, normalizedRequest, resource));
+        }
+
+        if (lookupRequests.Count > 0)
+        {
+            var reusableByKey = (await repository.FindReusableManyAsync(
+                    credentials.ClientId,
+                    credentials.ConnectionId,
+                    currentUser.Subject.Trim(),
+                    lookupRequests.Select(entry => entry.Request).ToArray(),
+                    now,
+                    cancellationToken))
+                .GroupBy(resource => BuildRegistrationCacheKey(
+                    credentials.ClientId,
+                    credentials.ConnectionId,
+                    currentUser.Subject,
+                    resource),
+                    StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+
+            foreach (var lookup in lookupRequests)
+            {
+                if (!reusableByKey.TryGetValue(lookup.CacheKey, out var reusable))
+                {
+                    continue;
+                }
+
+                var reusableDescriptor = new MoodleResourceDescriptor(
+                    MoodleResourceUri.Create(reusable.ResourceId),
+                    reusable.Filename,
+                    reusable.MimeType,
+                    reusable.SizeBytes,
+                    reusable.Sha256);
+                descriptors[lookup.Index] = reusableDescriptor;
+                cache.Set(lookup.CacheKey, reusableDescriptor, new MemoryCacheEntryOptions
+                {
+                    AbsoluteExpiration = reusable.ExpiresAt
+                });
+            }
+
+            pending = pending
+                .Where(entry => descriptors[entry.Index] is null)
+                .ToList();
+        }
+
+        // A page can contain the same attachment more than once when the
+        // caller retries. De-duplicate by identity before touching the DB.
+        var uniquePending = pending
+            .GroupBy(entry => entry.CacheKey, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        if (uniquePending.Length > 0)
+        {
+            await repository.RegisterManyAsync(uniquePending.Select(entry => entry.Resource).ToArray(), cancellationToken);
+            await repository.SaveChangesAsync(cancellationToken);
+        }
+
+        foreach (var entry in uniquePending)
+        {
+            var descriptor = new MoodleResourceDescriptor(
+                MoodleResourceUri.Create(entry.Resource.ResourceId),
+                entry.Resource.Filename,
+                entry.Resource.MimeType,
+                entry.Resource.SizeBytes,
+                entry.Resource.Sha256);
+            cache.Set(entry.CacheKey, descriptor, new MemoryCacheEntryOptions
+            {
+                AbsoluteExpiration = entry.Resource.ExpiresAt
+            });
+            foreach (var duplicate in pending.Where(candidate => string.Equals(candidate.CacheKey, entry.CacheKey, StringComparison.Ordinal)))
+            {
+                descriptors[duplicate.Index] = descriptor;
+            }
+        }
+
+        foreach (var entry in uniquePending)
+        {
+            await auditLogs.AddAsync(new MoodleAuditLog
+            {
+                CorrelationId = Guid.NewGuid().ToString("N"),
+                ToolName = "moodle_resource_register_many",
+                RiskLevel = ToolRiskLevel.SensitiveRead,
+                ActorSubject = currentUser.Subject,
+                CourseId = entry.Resource.CourseId,
+                MoodleConnectionId = entry.Resource.ConnectionId,
+                MoodleConnectionAlias = entry.Resource.MoodleAlias,
+                StartedAt = now,
+                FinishedAt = DateTimeOffset.UtcNow,
+                DurationMs = 0,
+                RequestSanitizedJson = System.Text.Json.JsonSerializer.Serialize(new { resourceType = entry.Resource.ResourceType }),
+                ResponseSummaryJson = System.Text.Json.JsonSerializer.Serialize(new { entry.Resource.Filename, entry.Resource.SizeBytes, entry.Resource.Sha256 }),
+                Status = "registered"
+            }, cancellationToken);
+        }
+        await auditLogs.SaveChangesAsync(cancellationToken);
+        telemetry?.RecordPhase("moodle_resource", "register_many", "success", 0, itemCount: uniquePending.Length);
+        return descriptors;
     }
 
     public async Task<MoodleResourceReadResult> ReadAsync(string uri, CancellationToken cancellationToken)
@@ -245,6 +424,27 @@ internal sealed class MoodleResourceGateway(
         if (!features.Value.McpResourceSubmissionDeliveryEnabled)
             throw new MoodleResourceException("RESOURCE_UNSUPPORTED", "A entrega de submissao por MCP Resource esta desabilitada.");
     }
+
+    private static string BuildRegistrationCacheKey(
+        string clientId,
+        string connectionId,
+        string ownerSubject,
+        MoodleResourceRegistration request,
+        string remoteReference) =>
+        $"moodle-resource-registration:{CachePart(clientId)}:{CachePart(connectionId)}:{CachePart(ownerSubject)}:{CachePart(NormalizeResourceType(request.ResourceType))}:{request.CourseId}:{request.AssignmentId}:{request.SubmissionId}:{request.StudentId}:{CachePart(Path.GetFileName(request.Filename.Trim()))}:{CachePart(remoteReference)}:{CachePart(NormalizeHash(request.Sha256))}";
+
+    private static string BuildRegistrationCacheKey(
+        string clientId,
+        string connectionId,
+        string ownerSubject,
+        MoodleResource resource) =>
+        $"moodle-resource-registration:{CachePart(clientId)}:{CachePart(connectionId)}:{CachePart(ownerSubject)}:{CachePart(NormalizeResourceType(resource.ResourceType))}:{resource.CourseId}:{resource.AssignmentId}:{resource.SubmissionId}:{resource.StudentId}:{CachePart(resource.Filename)}:{CachePart(resource.RemoteFileReference)}:{CachePart(NormalizeHash(resource.Sha256))}";
+
+    private static string CachePart(string? value) =>
+        Uri.EscapeDataString(string.IsNullOrWhiteSpace(value) ? "_" : value.Trim());
+
+    private static string NormalizeResourceType(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "submission_attachment" : value.Trim();
 
     private async Task AuditAsync(MoodleResource? resource, string status, string? errorCode, DateTimeOffset startedAt, CancellationToken cancellationToken, string toolName = "moodle_resource_read")
     {

@@ -1,6 +1,6 @@
 # Catálogo de Tools MCP
 
-Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`. O caminho de correção assistida termina na geração de um CSV local; as ferramentas de revisão, prévia, confirmação, auditoria e envio do lote foram retiradas do catálogo MCP.
+Este catálogo documenta as tools registradas no estado atual do repositório; aliases podem aparecer agrupados na tabela. Em caso de divergência, as fontes de registro são `src/MoodleConnector.Presentation/Tools`, e os fluxos de escrita devem ser conferidos também nos handlers em `src/MoodleConnector.Application`. O caminho de correção assistida salva rascunhos internamente e oferece dois destinos mutuamente exclusivos: CSV externo ou prévia/confirmação para publicação durável no Moodle. A confirmação pública apenas autoriza a `PendingAction`; o worker recuperável executa os itens com claims exclusivas e reconciliação.
 
 ## Memória e orientações pedagógicas
 
@@ -167,7 +167,7 @@ humana e minimização de dados.
 | `save_ai_grading_batch` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Rascunho interno | Implementada; sem confirmação |
 | `export_grading_corrections_csv` | Exportar Correcoes para CSV | `ReadOnly` | Sim | Não | Implementada; saída externa `nome;nota;feedback` |
 | `create_batch_grade_launch_preview` | Criar Previa Lancamento Lote | `CriticalHumanConfirmedWrite` | Não | Cria ação pendente | Implementada; inclui rascunhos internos e dispensa UI |
-| `confirm_batch_grade_launch` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Escrita oficial no Moodle | Implementada; exige `CONFIRMAR_PUBLICACAO` |
+| `confirm_batch_grade_launch` | Confirmar Lancamento Lote Moodle | `CriticalHumanConfirmedWrite` | Não | Autoriza publicação durável no Moodle | Implementada; exige `CONFIRMAR_PUBLICACAO`; worker recuperável executa por item |
 | `prepare_welcome_message` / `confirm_welcome_message` | Mensagem Boas Vindas | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_access_reminder` / `confirm_access_reminder` | Mensagem Cobranca Acesso | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
 | `prepare_activity_reminder` / `confirm_activity_reminder` | Mensagem Cobranca SA | `HumanConfirmedWrite` | Prévia | Mensagem individual no Moodle | Implementadas; bloqueadas por padrão |
@@ -725,7 +725,7 @@ Parametros:
 
 | Nome | Tipo | Descricao |
 | --- | --- | --- |
-| `batchJobId` | `Guid` | Identificador do lote de correcao assistida. |
+| `batchJobId` | `Guid` | Identificador do lote ou do `gradingRunId` agregado retornado por `start_pending_grading_run`. |
 | `gradingItemIds` | `IReadOnlyCollection<Guid>?` | Subconjunto opcional de itens do lote. |
 | `onlyReviewed` | `bool` | Quando verdadeiro, inclui somente itens revisados; o padrão também inclui rascunhos salvos. |
 
@@ -742,13 +742,13 @@ Metadados MCP:
 
 Descricao:
 
-- Confirma uma acao pendente criada por `create_batch_grade_launch_preview`.
+- Confirma uma acao pendente criada por `create_batch_grade_launch_preview`; a chamada pública apenas autoriza a execução durável e retorna sem escrever no Moodle.
 - Exige o texto literal `CONFIRMAR_PUBLICACAO` e o escopo server-side de escrita de notas.
 - Exige `Features:AssignmentGradeWriteEnabled=true`; quando houver feedback, exige tambem `Features:AssignmentFeedbackWriteEnabled=true`.
 - Bloqueia o envio se `mod_assign_save_grade` nao estiver disponivel no catalogo de funcoes do servico Moodle autorizado.
-- Envia cada item por `mod_assign_save_grade` usando `IMoodleAssignmentGradingGateway`.
-- Registra `commit_succeeded`, `commit_failed` ou `commit_blocked` em `moodle_audit_logs` por item.
-- Repeticoes com o mesmo `pendingActionId` ignoram itens ja marcados como enviados com sucesso.
+- Um worker recuperável revalida contexto, submissão, tentativa, matrícula, nota/feedback atual e fingerprint antes de cada escrita; não há retry cego.
+- Cada item é protegido por claim ativa mutuamente exclusiva `(conexão, atividade, usuário Moodle, tentativa)` e registra `commit_succeeded`, `commit_failed`, `execution_unknown` ou `commit_blocked` em `moodle_audit_logs`.
+- Repetições com o mesmo `pendingActionId` retomam somente itens ainda seguros; timeouts após envio permanecem `ExecutionUnknown` e exigem reconciliação explícita.
 
 Parametros:
 

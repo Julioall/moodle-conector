@@ -32,6 +32,15 @@ public sealed class PendingMoodleAction
 
     public string? ConfirmedBySubject { get; private set; }
 
+    /// <summary>Worker that currently owns durable publication execution.</summary>
+    public string? ExecutionOwner { get; private set; }
+
+    public DateTimeOffset? ExecutionLeaseUntil { get; private set; }
+
+    public int ExecutionAttemptCount { get; private set; }
+
+    public string? LastExecutionError { get; private set; }
+
     public string IdempotencyKey { get; init; } = string.Empty;
 
     public string CorrelationId { get; init; } = string.Empty;
@@ -53,15 +62,77 @@ public sealed class PendingMoodleAction
         Status = PendingActionStatus.Confirmed;
     }
 
-    public void MarkExecutionUnknown()
+    public void Authorize(string confirmedBySubject, DateTimeOffset confirmedAt)
+    {
+        ConfirmedBySubject = confirmedBySubject;
+        ConfirmedAt = confirmedAt;
+        Status = PendingActionStatus.Authorized;
+    }
+
+    public bool BeginExecution(string workerId, DateTimeOffset now, TimeSpan leaseDuration)
+    {
+        if (string.IsNullOrWhiteSpace(workerId) || leaseDuration <= TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        var leaseActiveForAnotherWorker = Status == PendingActionStatus.Executing &&
+            ExecutionLeaseUntil is { } activeUntil &&
+            activeUntil > now &&
+            !string.Equals(ExecutionOwner, workerId.Trim(), StringComparison.Ordinal);
+        if (leaseActiveForAnotherWorker ||
+            Status is not (PendingActionStatus.Confirmed or PendingActionStatus.Authorized or PendingActionStatus.PartiallyCompleted or PendingActionStatus.Executing))
+        {
+            return false;
+        }
+
+        if (!string.Equals(ExecutionOwner, workerId.Trim(), StringComparison.Ordinal))
+        {
+            ExecutionAttemptCount++;
+        }
+
+        ExecutionOwner = workerId.Trim();
+        ExecutionLeaseUntil = now.Add(leaseDuration);
+        LastExecutionError = null;
+        Status = PendingActionStatus.Executing;
+        return true;
+    }
+
+    public void MarkExecuted()
+    {
+        Status = PendingActionStatus.Executed;
+        ExecutionLeaseUntil = null;
+        LastExecutionError = null;
+    }
+
+    public void MarkFailed(string? error = null)
+    {
+        Status = PendingActionStatus.Failed;
+        ExecutionLeaseUntil = null;
+        LastExecutionError = string.IsNullOrWhiteSpace(error) ? null : error.Trim();
+    }
+
+    public void MarkPartiallyCompleted(string? error = null)
+    {
+        Status = PendingActionStatus.PartiallyCompleted;
+        ExecutionLeaseUntil = null;
+        LastExecutionError = string.IsNullOrWhiteSpace(error) ? null : error.Trim();
+    }
+
+    public void MarkExecutionUnknown(string? error = null)
     {
         // A confirmação é persistida com uma atualização atômica. O agregado
         // que iniciou o fluxo pode continuar com o snapshot
         // PendingConfirmation no mesmo DbContext; neste ponto, contudo, a
         // confirmação já foi validada antes de qualquer escrita remota.
-        if (Status is PendingActionStatus.Confirmed or PendingActionStatus.PendingConfirmation)
+        if (Status is PendingActionStatus.Confirmed or PendingActionStatus.PendingConfirmation or PendingActionStatus.Authorized or PendingActionStatus.Executing)
         {
             Status = PendingActionStatus.ExecutionUnknown;
+            ExecutionLeaseUntil = null;
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                LastExecutionError = error.Trim();
+            }
         }
     }
 

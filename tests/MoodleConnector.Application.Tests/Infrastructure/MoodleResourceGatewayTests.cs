@@ -54,6 +54,44 @@ public sealed class MoodleResourceGatewayTests
     }
 
     [Fact]
+    public async Task RegisterManyAsync_ReusesOnlyExactReferencesWithoutDuplicatingPage()
+    {
+        await using var db = CreateDb();
+        var credentials = new Credentials("client-a", "connection-a");
+        var gateway = CreateGateway(db, new FileGateway(), credentials, user: new User("teacher-a"));
+
+        var firstRequest = new MoodleResourceRegistration(
+            "submission_attachment",
+            "a.txt",
+            "text/plain",
+            "https://moodle.example/pluginfile.php/1/a.txt",
+            CourseId: 10,
+            AssignmentId: 501,
+            SubmissionId: 7001,
+            StudentId: 9001);
+        var first = await gateway.RegisterManyAsync([firstRequest], CancellationToken.None);
+
+        var secondGateway = CreateGateway(db, new FileGateway(), credentials, user: new User("teacher-a"));
+        var descriptors = await secondGateway.RegisterManyAsync(
+            [
+                firstRequest,
+                firstRequest with
+                {
+                    Filename = "b.txt",
+                    RemoteFileReference = "https://moodle.example/pluginfile.php/1/b.txt",
+                    SubmissionId = 7002,
+                    StudentId = 9002
+                }
+            ],
+            CancellationToken.None);
+
+        Assert.Equal(2, descriptors.Count);
+        Assert.Equal(first[0].Uri, descriptors[0].Uri);
+        Assert.NotEqual(descriptors[0].Uri, descriptors[1].Uri);
+        Assert.Equal(2, await db.MoodleResources.CountAsync());
+    }
+
+    [Fact]
     public async Task ReadAsync_DeliversBytesWithoutInspectingMimeOrSignature()
     {
         await using var db = CreateDb();

@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Moodle Connector",
     "subtitle": "Moodle course tools",
-    "description": "Moodle Connector helps authorized educators and academic teams search Moodle courses, inspect participants, activities, submissions, grades, completion data, student risk signals, and generate assisted-grading corrections as local CSV files. Assisted grading stops after generating and saving feedback and notes locally; it does not confirm or send grade changes to Moodle.",
+    "description": "Moodle Connector helps authorized educators and academic teams search Moodle courses, inspect participants, activities, submissions, grades, completion data, student risk signals, and prepare assisted-grading corrections. Corrections can be exported as a local CSV or reviewed in a durable, recoverable preview before an explicit confirmation authorizes per-item publication to Moodle; concurrent users and retries are handled with mutually exclusive claims.",
     "category": "EDUCATION"
   },
   "tools": {

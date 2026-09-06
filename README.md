@@ -204,7 +204,9 @@ As escritas controladas já estão disponíveis para fluxos específicos e devem
 3. o sistema pede uma confirmação explícita;
 4. somente depois disso a ação pode ser executada.
 
-Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais e nota/feedback de tarefa. Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write`, conexão `CanWrite` e `MessagesWriteEnabled=true`. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`. Em deploy, essas capacidades são configuradas pelas variáveis `FEATURES_MESSAGES_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED` e `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED`; os operadores podem defini-las como `false` conforme sua política de menor privilégio.
+Hoje existem fluxos reais de prévia/confirmação para publicação em fórum, mensagens individuais, nota/feedback de tarefa e correção assistida em lote. O fluxo em lote mantém `GradingRun`, rascunhos e prévia no PostgreSQL; a confirmação pública apenas autoriza uma `PendingAction` durável (`Authorized`), e um worker recuperável revalida cada item antes de escrever no Moodle. Assim, reinícios, retries e vários usuários concorrentes não duplicam a publicação: cada alvo `(conexão, atividade, usuário Moodle, tentativa)` possui uma claim ativa mutuamente exclusiva. A exportação CSV é um destino externo independente e não publica no Moodle.
+
+Mensagens exigem `PendingAction`, confirmação, escopo `moodle.write`, conexão `CanWrite` e `MessagesWriteEnabled=true`. Nota individual exige também `moodle.write.assignments.grade` e `AssignmentGradeWriteEnabled=true`. Em deploy, essas capacidades são configuradas pelas variáveis `FEATURES_MESSAGES_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED` e `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED`; os operadores podem defini-las como `false` conforme sua política de menor privilégio.
 
 ## Arquitetura
 

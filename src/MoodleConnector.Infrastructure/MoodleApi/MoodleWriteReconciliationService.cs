@@ -29,6 +29,26 @@ internal sealed class MoodleWriteReconciliationService(
             throw new InvalidOperationException("Apenas o criador da ação ou um administrador pode reconciliá-la.");
         }
 
+        var isGradingBatch = action.ToolName is "criar_previa_lancamento_lote" or "confirmar_lancamento_lote_moodle";
+        if (action.Status is PendingActionStatus.Executed or PendingActionStatus.Failed)
+        {
+            // The action row and grading ledger are persisted separately. A
+            // crash after the atomic action resolution but before the item
+            // statuses/checkpoint is possible; repair those unknown items on
+            // the next reconciliation request instead of leaving them stuck
+            // forever behind a terminal action.
+            if (isGradingBatch && gradingRepository is not null)
+            {
+                await RepairTerminalGradingItemsAsync(
+                    action,
+                    action.Status == PendingActionStatus.Executed,
+                    cancellationToken);
+            }
+
+            throw new InvalidOperationException(
+                $"A ação só pode ser reconciliada no estado ExecutionUnknown; estado atual: {action.Status}.");
+        }
+
         if (action.Status != PendingActionStatus.ExecutionUnknown)
         {
             throw new InvalidOperationException($"A ação só pode ser reconciliada no estado ExecutionUnknown; estado atual: {action.Status}.");
@@ -38,7 +58,6 @@ internal sealed class MoodleWriteReconciliationService(
         var functionName = payloadDocument.RootElement.TryGetProperty("function", out var function)
             ? function.GetString() ?? string.Empty
             : string.Empty;
-        var isGradingBatch = action.ToolName is "criar_previa_lancamento_lote" or "confirmar_lancamento_lote_moodle";
         if (string.IsNullOrWhiteSpace(functionName) && isGradingBatch)
         {
             functionName = "mod_assign_save_grade";
@@ -114,21 +133,33 @@ internal sealed class MoodleWriteReconciliationService(
             items.ValueKind == JsonValueKind.Array)
         {
             var applied = normalizedResolution.Item1 == PendingActionStatus.Executed;
-            foreach (var itemElement in items.EnumerateArray())
+            var gradingItemIds = items.EnumerateArray()
+                .Where(itemElement =>
+                    itemElement.TryGetProperty("gradingItemId", out var itemIdElement) &&
+                    itemIdElement.TryGetGuid(out var gradingItemId) &&
+                    gradingItemId != Guid.Empty)
+                .Select(itemElement => itemElement.GetProperty("gradingItemId").GetGuid())
+                .Distinct()
+                .ToArray();
+            // Reconciliation can cover the whole aggregate. Hydrate the
+            // ledger in one indexed query instead of issuing one SELECT per
+            // item (which made a 10k action an N+1 recovery operation).
+            var gradingItems = await gradingRepository.GetItemsAsync(
+                gradingItemIds,
+                cancellationToken);
+            foreach (var gradingItem in gradingItems.Values)
             {
-                if (!itemElement.TryGetProperty("gradingItemId", out var itemIdElement) ||
-                    !itemIdElement.TryGetGuid(out var gradingItemId))
-                {
-                    continue;
-                }
-
-                var gradingItem = await gradingRepository.GetItemAsync(gradingItemId, cancellationToken);
                 if (gradingItem?.CommitStatus == GradingCommitStatus.ExecutionUnknown)
                 {
                     gradingItem.ResolveCommitExecutionUnknown(applied);
                 }
             }
             await gradingRepository.SaveChangesAsync(cancellationToken);
+            if (payloadDocument.RootElement.TryGetProperty("publicationId", out var publicationIdElement) &&
+                publicationIdElement.TryGetGuid(out var publicationId))
+            {
+                await gradingRepository.ReleasePublicationClaimsAsync(publicationId, cancellationToken);
+            }
         }
 
         return new MoodleWriteReconciliationResult(
@@ -140,5 +171,57 @@ internal sealed class MoodleWriteReconciliationService(
             normalizedResolution.Item1 == PendingActionStatus.Executed
                 ? "A operação foi marcada como aplicada no Moodle; nenhuma nova requisição foi enviada."
                 : "A operação foi marcada como não aplicada; nenhuma nova requisição foi enviada. Crie uma nova prévia se necessário.");
+    }
+
+    private async Task RepairTerminalGradingItemsAsync(
+        PendingMoodleAction action,
+        bool applied,
+        CancellationToken cancellationToken)
+    {
+        if (gradingRepository is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var payloadDocument = JsonDocument.Parse(action.PayloadJson);
+            if (!payloadDocument.RootElement.TryGetProperty("items", out var items) ||
+                items.ValueKind != JsonValueKind.Array)
+            {
+                return;
+            }
+
+            var gradingItemIds = items.EnumerateArray()
+                .Where(itemElement =>
+                    itemElement.TryGetProperty("gradingItemId", out var itemIdElement) &&
+                    itemIdElement.TryGetGuid(out var gradingItemId) &&
+                    gradingItemId != Guid.Empty)
+                .Select(itemElement => itemElement.GetProperty("gradingItemId").GetGuid())
+                .Distinct()
+                .ToArray();
+            var gradingItems = await gradingRepository.GetItemsAsync(
+                gradingItemIds,
+                cancellationToken);
+            foreach (var gradingItem in gradingItems.Values)
+            {
+                if (gradingItem.CommitStatus == GradingCommitStatus.ExecutionUnknown)
+                {
+                    gradingItem.ResolveCommitExecutionUnknown(applied);
+                }
+            }
+
+            await gradingRepository.SaveChangesAsync(cancellationToken);
+            if (payloadDocument.RootElement.TryGetProperty("publicationId", out var publicationIdElement) &&
+                publicationIdElement.TryGetGuid(out var publicationId))
+            {
+                await gradingRepository.ReleasePublicationClaimsAsync(publicationId, cancellationToken);
+            }
+        }
+        catch (JsonException)
+        {
+            // Invalid historical payloads stay available for manual audit;
+            // never fail an unrelated reconciliation repair sweep.
+        }
     }
 }

@@ -19,9 +19,72 @@ public sealed partial class GradingContextBuilder(
     IAssignmentContextSelectionService contextSelectionService,
     IMoodleAssignmentSettingsGateway settingsGateway,
     ICriteriaGenerationService criteriaGenerationService,
-    ILogger<GradingContextBuilder>? logger = null)
+    ILogger<GradingContextBuilder>? logger = null,
+    IGradingArtifactIngestionService? artifactIngestionService = null)
     : IGradingContextBuilder
 {
+    private readonly Dictionary<Guid, IReadOnlyList<GradingArtifact>> artifactsByItem = [];
+    private readonly Dictionary<Guid, AssistedGradingBatch> batchesById = [];
+    private readonly Dictionary<(string UserExternalId, long CourseId, long AssignmentId), AssignmentSettingsSummary?> assignmentSettingsCache = [];
+    private readonly HashSet<(string UserExternalId, long CourseId, long AssignmentId)> assignmentSettingsLookups = [];
+
+    public async Task PrepareBatchAsync(
+        AssistedGradingBatch batch,
+        IReadOnlyCollection<AssistedGradingItem> items,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(items);
+
+        batchesById[batch.Id] = batch;
+        var itemIds = items
+            .Select(item => item.Id)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (itemIds.Length > 0)
+        {
+            var loadedArtifacts = await repository.ListArtifactsByItemsAsync(itemIds, cancellationToken);
+            foreach (var itemId in itemIds)
+            {
+                artifactsByItem[itemId] = loadedArtifacts.GetValueOrDefault(itemId, []);
+            }
+        }
+
+        // The assignment settings endpoint is course-scoped. One call is
+        // enough for every assignment in this child batch; per-assignment
+        // fallback remains available for lightweight/legacy gateways.
+        var userExternalId = batch.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture)
+            ?? batch.CreatedBySubject;
+        try
+        {
+            var settings = await settingsGateway.GetCourseAssignmentSettingsAsync(
+                userExternalId,
+                batch.CourseId.ToString(CultureInfo.InvariantCulture),
+                cancellationToken);
+            foreach (var item in items.Where(item => item.CourseId == batch.CourseId))
+            {
+                if (settings.TryGetValue(
+                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                        out var assignmentSettings))
+                {
+                    assignmentSettingsCache[(userExternalId, item.CourseId, item.AssignmentId)] = assignmentSettings;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger?.LogDebug(
+                exception,
+                "Leitura de configuracoes Moodle em lote indisponivel para o curso {CourseId}; o fallback por atividade sera usado uma vez por atividade.",
+                batch.CourseId);
+        }
+    }
+
     public async Task<GradingContext> BuildAsync(
         AssistedGradingItem item,
         GradingContextOptions options,
@@ -54,16 +117,34 @@ public sealed partial class GradingContextBuilder(
         // que 'Valor: 16 pontos' do PDF sobrescreva os 49 reais da API.
         // ============================================================
         {
-            var batch = await repository.GetBatchAsync(item.BatchId, cancellationToken);
+            var batch = batchesById.GetValueOrDefault(item.BatchId) ??
+                await repository.GetBatchAsync(item.BatchId, cancellationToken);
             if (batch != null)
             {
                 try
                 {
-                    var settings = await settingsGateway.GetAssignmentSettingsAsync(
-                        batch.CreatedBySubject,
-                        item.CourseId.ToString(CultureInfo.InvariantCulture),
-                        item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                        cancellationToken);
+                    var userExternalId = batch.CreatedByMoodleUserId?.ToString(CultureInfo.InvariantCulture)
+                        ?? batch.CreatedBySubject;
+                    var settingsKey = (userExternalId, item.CourseId, item.AssignmentId);
+                    AssignmentSettingsSummary? settings;
+                    if (assignmentSettingsCache.TryGetValue(settingsKey, out var cachedSettings))
+                    {
+                        settings = cachedSettings;
+                    }
+                    else if (assignmentSettingsLookups.Contains(settingsKey))
+                    {
+                        settings = null;
+                    }
+                    else
+                    {
+                        assignmentSettingsLookups.Add(settingsKey);
+                        settings = await settingsGateway.GetAssignmentSettingsAsync(
+                            userExternalId,
+                            item.CourseId.ToString(CultureInfo.InvariantCulture),
+                            item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                            cancellationToken);
+                        assignmentSettingsCache[settingsKey] = settings;
+                    }
 
                     assignmentNameFromSettings = settings?.Name;
                     assignmentDescriptionFromSettings = settings?.Description;
@@ -103,7 +184,16 @@ public sealed partial class GradingContextBuilder(
 
         if (options.IncludeSubmissionFiles || options.IncludeRubric || options.IncludeCourseMaterials)
         {
-            artifacts = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+            // In the worker, ingestion and context building share the same
+            // scoped cache. An empty list is meaningful: it says the item was
+            // already checked and prevents one artifact SELECT per item in a
+            // 10k run. Newly materialized deferred references are appended to
+            // that cache by the ingestion service before BuildAsync runs.
+            artifacts = artifactIngestionService?.TryGetCachedArtifacts(item.Id)
+                ?? (artifactsByItem.TryGetValue(item.Id, out var cachedArtifacts)
+                    ? cachedArtifacts
+                    : await repository.ListArtifactsByItemAsync(item.Id, cancellationToken));
+            artifactsByItem[item.Id] = artifacts;
         }
 
         if (options.IncludeSubmissionFiles)

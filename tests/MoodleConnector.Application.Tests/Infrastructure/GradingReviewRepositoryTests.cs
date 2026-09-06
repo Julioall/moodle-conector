@@ -9,6 +9,144 @@ namespace MoodleConnector.Application.Tests.Infrastructure;
 public sealed class GradingReviewRepositoryTests
 {
     [Fact]
+    public async Task GradingRun_AgrupaSublotesEPermanecePersistido()
+    {
+        await using var dbContext = CreateDbContext();
+        IGradingReviewRepository repository = new GradingReviewRepository(dbContext);
+        var run = GradingRun.Create("teacher-1", 321, "connection-1", "client-1", "alias-1", "10");
+        var first = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, 1, gradingRunId: run.Id);
+        var second = AssistedGradingBatch.Create(10, [502], "teacher-1", 321, 1, gradingRunId: run.Id);
+
+        await repository.AddGradingRunAsync(run, CancellationToken.None);
+        await repository.AddBatchAsync(first, CancellationToken.None);
+        await repository.AddBatchAsync(second, CancellationToken.None);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
+        var loaded = await repository.GetGradingRunAsync(run.Id, CancellationToken.None);
+        var children = await repository.ListBatchesByGradingRunAsync(run.Id, CancellationToken.None);
+
+        Assert.NotNull(loaded);
+        Assert.Equal("connection-1", loaded!.MoodleConnectionId);
+        Assert.Equal([first.Id, second.Id], children.Select(batch => batch.Id));
+    }
+
+    [Fact]
+    public async Task PublicationClaims_MantemAlvosNaoConflitantesQuandoParteDoLoteEstaOcupada()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var connectionKey = "connection-claims";
+        var occupied = new GradingPublicationClaimEntity
+        {
+            PublicationId = Guid.NewGuid(),
+            GradingItemId = Guid.NewGuid(),
+            ConnectionKey = connectionKey,
+            AssignmentId = 501,
+            MoodleUserId = 101,
+            AttemptNumber = 1,
+            Status = "Authorized",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+        };
+        dbContext.GradingPublicationClaims.Add(occupied);
+        await dbContext.SaveChangesAsync();
+
+        var freeItemId = Guid.NewGuid();
+        var results = await store.TryClaimPublicationTargetsAsync(
+            Guid.NewGuid(),
+            connectionKey,
+            [
+                new GradingPublicationClaimRequest(Guid.NewGuid(), 501, 101, 1),
+                new GradingPublicationClaimRequest(freeItemId, 501, 202, 1)
+            ],
+            DateTimeOffset.UtcNow.AddMinutes(15),
+            CancellationToken.None);
+
+        Assert.False(results.Single(result => result.GradingItemId != freeItemId).Claimed);
+        Assert.True(results.Single(result => result.GradingItemId == freeItemId).Claimed);
+        Assert.Contains(dbContext.GradingPublicationClaims,
+            claim => claim.ConnectionKey == connectionKey && claim.MoodleUserId == 202 && claim.Status == "AwaitingConfirmation");
+    }
+
+    [Fact]
+    public async Task PublicationClaims_VinculoAoPendingActionProtegePreviewAutorizadaContraExpiracao()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var action = new MoodleConnector.Domain.PendingMoodleAction
+        {
+            ToolName = "criar_previa_lancamento_lote",
+            CreatedBySubject = "teacher-1",
+            PayloadJson = "{}",
+            PreviewJson = "{}",
+            ConfirmationText = "CONFIRMAR",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            IdempotencyKey = Guid.NewGuid().ToString("N"),
+            CorrelationId = Guid.NewGuid().ToString("N")
+        };
+        var publicationId = Guid.NewGuid();
+        dbContext.PendingMoodleActions.Add(action);
+        dbContext.GradingPublicationClaims.Add(new GradingPublicationClaimEntity
+        {
+            PublicationId = publicationId,
+            GradingItemId = Guid.NewGuid(),
+            ConnectionKey = "connection-binding",
+            AssignmentId = 501,
+            MoodleUserId = 101,
+            AttemptNumber = 1,
+            Status = "AwaitingConfirmation",
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        });
+        await dbContext.SaveChangesAsync();
+
+        await store.BindPublicationClaimsAsync(publicationId, action.Id, CancellationToken.None);
+        action.Authorize("teacher-1", DateTimeOffset.UtcNow);
+        await dbContext.SaveChangesAsync();
+
+        var result = await store.TryClaimPublicationTargetsAsync(
+            Guid.NewGuid(),
+            "connection-binding",
+            [new GradingPublicationClaimRequest(Guid.NewGuid(), 501, 101, 1)],
+            DateTimeOffset.UtcNow.AddMinutes(15),
+            CancellationToken.None);
+
+        Assert.False(Assert.Single(result).Claimed);
+        Assert.Equal("publication_target_busy", result[0].ConflictCode);
+        Assert.Equal("AwaitingConfirmation", Assert.Single(dbContext.GradingPublicationClaims).Status);
+    }
+
+    [Fact]
+    public async Task PublicationClaims_MesmaPublicacaoPodeReivindicarNovamenteAposFalhaParcial()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var publicationId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        dbContext.GradingPublicationClaims.Add(new GradingPublicationClaimEntity
+        {
+            PublicationId = publicationId,
+            GradingItemId = itemId,
+            ConnectionKey = "connection-retry",
+            AssignmentId = 501,
+            MoodleUserId = 101,
+            AttemptNumber = 1,
+            Status = "Authorized",
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1)
+        });
+        await dbContext.SaveChangesAsync();
+
+        var result = await store.TryClaimPublicationTargetsAsync(
+            publicationId,
+            "connection-retry",
+            [new GradingPublicationClaimRequest(itemId, 501, 101, 1)],
+            DateTimeOffset.UtcNow.AddMinutes(15),
+            CancellationToken.None);
+
+        Assert.True(Assert.Single(result).Claimed);
+        Assert.Single(dbContext.GradingPublicationClaims);
+        Assert.Equal("Authorized", dbContext.GradingPublicationClaims.Single().Status);
+    }
+
+    [Fact]
     public async Task AddBatchAndItemAsync_PersisteCicloMinimoDeCorrecao()
     {
         await using var dbContext = CreateDbContext();
@@ -422,6 +560,64 @@ public sealed class GradingReviewRepositoryTests
         var saved = await store.GetItemAsync(item.Id, CancellationToken.None);
         Assert.Equal("worker-c", saved!.LeaseOwner);
         Assert.Equal(2, saved.AttemptCount);
+    }
+
+    [Fact]
+    public async Task JobStore_ClaimEReleaseEmLoteMantemExclusividadePorJanela()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 32);
+        var items = Enumerable.Range(0, 32)
+            .Select(index => AssistedGradingItem.Create(
+                batch.Id,
+                10,
+                501,
+                9001 + index,
+                101 + index,
+                0))
+            .ToArray();
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.AddRange(items);
+        await dbContext.SaveChangesAsync();
+
+        var claimTime = DateTimeOffset.UtcNow;
+        var first = await store.TryClaimItemsAsync(
+            batch.Id,
+            items.Select(item => item.Id).ToArray(),
+            "worker-a",
+            claimTime,
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None);
+        var second = await store.TryClaimItemsAsync(
+            batch.Id,
+            items.Select(item => item.Id).ToArray(),
+            "worker-b",
+            claimTime,
+            TimeSpan.FromMinutes(10),
+            CancellationToken.None);
+
+        Assert.Equal(32, first.Count);
+        Assert.Empty(second);
+        Assert.Equal(32, await store.ReleaseItemLeasesAsync(
+            batch.Id,
+            first,
+            "worker-a",
+            claimTime.AddMinutes(1),
+            errorCode: null,
+            nextAttemptAt: null,
+            CancellationToken.None));
+
+        var savedItems = await dbContext.GradingItems
+            .AsNoTracking()
+            .Where(item => item.BatchId == batch.Id)
+            .ToArrayAsync();
+        Assert.All(savedItems, item =>
+        {
+            Assert.Null(item.LeaseOwner);
+            Assert.Null(item.LeaseUntil);
+            Assert.Equal(1, item.AttemptCount);
+        });
     }
 
     [Fact]

@@ -64,6 +64,11 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "057_moodle_resource_owner_subject.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "058_rename_nacional_alias_to_senai.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "059_rename_dashboard_nacional_alias_to_senai.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "060_grading_publication_recovery.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "061_grading_run_aggregate.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "062_moodle_resource_reuse_index.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "063_grading_publication_action_binding.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "064_moodle_resource_reuse_reference_index.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

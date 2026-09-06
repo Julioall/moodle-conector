@@ -22,6 +22,34 @@ public sealed class GradingArtifactIngestionService(
     ILogger<GradingArtifactIngestionService> logger,
     IGradingOperationTelemetry? telemetry = null) : IGradingArtifactIngestionService
 {
+    // One worker scope handles one child batch sequentially. Cache repeated
+    // Moodle reads by assignment/course so a 400-item batch does not issue
+    // hundreds of identical requests when references were initially empty.
+    private readonly Dictionary<long, IReadOnlyList<AssignmentSubmissionRecord>> submissionFilesCache = [];
+    private readonly Dictionary<long, (CourseContentsSummary? Contents, string? Error)> courseContentsCache = [];
+    private readonly Dictionary<Guid, IReadOnlyList<GradingArtifact>> artifactsCache = [];
+
+    public IReadOnlyList<GradingArtifact>? TryGetCachedArtifacts(Guid gradingItemId) =>
+        artifactsCache.GetValueOrDefault(gradingItemId);
+
+    public async Task PrepareBatchAsync(
+        AssistedGradingBatch batch,
+        IReadOnlyCollection<Guid> gradingItemIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        if (gradingItemIds.Count == 0)
+        {
+            return;
+        }
+
+        var loaded = await repository.ListArtifactsByItemsAsync(gradingItemIds, cancellationToken);
+        foreach (var itemId in gradingItemIds)
+        {
+            artifactsCache[itemId] = loaded.GetValueOrDefault(itemId, []);
+        }
+    }
+
     public async Task IngestPendingAsync(
         AssistedGradingBatch batch,
         AssistedGradingItem item,
@@ -36,11 +64,9 @@ public sealed class GradingArtifactIngestionService(
             ?? batch.CreatedBySubject;
         try
         {
-            var changed = false;
-
             if (batch.IncludeSubmissionFiles)
             {
-                changed |= await EnsureSubmissionFileReferencesAsync(
+                await EnsureSubmissionFileReferencesAsync(
                     userExternalId,
                     item,
                     cancellationToken);
@@ -48,19 +74,18 @@ public sealed class GradingArtifactIngestionService(
 
             if (batch.IncludeRubric || batch.IncludeCourseMaterials)
             {
-                changed |= await EnsureContextReferencesAsync(
+                await EnsureContextReferencesAsync(
                     userExternalId,
                     batch,
                     item,
                     cancellationToken);
             }
 
-            if (changed)
-            {
-                // As referências precisam existir antes de o construtor de contexto
-                // consultar o repositório, inclusive após um restart do worker.
-                await repository.SaveChangesAsync(cancellationToken);
-            }
+            // O worker persiste o conjunto de alterações em checkpoints
+            // amortizados. Salvar aqui por item transformava um lote de
+            // 10.000 correções em milhares de transações; se o processo
+            // cair antes do checkpoint, o item permanece Pending e pode
+            // ser reidratado de forma idempotente no retry.
 
         }
         catch
@@ -86,7 +111,7 @@ public sealed class GradingArtifactIngestionService(
         AssistedGradingItem item,
         CancellationToken cancellationToken)
     {
-        var existing = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+        var existing = await GetExistingArtifactsAsync(item.Id, cancellationToken);
         if (existing.Any(artifact => artifact.ArtifactType == "submission_file"))
         {
             return false;
@@ -97,28 +122,35 @@ public sealed class GradingArtifactIngestionService(
             return false;
         }
 
-        IReadOnlyList<AssignmentSubmissionRecord> submissions;
-        try
+        if (!submissionFilesCache.TryGetValue(item.AssignmentId, out var submissions))
         {
-            submissions = await submissionsGateway.GetAssignmentSubmissionsAsync(
-                userExternalId,
-                item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                "submitted",
-                since: null,
-                before: null,
-                cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Nao foi possivel recuperar referencias de arquivos da submissao {SubmissionId}.",
-                item.SubmissionId);
-            return false;
+            try
+            {
+                submissions = await submissionsGateway.GetAssignmentSubmissionsAsync(
+                    userExternalId,
+                    item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                    "submitted",
+                    since: null,
+                    before: null,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Nao foi possivel recuperar referencias de arquivos da submissao {SubmissionId}.",
+                    item.SubmissionId);
+                // Cache the failed read for this batch. A later batch retry can
+                // recover it, while siblings do not hammer an unavailable
+                // Moodle endpoint in the same run.
+                submissions = [];
+            }
+
+            submissionFilesCache[item.AssignmentId] = submissions;
         }
 
         var match = submissions.FirstOrDefault(submission =>
@@ -139,15 +171,15 @@ public sealed class GradingArtifactIngestionService(
         var selectedFiles = files.Take(maxFiles).ToArray();
         foreach (var file in selectedFiles)
         {
-            await repository.AddArtifactAsync(
-                BuildPendingArtifact(
-                    item.Id,
-                    "submission_file",
-                    file.Filename,
-                    file.MimeType,
-                    file.SizeBytes,
-                    file.FileUrl),
-                cancellationToken);
+            var artifact = BuildPendingArtifact(
+                item.Id,
+                "submission_file",
+                file.Filename,
+                file.MimeType,
+                file.SizeBytes,
+                file.FileUrl);
+            await repository.AddArtifactAsync(artifact, cancellationToken);
+            AppendCachedArtifact(artifact);
         }
 
         return selectedFiles.Length > 0;
@@ -159,7 +191,7 @@ public sealed class GradingArtifactIngestionService(
         AssistedGradingItem item,
         CancellationToken cancellationToken)
     {
-        var existing = await repository.ListArtifactsByItemAsync(item.Id, cancellationToken);
+        var existing = await GetExistingArtifactsAsync(item.Id, cancellationToken);
         if (existing.Any(artifact =>
                 artifact.ArtifactType == "assignment_context" &&
                 !ExtractionStatus.IsFailure(artifact.ExtractionStatus)))
@@ -167,34 +199,44 @@ public sealed class GradingArtifactIngestionService(
             return false;
         }
 
-        CourseContentsSummary contents;
-        try
+        if (!courseContentsCache.TryGetValue(item.CourseId, out var cachedContents))
         {
-            contents = await GradingMoodleReadRetry.ExecuteAsync(
-                retryCancellationToken => contentsGateway.GetCourseContentsAsync(
-                    userExternalId,
-                    item.CourseId.ToString(CultureInfo.InvariantCulture),
-                    moduleTypes: [],
-                    includeHidden: true,
-                    onlyWithFiles: false,
-                    retryCancellationToken),
-                (exception, attempt) => logger.LogWarning(
-                    exception,
-                    "Falha transitória ao recuperar contexto da tarefa {AssignmentId}; nova tentativa {Attempt}.",
-                    item.AssignmentId,
-                    attempt),
-                cancellationToken);
+            try
+            {
+                var fetchedContents = await GradingMoodleReadRetry.ExecuteAsync(
+                    retryCancellationToken => contentsGateway.GetCourseContentsAsync(
+                        userExternalId,
+                        item.CourseId.ToString(CultureInfo.InvariantCulture),
+                        moduleTypes: [],
+                        includeHidden: true,
+                        onlyWithFiles: false,
+                        retryCancellationToken),
+                    (exception, attempt) => logger.LogWarning(
+                        exception,
+                        "Falha transitória ao recuperar contexto da tarefa {AssignmentId}; nova tentativa {Attempt}.",
+                        item.AssignmentId,
+                        attempt),
+                    cancellationToken);
+                cachedContents = (fetchedContents, null);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Nao foi possivel recuperar contexto da tarefa {AssignmentId}.",
+                    item.AssignmentId);
+                cachedContents = (null, ex.GetType().Name);
+            }
+
+            courseContentsCache[item.CourseId] = cachedContents;
         }
-        catch (OperationCanceledException)
+
+        if (cachedContents.Contents is null)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Nao foi possivel recuperar contexto da tarefa {AssignmentId}.",
-                item.AssignmentId);
             await UpsertContextDiagnosticAsync(
                 existing,
                 item,
@@ -202,6 +244,8 @@ public sealed class GradingArtifactIngestionService(
                 cancellationToken);
             return false;
         }
+
+        var contents = cachedContents.Contents;
 
         var assignmentId = item.AssignmentId.ToString(CultureInfo.InvariantCulture);
         var section = contents.Sections.FirstOrDefault(candidate =>
@@ -220,20 +264,20 @@ public sealed class GradingArtifactIngestionService(
         var added = false;
         if (batch.IncludeRubric && !string.IsNullOrWhiteSpace(assignmentModule.Description))
         {
-            await repository.AddArtifactAsync(
-                new GradingArtifact(
-                    Guid.NewGuid(),
-                    item.Id,
-                    "assignment_context",
-                    assignmentModule.Name,
-                    "text/html",
-                    Sha256: null,
-                    SizeBytes: assignmentModule.Description.Length,
-                    ExtractionStatus.Succeeded,
-                    assignmentModule.Description,
-                    SummaryRef: "assignment_description",
-                    DateTimeOffset.UtcNow),
-                cancellationToken);
+            var artifact = new GradingArtifact(
+                Guid.NewGuid(),
+                item.Id,
+                "assignment_context",
+                assignmentModule.Name,
+                "text/html",
+                Sha256: null,
+                SizeBytes: assignmentModule.Description.Length,
+                ExtractionStatus.Succeeded,
+                assignmentModule.Description,
+                SummaryRef: "assignment_description",
+                DateTimeOffset.UtcNow);
+            await repository.AddArtifactAsync(artifact, cancellationToken);
+            AppendCachedArtifact(artifact);
             added = true;
         }
 
@@ -261,20 +305,20 @@ public sealed class GradingArtifactIngestionService(
         {
             if (!string.IsNullOrWhiteSpace(entry.Module.Description))
             {
-                await repository.AddArtifactAsync(
-                    new GradingArtifact(
-                        Guid.NewGuid(),
-                        item.Id,
-                        "assignment_context",
-                        entry.Module.Name,
-                        "text/html",
-                        Sha256: null,
-                        SizeBytes: entry.Module.Description.Length,
-                        ExtractionStatus.Succeeded,
-                        entry.Module.Description,
-                        SummaryRef: $"section:{section.SectionNumber};distance:{entry.Distance}",
-                        DateTimeOffset.UtcNow),
-                    cancellationToken);
+                var artifact = new GradingArtifact(
+                    Guid.NewGuid(),
+                    item.Id,
+                    "assignment_context",
+                    entry.Module.Name,
+                    "text/html",
+                    Sha256: null,
+                    SizeBytes: entry.Module.Description.Length,
+                    ExtractionStatus.Succeeded,
+                    entry.Module.Description,
+                    SummaryRef: $"section:{section.SectionNumber};distance:{entry.Distance}",
+                    DateTimeOffset.UtcNow);
+                await repository.AddArtifactAsync(artifact, cancellationToken);
+                AppendCachedArtifact(artifact);
                 added = true;
             }
 
@@ -285,15 +329,15 @@ public sealed class GradingArtifactIngestionService(
                     break;
                 }
 
-                await repository.AddArtifactAsync(
-                    BuildPendingArtifact(
-                        item.Id,
-                        "assignment_context",
-                        string.IsNullOrWhiteSpace(file.FileName) ? "context-file" : file.FileName,
-                        file.MimeType,
-                        file.FileSize,
-                        file.FileUrl),
-                    cancellationToken);
+                var artifact = BuildPendingArtifact(
+                    item.Id,
+                    "assignment_context",
+                    string.IsNullOrWhiteSpace(file.FileName) ? "context-file" : file.FileName,
+                    file.MimeType,
+                    file.FileSize,
+                    file.FileUrl);
+                await repository.AddArtifactAsync(artifact, cancellationToken);
+                AppendCachedArtifact(artifact);
                 added = true;
                 contextFilesAdded++;
             }
@@ -327,10 +371,45 @@ public sealed class GradingArtifactIngestionService(
         if (diagnostic is null)
         {
             await repository.AddArtifactAsync(updated, cancellationToken);
+            AppendCachedArtifact(updated);
         }
         else
         {
             await repository.UpdateArtifactAsync(updated, cancellationToken);
+            ReplaceCachedArtifact(updated);
+        }
+    }
+
+    private async Task<IReadOnlyList<GradingArtifact>> GetExistingArtifactsAsync(
+        Guid gradingItemId,
+        CancellationToken cancellationToken)
+    {
+        if (artifactsCache.TryGetValue(gradingItemId, out var cached))
+        {
+            return cached;
+        }
+
+        var loaded = await repository.ListArtifactsByItemAsync(gradingItemId, cancellationToken);
+        artifactsCache[gradingItemId] = loaded;
+        return loaded;
+    }
+
+    private void AppendCachedArtifact(GradingArtifact artifact)
+    {
+        if (artifactsCache.TryGetValue(artifact.GradingItemId, out var cached))
+        {
+            artifactsCache[artifact.GradingItemId] = cached.Concat([artifact]).ToArray();
+        }
+    }
+
+    private void ReplaceCachedArtifact(GradingArtifact artifact)
+    {
+        if (artifactsCache.TryGetValue(artifact.GradingItemId, out var cached))
+        {
+            artifactsCache[artifact.GradingItemId] = cached
+                .Where(existing => existing.Id != artifact.Id)
+                .Concat([artifact])
+                .ToArray();
         }
     }
 

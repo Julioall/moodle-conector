@@ -5,19 +5,16 @@ using MoodleConnector.Infrastructure;
 
 namespace MoodleConnector.Application.Tests.Integration;
 
+[Trait("Category", "PostgresIntegration")]
 public sealed class MoodleSnapshotPostgresIntegrationTests
 {
     [Fact]
     public async Task SchemaAndConcurrentHeadUpsertConvergemNoPostgres()
     {
         var connectionString = Environment.GetEnvironmentVariable("MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION");
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            // The regular developer suite has no database daemon. CI supplies
-            // the connection string and executes this same test against a
-            // disposable PostgreSQL service.
-            return;
-        }
+        Assert.False(
+            string.IsNullOrWhiteSpace(connectionString),
+            "MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION e obrigatoria; o gate PostgreSQL nao pode ser silenciosamente ignorado.");
 
         var ownerId = Guid.NewGuid();
         var alias = $"it-{Guid.NewGuid():N}"[..32];

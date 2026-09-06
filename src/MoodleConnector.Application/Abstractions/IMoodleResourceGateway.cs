@@ -23,6 +23,26 @@ public sealed record MoodleResourceReadResult(string Uri, string MimeType, byte[
 public interface IMoodleResourceGateway
 {
     Task<MoodleResourceDescriptor> RegisterAsync(MoodleResourceRegistration request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Registers a page of resources with one persistence flush. The default
+    /// keeps legacy gateways source-compatible; production gateways override
+    /// it to avoid one database transaction per student attachment.
+    /// Results preserve the input order.
+    /// </summary>
+    async Task<IReadOnlyList<MoodleResourceDescriptor>> RegisterManyAsync(
+        IReadOnlyList<MoodleResourceRegistration> requests,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<MoodleResourceDescriptor>(requests.Count);
+        foreach (var request in requests)
+        {
+            result.Add(await RegisterAsync(request, cancellationToken));
+        }
+
+        return result;
+    }
+
     Task<MoodleResourceReadResult> ReadAsync(string uri, CancellationToken cancellationToken);
     Task<IReadOnlyList<MoodleResourceDescriptor>> ExpandZipAsync(string uri, CancellationToken cancellationToken);
 }

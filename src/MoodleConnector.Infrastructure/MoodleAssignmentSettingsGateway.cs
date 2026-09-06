@@ -31,14 +31,14 @@ internal sealed class MoodleAssignmentSettingsGateway(
 
         var normalizedCourseId = ParseMoodleId(courseId, nameof(courseId));
         var normalizedAssignmentId = ParseMoodleId(assignmentId, nameof(assignmentId));
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var cachePrefix = BuildCachePrefix(credentials, userExternalId);
 
-        var cacheKey = $"moodle_assign_settings_{normalizedCourseId}_{normalizedAssignmentId}";
+        var cacheKey = $"{cachePrefix}:assignment:{normalizedCourseId}:{normalizedAssignmentId}";
         if (memoryCache.TryGetValue(cacheKey, out AssignmentSettingsSummary? cached) && cached is not null)
         {
             return cached;
         }
-
-        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
 
         var parameters = new Dictionary<string, string>
         {
@@ -71,7 +71,9 @@ internal sealed class MoodleAssignmentSettingsGateway(
         }
 
         var normalizedCourseId = ParseMoodleId(courseId, nameof(courseId));
-        var cacheKey = $"moodle_assign_settings_course_{normalizedCourseId}";
+        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+        var cachePrefix = BuildCachePrefix(credentials, userExternalId);
+        var cacheKey = $"{cachePrefix}:course:{normalizedCourseId}";
         if (memoryCache.TryGetValue(
                 cacheKey,
                 out IReadOnlyDictionary<string, AssignmentSettingsSummary>? cached) && cached is not null)
@@ -79,7 +81,6 @@ internal sealed class MoodleAssignmentSettingsGateway(
             return cached;
         }
 
-        var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
         var parameters = new Dictionary<string, string>
         {
             ["courseids[0]"] = normalizedCourseId.ToString(CultureInfo.InvariantCulture)
@@ -96,12 +97,25 @@ internal sealed class MoodleAssignmentSettingsGateway(
         foreach (var pair in settingsById)
         {
             memoryCache.Set(
-                $"moodle_assign_settings_{normalizedCourseId}_{pair.Key}",
+                $"{cachePrefix}:assignment:{normalizedCourseId}:{pair.Key}",
                 pair.Value,
                 TimeSpan.FromMinutes(15));
         }
 
         return settingsById;
+    }
+
+    private static string BuildCachePrefix(
+        MoodleConnectorCredentials credentials,
+        string userExternalId)
+    {
+        // Assignment visibility/settings can vary by authenticated Moodle
+        // connection and actor. Keep every cache namespace tenant-safe; a
+        // numeric course/assignment id is not globally unique across sites.
+        static string Part(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? "_" : value.Trim().Replace(":", "%3A", StringComparison.Ordinal);
+
+        return $"moodle_assign_settings:{Part(credentials.ClientId)}:{Part(credentials.ConnectionId)}:{Part(credentials.Alias)}:{Part(userExternalId)}";
     }
 
     private static AssignmentSettingsSummary? ParseSettings(string payload, long assignmentId)

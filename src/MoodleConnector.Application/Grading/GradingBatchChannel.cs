@@ -12,7 +12,10 @@ public sealed class GradingBatchChannel
         Channel.CreateBounded<GradingBatchWorkItem>(new BoundedChannelOptions(capacity: 100)
         {
             FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true,
+            // Multiple bounded consumers let one instance drain many 400-item
+            // chunks. Durable batch/item leases still make duplicate delivery
+            // safe across consumers and replicas.
+            SingleReader = false,
             SingleWriter = false
         });
 

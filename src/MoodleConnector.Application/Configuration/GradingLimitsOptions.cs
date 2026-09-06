@@ -59,6 +59,34 @@ public sealed class GradingLimitsOptions
     public int DurableBatchClaimSize { get; init; } = 4;
 
     /// <summary>
+    /// Número máximo de lotes processados em paralelo por instância. Cada
+    /// lote continua protegido por lease PostgreSQL e por um limite separado
+    /// por conexão Moodle.
+    /// </summary>
+    public int BatchWorkerConcurrency { get; init; } = 4;
+
+    /// <summary>
+    /// Evita que vários lotes do mesmo Moodle saturem a API enquanto permite
+    /// que conexões independentes avancem em paralelo.
+    /// </summary>
+    public int BatchWorkerPerConnectionConcurrency { get; init; } = 2;
+
+    /// <summary>
+    /// Frequência do worker que retoma publicações autorizadas após queda ou
+    /// timeout do request de confirmação.
+    /// </summary>
+    public int PublicationWorkerPollSeconds { get; init; } = 5;
+
+    /// <summary>Publicações que uma instância pode tentar retomar em paralelo.</summary>
+    public int PublicationWorkerConcurrency { get; init; } = 2;
+
+    /// <summary>
+    /// Limita escritas de publicação simultâneas contra a mesma instalação
+    /// Moodle dentro de uma instância do conector.
+    /// </summary>
+    public int PublicationWorkerPerConnectionConcurrency { get; init; } = 1;
+
+    /// <summary>
     /// Orçamento total da chamada MCP de criação. Deve ficar abaixo do timeout
     /// do transporte para devolver um erro estruturado, não um HTTP 504.
     /// </summary>

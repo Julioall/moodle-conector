@@ -50,11 +50,13 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
     public DbSet<PlatformRequestMetricEntity> PlatformRequestMetrics => Set<PlatformRequestMetricEntity>();
     public DbSet<MoodleUserLink> MoodleUserLinks => Set<MoodleUserLink>();
     public DbSet<AssistedGradingBatch> GradingBatches => Set<AssistedGradingBatch>();
+    public DbSet<GradingRun> GradingRuns => Set<GradingRun>();
     public DbSet<AssistedGradingItem> GradingItems => Set<AssistedGradingItem>();
     public DbSet<GradingArtifact> GradingArtifacts => Set<GradingArtifact>();
     public DbSet<GradingEvidence> GradingEvidence => Set<GradingEvidence>();
     public DbSet<GradingContextSnapshotDocument> GradingContextSnapshots => Set<GradingContextSnapshotDocument>();
     public DbSet<AiGradingProposalDocument> AiGradingProposals => Set<AiGradingProposalDocument>();
+    public DbSet<GradingPublicationClaimEntity> GradingPublicationClaims => Set<GradingPublicationClaimEntity>();
     public DbSet<UserMemory> UserMemories => Set<UserMemory>();
     public DbSet<UserMemoryDocument> UserMemoryDocuments => Set<UserMemoryDocument>();
     public DbSet<OpenIddictEntityFrameworkCoreApplication> OAuthApplications => Set<OpenIddictEntityFrameworkCoreApplication>();
@@ -397,6 +399,36 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         pendingAction.Property(x => x.Status).HasConversion<int>().IsRequired();
         pendingAction.Property(x => x.IdempotencyKey).HasMaxLength(64).IsRequired();
         pendingAction.Property(x => x.CorrelationId).HasMaxLength(64).IsRequired();
+        pendingAction.Property(x => x.ExecutionOwner).HasMaxLength(200);
+        pendingAction.Property(x => x.LastExecutionError).HasMaxLength(4000);
+        pendingAction.HasIndex(x => new { x.Status, x.ExecutionLeaseUntil });
+
+        var publicationClaim = modelBuilder.Entity<GradingPublicationClaimEntity>();
+        publicationClaim.ToTable("grading_publication_claim");
+        publicationClaim.HasKey(x => x.Id);
+        publicationClaim.Property(x => x.PendingActionId);
+        publicationClaim.Property(x => x.ConnectionKey).HasMaxLength(256).IsRequired();
+        publicationClaim.Property(x => x.Status).HasMaxLength(40).IsRequired();
+        publicationClaim.HasIndex(x => new
+        {
+            x.ConnectionKey,
+            x.AssignmentId,
+            x.MoodleUserId,
+            x.AttemptNumber,
+            x.Status
+        });
+        publicationClaim.HasIndex(x => new { x.Status, x.ExpiresAt });
+        publicationClaim.HasIndex(x => x.PublicationId);
+        publicationClaim.HasIndex(x => x.PendingActionId);
+        publicationClaim.HasIndex(x => new
+        {
+            x.ConnectionKey,
+            x.AssignmentId,
+            x.MoodleUserId,
+            x.AttemptNumber
+        })
+            .IsUnique()
+            .HasFilter("\"Status\" IN ('AwaitingConfirmation', 'Authorized', 'Executing', 'ExecutionUnknown')");
         pendingAction.HasIndex(x => x.CorrelationId);
         pendingAction.HasIndex(x => new { x.CreatedBySubject, x.Status });
 
@@ -500,6 +532,21 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
 
     private static void ConfigureGrading(ModelBuilder modelBuilder)
     {
+        var run = modelBuilder.Entity<GradingRun>();
+        run.ToTable("grading_run");
+        run.HasKey(x => x.Id);
+        run.Property(x => x.CreatedBySubject).HasMaxLength(200).IsRequired();
+        run.Property(x => x.CreatedByMoodleUserId);
+        run.Property(x => x.MoodleConnectionId).HasMaxLength(64);
+        run.Property(x => x.ConnectorClientId).HasMaxLength(64);
+        run.Property(x => x.ConnectionAlias).HasMaxLength(64);
+        run.Property(x => x.CourseIdScope).HasMaxLength(64);
+        run.Property(x => x.Destination).HasMaxLength(32).IsRequired();
+        run.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
+        run.Property(x => x.CreatedAt).IsRequired();
+        run.Property(x => x.UpdatedAt).IsRequired();
+        run.HasIndex(x => new { x.CreatedBySubject, x.Status, x.CreatedAt });
+
         var batch = modelBuilder.Entity<AssistedGradingBatch>();
         batch.ToTable("grading_batch");
         batch.HasKey(x => x.Id);
@@ -517,6 +564,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         batch.Property(x => x.CourseDisplayName).HasMaxLength(240);
         batch.Property(x => x.ConnectorClientId).HasMaxLength(64);
         batch.Property(x => x.ConnectionAlias).HasMaxLength(64);
+        batch.Property(x => x.MoodleConnectionId).HasMaxLength(64);
+        batch.Property(x => x.GradingRunId);
         batch.Property(x => x.IdempotencyKey).HasMaxLength(128);
         batch.Property(x => x.TeacherInstructions).HasMaxLength(8000);
         batch.Property(x => x.Priority).HasMaxLength(16).IsRequired();
@@ -531,6 +580,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
             .IsUnique()
             .HasFilter("\"IdempotencyKey\" IS NOT NULL");
         batch.HasIndex(x => new { x.CourseId, x.Status });
+        batch.HasIndex(x => x.GradingRunId);
         batch.HasIndex(x => new { x.Status, x.NextAttemptAt, x.LeaseUntil, x.Priority });
 
         var item = modelBuilder.Entity<AssistedGradingItem>();
@@ -600,6 +650,15 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleResource.Property(x => x.ParentResourceId).HasMaxLength(32);
         moodleResource.Property(x => x.InlineContent).HasColumnType("bytea");
         moodleResource.HasIndex(x => new { x.ClientId, x.ConnectionId, x.ExpiresAt });
+        moodleResource.HasIndex(x => new { x.ClientId, x.ConnectionId, x.OwnerSubject, x.ExpiresAt });
+        moodleResource.HasIndex(x => new
+        {
+            x.ClientId,
+            x.ConnectionId,
+            x.OwnerSubject,
+            x.RemoteFileReference,
+            x.ExpiresAt
+        });
         moodleResource.HasIndex(x => x.ExpiresAt);
         moodleResource.HasIndex(x => x.ParentResourceId).HasFilter("\"ParentResourceId\" IS NOT NULL");
 

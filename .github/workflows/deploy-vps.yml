@@ -78,6 +78,22 @@ jobs:
     name: Test, sync and restart containers
     runs-on: ubuntu-latest
     environment: moodle-connector
+    env:
+      MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION: Host=localhost;Port=5432;Database=moodle_connector_ci;Username=moodle_connector;Password=ci-postgres-password
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: moodle_connector_ci
+          POSTGRES_USER: moodle_connector
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U moodle_connector -d moodle_connector_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout

@@ -5,6 +5,112 @@ namespace MoodleConnector.Application.Tests.Infrastructure;
 public sealed class SchemaScriptTests
 {
     [Fact]
+    public async Task GradingRunSchemaScript_DeveConterAgregadorEIndiceDeFilhos()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "061_grading_run_aggregate.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de agregacao de correção nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("grading_run", sql, StringComparison.Ordinal);
+        Assert.Contains("GradingRunId", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_batch_GradingRunId", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (61, 'durable grading run aggregate and child batch lineage'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GradingPublicationRecoveryScript_DeveConterClaimsAtivosELeasesDeExecucao()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "060_grading_publication_recovery.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de recuperacao de publicacao nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("ExecutionLeaseUntil", sql, StringComparison.Ordinal);
+        Assert.Contains("grading_publication_claim", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_publication_claim_ActiveTarget", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_publication_claim_Expiry", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_publication_claim_PublicationId", sql, StringComparison.Ordinal);
+        Assert.Contains("ExecutionUnknown", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (60, 'durable grading publication recovery and target claims'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MoodleResourceReuseScript_DeveConterIndicePorProprietario()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "062_moodle_resource_reuse_index.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de indice de resources nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("IX_moodle_resource_Client_Connection_Owner_Expiry", sql, StringComparison.Ordinal);
+        Assert.Contains("OwnerSubject", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (62, 'bulk reusable Moodle resource lookup index'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GradingPublicationBindingScript_DeveVincularClaimAoPendingAction()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "063_grading_publication_action_binding.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de vinculo da publicacao nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("PendingActionId", sql, StringComparison.Ordinal);
+        Assert.Contains("IX_grading_publication_claim_PendingActionId", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (63, 'bind grading publication claims to pending actions'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task MoodleResourceReferenceIndexScript_DeveCobrirBuscaDirecionada()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(
+            assemblyDirectory,
+            "Database",
+            "Scripts",
+            "064_moodle_resource_reuse_reference_index.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de indice de referencias nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("IX_moodle_resource_Client_Connection_Owner_Reference_Expiry", sql, StringComparison.Ordinal);
+        Assert.Contains("RemoteFileReference", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (64, 'targeted reusable Moodle resource reference lookup index'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task InitialSchemaScript_DeveSerCopiadoParaOutputEConterTabelasCriticas()
     {
         var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)

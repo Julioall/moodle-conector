@@ -154,9 +154,41 @@ conforme `RawFileRetentionDays`, redigindo apenas `ExtractedTextRef` de artifact
 `submission_file` expirados e mantendo hash, estado, cobertura e identidade técnica. A
 operação é observável, idempotente e não remove auditoria ou snapshots.
 
-Ingestão leve e checkpoints por etapa permanecem pendentes. A ordenação da fila durável já
-promove lotes envelhecidos (30 minutos) antes da prioridade para evitar starvation; métricas
-de idade e calibração do limite ficam para o rollout.
+Ingestão leve e checkpoints por etapa já estão implementados: o worker registra referências
+sem baixar conteúdo na criação, processa em janelas de claim e persiste checkpoints periódicos
+com retomada por lease. A ordenação da fila durável promove lotes envelhecidos (30 minutos)
+antes da prioridade para evitar starvation; métricas de idade e calibração do limite ficam
+para o rollout.
+
+### Incremento de execução agregadora e escala multiusuário
+
+`start_pending_grading_run` agora cria um `gradingRunId` durável e relaciona cada sublote
+por curso/atividade a essa execução. O identificador agregado é o contrato recomendado para
+preparar páginas de até 400 itens, salvar rascunhos, consultar status/coordenação, cancelar e
+exportar CSV; `batchJobId` continua aceito para compatibilidade. A posse é validada pelo
+subject autenticado e cada sublote é revalidado antes de qualquer leitura ou escrita.
+
+Após a confirmação, a tool pública somente autoriza a ação; um worker durável executa fora da
+requisição MCP e pode recuperar a fila após restart. O worker usa leases atômicos no PostgreSQL para exclusividade entre réplicas, claims em janelas
+de 16 itens com renovação bulk (inclusive dos itens aguardando na janela), checkpoint em
+pequenos grupos de 25 itens e recuperação após queda. Claims de publicação são vinculados à
+pending action; assim, a limpeza de previews expirados não libera uma publicação que já foi
+autorizada durante uma janela de crash. Dentro de cada processo há consumidores concorrentes e
+semáforos por `MoodleConnectionId` tanto no preparo quanto na retomada de publicações,
+evitando saturar a mesma instalação enquanto conexões independentes avançam em paralelo. O
+preparo do pacote carrega os itens em páginas, registra os anexos da página em uma operação
+bulk e não baixa recursos fora da página solicitada. As páginas usam a ordem estável de todos
+os itens e filtram o status dentro da página, portanto salvar uma página não desloca nem pula
+itens da próxima; a reutilização de resources consulta somente as referências da página com
+índice composto por conexão, proprietário e referência remota.
+Em uma colisão de índice durante dois previews concorrentes, a transação perdedora divide e
+repete apenas o conjunto afetado; itens livres não são descartados junto com o conflito.
+
+O teste de carga da aplicação cobre uma execução com 25 sublotes e 10.000 itens: a página 24
+retorna 400 itens, registra exatamente os anexos dessa página e mantém `hasMore/nextPage`
+determinísticos. O limite de 400 permanece por sublote; 10.000 é a capacidade agregada da
+execução (com bloqueio explícito e aviso ao atingir o teto), sujeita aos limites de arquivo,
+retenção e taxa da conexão Moodle.
 
 ### Fase 5 — rollout e certificação
 

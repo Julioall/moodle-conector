@@ -34,22 +34,15 @@ public sealed class ActionConfirmationService(
             throw new InvalidOperationException("Apenas o criador da acao ou um administrador Moodle pode confirma-la.");
         }
 
-        if (!string.IsNullOrWhiteSpace(requiredScope) && !currentUser.HasScope(requiredScope))
-        {
-            await RecordAuthorizationFailureAsync(
-                "missing_required_scope",
-                $"Escopo obrigatorio ausente: {requiredScope}.",
-                action,
-                cancellationToken);
-            throw new InvalidOperationException($"Escopo obrigatorio ausente: {requiredScope}.");
-        }
-
         if (!string.Equals(action.ConfirmationText, confirmationText, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Texto de confirmacao invalido.");
         }
 
-        if (action.Status == PendingActionStatus.Confirmed)
+        var durableGradingPublication = IsDurableGradingPublication(action);
+
+        if (action.Status is PendingActionStatus.Executed or PendingActionStatus.Failed ||
+            (!durableGradingPublication && action.Status == PendingActionStatus.Confirmed))
         {
             return new ActionConfirmationResponse(
                 "already_confirmed",
@@ -66,7 +59,34 @@ public sealed class ActionConfirmationService(
                 "O resultado remoto desta acao e desconhecido. Reconcilie a acao antes de tentar qualquer nova execucao.");
         }
 
-        if (action.Status != PendingActionStatus.PendingConfirmation)
+        if (durableGradingPublication &&
+            action.Status is PendingActionStatus.Confirmed or PendingActionStatus.Authorized or PendingActionStatus.Executing)
+        {
+            return new ActionConfirmationResponse(
+                "authorized",
+                action.Id,
+                action.ToolName,
+                action.RiskLevel,
+                action.ConfirmedAt ?? DateTimeOffset.UtcNow,
+                action.CorrelationId);
+        }
+
+        // A retry of an already authorized publication is an execution
+        // recovery, not a new authorization request. The original confirmation
+        // already passed the write scope gate; requiring a transient HTTP
+        // scope here would strand an Authorized action after a process restart.
+        if (!string.IsNullOrWhiteSpace(requiredScope) && !currentUser.HasScope(requiredScope))
+        {
+            await RecordAuthorizationFailureAsync(
+                "missing_required_scope",
+                $"Escopo obrigatorio ausente: {requiredScope}.",
+                action,
+                cancellationToken);
+            throw new InvalidOperationException($"Escopo obrigatorio ausente: {requiredScope}.");
+        }
+
+        if (action.Status != PendingActionStatus.PendingConfirmation &&
+            !(durableGradingPublication && action.Status == PendingActionStatus.PartiallyCompleted))
         {
             throw new InvalidOperationException($"A acao nao pode ser confirmada no estado {action.Status}.");
         }
@@ -84,9 +104,16 @@ public sealed class ActionConfirmationService(
             CourseId = action.CourseId,
             RequestSanitizedJson = AuditPayloadSanitizer.SanitizeJson(action.PreviewJson),
             ResponseSummaryJson = JsonSerializer.Serialize(new { action.Id, confirmedAt = now }, JsonOptions),
-            Status = "confirmed"
+            Status = durableGradingPublication ? "authorized" : "confirmed"
         };
-        var claim = await pendingActions.TryConfirmWithAuditAsync(
+        var claim = durableGradingPublication
+            ? await pendingActions.TryAuthorizeWithAuditAsync(
+                action.Id,
+                currentUser.Subject,
+                now,
+                audit,
+                cancellationToken)
+            : await pendingActions.TryConfirmWithAuditAsync(
             action.Id,
             currentUser.Subject,
             now,
@@ -94,10 +121,11 @@ public sealed class ActionConfirmationService(
             cancellationToken);
         if (!claim.ConfirmedByCaller)
         {
-            if (claim.Status == PendingActionStatus.Confirmed)
+            if (claim.Status == PendingActionStatus.Confirmed ||
+                (durableGradingPublication && claim.Status is PendingActionStatus.Authorized or PendingActionStatus.Executing or PendingActionStatus.PartiallyCompleted))
             {
                 return new ActionConfirmationResponse(
-                    "already_confirmed",
+                    durableGradingPublication ? "authorized" : "already_confirmed",
                     action.Id,
                     action.ToolName,
                     action.RiskLevel,
@@ -114,13 +142,16 @@ public sealed class ActionConfirmationService(
         }
 
         return new ActionConfirmationResponse(
-            "confirmed",
+            durableGradingPublication ? "authorized" : "confirmed",
             action.Id,
             action.ToolName,
             action.RiskLevel,
             now,
             action.CorrelationId);
     }
+
+    private static bool IsDurableGradingPublication(PendingMoodleAction action) =>
+        action.ToolName is "criar_previa_lancamento_lote" or "confirmar_lancamento_lote_moodle";
 
     private Task RecordAuthorizationFailureAsync(
         string reason,

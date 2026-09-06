@@ -364,6 +364,30 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task ConfirmLaunch_PublicAuthorizationOnlyDoesNotWriteBeforeDurableWorker()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        fixture.Confirmations.Status = "authorized";
+        var sut = CreateConfirmHandler(fixture);
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                "CONFIRMAR LANCAMENTO 1 ITEM",
+                ExecuteImmediately: false),
+            CancellationToken.None);
+
+        Assert.Equal("authorized", result.Status);
+        Assert.Equal(0, result.SentItems);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Equal(GradingCommitStatus.Pending, item.CommitStatus);
+    }
+
+    [Fact]
     public async Task ConfirmLaunch_BloqueiaQuandoHashDaSubmissaoMudouAposRevisao()
     {
         var fixture = new Fixture();
@@ -458,6 +482,67 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(GradingCommitStatus.Succeeded, item.CommitStatus);
         Assert.Contains(fixture.AuditLogs.Logs, log => log.Status == "commit_reconciled_succeeded");
         Assert.Single(fixture.Mediator.SavedGrades);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_AposRestartReconciliaNotaPersistidaSemReenviarWrite()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+
+        // Build the same preflight payload used by the public flow. The
+        // simulated process then dies after Moodle applied the values but
+        // before the item checkpoint was persisted.
+        var preview = await new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway).Handle(
+                new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: true),
+                CancellationToken.None);
+        var payload = fixture.PendingActions.LastPayload!;
+        var pendingAction = new PendingMoodleAction
+        {
+            Id = fixture.PendingActions.PendingActionId,
+            ToolName = "criar_previa_lancamento_lote",
+            RiskLevel = ToolRiskLevel.CriticalHumanConfirmedWrite,
+            CreatedBySubject = "teacher-1",
+            CreatedByMoodleUserId = 321,
+            CourseId = 10,
+            PayloadJson = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            PreviewJson = "{}",
+            ConfirmationText = preview.ConfirmationText,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            IdempotencyKey = "restart-recovery",
+            CorrelationId = "restart-recovery-audit"
+        };
+        pendingAction.Authorize("teacher-1", DateTimeOffset.UtcNow);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        fixture.Confirmations.Status = "authorized";
+        fixture.ExistingGrades.ExistingGrades.Add(new AssignmentExistingGrade(
+            "501",
+            "101",
+            payload.Items[0].Grade,
+            HasGrade: true,
+            payload.Items[0].FeedbackText));
+
+        var result = await CreateConfirmHandler(fixture).Handle(
+            new ConfirmMoodleBatchLaunchCommand(
+                pendingAction.Id,
+                preview.ConfirmationText,
+                ExecuteImmediately: true),
+            CancellationToken.None);
+
+        Assert.Equal("executed", result.Status);
+        Assert.Equal(1, result.SentItems);
+        Assert.Equal(0, result.FailedItems);
+        Assert.Equal(GradingCommitStatus.Succeeded, item.CommitStatus);
+        Assert.Empty(fixture.Mediator.SavedGrades);
+        Assert.Contains(fixture.AuditLogs.Logs, log => log.Status == "commit_recovered_succeeded");
     }
 
     [Fact]
@@ -1328,6 +1413,38 @@ public sealed class GradingLaunchCommandHandlerTests
             return Task.FromResult(new PendingActionConfirmationClaimResult(true, action.Status, action.ConfirmedAt));
         }
 
+        public Task<PendingActionExecutionClaimResult> TryBeginExecutionAsync(
+            Guid id,
+            string workerId,
+            DateTimeOffset now,
+            TimeSpan leaseDuration,
+            CancellationToken cancellationToken)
+        {
+            var action = Actions.SingleOrDefault(candidate => candidate.Id == id);
+            if (action is null || !action.BeginExecution(workerId, now, leaseDuration))
+            {
+                return Task.FromResult(new PendingActionExecutionClaimResult(
+                    false,
+                    action?.Status ?? PendingActionStatus.Failed,
+                    action?.ExecutionLeaseUntil,
+                    action?.ExecutionAttemptCount ?? 0));
+            }
+
+            return Task.FromResult(new PendingActionExecutionClaimResult(
+                true,
+                action.Status,
+                action.ExecutionLeaseUntil,
+                action.ExecutionAttemptCount));
+        }
+
+        public Task<bool> TryRenewExecutionLeaseAsync(
+            Guid id,
+            string workerId,
+            DateTimeOffset now,
+            TimeSpan leaseDuration,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(Actions.SingleOrDefault(candidate => candidate.Id == id)?.ExecutionOwner == workerId);
+
         public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByStatusAsync(
             GradingBatchStatus status, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Array.Empty<AssistedGradingBatch>());
@@ -1340,6 +1457,7 @@ public sealed class GradingLaunchCommandHandlerTests
     private sealed class FakeActionConfirmationService : IActionConfirmationService
     {
         public string? LastRequiredScope { get; private set; }
+        public string Status { get; set; } = "confirmed";
 
         public Task<ActionConfirmationResponse> ConfirmAsync(
             Guid pendingActionId,
@@ -1349,7 +1467,7 @@ public sealed class GradingLaunchCommandHandlerTests
         {
             LastRequiredScope = requiredScope;
             return Task.FromResult(new ActionConfirmationResponse(
-                "confirmed",
+                Status,
                 pendingActionId,
                 "criar_previa_lancamento_lote",
                 ToolRiskLevel.CriticalHumanConfirmedWrite,

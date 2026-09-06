@@ -29,7 +29,9 @@ public sealed record CreateAssistedGradingBatchCommand(
     string Priority = "normal",
     IReadOnlyList<AssignmentSubmissionSummary>? PrefetchedSubmissions = null,
     string? IdempotencyKey = null,
-    string? CourseDisplayName = null) : IRequest<CreateAssistedGradingBatchResult>;
+    string? CourseDisplayName = null,
+    string? MoodleConnectionId = null,
+    Guid? GradingRunId = null) : IRequest<CreateAssistedGradingBatchResult>;
 
 public sealed record AssistedGradingBatchDiscoveryFailure(
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
@@ -591,11 +593,13 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         // perder a identidade do cliente.
         var connectorClientId = executionContext?.ClientId;
         var connectionAlias = connectionSelection?.Alias;
+        var moodleConnectionId = request.MoodleConnectionId;
         if (credentialsProvider is not null)
         {
             var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
             connectorClientId = credentials.ClientId;
             connectionAlias = credentials.Alias;
+            moodleConnectionId = credentials.ConnectionId;
         }
 
         var batch = AssistedGradingBatch.Create(
@@ -612,7 +616,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             connectorClientId: connectorClientId,
             connectionAlias: connectionAlias,
             idempotencyKey: normalizedIdempotencyKey,
-            courseDisplayName: request.CourseDisplayName);
+            courseDisplayName: request.CourseDisplayName,
+            moodleConnectionId: moodleConnectionId,
+            gradingRunId: request.GradingRunId);
 
         await repository.AddBatchAsync(batch, cancellationToken);
         var assignmentContextCache = new Dictionary<AssignmentContextCacheKey, IReadOnlyList<ContextArtifactTemplate>>();
@@ -1441,8 +1447,16 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
         GetAssistedGradingBatchStatusQuery request,
         CancellationToken cancellationToken)
     {
-        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
-            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
+        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken);
+        if (batch is null)
+        {
+            var scope = await GradingBatchScopeResolver.ResolveAsync(
+                repository,
+                currentUser,
+                request.BatchJobId,
+                cancellationToken);
+            return await BuildRunStatusAsync(scope, request, cancellationToken);
+        }
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
         var page = Math.Max(1, request.Page);
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
@@ -1500,7 +1514,8 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
 
     private static GradingBatchProcessingMetrics BuildMetrics(
         AssistedGradingBatch batch,
-        IReadOnlyList<AssistedGradingItem> items)
+        IReadOnlyList<AssistedGradingItem> items,
+        bool? canLaunchOverride = null)
     {
         var total = batch.TotalItems > 0 ? batch.TotalItems : 1;
         var progressPercent = (int)Math.Round((double)batch.ProcessedItems / total * 100);
@@ -1510,10 +1525,10 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
         // ProcessedItems já é a união dos estados terminais; subtrair
         // bloqueados/falhos novamente produzia uma contagem pendente inflada.
         var pendingItems = Math.Max(0, batch.TotalItems - batch.ProcessedItems);
-        var canLaunch = items.Any(item =>
+        var canLaunch = (canLaunchOverride ?? items.Any(item =>
                 item.Status == GradingItemStatus.ReadyToCommit &&
                 item.CommitStatus == GradingCommitStatus.Pending &&
-                !string.IsNullOrWhiteSpace(item.FinalFeedback)) &&
+                !string.IsNullOrWhiteSpace(item.FinalFeedback))) &&
             batch.Status is GradingBatchStatus.ReadyForReview or GradingBatchStatus.Processing;
 
         return new GradingBatchProcessingMetrics(
@@ -1523,6 +1538,94 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             failedPercent,
             pendingItems,
             canLaunch);
+    }
+
+    private async Task<AssistedGradingBatchStatusResult> BuildRunStatusAsync(
+        GradingBatchScope scope,
+        GetAssistedGradingBatchStatusQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (scope.Batches.Count == 0)
+        {
+            var emptyPage = Math.Max(1, request.Page);
+            var emptyPageSize = Math.Clamp(request.PageSize, 1, 100);
+            return new AssistedGradingBatchStatusResult(
+                request.BatchJobId,
+                scope.Run?.Status.ToString() ?? "Preparing",
+                0,
+                0,
+                0,
+                0,
+                0,
+                emptyPage,
+                emptyPageSize,
+                false,
+                [],
+                [],
+                new Dictionary<string, int>(),
+                new GradingBatchProcessingMetrics(0, 0, 0, 0, 0, false));
+        }
+
+        var page = Math.Max(1, request.Page);
+        var pageSize = Math.Clamp(request.PageSize, 1, 100);
+        var pageItems = await repository.ListItemsByGradingRunAsync(
+            scope.Run!.Id,
+            page,
+            pageSize,
+            status: null,
+            cancellationToken);
+        var totalItems = await repository.CountItemsByGradingRunAsync(
+            scope.Run.Id,
+            status: null,
+            cancellationToken);
+        var nextReady = pageItems
+            .Where(item => item.Status == GradingItemStatus.DraftReady && item.ReviewStatus == GradingReviewStatus.NotReviewed)
+            .Take(5)
+            .Select(ToStatusItem)
+            .ToArray();
+        var draftReady = await repository.CountItemsByGradingRunAsync(scope.Run.Id, GradingItemStatus.DraftReady, cancellationToken);
+        var readyToCommit = await repository.CountItemsByGradingRunAsync(scope.Run.Id, GradingItemStatus.ReadyToCommit, cancellationToken);
+        var committed = await repository.CountItemsByGradingRunAsync(scope.Run.Id, GradingItemStatus.Committed, cancellationToken);
+        var blocked = await repository.CountItemsByGradingRunAsync(scope.Run.Id, GradingItemStatus.Blocked, cancellationToken);
+        var failed = await repository.CountItemsByGradingRunAsync(scope.Run.Id, GradingItemStatus.Failed, cancellationToken);
+        var processed = draftReady + readyToCommit + committed + blocked + failed;
+        var ready = draftReady + readyToCommit + committed;
+        var errorsByCategory = new Dictionary<string, int>();
+        if (blocked > 0) errorsByCategory["blocked"] = blocked;
+        if (failed > 0) errorsByCategory["failed"] = failed;
+        var syntheticBatch = AssistedGradingBatch.Create(
+            scope.Batches[0].CourseId,
+            scope.AssignmentIds.Count == 0 ? [1L] : scope.AssignmentIds,
+            scope.Run?.CreatedBySubject ?? scope.Batches[0].CreatedBySubject,
+            scope.Run?.CreatedByMoodleUserId ?? scope.Batches[0].CreatedByMoodleUserId,
+            totalItems);
+        syntheticBatch.UpdateCounters(processed, ready, blocked, failed);
+        // A process can crash after the publication action reaches a
+        // terminal state but before the aggregate row is updated. Derive the
+        // observable status from the item ledger in that narrow window so a
+        // run does not remain indefinitely stuck at Publishing after restart.
+        var runStatus = scope.Run?.Status.ToString() ?? "Ready";
+        if (scope.Run?.Status == GradingRunStatus.Publishing && readyToCommit == 0)
+        {
+            runStatus = committed == totalItems
+                ? GradingRunStatus.Completed.ToString()
+                : GradingRunStatus.PartiallyCompleted.ToString();
+        }
+        return new AssistedGradingBatchStatusResult(
+            request.BatchJobId,
+            runStatus,
+            totalItems,
+            processed,
+            ready,
+            blocked,
+            failed,
+            page,
+            pageSize,
+            page * pageSize < totalItems,
+            pageItems.Select(ToStatusItem).ToArray(),
+            nextReady,
+            errorsByCategory,
+            BuildMetrics(syntheticBatch, pageItems, canLaunchOverride: readyToCommit > 0));
     }
 }
 
@@ -1544,16 +1647,54 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
             throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
         }
 
-        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
-            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
-        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
-
-        var items = await GradingItemProcessor.LoadAllBatchItemsAsync(repository, batch.Id, cancellationToken);
-        var evidenceByItem = new Dictionary<Guid, IReadOnlyList<GradingEvidence>>();
-        foreach (var item in items)
+        var scope = await GradingBatchScopeResolver.ResolveAsync(
+            repository,
+            currentUser,
+            request.BatchJobId,
+            cancellationToken);
+        var batch = scope.FirstBatch;
+        if (batch is null)
         {
-            evidenceByItem[item.Id] = await repository.ListEvidenceByItemAsync(item.Id, cancellationToken);
+            var emptyReport = new AssistedGradingCoordinationReportResult(
+                scope.RequestedId,
+                DateTimeOffset.UtcNow,
+                string.Empty,
+                scope.AssignmentIds.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToArray(),
+                scope.Run?.Status.ToString() ?? "Preparing",
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                null,
+                null,
+                null,
+                new Dictionary<string, int>(),
+                new Dictionary<string, int>(),
+                new Dictionary<string, int>(),
+                [],
+                [],
+                string.Empty);
+            return emptyReport with { ReportMarkdown = BuildReportMarkdown(emptyReport) };
         }
+
+        var items = new List<AssistedGradingItem>();
+        foreach (var child in scope.Batches)
+        {
+            items.AddRange(await GradingItemProcessor.LoadAllBatchItemsAsync(repository, child.Id, cancellationToken));
+        }
+
+        // A single set-based read avoids one evidence query per item when a
+        // run contains thousands of submissions.
+        var evidenceByItem = await repository.ListEvidenceByItemsAsync(
+            items.Select(item => item.Id).ToArray(),
+            cancellationToken);
 
         var statusCounts = CountBy(items, item => item.Status.ToString());
         var reviewStatusCounts = CountBy(items, item => item.ReviewStatus.ToString());
@@ -1580,19 +1721,25 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
         var lowConfidenceItems = items.Count(HasLowConfidence);
         var generatedAt = DateTimeOffset.UtcNow;
 
+        var processedItems = scope.IsRun
+            ? items.Count(item => item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit or GradingItemStatus.Committed or GradingItemStatus.Blocked or GradingItemStatus.Failed)
+            : batch.ProcessedItems;
+        var readyItems = scope.IsRun
+            ? items.Count(item => item.Status is GradingItemStatus.DraftReady or GradingItemStatus.ReadyToCommit or GradingItemStatus.Committed)
+            : batch.ReadyItems;
+        var blockedItems = scope.IsRun ? items.Count(item => item.Status == GradingItemStatus.Blocked) : batch.BlockedItems;
+        var failedItems = scope.IsRun ? items.Count(item => item.Status == GradingItemStatus.Failed) : batch.FailedItems;
         var report = new AssistedGradingCoordinationReportResult(
-            batch.Id,
+            scope.RequestedId,
             generatedAt,
-            batch.CourseId.ToString(CultureInfo.InvariantCulture),
-            batch.AssignmentIds
-                .Select(id => id.ToString(CultureInfo.InvariantCulture))
-                .ToArray(),
-            batch.Status.ToString(),
-            batch.TotalItems,
-            batch.ProcessedItems,
-            batch.ReadyItems,
-            batch.BlockedItems,
-            batch.FailedItems,
+            scope.CourseId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            scope.AssignmentIds.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToArray(),
+            scope.Run?.Status.ToString() ?? batch.Status.ToString(),
+            scope.IsRun ? items.Count : batch.TotalItems,
+            processedItems,
+            readyItems,
+            blockedItems,
+            failedItems,
             executionUnknownItems,
             reviewedItems,
             pendingReviewItems,
@@ -1943,12 +2090,27 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
             throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
         }
 
-        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
-            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
-        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
+        var scope = await GradingBatchScopeResolver.ResolveAsync(
+            repository,
+            currentUser,
+            request.BatchJobId,
+            cancellationToken);
+        foreach (var child in scope.Batches)
+        {
+            await orchestrator.CancelAsync(child.Id, cancellationToken);
+        }
 
-        await orchestrator.CancelAsync(batch.Id, cancellationToken);
+        if (scope.Run is not null)
+        {
+            scope.Run.Cancel();
+            await repository.SaveChangesAsync(cancellationToken);
+            return new CancelAssistedGradingBatchResult(
+                scope.RequestedId,
+                scope.Run.Status.ToString(),
+                $"Execucao cancelada; {scope.Batches.Count} sublote(s) foram sinalizados para cancelamento.");
+        }
 
+        var batch = scope.FirstBatch!;
         return new CancelAssistedGradingBatchResult(
             batch.Id,
             batch.Status.ToString(),
@@ -2180,7 +2342,7 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             (maxGrade is not null ? "3) Sugira uma nota somente dentro da escala confirmada. " : "3) Nao inclua nota numerica. ") +
             $"O feedback deve ser adequado para colar diretamente no Moodle. " +
             $"Nao exija saudacao nominal: este contexto fornece apenas studentId, que nao e um nome. " +
-            $"Apos gerar, use save_ai_grading_batch para salvar o rascunho e export_grading_corrections_csv para receber o CSV. Nao use ferramentas de revisao, confirmacao ou envio ao Moodle.");
+            $"Apos gerar, use save_ai_grading_batch para salvar o rascunho. Se o usuario pediu CSV, use export_grading_corrections_csv; caso contrario, use create_batch_grade_launch_preview e aguarde a confirmacao explicita antes de publicar.");
 
         return new GradingContextForChatResult(
             item.Id,
@@ -2221,7 +2383,9 @@ public sealed class PrepareGradingContextForChatQueryHandler(
 // ============================================================
 
 public sealed record PrepareAiGradingBatchQuery(
-    Guid BatchJobId) : IRequest<AiGradingBatchPackageResult>;
+    Guid BatchJobId,
+    int Page = 1,
+    int PageSize = 400) : IRequest<AiGradingBatchPackageResult>;
 
 public sealed record AiGradingBatchPackageResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -2230,7 +2394,12 @@ public sealed record AiGradingBatchPackageResult(
     [property: JsonPropertyName("totalItems")] int TotalItems,
     [property: JsonPropertyName("items")] IReadOnlyList<AiGradingBatchItemPackage> Items,
     [property: JsonPropertyName("instructions")] string Instructions,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("gradingRunId")] Guid? GradingRunId = null,
+    [property: JsonPropertyName("page")] int Page = 1,
+    [property: JsonPropertyName("pageSize")] int PageSize = 400,
+    [property: JsonPropertyName("hasMore")] bool HasMore = false,
+    [property: JsonPropertyName("nextPage")] int? NextPage = null);
 
 public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -2266,7 +2435,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
     IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
     : IRequestHandler<PrepareAiGradingBatchQuery, AiGradingBatchPackageResult>
 {
-    private const int PageSize = 100;
+    private const int MaxPageSize = 400;
 
     public async Task<AiGradingBatchPackageResult> Handle(
         PrepareAiGradingBatchQuery request,
@@ -2279,21 +2448,93 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
         }
 
-        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
-            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
-        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
+        var scope = await GradingBatchScopeResolver.ResolveAsync(
+            repository,
+            currentUser,
+            request.BatchJobId,
+            cancellationToken);
+        var batch = scope.FirstBatch;
+        if (batch is null)
+        {
+            const string emptyInstructions = "Nao ha itens elegiveis para preparar nesta execucao. Se a execucao ainda estiver em processamento, repita a chamada usando o mesmo gradingRunId quando os sublotes estiverem prontos.";
+            return new AiGradingBatchPackageResult(
+                request.BatchJobId,
+                string.Empty,
+                [],
+                0,
+                [],
+                emptyInstructions,
+                ["A execucao ainda nao possui sublotes com itens elegiveis."],
+                scope.Run?.Id ?? Guid.Empty,
+                Math.Max(1, request.Page),
+                Math.Clamp(request.PageSize, 1, MaxPageSize),
+                false,
+                null);
+        }
 
         var globalWarnings = new List<string>();
-        var items = await LoadAllBatchItemsAsync(batch.Id, cancellationToken);
-        var itemIds = items.Select(item => item.Id).ToArray();
-        var artifactsByItem = await repository.ListArtifactsByItemsAsync(itemIds, cancellationToken);
-        var evidenceByItem = await repository.ListEvidenceByItemsAsync(itemIds, cancellationToken);
-        var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(itemIds, cancellationToken);
+        var page = Math.Max(1, request.Page);
+        var pageSize = Math.Clamp(request.PageSize, 1, MaxPageSize);
+        IReadOnlyList<AssistedGradingItem> items;
+        IReadOnlyList<AssistedGradingItem> pageItems;
+        int eligibleItemCount;
+        int totalScopedItems;
+        if (scope.Run is not null)
+        {
+            // Keep pagination in SQL for aggregate runs. Materializing all
+            // children here made page 25 of a 10k run read the same 10k rows
+            // again, multiplying database and memory pressure for each AI
+            // page request. The page itself is intentionally selected without
+            // a status predicate: saving page 1 changes those items from
+            // AwaitingAiAnalysis to DraftReady, and applying Skip to a
+            // shrinking filtered set would otherwise skip the next 400 items
+            // when the caller requests page 2.
+            var stablePageItems = await repository.ListItemsByGradingRunAsync(
+                scope.Run.Id,
+                page,
+                pageSize,
+                status: null,
+                cancellationToken);
+            eligibleItemCount = await repository.CountItemsByGradingRunAsync(
+                scope.Run.Id,
+                GradingItemStatus.AwaitingAiAnalysis,
+                cancellationToken);
+            totalScopedItems = await repository.CountItemsByGradingRunAsync(
+                scope.Run.Id,
+                status: null,
+                cancellationToken);
+            items = stablePageItems;
+            pageItems = stablePageItems
+                .Where(item => item.Status == GradingItemStatus.AwaitingAiAnalysis)
+                .ToArray();
+        }
+        else
+        {
+            var allScopeItems = await LoadAllScopeItemsAsync(scope.Batches, cancellationToken);
+            var eligibleItems = allScopeItems
+                .Where(item => item.Status == GradingItemStatus.AwaitingAiAnalysis)
+                .ToArray();
+            eligibleItemCount = eligibleItems.Length;
+            totalScopedItems = allScopeItems.Count;
+            // Keep the legacy child-batch path consistent with aggregate runs:
+            // page boundaries are based on immutable creation order, not on a
+            // status-filtered set that shrinks after each save operation.
+            items = allScopeItems
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToArray();
+            pageItems = items
+                .Where(item => item.Status == GradingItemStatus.AwaitingAiAnalysis)
+                .ToArray();
+        }
+        var pageItemIds = pageItems.Select(item => item.Id).ToArray();
+        var artifactsByItem = await repository.ListArtifactsByItemsAsync(pageItemIds, cancellationToken);
+        var evidenceByItem = await repository.ListEvidenceByItemsAsync(pageItemIds, cancellationToken);
+        var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(pageItemIds, cancellationToken);
         var packageItems = new List<AiGradingBatchItemPackage>();
-        var eligibleItems = items
-            .Where(item => item.Status == GradingItemStatus.AwaitingAiAnalysis)
-            .ToArray();
-        var skippedByStatus = items
+        var skippedByStatus = scope.Run is not null
+            ? []
+            : items
             .Where(item => item.Status != GradingItemStatus.AwaitingAiAnalysis)
             .GroupBy(item => item.Status.ToString())
             .OrderBy(group => group.Key, StringComparer.Ordinal)
@@ -2305,17 +2546,18 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 $"Itens fora da pre-validacao da IA foram ignorados: {string.Join(", ", skippedByStatus)}.");
         }
 
-        foreach (var item in eligibleItems)
+        if (pageItems.Count > 0 &&
+            (resourceGateway is null || resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled != true))
         {
-            var itemWarnings = new List<string>();
-            IReadOnlyList<GradingArtifact> artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
-            var resourceLinks = new List<AiGradingResourceLink>();
-            if (resourceGateway is null || resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled != true)
-            {
-                throw new InvalidOperationException(
-                    "A correção assistida exige McpResourceSubmissionDeliveryEnabled=true e o gateway MCP Resource disponível.");
-            }
+            throw new InvalidOperationException(
+                "A correção assistida exige McpResourceSubmissionDeliveryEnabled=true e o gateway MCP Resource disponível.");
+        }
 
+        var submissionRegistrationEntries = new List<(Guid ItemId, MoodleResourceRegistration Registration)>();
+        var contextRegistrationEntries = new List<(Guid ItemId, string Filename, MoodleResourceRegistration Registration)>();
+        foreach (var item in pageItems)
+        {
+            var artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
             var submissionArtifacts = artifacts
                 .Where(artifact => artifact.ArtifactType == "submission_file")
                 .ToArray();
@@ -2327,74 +2569,117 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                     $"A entrega do item {item.Id} não possui referências originais completas para MCP Resource.");
             }
 
+            submissionRegistrationEntries.AddRange(submissionArtifacts.Select(artifact =>
+                (item.Id, new MoodleResourceRegistration(
+                    "submission_attachment",
+                    artifact.Filename!,
+                    artifact.MimeType ?? "application/octet-stream",
+                    artifact.SourceUrl!,
+                    item.CourseId,
+                    item.AssignmentId,
+                    item.SubmissionId,
+                    item.MoodleUserId,
+                    SizeBytes: artifact.SizeBytes,
+                    Sha256: artifact.Sha256))));
+
+            contextRegistrationEntries.AddRange(artifacts
+                .Where(artifact => artifact.ArtifactType == "assignment_context" &&
+                                   !string.IsNullOrWhiteSpace(artifact.SourceUrl) &&
+                                   !string.IsNullOrWhiteSpace(artifact.Filename))
+                .Select(artifact => (
+                    item.Id,
+                    artifact.Filename!,
+                    new MoodleResourceRegistration(
+                        "assignment_context_attachment",
+                        artifact.Filename!,
+                        artifact.MimeType ?? "application/octet-stream",
+                        artifact.SourceUrl!,
+                        item.CourseId,
+                        item.AssignmentId,
+                        item.SubmissionId,
+                        item.MoodleUserId,
+                        SizeBytes: artifact.SizeBytes,
+                        Sha256: artifact.Sha256))));
+        }
+
+        var resourceLinksByItem = new Dictionary<Guid, IReadOnlyList<AiGradingResourceLink>>();
+        if (submissionRegistrationEntries.Count > 0)
+        {
+            var descriptors = await resourceGateway!.RegisterManyAsync(
+                submissionRegistrationEntries.Select(entry => entry.Registration).ToArray(),
+                cancellationToken);
+            if (descriptors.Count != submissionRegistrationEntries.Count)
+            {
+                throw new InvalidOperationException("O gateway MCP Resource retornou uma quantidade inconsistente de anexos registrados.");
+            }
+
+            resourceLinksByItem = submissionRegistrationEntries
+                .Select((entry, index) => (entry.ItemId, Link: new AiGradingResourceLink(
+                    descriptors[index].Uri,
+                    descriptors[index].Filename,
+                    descriptors[index].MimeType,
+                    descriptors[index].SizeBytes,
+                    ResourceType: "submission")))
+                .GroupBy(entry => entry.ItemId)
+                .ToDictionary(group => group.Key, group => (IReadOnlyList<AiGradingResourceLink>)group.Select(entry => entry.Link).ToArray());
+        }
+
+        // Context attachments are optional, but registering them one by one
+        // made a 400-item page perform hundreds of credential/DB round trips.
+        // Keep the submission path strict and bulk the optional context path
+        // separately so one optional failure only produces item warnings.
+        var contextWarningsByItem = new Dictionary<Guid, IReadOnlyList<string>>();
+        if (contextRegistrationEntries.Count > 0)
+        {
             try
             {
-                foreach (var artifact in submissionArtifacts)
+                var descriptors = await resourceGateway!.RegisterManyAsync(
+                    contextRegistrationEntries.Select(entry => entry.Registration).ToArray(),
+                    cancellationToken);
+                if (descriptors.Count != contextRegistrationEntries.Count)
                 {
-                    var descriptor = await resourceGateway.RegisterAsync(
-                        new MoodleResourceRegistration(
-                            "submission_attachment",
-                            artifact.Filename!,
-                            artifact.MimeType ?? "application/octet-stream",
-                            artifact.SourceUrl!,
-                            item.CourseId,
-                            item.AssignmentId,
-                            item.SubmissionId,
-                            item.MoodleUserId,
-                            SizeBytes: artifact.SizeBytes,
-                            Sha256: artifact.Sha256),
-                        cancellationToken);
-                    resourceLinks.Add(new AiGradingResourceLink(
-                        descriptor.Uri,
-                        descriptor.Filename,
-                        descriptor.MimeType,
-                        descriptor.SizeBytes,
-                        ResourceType: "submission"));
+                    throw new InvalidOperationException("O gateway MCP Resource retornou uma quantidade inconsistente de materiais de contexto registrados.");
                 }
 
-                foreach (var artifact in artifacts.Where(a =>
-                             a.ArtifactType == "assignment_context" &&
-                             !string.IsNullOrWhiteSpace(a.SourceUrl) &&
-                             !string.IsNullOrWhiteSpace(a.Filename)))
+                var contextLinks = contextRegistrationEntries
+                    .Select((entry, index) => (entry.ItemId, Link: new AiGradingResourceLink(
+                        descriptors[index].Uri,
+                        descriptors[index].Filename,
+                        descriptors[index].MimeType,
+                        descriptors[index].SizeBytes,
+                        ResourceType: "assignment_context")))
+                    .GroupBy(entry => entry.ItemId)
+                    .ToDictionary(group => group.Key, group => (IReadOnlyList<AiGradingResourceLink>)group.Select(entry => entry.Link).ToArray());
+                foreach (var (itemId, links) in contextLinks)
                 {
-                    try
-                    {
-                        var descriptor = await resourceGateway.RegisterAsync(
-                            new MoodleResourceRegistration(
-                                "assignment_context_attachment",
-                                artifact.Filename!,
-                                artifact.MimeType ?? "application/octet-stream",
-                                artifact.SourceUrl!,
-                                item.CourseId,
-                                item.AssignmentId,
-                                item.SubmissionId,
-                                item.MoodleUserId,
-                                SizeBytes: artifact.SizeBytes,
-                                Sha256: artifact.Sha256),
-                            cancellationToken);
-                        resourceLinks.Add(new AiGradingResourceLink(
-                            descriptor.Uri,
-                            descriptor.Filename,
-                            descriptor.MimeType,
-                            descriptor.SizeBytes,
-                            ResourceType: "assignment_context"));
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception exception)
-                    {
-                        itemWarnings.Add($"Material de contexto {artifact.Filename} não foi disponibilizado como MCP Resource ({exception.GetType().Name}).");
-                    }
+                    resourceLinksByItem[itemId] = resourceLinksByItem.TryGetValue(itemId, out var existing)
+                        ? existing.Concat(links).ToArray()
+                        : links;
                 }
             }
-            catch (Exception exception) when (exception is not OperationCanceledException)
+            catch (OperationCanceledException)
             {
-                resourceLinks.Clear();
-                throw new InvalidOperationException(
-                    $"Não foi possível registrar os anexos da submissão como MCP Resource ({exception.GetType().Name}).",
-                    exception);
+                throw;
+            }
+            catch (Exception exception)
+            {
+                foreach (var itemGroup in contextRegistrationEntries.GroupBy(entry => entry.ItemId))
+                {
+                    contextWarningsByItem[itemGroup.Key] = itemGroup
+                        .Select(entry => $"Material de contexto {entry.Filename} não foi disponibilizado como MCP Resource ({exception.GetType().Name}).")
+                        .ToArray();
+                }
+            }
+        }
+
+        foreach (var item in pageItems)
+        {
+            var itemWarnings = new List<string>();
+            IReadOnlyList<GradingArtifact> artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
+            var resourceLinks = resourceLinksByItem.GetValueOrDefault(item.Id, []).ToList();
+            if (contextWarningsByItem.TryGetValue(item.Id, out var contextWarnings))
+            {
+                itemWarnings.AddRange(contextWarnings);
             }
 
             itemWarnings.Add("Entrega fornecida por MCP Resource; leia os arquivos originais antes de propor a correção.");
@@ -2473,16 +2758,26 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
             "- Ao chamar save_ai_grading_batch, preencha proposal.resourceUris com todas e somente as URIs em resources cujo resourceType seja 'submission'. Nunca inclua resources de 'assignment_context' nesse campo; eles podem ser citados somente em proposal.evidence[].resourceUri. Sem todas as URIs de submission, o rascunho nao pode gerar uma previa de lancamento.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
-            "Apos gerar, use a tool save_ai_grading_batch para salvar os resultados e em seguida chame export_grading_corrections_csv para receber o CSV com nome, nota, feedback e situacao. Nao chame ferramentas de confirmacao ou envio ao Moodle.");
+            "Apos gerar, use a tool save_ai_grading_batch para salvar os resultados. Se o usuario pediu CSV, chame export_grading_corrections_csv; caso contrario, chame create_batch_grade_launch_preview, mostre a previa e aguarde CONFIRMAR_PUBLICACAO.");
 
+        // The traversal cursor is the stable all-item page, while
+        // eligibleItemCount remains the number of items that still need AI.
+        // This avoids skipping work when saving a previous page changes item
+        // statuses between requests.
+        var hasMore = totalScopedItems > page * pageSize;
         var result = new AiGradingBatchPackageResult(
-            batch.Id,
-            batch.CourseId.ToString(CultureInfo.InvariantCulture),
-            batch.AssignmentIds.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToArray(),
-            packageItems.Count,
+            scope.RequestedId,
+            scope.CourseId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            scope.AssignmentIds.Select(id => id.ToString(CultureInfo.InvariantCulture)).ToArray(),
+            eligibleItemCount,
             packageItems,
             instructions,
-            globalWarnings);
+            globalWarnings,
+            scope.Run?.Id ?? Guid.Empty,
+            page,
+            pageSize,
+            hasMore,
+            hasMore ? page + 1 : null);
         telemetry?.RecordPhase(
             "grading",
             "package",
@@ -2493,11 +2788,21 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         return result;
     }
 
-    private Task<IReadOnlyList<AssistedGradingItem>> LoadAllBatchItemsAsync(
-        Guid batchId,
+    private async Task<IReadOnlyList<AssistedGradingItem>> LoadAllScopeItemsAsync(
+        IReadOnlyList<AssistedGradingBatch> batches,
         CancellationToken cancellationToken)
     {
-        return GradingItemProcessor.LoadAllBatchItemsAsync(repository, batchId, cancellationToken);
+        var result = new List<AssistedGradingItem>();
+        foreach (var child in batches)
+        {
+            var items = await GradingItemProcessor.LoadAllBatchItemsAsync(repository, child.Id, cancellationToken);
+            result.AddRange(items);
+        }
+
+        return result
+            .OrderBy(item => item.CreatedAt)
+            .ThenBy(item => item.Id)
+            .ToArray();
     }
 
     private static string FormatSkippedStatus(string status) => status switch
@@ -2662,9 +2967,14 @@ public sealed class SaveAiGradingBatchCommandHandler(
             throw new ArgumentException("Informe pelo menos um item.", nameof(request.Items));
         }
 
-        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
-            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
-        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
+        var scope = await GradingBatchScopeResolver.ResolveAsync(
+            repository,
+            currentUser,
+            request.BatchJobId,
+            cancellationToken);
+        var batch = scope.FirstBatch
+            ?? throw new InvalidOperationException("A execucao de correcao ainda nao possui sublotes.");
+        var scopeBatchIds = scope.Batches.Select(child => child.Id).ToHashSet();
 
         _ = settingsGateway; // Compatibilidade de DI; a escala vem do snapshot local.
         var moodleUserId = await moodleUserResolver.ResolveMoodleUserIdAsync(cancellationToken);
@@ -2677,13 +2987,69 @@ public sealed class SaveAiGradingBatchCommandHandler(
         var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(
             request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
             cancellationToken);
-        var legacySettingsCache = new Dictionary<long, AssignmentSettingsSummary?>();
+        var legacySettingsCache = new Dictionary<(long CourseId, long AssignmentId), AssignmentSettingsSummary?>();
         var itemsById = await repository.GetItemsAsync(
             request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
             cancellationToken);
         var nextProposalVersions = proposalStore is null
             ? new Dictionary<Guid, int>()
             : new Dictionary<Guid, int>(await proposalStore.GetNextVersionsAsync(itemsById.Keys.ToArray(), cancellationToken));
+        var resourcesById = new Dictionary<string, MoodleResource>(StringComparer.Ordinal);
+        if (resourceRepository is not null)
+        {
+            // Validate all proposal resource references from one indexed
+            // lookup before entering the item loop. The previous per-URI
+            // FindAsync path multiplied database round trips across a 10k
+            // run, especially when each submission had several attachments.
+            var requestedResourceIds = request.Items
+                .SelectMany(input => (input.Proposal?.ResourceUris ?? [])
+                    .Concat((input.Proposal?.Evidence ?? [])
+                        .Select(evidence => evidence.ResourceUri)
+                        .Where(uri => !string.IsNullOrWhiteSpace(uri))
+                        .Select(uri => uri!)))
+                .Where(uri => !string.IsNullOrWhiteSpace(uri) && MoodleResourceUri.TryParse(uri, out _))
+                .Select(uri => MoodleResourceUri.TryParse(uri!, out var resourceId) ? resourceId : null)
+                .Where(resourceId => !string.IsNullOrWhiteSpace(resourceId))
+                .Select(resourceId => resourceId!)
+                .Distinct(StringComparer.Ordinal)
+                .ToArray();
+            if (requestedResourceIds.Length > 0)
+            {
+                try
+                {
+                    foreach (var entry in await resourceRepository.FindManyAsync(
+                                 requestedResourceIds,
+                                 cancellationToken))
+                    {
+                        resourcesById[entry.Key] = entry.Value;
+                    }
+
+                    // ZIP child resources point to a parent attachment. Load
+                    // those parents in one second indexed query as well.
+                    var parentIds = resourcesById.Values
+                        .Select(resource => resource.ParentResourceId)
+                        .Where(parentId => !string.IsNullOrWhiteSpace(parentId))
+                        .Select(parentId => parentId!)
+                        .Distinct(StringComparer.Ordinal)
+                        .Where(parentId => !resourcesById.ContainsKey(parentId))
+                        .ToArray();
+                    if (parentIds.Length > 0)
+                    {
+                        foreach (var entry in await resourceRepository.FindManyAsync(parentIds, cancellationToken))
+                        {
+                            resourcesById[entry.Key] = entry.Value;
+                        }
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // Preserve per-item partial-failure semantics. The loop
+                    // below falls back to FindAsync only if this bulk read
+                    // itself failed, which is an exceptional path.
+                    resourcesById.Clear();
+                }
+            }
+        }
 
         foreach (var input in request.Items)
         {
@@ -2717,9 +3083,9 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     continue;
                 }
 
-                if (item.BatchId != batch.Id)
+                if (!scopeBatchIds.Contains(item.BatchId))
                 {
-                    warnings.Add($"Item {input.GradingItemId} nao pertence ao lote {batch.Id}.");
+                    warnings.Add($"Item {input.GradingItemId} nao pertence ao lote ou execucao {request.BatchJobId}.");
                     failedCount++;
                     continue;
                 }
@@ -2764,14 +3130,15 @@ public sealed class SaveAiGradingBatchCommandHandler(
                 {
                     // Compatibilidade para lotes legados que ainda não têm
                     // snapshot. Lotes novos nunca chegam a este fallback.
-                    if (!legacySettingsCache.TryGetValue(item.AssignmentId, out var legacySettings))
+                    var settingsKey = (item.CourseId, item.AssignmentId);
+                    if (!legacySettingsCache.TryGetValue(settingsKey, out var legacySettings))
                     {
                         legacySettings = await settingsGateway.GetAssignmentSettingsAsync(
                             batch.CreatedBySubject,
                             item.CourseId.ToString(CultureInfo.InvariantCulture),
                             item.AssignmentId.ToString(CultureInfo.InvariantCulture),
                             cancellationToken);
-                        legacySettingsCache[item.AssignmentId] = legacySettings;
+                        legacySettingsCache[settingsKey] = legacySettings;
                     }
                     maxGrade = legacySettings?.MaxGrade > 0 ? legacySettings.MaxGrade : null;
                     if (maxGrade is not null)
@@ -2837,13 +3204,18 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         {
                             if (!MoodleResourceUri.TryParse(uri, out var resourceId))
                                 throw new InvalidOperationException("A proposta aponta para uma URI de resource invalida.");
-                            var resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
+                            var resource = resourcesById.GetValueOrDefault(resourceId);
+                            if (resource is null)
+                            {
+                                resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
+                            }
                             if (resource is null || resource.IsExpired(DateTimeOffset.UtcNow) || resource.SubmissionId != item.SubmissionId)
                                 throw new InvalidOperationException("A proposta referencia um resource invalido da submissao.");
                             if (!string.IsNullOrWhiteSpace(resource.ParentResourceId))
                             {
-                                resource = await resourceRepository.FindAsync(resource.ParentResourceId, cancellationToken)
-                                    ?? throw new InvalidOperationException("O resource ZIP pai nao esta mais disponivel.");
+                                resource = resourcesById.GetValueOrDefault(resource.ParentResourceId) ??
+                                    await resourceRepository.FindAsync(resource.ParentResourceId, cancellationToken) ??
+                                    throw new InvalidOperationException("O resource ZIP pai nao esta mais disponivel.");
                             }
                             if (!string.Equals(resource.ResourceType, "submission_attachment", StringComparison.OrdinalIgnoreCase))
                                 throw new InvalidOperationException("proposal.resourceUris deve conter somente os anexos originais da submissao.");
@@ -2866,8 +3238,8 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         item.RecordSubmissionIntegrity(submissionContentHash, resources.Keys.ToArray());
                     }
 
-                    if (resourceRepository is not null)
-                    {
+                            if (resourceRepository is not null)
+                            {
                         // URIs de evidência são sempre verificadas; o ID opaco
                         // não é uma autorização. Elas podem apontar para o
                         // anexo da submissão ou para material de contexto, mas
@@ -2876,7 +3248,11 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         {
                             if (string.IsNullOrWhiteSpace(evidence.ResourceUri)) continue;
                             if (!MoodleResourceUri.TryParse(evidence.ResourceUri, out var resourceId)) throw new InvalidOperationException("A evidencia aponta para uma URI de resource invalida.");
-                            var resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
+                            var resource = resourcesById.GetValueOrDefault(resourceId);
+                            if (resource is null)
+                            {
+                                resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
+                            }
                             if (resource is null || resource.IsExpired(DateTimeOffset.UtcNow) || resource.SubmissionId != item.SubmissionId)
                                 throw new InvalidOperationException("A evidencia nao esta vinculada a um resource valido da submissao.");
                         }
@@ -2942,15 +3318,20 @@ public sealed class SaveAiGradingBatchCommandHandler(
             await proposalStore.PublishManyAsync(proposalsToPublish, cancellationToken);
         }
 
-        // Atualizar contadores do lote
-        var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(repository, batch.Id, cancellationToken);
-        GradingItemProcessor.UpdateBatchCounters(batch, allItems);
+        // Atualizar contadores de todos os sublotes. O mesmo comando pode
+        // receber uma página do run agregador, sem misturar itens de outro
+        // usuário ou de outra execução.
+        foreach (var child in scope.Batches)
+        {
+            var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(repository, child.Id, cancellationToken);
+            GradingItemProcessor.UpdateBatchCounters(child, allItems);
+        }
         await repository.SaveChangesAsync(cancellationToken);
 
         await auditLogs.AddAsync(new MoodleAuditLog
         {
-            CorrelationId = $"grading-batch-{batch.Id:N}",
-            BatchJobId = batch.Id,
+            CorrelationId = $"grading-batch-{request.BatchJobId:N}",
+            BatchJobId = request.BatchJobId,
             ToolName = "salvar_correcoes_ia_lote",
             RiskLevel = ToolRiskLevel.DraftOnly,
             ActorSubject = currentUser.Subject,
@@ -2960,7 +3341,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
             MoodleFunction = null,
             RequestSanitizedJson = AuditPayloadSanitizer.SerializeSanitized(new
             {
-                batchJobId = batch.Id,
+                batchJobId = request.BatchJobId,
                 itemCount = request.Items.Count
             }),
             ResponseSummaryJson = AuditPayloadSanitizer.SerializeSanitized(new
@@ -2974,14 +3355,14 @@ public sealed class SaveAiGradingBatchCommandHandler(
         await auditLogs.SaveChangesAsync(cancellationToken);
 
         var result = new SaveAiGradingBatchResult(
-            batch.Id,
+            request.BatchJobId,
             savedCount,
             skippedCount,
             failedCount,
             request.Items.Count,
             warnings,
             NextStep: savedCount > 0
-                ? "Correcoes salvas internamente. Para CSV externo, chame export_grading_corrections_csv. Para publicar no Moodle, chame create_batch_grade_launch_preview, revise a previa e aguarde a confirmacao explicita."
+                ? "Correcoes salvas internamente. Para CSV externo, chame export_grading_corrections_csv com o mesmo batchJobId ou gradingRunId. Para publicar no Moodle, chame create_batch_grade_launch_preview, revise a previa e aguarde a confirmacao explicita."
                 : "Nenhum item foi salvo. Verifique os avisos.",
             updatedItems);
         telemetry?.RecordPhase(

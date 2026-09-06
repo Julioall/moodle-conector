@@ -18,6 +18,14 @@ public sealed class GradingItemProcessor(
     IGradingContextSnapshotStore? snapshotStore = null,
     IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
 {
+    public Task PrepareBatchAsync(
+        AssistedGradingBatch batch,
+        IReadOnlyCollection<AssistedGradingItem> items,
+        CancellationToken cancellationToken)
+    {
+        return contextBuilder.PrepareBatchAsync(batch, items, cancellationToken);
+    }
+
     public async Task ProcessItemAsync(
         AssistedGradingItem item,
         IGradingReviewRepository repository,
@@ -76,10 +84,23 @@ public sealed class GradingItemProcessor(
         {
             if (resourceFeatures?.Value.McpResourceSubmissionDeliveryEnabled == true)
             {
-                var hasDeferredSubmissionResource = (await repository.ListArtifactsByItemAsync(item.Id, cancellationToken))
-                    .Any(artifact =>
-                        string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase) &&
-                        !string.IsNullOrWhiteSpace(artifact.SourceUrl));
+                // BuildAsync already loaded the artifacts. Reusing the
+                // context avoids a second SELECT for every deferred file in a
+                // large batch; the resource flag is part of GradingFileInfo.
+                var hasDeferredSubmissionResource = context.AttachedFiles.Any(file =>
+                    string.Equals(file.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase) &&
+                    file.OriginalResourceAvailable);
+                // Legacy/test builders may not expose attached-file metadata.
+                // Keep their behavior by consulting persistence only when the
+                // context is genuinely empty; the production builder never
+                // takes this branch after its batch preload.
+                if (!hasDeferredSubmissionResource && context.AttachedFiles.Count == 0)
+                {
+                    hasDeferredSubmissionResource = (await repository.ListArtifactsByItemAsync(item.Id, cancellationToken))
+                        .Any(artifact =>
+                            string.Equals(artifact.ArtifactType, "submission_file", StringComparison.OrdinalIgnoreCase) &&
+                            !string.IsNullOrWhiteSpace(artifact.SourceUrl));
+                }
                 if (hasDeferredSubmissionResource)
                 {
                     // A pré-validação local não interpreta a entrega quando o
@@ -184,10 +205,10 @@ public sealed class GradingItemProcessor(
         CancellationToken cancellationToken,
         int pageSize = 100)
     {
-        // O repositório aplica um limite de segurança de 100 itens por página.
-        // Normalizar aqui evita que um chamador que solicite, por exemplo, 400
-        // itens interprete a primeira página truncada como o lote completo.
-        var effectivePageSize = Math.Clamp(pageSize, 1, 100);
+        // O repositório aplica um limite de segurança de 400 itens por página,
+        // alinhado ao limite de sublote. Isso mantém a memória limitada sem
+        // transformar cada sublote de 400 em quatro consultas sequenciais.
+        var effectivePageSize = Math.Clamp(pageSize, 1, 400);
         var allItems = new List<AssistedGradingItem>();
         var page = 1;
         while (true)

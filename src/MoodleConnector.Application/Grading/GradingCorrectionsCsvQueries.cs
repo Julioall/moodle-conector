@@ -38,20 +38,34 @@ public sealed class GetGradingCorrectionsCsvQueryHandler(
             throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
         }
 
-        var batch = await repository.GetBatchAsync(request.BatchJobId, cancellationToken)
-            ?? throw new InvalidOperationException("Lote de correcao nao encontrado.");
-        GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
-
-        var items = await GradingItemProcessor.LoadAllBatchItemsAsync(
+        var scope = await GradingBatchScopeResolver.ResolveAsync(
             repository,
-            batch.Id,
+            currentUser,
+            request.BatchJobId,
             cancellationToken);
+        if (scope.DestinationRun is not null &&
+            !await repository.TrySetGradingRunDestinationAsync(
+                scope.DestinationRun.Id,
+                "csv",
+                cancellationToken))
+        {
+            throw new InvalidOperationException(
+                "Esta execucao ja foi direcionada para publicacao no Moodle; gere um novo gradingRunId para exportar CSV.");
+        }
+        var items = new List<AssistedGradingItem>();
+        foreach (var batch in scope.Batches)
+        {
+            items.AddRange(await GradingItemProcessor.LoadAllBatchItemsAsync(
+                repository,
+                batch.Id,
+                cancellationToken));
+        }
         var rows = items
             .Select(ToRow)
             .ToArray();
 
         return new GradingCorrectionsCsvResult(
-            batch.Id,
+            request.BatchJobId,
             DateTimeOffset.UtcNow,
             rows.Length,
             rows.Count(row => row.Situacao == "gerado"),

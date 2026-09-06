@@ -20,7 +20,10 @@ public sealed class GradingBatchWorkerService(
     IOptions<GradingLimitsOptions> limits,
     ILogger<GradingBatchWorkerService> logger) : BackgroundService
 {
+    private const int ItemClaimWindowSize = 16;
+    private const int CheckpointInterval = 25;
     private readonly ConcurrentDictionary<Guid, byte> activeBatches = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> connectionGates = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly string WorkerId =
         $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
@@ -33,7 +36,7 @@ public sealed class GradingBatchWorkerService(
         {
             // Compatibilidade para hosts que ainda não registraram o job store.
             await ResumeInProgressBatchesAsync(stoppingToken);
-            await ProcessChannelAsync(stoppingToken);
+            await ProcessChannelConsumersAsync(stoppingToken);
             return;
         }
 
@@ -55,7 +58,7 @@ public sealed class GradingBatchWorkerService(
         try
         {
             await Task.WhenAll(
-                ProcessChannelAsync(stoppingToken),
+                ProcessChannelConsumersAsync(stoppingToken),
                 PollDurableBatchesAsync(stoppingToken));
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -64,6 +67,13 @@ public sealed class GradingBatchWorkerService(
         }
 
         logger.LogInformation("GradingBatchWorkerService encerrado.");
+    }
+
+    private Task ProcessChannelConsumersAsync(CancellationToken cancellationToken)
+    {
+        var consumerCount = Math.Clamp(limits.Value.BatchWorkerConcurrency, 1, 32);
+        return Task.WhenAll(Enumerable.Range(0, consumerCount)
+            .Select(_ => ProcessChannelAsync(cancellationToken)));
     }
 
     private async Task ProcessChannelAsync(CancellationToken cancellationToken)
@@ -257,16 +267,39 @@ public sealed class GradingBatchWorkerService(
             return;
         }
 
-        var enteredExecutionContext = false;
-        if (!string.IsNullOrWhiteSpace(batch.ConnectorClientId) && executionContext is not null)
-        {
-            executionContext.Enter(batch.ConnectorClientId, batch.CreatedBySubject, null);
-            if (connectionSelection is not null)
-            {
-                connectionSelection.Alias = batch.ConnectionAlias;
-            }
+        var connectionKey = ResolveConnectionKey(batch);
+        var connectionGate = connectionGates.GetOrAdd(
+            connectionKey,
+            _ => new SemaphoreSlim(
+                Math.Clamp(limits.Value.BatchWorkerPerConnectionConcurrency, 1, 16),
+                Math.Clamp(limits.Value.BatchWorkerPerConnectionConcurrency, 1, 16)));
+        await connectionGate.WaitAsync(cancellationToken);
 
-            enteredExecutionContext = true;
+        var enteredExecutionContext = false;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(batch.ConnectorClientId) && executionContext is not null)
+            {
+                executionContext.Enter(batch.ConnectorClientId, batch.CreatedBySubject, null);
+                enteredExecutionContext = true;
+                if (connectionSelection is not null)
+                {
+                    connectionSelection.Alias = batch.ConnectionAlias;
+                }
+            }
+        }
+        catch
+        {
+            if (enteredExecutionContext)
+            {
+                if (connectionSelection is not null)
+                {
+                    connectionSelection.Alias = null;
+                }
+                executionContext!.Clear();
+            }
+            connectionGate.Release();
+            throw;
         }
 
         try
@@ -298,127 +331,251 @@ public sealed class GradingBatchWorkerService(
                 maxItems);
             var pendingItems = items.Where(item => item.Status == GradingItemStatus.Pending).ToArray();
 
+            // Artifact references are immutable for a batch item in the
+            // normal path. Let ingestion hydrate them once for the entire
+            // child batch instead of issuing two artifact SELECTs per item.
+            await ingestionService.PrepareBatchAsync(
+                batch,
+                pendingItems.Select(item => item.Id).ToArray(),
+                cancellationToken);
+            await processor.PrepareBatchAsync(
+                batch,
+                pendingItems,
+                cancellationToken);
+
             logger.LogInformation(
                 "Processando lote {BatchId}: {PendingCount} itens pendentes de {TotalCount} total.",
                 batchId,
                 pendingItems.Length,
                 items.Count);
 
-            var claimedItemIds = new List<Guid>(pendingItems.Length);
-            foreach (var item in pendingItems)
+            var processorCheckpointsSinceSave = 0;
+            var itemsSinceOperationalCheck = 0;
+            var itemsSinceBatchCheckpoint = 0;
+            var lastBatchCheckpointItemId = Guid.Empty;
+            var batchCancelled = false;
+
+            async Task CheckpointProcessorAsync(CancellationToken checkpointCancellationToken)
+            {
+                // Context and analysis transitions stay on the tracked item,
+                // but flushing every transition turns a 10k run into tens of
+                // thousands of database round trips. Periodic and final saves
+                // bound restart loss without multiplying database pressure.
+                processorCheckpointsSinceSave++;
+                if (processorCheckpointsSinceSave >= CheckpointInterval)
+                {
+                    await repository.SaveChangesAsync(checkpointCancellationToken);
+                    processorCheckpointsSinceSave = 0;
+                }
+            }
+
+            // Claims are deliberately windowed. Claiming an entire 400-item
+            // batch at once would let early leases expire while later items
+            // wait behind slow AI calls, allowing another replica to take the
+            // same work. Sixteen items keeps the claim horizon bounded while
+            // reducing claim/release round trips by an order of magnitude.
+            foreach (var itemWindow in pendingItems.Chunk(ItemClaimWindowSize))
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
                     break;
                 }
 
-                // Verificar se lote foi cancelado durante processamento.
-                var currentBatch = await repository.GetBatchAsync(batchId, cancellationToken);
-                if (currentBatch?.Status == GradingBatchStatus.Cancelled)
+                var windowClaimedItemIds = jobStore is null
+                    ? itemWindow.Select(item => item.Id).ToHashSet()
+                    : (await jobStore.TryClaimItemsAsync(
+                        batchId,
+                        itemWindow.Select(item => item.Id).ToArray(),
+                        WorkerId,
+                        DateTimeOffset.UtcNow,
+                        LeaseDuration,
+                        cancellationToken)).ToHashSet();
+
+                foreach (var item in itemWindow.Where(item => windowClaimedItemIds.Contains(item.Id)))
                 {
-                    if (jobStore is not null)
+                    if (cancellationToken.IsCancellationRequested)
                     {
-                        await jobStore.ReleaseBatchLeaseAsync(
-                            batchId,
-                            WorkerId,
-                            DateTimeOffset.UtcNow,
-                            errorCode: null,
-                            nextAttemptAt: null,
-                            cancellationToken);
+                        break;
                     }
 
-                    logger.LogInformation(
-                        "Lote {BatchId} cancelado durante processamento; interrompendo worker.",
-                        batchId);
-                    break;
-                }
-
-                try
-                {
-                    if (jobStore is not null && !await jobStore.RenewBatchLeaseAsync(
-                            batchId,
-                            WorkerId,
-                            DateTimeOffset.UtcNow,
-                            LeaseDuration,
-                            cancellationToken))
+                    itemsSinceOperationalCheck++;
+                    // Verificar cancelamento em intervalos amortizados. O
+                    // lease do lote continua protegendo contra outra réplica;
+                    // a leitura por item era um N+1 desnecessário.
+                    if (itemsSinceOperationalCheck >= CheckpointInterval)
                     {
-                        logger.LogWarning("Lease do lote {BatchId} expirou durante o processamento.", batchId);
-                        return;
+                        itemsSinceOperationalCheck = 0;
+                        var currentBatch = await repository.GetBatchAsync(batchId, cancellationToken);
+                        if (currentBatch?.Status == GradingBatchStatus.Cancelled)
+                        {
+                            if (jobStore is not null)
+                            {
+                                await jobStore.ReleaseBatchLeaseAsync(
+                                    batchId,
+                                    WorkerId,
+                                    DateTimeOffset.UtcNow,
+                                    errorCode: null,
+                                    nextAttemptAt: null,
+                                    cancellationToken);
+                            }
+
+                            logger.LogInformation(
+                                "Lote {BatchId} cancelado durante processamento; interrompendo worker.",
+                                batchId);
+                            batchCancelled = true;
+                            break;
+                        }
                     }
 
-                    if (jobStore is not null && await jobStore.TryClaimItemAsync(
-                            batchId,
-                            item.Id,
-                            WorkerId,
-                            DateTimeOffset.UtcNow,
-                            LeaseDuration,
-                            cancellationToken) is null)
+                    async Task ProcessItemCoreAsync(CancellationToken itemCancellationToken)
                     {
-                        logger.LogDebug(
-                            "Item {GradingItemId} do lote {BatchId} já possui claim ativo ou não está pronto; ignorado.",
-                            item.Id,
-                            batchId);
-                        continue;
+                        item.MarkProcessingStage(GradingProcessingStage.Ingestion);
+
+                        await ingestionService.IngestPendingAsync(
+                            batch,
+                            item,
+                            itemCancellationToken);
+
+                        await processor.ProcessItemAsync(
+                            item,
+                            repository,
+                            itemCancellationToken,
+                            batch.TeacherInstructions,
+                            new GradingContextOptions(
+                                batch.IncludeRubric,
+                                batch.IncludeSubmissionFiles,
+                                batch.IncludeCourseMaterials,
+                                batch.TeacherInstructions),
+                            checkpointAsync: CheckpointProcessorAsync);
+                        item.MarkProcessingStage(
+                            item.Status == GradingItemStatus.AwaitingAiAnalysis
+                                ? GradingProcessingStage.Analysis
+                                : item.Status is GradingItemStatus.Blocked or GradingItemStatus.Failed
+                                    ? GradingProcessingStage.Failed
+                                    : GradingProcessingStage.Completed);
                     }
 
-                    item.MarkProcessingStage(GradingProcessingStage.Ingestion);
-                    await repository.SaveChangesAsync(cancellationToken);
-
-                    if (jobStore is not null)
+                    try
                     {
-                        claimedItemIds.Add(item.Id);
-                    }
-
-                    await ingestionService.IngestPendingAsync(batch, item, cancellationToken);
-
-                    await processor.ProcessItemAsync(
-                        item,
-                        repository,
-                        cancellationToken,
-                        batch.TeacherInstructions,
-                        new GradingContextOptions(
-                            batch.IncludeRubric,
-                            batch.IncludeSubmissionFiles,
-                            batch.IncludeCourseMaterials,
-                            batch.TeacherInstructions),
-                        checkpointAsync: repository.SaveChangesAsync);
-                    item.MarkProcessingStage(
-                        item.Status == GradingItemStatus.AwaitingAiAnalysis
-                            ? GradingProcessingStage.Analysis
-                            : item.Status is GradingItemStatus.Blocked or GradingItemStatus.Failed
-                                ? GradingProcessingStage.Failed
-                                : GradingProcessingStage.Completed);
-
-                    if (jobStore is not null)
-                    {
-                        var checkpointed = await jobStore.UpdateBatchCheckpointAsync(
-                            batchId,
-                            WorkerId,
-                            item.Id,
-                            DateTimeOffset.UtcNow,
-                            cancellationToken);
-                        if (!checkpointed)
+                        if (jobStore is null)
+                        {
+                            await ProcessItemCoreAsync(cancellationToken);
+                        }
+                        else if (!await ProcessItemWithLeaseHeartbeatAsync(
+                                     jobStore,
+                                     batchId,
+                                     item.Id,
+                                     itemWindow
+                                         .Where(candidate =>
+                                             windowClaimedItemIds.Contains(candidate.Id) &&
+                                             candidate.Status == GradingItemStatus.Pending)
+                                         .Select(candidate => candidate.Id)
+                                         .ToArray(),
+                                     cancellationToken,
+                                     ProcessItemCoreAsync,
+                                     getRenewableItemIds: () => itemWindow
+                                         .Where(candidate =>
+                                             windowClaimedItemIds.Contains(candidate.Id) &&
+                                             candidate.Status == GradingItemStatus.Pending)
+                                         .Select(candidate => candidate.Id)
+                                         .ToArray()))
                         {
                             logger.LogWarning(
-                                "Lease do lote {BatchId} expirou antes do checkpoint; descartando alterações locais.",
+                                "Lease do item {GradingItemId} ou do lote {BatchId} foi perdido; descartando o restante deste worker.",
+                                item.Id,
                                 batchId);
                             return;
                         }
+
+                        lastBatchCheckpointItemId = item.Id;
+                        itemsSinceBatchCheckpoint++;
+                        if (jobStore is not null && itemsSinceBatchCheckpoint >= CheckpointInterval)
+                        {
+                            // A checkpoint is also the amortized heartbeat
+                            // for fast items. If every item finishes before
+                            // the per-item timer ticks, renewing only inside
+                            // long calls would let the 15-minute batch lease
+                            // expire during a long 10k run.
+                            var batchLeaseRenewed = await jobStore.RenewBatchLeaseAsync(
+                                batchId,
+                                WorkerId,
+                                DateTimeOffset.UtcNow,
+                                LeaseDuration,
+                                cancellationToken);
+                            if (!batchLeaseRenewed)
+                            {
+                                logger.LogWarning(
+                                    "Lease do lote {BatchId} expirou antes do heartbeat de checkpoint; descartando alterações locais.",
+                                    batchId);
+                                return;
+                            }
+
+                            var checkpointed = await jobStore.UpdateBatchCheckpointAsync(
+                                batchId,
+                                WorkerId,
+                                lastBatchCheckpointItemId,
+                                DateTimeOffset.UtcNow,
+                                cancellationToken);
+                            if (!checkpointed)
+                            {
+                                logger.LogWarning(
+                                    "Lease do lote {BatchId} expirou antes do checkpoint; descartando alterações locais.",
+                                    batchId);
+                                return;
+                            }
+
+                            itemsSinceBatchCheckpoint = 0;
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(
+                            ex,
+                            "Falha recuperavel ao processar item {GradingItemId} do lote {BatchId}.",
+                            item.Id,
+                            batchId);
+                        item.MarkAnalysisFailed($"Falha ao processar este item de correcao assistida: {ex.Message}");
+                        item.MarkProcessingStage(GradingProcessingStage.Failed);
                     }
                 }
-                catch (OperationCanceledException)
+
+                // The window's leases are no longer needed after its items
+                // have been processed. A bulk release avoids one UPDATE per
+                // item while keeping interrupted windows recoverable by TTL.
+                if (jobStore is not null && windowClaimedItemIds.Count > 0)
                 {
-                    throw;
+                    await jobStore.ReleaseItemLeasesAsync(
+                        batchId,
+                        windowClaimedItemIds,
+                        WorkerId,
+                        DateTimeOffset.UtcNow,
+                        errorCode: null,
+                        nextAttemptAt: null,
+                        cancellationToken);
                 }
-                catch (Exception ex)
+
+                if (batchCancelled)
                 {
-                    logger.LogError(
-                        ex,
-                        "Falha recuperavel ao processar item {GradingItemId} do lote {BatchId}.",
-                        item.Id,
-                        batchId);
-                    item.MarkAnalysisFailed($"Falha ao processar este item de correcao assistida: {ex.Message}");
-                    item.MarkProcessingStage(GradingProcessingStage.Failed);
+                    break;
+                }
+            }
+
+            if (jobStore is not null && lastBatchCheckpointItemId != Guid.Empty)
+            {
+                var checkpointed = await jobStore.UpdateBatchCheckpointAsync(
+                    batchId,
+                    WorkerId,
+                    lastBatchCheckpointItemId,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken);
+                if (!checkpointed)
+                {
+                    logger.LogWarning("Lease do lote {BatchId} expirou antes do checkpoint final.", batchId);
+                    return;
                 }
             }
 
@@ -444,18 +601,6 @@ public sealed class GradingBatchWorkerService(
 
             if (jobStore is not null)
             {
-                foreach (var itemId in claimedItemIds)
-                {
-                    await jobStore.ReleaseItemLeaseAsync(
-                        batchId,
-                        itemId,
-                        WorkerId,
-                        DateTimeOffset.UtcNow,
-                        errorCode: null,
-                        nextAttemptAt: null,
-                        cancellationToken);
-                }
-
                 await jobStore.ReleaseBatchLeaseAsync(
                     batchId,
                     WorkerId,
@@ -482,6 +627,168 @@ public sealed class GradingBatchWorkerService(
                 }
                 executionContext!.Clear();
             }
+
+            connectionGate.Release();
+        }
+    }
+
+    private static string ResolveConnectionKey(AssistedGradingBatch batch) =>
+        !string.IsNullOrWhiteSpace(batch.MoodleConnectionId)
+            ? $"connection:{batch.MoodleConnectionId.Trim()}"
+            : $"client:{(string.IsNullOrWhiteSpace(batch.ConnectorClientId) ? "default" : batch.ConnectorClientId)}" +
+              $":alias:{(string.IsNullOrWhiteSpace(batch.ConnectionAlias) ? "default" : batch.ConnectionAlias)}";
+
+    private async Task<bool> ProcessItemWithLeaseHeartbeatAsync(
+        IGradingBatchJobStore jobStore,
+        Guid batchId,
+        Guid itemId,
+        IReadOnlyCollection<Guid> windowItemIds,
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task> work,
+        Func<bool>? shouldRenewItem = null,
+        Func<IReadOnlyCollection<Guid>>? getRenewableItemIds = null)
+    {
+        using var leaseCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var leaseLost = 0;
+        var heartbeat = MaintainLeaseHeartbeatAsync(
+            jobStore,
+            batchId,
+            itemId,
+            windowItemIds,
+            leaseCancellation,
+            () => Interlocked.Exchange(ref leaseLost, 1),
+            shouldRenewItem,
+            getRenewableItemIds);
+
+        try
+        {
+            await work(leaseCancellation.Token);
+            return Volatile.Read(ref leaseLost) == 0;
+        }
+        finally
+        {
+            leaseCancellation.Cancel();
+            try
+            {
+                await heartbeat;
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation belongs to the linked work token and is
+                // observed by the caller when the item operation is aborted.
+            }
+        }
+    }
+
+    private async Task MaintainLeaseHeartbeatAsync(
+        IGradingBatchJobStore jobStore,
+        Guid batchId,
+        Guid itemId,
+        IReadOnlyCollection<Guid> windowItemIds,
+        CancellationTokenSource leaseCancellation,
+        Action markLeaseLost,
+        Func<bool>? shouldRenewItem,
+        Func<IReadOnlyCollection<Guid>>? getRenewableItemIds)
+    {
+        var interval = TimeSpan.FromTicks(Math.Max(
+            TimeSpan.FromSeconds(5).Ticks,
+            LeaseDuration.Ticks / 3));
+        using var timer = new PeriodicTimer(interval);
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(leaseCancellation.Token))
+            {
+                var now = DateTimeOffset.UtcNow;
+                if (!await jobStore.RenewBatchLeaseAsync(
+                        batchId,
+                        WorkerId,
+                        now,
+                        LeaseDuration,
+                        leaseCancellation.Token))
+                {
+                    logger.LogWarning(
+                        "Lease do lote {BatchId} expirou durante o processamento do item {GradingItemId}.",
+                        batchId,
+                        itemId);
+                    markLeaseLost();
+                    leaseCancellation.Cancel();
+                    return;
+                }
+
+                // Keep queued items in this claim window owned by the same
+                // worker. Without this bulk heartbeat, a slow first item
+                // could let later queued items expire and be claimed by a
+                // second replica before this worker reaches them.
+                var renewableItemIds = getRenewableItemIds?.Invoke() ?? windowItemIds;
+                if (renewableItemIds.Count > 0)
+                {
+                    var renewedItemCount = await jobStore.RenewItemLeasesAsync(
+                        batchId,
+                        renewableItemIds,
+                        WorkerId,
+                        now,
+                        LeaseDuration,
+                        leaseCancellation.Token);
+                    if (renewedItemCount < renewableItemIds.Count)
+                    {
+                        // A short renewal means another replica acquired at
+                        // least one still-pending item after its lease
+                        // expired; abort before this worker can write a
+                        // duplicate.
+                        logger.LogWarning(
+                            "A janela do lote {BatchId} perdeu {LostCount} claim(s) durante o item {GradingItemId}.",
+                            batchId,
+                            renewableItemIds.Count - renewedItemCount,
+                            itemId);
+                        markLeaseLost();
+                        leaseCancellation.Cancel();
+                        return;
+                    }
+                }
+
+                // Once the processor has moved the item out of Pending, its
+                // lease no longer needs renewal. Avoid treating that normal
+                // transition as a lost lease when the heartbeat races the
+                // final item update.
+                if (shouldRenewItem is not null && !shouldRenewItem())
+                {
+                    continue;
+                }
+
+                if (!await jobStore.RenewItemLeaseAsync(
+                        batchId,
+                        itemId,
+                        WorkerId,
+                        now,
+                        LeaseDuration,
+                        leaseCancellation.Token))
+                {
+                    logger.LogWarning(
+                        "Lease do item {GradingItemId} expirou durante o processamento do lote {BatchId}.",
+                        itemId,
+                        batchId);
+                    markLeaseLost();
+                    leaseCancellation.Cancel();
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (leaseCancellation.IsCancellationRequested)
+        {
+            // Normal completion or cancellation of the item work.
+        }
+        catch (Exception exception)
+        {
+            // A heartbeat failure is safety-critical: stop this worker rather
+            // than risk writing after another replica has acquired the lease.
+            logger.LogWarning(
+                exception,
+                "Falha ao renovar lease do lote {BatchId}/item {GradingItemId}; interrompendo o processamento local.",
+                batchId,
+                itemId);
+            markLeaseLost();
+            leaseCancellation.Cancel();
         }
     }
 

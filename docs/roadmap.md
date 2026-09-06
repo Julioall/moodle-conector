@@ -208,10 +208,10 @@ Cada atividade declara: público; referência pedagógica em `public/pedagogic`;
 - **Resultado humano:** revisar evidências e transformar um rascunho em feedback pedagógico próprio.
 - **Evidências necessárias / disponíveis:** enunciado, entrega, anexos, rubrica, critérios e histórico; disponíveis tarefas, submissões, arquivos permitidos, contexto e rascunhos internos.
 - **Funções Moodle / tool MCP:** funções `mod_assign_*`; `listar_entregas_corrigiveis`, `criar_lote_correcao_assistida`, `preparar_lote_correcao_ia`, `salvar_correcoes_ia_lote`, `revisar_feedbacks_lote`.
-- **Nível / cobertura e limites:** **Nível B**; lote até 400 itens por configuração, arquivos/tamanho/texto limitados por `GradingLimits`.
+- **Nível / cobertura e limites:** **Nível B**; cada sublote tem até 400 itens, enquanto `gradingRunId` consolida execuções de até 10.000 itens em páginas de no máximo 400. Arquivos/tamanho/texto continuam limitados por `GradingLimits`.
 - **Limitações:** extração e contexto podem ser incompletos; IA não decide nota nem publica automaticamente.
 - **Gate humano:** revisão item a item antes da prévia; texto aprovado fica auditável.
-- **Status / evidência de conclusão:** **implementado com limitações**; fluxo de grading e testes em `Tools/Grading` e `Grading`.
+- **Status / evidência de conclusão:** **implementado com limitações**; fluxo de grading, agregação por execução, retomada durável e testes em `Tools/Grading` e `Grading`.
 
 ### Lançar nota e feedback individual
 
