@@ -51,6 +51,8 @@ public sealed class MoodleGradingTools(
     public Task<CallToolResult> IniciarFluxoCorrecaoPendentesAsync(
         [Description("Identificador opcional do curso a processar. Quando informado, nenhum outro curso e consultado.")]
         string? courseId = null,
+        [Description("IDs opcionais das atividades a processar dentro do curso. Aceita instanceId ou cmid; quando omitido, inclui todas as atividades avaliativas.")]
+        string[]? assignmentIds = null,
         [Description("Numero maximo de cursos a percorrer. Use 0 para todos os cursos acessiveis.")]
         int maxCourses = 0,
         [Description("Numero maximo de entregas por sublote, de 1 a 400. A ferramenta cria sublotes adicionais ate percorrer todas as entregas pendentes.")]
@@ -79,6 +81,7 @@ public sealed class MoodleGradingTools(
             teacherInstructions,
             priority,
             moodleAlias,
+            assignmentIds,
             cancellationToken);
     }
 
@@ -371,6 +374,7 @@ public sealed class MoodleGradingTools(
         string? teacherInstructions,
         string priority,
         string? moodleAlias,
+        IReadOnlyList<string>? assignmentIds,
         CancellationToken cancellationToken)
     {
         moodleSelection.Alias = moodleAlias;
@@ -419,7 +423,8 @@ public sealed class MoodleGradingTools(
                     SnapshotOwnerId: snapshotOwnerId,
                     SnapshotClientId: snapshotClientId,
                     SnapshotConnectionAlias: snapshotConnectionAlias,
-                    CourseId: courseId),
+                    CourseId: courseId,
+                    AssignmentIds: assignmentIds),
                 cancellationToken);
         }
         catch (OperationCanceledException)

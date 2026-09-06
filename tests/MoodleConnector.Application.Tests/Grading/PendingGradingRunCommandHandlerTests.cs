@@ -86,6 +86,29 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task StartRun_ComAtividadesInformadas_ProcessaSomenteAsSelecionadas()
+    {
+        var mediator = new RunMediator();
+        var sut = new StartPendingGradingRunCommandHandler(
+            mediator,
+            new RunCourseContentsGateway(includeSecondAssignment: true));
+
+        var result = await sut.Handle(
+            new StartPendingGradingRunCommand(
+                "321",
+                MaxCourses: 0,
+                MaxItemsPerBatch: 100,
+                CourseId: "10",
+                AssignmentIds: ["502"]),
+            CancellationToken.None);
+
+        Assert.Single(result.Batches);
+        Assert.Equal(["502"], result.Batches[0].AssignmentIds);
+        Assert.Single(mediator.CreateBatchRequests);
+        Assert.Equal(["502"], mediator.CreateBatchRequests[0].AssignmentIds);
+    }
+
+    [Fact]
     public async Task StartRun_UsaSnapshotsSemLerCursosOuEntregasNoMoodle()
     {
         var mediator = new RunMediator(pendingSubmissionCount: 99);
@@ -743,7 +766,7 @@ public sealed class PendingGradingRunCommandHandlerTests
             Task.FromResult(new SubmissionContentHashSnapshot(hash, 0, DateTimeOffset.UtcNow, attachmentHashes.Count));
     }
 
-    private sealed class RunCourseContentsGateway : IMoodleCourseContentsGateway
+    private sealed class RunCourseContentsGateway(bool includeSecondAssignment = false) : IMoodleCourseContentsGateway
     {
         public Task<CourseContentsSummary> GetCourseContentsAsync(
             string userExternalId,
@@ -770,12 +793,30 @@ public sealed class PendingGradingRunCommandHandlerTests
                 AvailabilityInfo: null,
                 Dates: [],
                 Files: []);
+            var modules = includeSecondAssignment
+                ? new[]
+                {
+                    assignment,
+                    new CourseModuleSummary(
+                        "1002",
+                        "502",
+                        "assign",
+                        "Outra atividade",
+                        null,
+                        Visible: true,
+                        UserVisible: true,
+                        Description: null,
+                        AvailabilityInfo: null,
+                        Dates: [],
+                        Files: [])
+                }
+                : new[] { assignment };
             return Task.FromResult(new CourseContentsSummary(
                 courseId,
                 moduleTypes.ToArray(),
                 includeHidden,
                 onlyWithFiles,
-                [new CourseSectionSummary("1", 1, "Topico", null, true, 1, false, [assignment])]));
+                [new CourseSectionSummary("1", 1, "Topico", null, true, modules.Length, false, modules)]));
         }
     }
 

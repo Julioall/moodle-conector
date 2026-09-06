@@ -28,7 +28,8 @@ public sealed record StartPendingGradingRunCommand(
     Guid? SnapshotOwnerId = null,
     string? SnapshotClientId = null,
     string? SnapshotConnectionAlias = null,
-    string? CourseId = null) : IRequest<StartPendingGradingRunResult>;
+    string? CourseId = null,
+    IReadOnlyList<string>? AssignmentIds = null) : IRequest<StartPendingGradingRunResult>;
 
 public sealed record StartPendingGradingRunResult(
     [property: JsonPropertyName("coursesDiscovered")] int CoursesDiscovered,
@@ -186,23 +187,36 @@ public sealed class StartPendingGradingRunCommandHandler(
                 continue;
             }
 
+            var requestedAssignmentIds = request.AssignmentIds is null
+                ? null
+                : request.AssignmentIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim())
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var assignmentIds = contents.Sections
                 .SelectMany(section => section.Modules)
                 .Where(module =>
                     string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
-                    !string.IsNullOrWhiteSpace(module.InstanceId))
+                    !string.IsNullOrWhiteSpace(module.InstanceId) &&
+                    (requestedAssignmentIds is null ||
+                     requestedAssignmentIds.Contains(module.InstanceId!) ||
+                     (!string.IsNullOrWhiteSpace(module.ModuleId) &&
+                      requestedAssignmentIds.Contains(module.ModuleId!))))
                 .Select(module => module.InstanceId!.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
             if (assignmentIds.Length == 0)
             {
+                var message = requestedAssignmentIds is { Count: > 0 }
+                    ? $"Nenhuma das tarefas solicitadas ({string.Join(", ", requestedAssignmentIds)}) foi encontrada no curso."
+                    : "Nenhuma atividade avaliativa do tipo assign foi encontrada.";
                 courseResults.Add(new PendingGradingRunCourse(
                     course.CourseId,
                     courseName,
                     "no_assignments",
                     null,
-                    "Nenhuma atividade avaliativa do tipo assign foi encontrada."));
+                    message));
                 continue;
             }
 
