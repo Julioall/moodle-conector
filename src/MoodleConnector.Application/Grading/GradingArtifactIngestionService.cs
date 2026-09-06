@@ -281,66 +281,58 @@ public sealed class GradingArtifactIngestionService(
             added = true;
         }
 
-        if (!batch.IncludeCourseMaterials)
-        {
-            return added;
-        }
-
-        var modules = section.Modules.ToArray();
-        var assignmentIndex = Array.IndexOf(modules, assignmentModule);
-        var nearbyModules = modules
-            .Select((module, index) => new
-            {
-                Module = module,
-                Distance = assignmentIndex >= 0 ? Math.Abs(index - assignmentIndex) : int.MaxValue
-            })
-            .Where(entry => entry.Distance <= 3 && IsContextCandidateModule(entry.Module, assignmentModule))
-            .OrderBy(entry => entry.Distance)
-            .Take(Math.Max(1, limits.Value.MaxFilesPerSubmission))
-            .ToArray();
         var maxContextFiles = Math.Clamp(limits.Value.MaxFilesPerSubmission, 0, 100);
+        var candidates = AssignmentContextCandidateRanking.Select(
+            contents,
+            section,
+            assignmentModule,
+            Math.Max(1, maxContextFiles),
+            batch.IncludeCourseMaterials);
         var contextFilesAdded = 0;
 
-        foreach (var entry in nearbyModules)
+        foreach (var candidate in candidates)
         {
-            if (!string.IsNullOrWhiteSpace(entry.Module.Description))
+            if (candidate.File is null)
             {
-                var artifact = new GradingArtifact(
-                    Guid.NewGuid(),
-                    item.Id,
-                    "assignment_context",
-                    entry.Module.Name,
-                    "text/html",
-                    Sha256: null,
-                    SizeBytes: entry.Module.Description.Length,
-                    ExtractionStatus.Succeeded,
-                    entry.Module.Description,
-                    SummaryRef: $"section:{section.SectionNumber};distance:{entry.Distance}",
-                    DateTimeOffset.UtcNow);
-                await repository.AddArtifactAsync(artifact, cancellationToken);
-                AppendCachedArtifact(artifact);
-                added = true;
-            }
-
-            foreach (var file in entry.Module.Files.Where(file => !string.IsNullOrWhiteSpace(file.FileUrl)))
-            {
-                if (contextFilesAdded >= maxContextFiles)
+                if (!string.IsNullOrWhiteSpace(candidate.Module.Description))
                 {
-                    break;
+                    var descriptionArtifact = new GradingArtifact(
+                        Guid.NewGuid(),
+                        item.Id,
+                        "assignment_context",
+                        candidate.Module.Name,
+                        "text/html",
+                        Sha256: null,
+                        SizeBytes: candidate.Module.Description.Length,
+                        ExtractionStatus.Succeeded,
+                        candidate.Module.Description,
+                        BuildContextSummary(candidate),
+                        DateTimeOffset.UtcNow);
+                    await repository.AddArtifactAsync(descriptionArtifact, cancellationToken);
+                    AppendCachedArtifact(descriptionArtifact);
+                    added = true;
                 }
 
-                var artifact = BuildPendingArtifact(
-                    item.Id,
-                    "assignment_context",
-                    string.IsNullOrWhiteSpace(file.FileName) ? "context-file" : file.FileName,
-                    file.MimeType,
-                    file.FileSize,
-                    file.FileUrl);
-                await repository.AddArtifactAsync(artifact, cancellationToken);
-                AppendCachedArtifact(artifact);
-                added = true;
-                contextFilesAdded++;
+                continue;
             }
+
+            if (contextFilesAdded >= maxContextFiles)
+            {
+                break;
+            }
+
+            var candidateArtifact = BuildPendingArtifact(
+                item.Id,
+                "assignment_context",
+                string.IsNullOrWhiteSpace(candidate.File.FileName) ? "context-file" : candidate.File.FileName,
+                candidate.File.MimeType,
+                candidate.File.FileSize,
+                candidate.File.FileUrl,
+                BuildContextSummary(candidate));
+            await repository.AddArtifactAsync(candidateArtifact, cancellationToken);
+            AppendCachedArtifact(candidateArtifact);
+            added = true;
+            contextFilesAdded++;
         }
 
         return added;
@@ -419,7 +411,8 @@ public sealed class GradingArtifactIngestionService(
         string? filename,
         string? mimeType,
         long? sizeBytes,
-        string? sourceUrl)
+        string? sourceUrl,
+        string? summaryRef = null)
     {
         var normalizedSource = GradingArtifactSourceReference.Normalize(sourceUrl);
         return new GradingArtifact(
@@ -432,31 +425,18 @@ public sealed class GradingArtifactIngestionService(
             sizeBytes,
             normalizedSource is null ? ExtractionStatus.Failed : ExtractionStatus.Pending,
             ExtractedTextRef: null,
-                    SummaryRef: normalizedSource is null ? "source_url_invalid" : "pending_resource",
+            SummaryRef: normalizedSource is null ? "source_url_invalid" : summaryRef ?? "pending_resource",
             DateTimeOffset.UtcNow,
             normalizedSource);
     }
+
+    private static string BuildContextSummary(AssignmentContextCandidateSelection candidate) =>
+        $"section:{candidate.Section.SectionNumber};distance:{candidate.DistanceFromAssignment};" +
+        $"score:{candidate.Score.ToString("0.##", CultureInfo.InvariantCulture)};reason:{candidate.Reason}";
 
     private static bool IsAssignmentModule(CourseModuleSummary module, string assignmentId) =>
         string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
         (string.Equals(module.InstanceId, assignmentId, StringComparison.OrdinalIgnoreCase) ||
          string.Equals(module.ModuleId, assignmentId, StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsContextCandidateModule(CourseModuleSummary module, CourseModuleSummary assignmentModule)
-    {
-        if (ReferenceEquals(module, assignmentModule))
-        {
-            return false;
-        }
-
-        if (module.Files.Count > 0)
-        {
-            return true;
-        }
-
-        return module.ModuleType.Equals("resource", StringComparison.OrdinalIgnoreCase) ||
-            module.ModuleType.Equals("page", StringComparison.OrdinalIgnoreCase) ||
-            module.ModuleType.Equals("label", StringComparison.OrdinalIgnoreCase) ||
-            module.ModuleType.Equals("folder", StringComparison.OrdinalIgnoreCase);
-    }
 }

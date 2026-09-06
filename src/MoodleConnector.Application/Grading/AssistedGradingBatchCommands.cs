@@ -893,51 +893,90 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
 
         if (!includeCourseMaterials)
         {
+            // Mesmo quando o tutor não pediu materiais auxiliares, um arquivo
+            // cujo nome identifica explicitamente a atividade é parte do
+            // enunciado. O Moodle frequentemente guarda esse arquivo como um
+            // resource separado do assign.
+            foreach (var candidate in AssignmentContextCandidateRanking.Select(
+                         contents,
+                         section,
+                         assignmentModule,
+                         maxCandidates: Math.Min(3, Math.Max(1, _limits.MaxFilesPerSubmission)),
+                         includeCourseMaterials: false))
+            {
+                AddContextCandidateTemplate(templates, candidate, warnings);
+            }
+
+            if (templates.Count == 0)
+            {
+                warnings.Add(
+                    $"A tarefa {item.AssignmentId} não possui descrição nem arquivo de enunciado com correspondência forte; a correção ficará bloqueada até revisão humana.");
+            }
+
             return templates;
         }
 
-        var modules = section.Modules.ToArray();
-        var assignmentIndex = Array.IndexOf(modules, assignmentModule);
-        var nearbyModules = modules
-            .Select((module, index) => new
-            {
-                Module = module,
-                Distance = assignmentIndex >= 0 ? Math.Abs(index - assignmentIndex) : int.MaxValue
-            })
-            .Where(entry => entry.Distance <= 3 && IsContextCandidateModule(entry.Module, assignmentModule))
-            .OrderBy(entry => entry.Distance)
-            .Take(Math.Max(1, _limits.MaxFilesPerSubmission))
-            .ToArray();
-
-        foreach (var entry in nearbyModules)
+        var selectedCandidates = AssignmentContextCandidateRanking.Select(
+                     contents,
+                     section,
+                     assignmentModule,
+                     Math.Max(1, _limits.MaxFilesPerSubmission),
+                     includeCourseMaterials: true);
+        foreach (var candidate in selectedCandidates)
         {
-            if (!string.IsNullOrWhiteSpace(entry.Module.Description))
-            {
-                templates.Add(new ContextArtifactTemplate(
-                    "assignment_context",
-                    entry.Module.Name,
-                    "text/html",
-                    Sha256: null,
-                    SizeBytes: entry.Module.Description.Length,
-                    ExtractionStatus.Succeeded,
-                    entry.Module.Description,
-                    SummaryRef: $"section:{section.SectionNumber};distance:{entry.Distance}"));
-            }
+            AddContextCandidateTemplate(templates, candidate, warnings);
+        }
 
-            foreach (var file in entry.Module.Files.Where(file => !string.IsNullOrWhiteSpace(file.FileUrl)))
-            {
-                var template = BuildContextFileArtifactTemplate(file);
-                if (template is not null)
-                {
-                    templates.Add(template);
-                }
-            }
+        if (templates.Count == 0)
+        {
+            warnings.Add(
+                $"A tarefa {item.AssignmentId} não possui descrição nem material de contexto identificável no curso; a correção ficará bloqueada até revisão humana.");
         }
 
         return templates;
     }
 
-    private static ContextArtifactTemplate? BuildContextFileArtifactTemplate(CourseModuleFile file)
+    private static void AddContextCandidateTemplate(
+        ICollection<ContextArtifactTemplate> templates,
+        AssignmentContextCandidateSelection candidate,
+        ICollection<string> warnings)
+    {
+        var summaryRef =
+            $"section:{candidate.Section.SectionNumber};distance:{candidate.DistanceFromAssignment};" +
+            $"score:{candidate.Score.ToString("0.##", CultureInfo.InvariantCulture)};reason:{candidate.Reason}";
+
+        if (candidate.File is null)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate.Module.Description))
+            {
+                templates.Add(new ContextArtifactTemplate(
+                    "assignment_context",
+                    candidate.Module.Name,
+                    "text/html",
+                    Sha256: null,
+                    SizeBytes: candidate.Module.Description.Length,
+                    ExtractionStatus.Succeeded,
+                    candidate.Module.Description,
+                    SummaryRef: summaryRef));
+            }
+
+            return;
+        }
+
+        var template = BuildContextFileArtifactTemplate(candidate.File, summaryRef);
+        if (template is not null)
+        {
+            templates.Add(template);
+        }
+        else
+        {
+            warnings.Add($"Material de contexto {candidate.Title} ignorado porque não possui URL autenticável.");
+        }
+    }
+
+    private static ContextArtifactTemplate? BuildContextFileArtifactTemplate(
+        CourseModuleFile file,
+        string? summaryRef = null)
     {
         var filename = string.IsNullOrWhiteSpace(file.FileName)
             ? "context-file"
@@ -952,7 +991,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             SizeBytes: file.FileSize,
             sourceUrl is null ? ExtractionStatus.Failed : ExtractionStatus.Pending,
             ExtractedTextRef: null,
-            SummaryRef: sourceUrl is null ? "source_url_invalid" : "pending_resource",
+            SummaryRef: sourceUrl is null ? "source_url_invalid" : summaryRef ?? "pending_resource",
             SourceUrl: sourceUrl);
     }
 
@@ -2756,6 +2795,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- Escreva em paragrafos (nao use listas com marcadores).\n" +
             "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
+            "- Quando houver resources com resourceType 'assignment_context', identifique automaticamente o enunciado priorizando o arquivo cujo nome e numero correspondam a atividade; ignore materiais genericos, folhas de resposta e arquivos de outra atividade. Se nenhum contexto corresponder com seguranca, nao invente criterios nem nota e sinalize revisao humana.\n" +
             "- Ao chamar save_ai_grading_batch, preencha proposal.resourceUris com todas e somente as URIs em resources cujo resourceType seja 'submission'. Nunca inclua resources de 'assignment_context' nesse campo; eles podem ser citados somente em proposal.evidence[].resourceUri. Sem todas as URIs de submission, o rascunho nao pode gerar uma previa de lancamento.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
             "Apos gerar, use a tool save_ai_grading_batch para salvar os resultados. Se o usuario pediu CSV, chame export_grading_corrections_csv; caso contrario, chame create_batch_grade_launch_preview, mostre a previa e aguarde CONFIRMAR_PUBLICACAO.");

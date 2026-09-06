@@ -16,6 +16,18 @@
 
 O fluxo direto por MCP Resource é o único caminho de correção. `LegacySubmissionExtractionEnabled` deve permanecer `false`; a flag é mantida somente para compatibilidade de configuração.
 
+## Seleção automática do enunciado
+
+O preparador procura primeiro a descrição oficial do `assign`. Quando ela não
+existe, ele varre os módulos do curso (inclusive outras seções) e ranqueia
+resources por nome, número/família da atividade, tipo de arquivo e proximidade.
+Um arquivo como `Atividade_EAD_01_...docx` é associado à atividade `Atividade
+Extra - 01`; arquivos de outra atividade, folhas de resposta e materiais
+genéricos não são usados como enunciado. Materiais genéricos só entram quando
+`includeCourseMaterials=true`. Sem correspondência forte, o item permanece
+bloqueado para revisão humana em vez de receber uma nota baseada no arquivo
+errado.
+
 ## Métricas e alertas
 
 Monitorar os instrumentos `resource_register_count`, `resource_read_count`, `resource_read_duration_ms`, `resource_download_duration_ms`, `resource_download_bytes`, `resource_cache_hit`, `resource_cache_miss` e `resource_read_failure`.

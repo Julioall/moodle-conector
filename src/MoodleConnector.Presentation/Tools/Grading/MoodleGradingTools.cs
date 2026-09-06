@@ -59,7 +59,7 @@ public sealed class MoodleGradingTools(
         bool includeRubric = true,
         [Description("Quando true, baixa e extrai arquivos das entregas.")]
         bool includeSubmissionFiles = true,
-        [Description("Quando true, inclui materiais próximos do curso como contexto auxiliar.")]
+        [Description("Quando true, inclui materiais auxiliares do curso. Mesmo quando false, o conector procura automaticamente arquivos de enunciado cujo nome/número corresponda à atividade; materiais genéricos só entram quando esta opção está ativa.")]
         bool includeCourseMaterials = false,
         [Description("Instrucoes adicionais do professor/tutor para orientar a correcao.")]
         string? teacherInstructions = null,

@@ -590,7 +590,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
-    public async Task CreateBatch_SemMateriaisDoCurso_NaoBaixaModulosVizinhos()
+    public async Task CreateBatch_SemMateriaisDoCurso_IncluiEnunciadoCorrespondenteMasNaoMaterialGenerico()
     {
         var repository = new FakeGradingReviewRepository();
         var mediator = new FakeMediator();
@@ -621,7 +621,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
 
         Assert.Equal(1, contentsGateway.CallCount);
         Assert.Contains(repository.Artifacts, artifact => artifact.Filename == "Tarefa 1");
-        Assert.DoesNotContain(repository.Artifacts, artifact => artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf");
+        Assert.Contains(repository.Artifacts, artifact => artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf");
+        Assert.DoesNotContain(repository.Artifacts, artifact => artifact.Filename == "Calendario do curso");
     }
 
     [Fact]
@@ -660,7 +661,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         var contextArtifacts = repository.Artifacts
             .Where(artifact => artifact.ArtifactType == "assignment_context")
             .ToArray();
-        Assert.Equal(6, contextArtifacts.Length);
+        Assert.Equal(4, contextArtifacts.Length);
         foreach (var item in repository.Items)
         {
             Assert.Contains(contextArtifacts, artifact =>
@@ -669,6 +670,9 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             Assert.Contains(contextArtifacts, artifact =>
                 artifact.GradingItemId == item.Id &&
                 artifact.Filename == "Orientacoes SAP 01 - Etapa 1.pdf");
+            Assert.DoesNotContain(contextArtifacts, artifact =>
+                artifact.GradingItemId == item.Id &&
+                artifact.Filename == "Calendario do curso");
         }
     }
 
