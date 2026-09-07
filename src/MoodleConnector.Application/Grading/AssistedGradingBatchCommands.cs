@@ -3597,8 +3597,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
         var submissionReferences = (proposal.Evidence ?? [])
             .Any(evidence =>
                 evidence.ArtifactId != Guid.Empty ||
-                !string.IsNullOrWhiteSpace(evidence.ResourceUri) ||
-                !string.IsNullOrWhiteSpace(evidence.Reference));
+                !string.IsNullOrWhiteSpace(evidence.ResourceUri));
         var criterionArtifactReferences = (proposal.Criteria ?? [])
             .Any(criterion => (criterion.ArtifactIds ?? []).Any(id => id != Guid.Empty));
 

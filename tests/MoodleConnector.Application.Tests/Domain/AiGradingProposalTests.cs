@@ -69,6 +69,41 @@ public sealed class AiGradingProposalTests
         Assert.False(first.ReviewRequired);
     }
 
+    [Theory]
+    [InlineData("assignment_context", AiGradingCriterionSource.StatementDerived)]
+    [InlineData("teacher_instruction", AiGradingCriterionSource.TeacherDefined)]
+    [InlineData("model", AiGradingCriterionSource.Unknown)]
+    public void Create_NormalizaFontesDeCriterioUsadasPeloModelo(string source, string expected)
+    {
+        var proposal = AiGradingProposal.Create(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            1,
+            "context-hash",
+            0m,
+            "A entrega nao corresponde a atividade solicitada.",
+            [new AiGradingCriterionProposal(
+                "C1",
+                "Compatibilidade com o enunciado",
+                10m,
+                null,
+                source,
+                "Arquivo analisado",
+                "Revisar a atividade correta",
+                TeacherReviewRequired: true,
+                TeacherApproved: false,
+                ArtifactIds: [])],
+            [],
+            [],
+            new GradingScaleSnapshot(10m, "points", "moodle"),
+            CompleteExtraction(),
+            CompleteCoverage(),
+            new AiGradingConfidenceResult(.2m, ["delivery_mismatch"], true),
+            reviewRequired: true);
+
+        Assert.Equal(expected, Assert.Single(proposal.Criteria).Source);
+    }
+
     [Fact]
     public void Create_NaoAceitaNotaSemEscalaConfirmada()
     {

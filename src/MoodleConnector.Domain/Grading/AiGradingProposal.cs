@@ -12,11 +12,41 @@ public static class AiGradingCriterionSource
     public const string GeneratedSupport = "GeneratedSupport";
     public const string Unknown = "Unknown";
 
-    public static bool IsKnown(string value) => value switch
+    public static bool IsKnown(string value) => Normalize(value) switch
     {
         FormalRubric or TeacherDefined or StatementDerived or GeneratedSupport or Unknown => true,
         _ => false
     };
+
+    /// <summary>
+    /// Aceita as grafias que aparecem naturalmente em respostas de modelos e
+    /// persiste somente o vocabulário canônico do domínio. Valores ambíguos
+    /// são mantidos como Unknown para exigir revisão humana, em vez de
+    /// derrubar o lote inteiro por uma diferença de nomenclatura.
+    /// </summary>
+    public static string Normalize(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var key = new string(value
+            .Trim()
+            .Where(char.IsLetterOrDigit)
+            .ToArray())
+            .ToLowerInvariant();
+
+        return key switch
+        {
+            "formalrubric" or "rubric" => FormalRubric,
+            "teacherdefined" or "teacherinstruction" or "teacherinstructions" or "teacheroverride" or "teacher" => TeacherDefined,
+            "statementderived" or "assignmentcontext" or "assignmentstatement" or "assignment" or "enunciado" or "context" => StatementDerived,
+            "generatedsupport" or "generated" or "support" => GeneratedSupport,
+            "unknown" or "submission" or "delivery" or "entrega" or "model" or "ai" or "inferred" => Unknown,
+            _ => value.Trim()
+        };
+    }
 }
 
 public sealed record AiGradingCriterionProposal(
@@ -378,7 +408,7 @@ public sealed class AiGradingProposal
                 NormalizeBounded(NormalizeRequired(value.Description, "description"), 2000, "description")!,
                 value.MaxPoints,
                 value.SuggestedPoints,
-                NormalizeRequired(value.Source, "source"),
+                AiGradingCriterionSource.Normalize(NormalizeRequired(value.Source, "source")),
                 NormalizeBounded(value.EvidenceText, 2000, "evidenceText"),
                 NormalizeBounded(value.GapsText, 2000, "gapsText"),
                 value.TeacherReviewRequired,

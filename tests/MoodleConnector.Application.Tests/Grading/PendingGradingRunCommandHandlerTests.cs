@@ -479,7 +479,8 @@ public sealed class PendingGradingRunCommandHandlerTests
             {
                 ResourceId = contextResourceId,
                 ResourceType = "assignment_context_attachment",
-                SubmissionId = 9001,
+                CourseId = 10,
+                AssignmentId = 501,
                 Sha256 = new string('b', 64),
                 ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
             }
@@ -655,7 +656,8 @@ public sealed class PendingGradingRunCommandHandlerTests
         item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
         await repository.AddBatchAsync(batch, CancellationToken.None);
         await repository.AddItemAsync(item, CancellationToken.None);
-        await repository.AddArtifactAsync(new GradingArtifact(Guid.NewGuid(), item.Id, "submission_file", "entrega.pdf", "application/pdf", "aa", 12, "succeeded", "texto legado que nao deve vazar", null, DateTimeOffset.UtcNow, "https://moodle.example/pluginfile.php/1/entrega.pdf"), CancellationToken.None);
+        var artifactId = Guid.NewGuid();
+        await repository.AddArtifactAsync(new GradingArtifact(artifactId, item.Id, "submission_file", "entrega.pdf", "application/pdf", "aa", 12, "succeeded", "texto legado que nao deve vazar", null, DateTimeOffset.UtcNow, "https://moodle.example/pluginfile.php/1/entrega.pdf"), CancellationToken.None);
         var sut = new PrepareAiGradingBatchQueryHandler(repository, new RunCurrentUserContext("teacher-1"), new RunAssignmentSettingsGateway(), resourceGateway: new RunResourceGateway(), resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions { McpResourceSubmissionDeliveryEnabled = true }));
 
         var package = await sut.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None);
@@ -665,6 +667,7 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Null(result.ExtractedText);
         Assert.Equal("moodle://resource/0123456789abcdef0123456789abcdef", Assert.Single(result.Resources!).Uri);
         Assert.Equal("submission", Assert.Single(result.Resources!).ResourceType);
+        Assert.Equal(artifactId, Assert.Single(result.Resources!).ArtifactId);
         Assert.Contains("resourceType", package.Instructions, StringComparison.Ordinal);
     }
 
