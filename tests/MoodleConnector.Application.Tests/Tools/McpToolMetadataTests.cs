@@ -47,10 +47,17 @@ public sealed class McpToolMetadataTests
                 Assert.False(attribute.ReadOnly, $"{toolName} remove estado interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe pelo documentId.");
             }
-            else if (toolName == "start_pending_grading_run")
+            else if (toolName is "start_pending_grading_run" or "requeue_blocked_grading_items")
             {
-                Assert.False(attribute.ReadOnly, $"{toolName} cria job interno e deve declarar ReadOnly=false.");
-                Assert.False(attribute.Idempotent, $"{toolName} nao deve ser idempotente sem chave de idempotencia.");
+                Assert.False(attribute.ReadOnly, $"{toolName} altera estado interno e deve declarar ReadOnly=false.");
+                if (toolName == "start_pending_grading_run")
+                {
+                    Assert.False(attribute.Idempotent, $"{toolName} nao deve ser idempotente sem chave de idempotencia.");
+                }
+                else
+                {
+                    Assert.True(attribute.Idempotent, $"{toolName} deve ser idempotente por item e lote.");
+                }
             }
             else if (toolName is "create_batch_grade_launch_preview" or "create_forum_post_preview")
             {

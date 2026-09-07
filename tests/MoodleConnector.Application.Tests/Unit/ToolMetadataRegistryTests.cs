@@ -147,7 +147,7 @@ public class ToolMetadataRegistryTests
     {
         var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
 
-        Assert.Equal(82, reg.Entries.Count);
+        Assert.Equal(83, reg.Entries.Count);
         Assert.All(reg.Entries, entry =>
         {
             Assert.False(string.IsNullOrWhiteSpace(entry.Key));

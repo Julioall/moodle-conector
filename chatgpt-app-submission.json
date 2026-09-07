@@ -1030,6 +1030,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "requeue_blocked_grading_items": {
+      "annotations": {
+        "title": "Requeue Blocked Grading Items",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "save_ai_grading_batch": {
       "annotations": {
         "title": "Save AI Grading Batch",
