@@ -455,6 +455,31 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             ready = ready.Where(candidate => !duplicateTargetItemIds.Contains(candidate.Item.Id)).ToList();
         }
 
+        // Um feedback idêntico para dois estudantes da mesma atividade é um
+        // forte sinal de reutilização de modelo. Bloqueamos todo o grupo para
+        // impedir que um retorno genérico chegue ao Moodle; o professor pode
+        // corrigir os rascunhos e gerar uma nova prévia.
+        var repeatedFeedbackItemIds = ready
+            .Where(candidate => !string.IsNullOrWhiteSpace(candidate.FeedbackText))
+            .GroupBy(candidate => (
+                candidate.Item.AssignmentId,
+                Feedback: GradingFeedbackQuality.NormalizeForComparison(candidate.FeedbackText)))
+            .Where(group => group.Key.Feedback.Length > 0 && group.Count() > 1)
+            .SelectMany(group => group.Select(candidate => candidate.Item.Id))
+            .ToHashSet();
+        if (repeatedFeedbackItemIds.Count > 0)
+        {
+            var repeatedGroups = ready
+                .Where(candidate => repeatedFeedbackItemIds.Contains(candidate.Item.Id))
+                .GroupBy(candidate => candidate.Item.AssignmentId)
+                .Select(group => $"atividade {group.Key}: {group.Count()} item(ns)")
+                .ToArray();
+            contextWarnings.Add(
+                $"Feedback reutilizado detectado ({string.Join(", ", repeatedGroups)}). " +
+                "Os itens foram bloqueados; gere feedback individual com evidencias da submissao.");
+            ready = ready.Where(candidate => !repeatedFeedbackItemIds.Contains(candidate.Item.Id)).ToList();
+        }
+
         var claimResults = await repository.TryClaimPublicationTargetsAsync(
             publicationId,
             connectionKey,
@@ -1517,16 +1542,46 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
 
                     if (reconciliation.Status == UnknownWriteReconciliationStatus.NotApplied)
                     {
-                        item.MarkCommitFailed(reconciliation.Message);
-                        failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, reconciliation.Message));
+                        // A connection reset followed by a read that still
+                        // shows the old state is a safe, definite
+                        // non-application. Give the upstream one bounded
+                        // retry in the same durable publication. This avoids
+                        // forcing a new human preview for a transient reset,
+                        // while preserving the no-duplicate rule: a second
+                        // write is attempted only after the read proved that
+                        // the approved values are not present.
+                        var retry = await RetryDefiniteNotAppliedWriteAsync(
+                            mediator,
+                            userExternalId,
+                            payloadItem,
+                            cancellationToken);
+                        if (retry.Succeeded)
+                        {
+                            item.MarkCommitSucceeded();
+                            sent++;
+                            await RecordCommitAuditAsync(
+                                action,
+                                payload.BatchJobId,
+                                payloadItem,
+                                "commit_retry_succeeded",
+                                responseSummary: new { item.CommitStatus, retry = true },
+                                errorCode: "moodle_write_retry_after_not_applied",
+                                errorMessage: null,
+                                cancellationToken);
+                            continue;
+                        }
+
+                        var finalMessage = retry.Message ?? reconciliation.Message;
+                        item.MarkCommitFailed(finalMessage);
+                        failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, finalMessage));
                         await RecordCommitAuditAsync(
                             action,
                             payload.BatchJobId,
                             payloadItem,
                             "commit_reconciled_not_applied",
-                            responseSummary: new { item.CommitStatus, reconciliation.Message },
+                            responseSummary: new { item.CommitStatus, reconciliation.Message, retry = true },
                             errorCode: "moodle_write_reconciled_not_applied",
-                            errorMessage: reconciliation.Message,
+                            errorMessage: finalMessage,
                             cancellationToken);
                         continue;
                     }
@@ -2074,6 +2129,50 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         }
     }
 
+    private async Task<RetryWriteResult> RetryDefiniteNotAppliedWriteAsync(
+        IMediator mediator,
+        string userExternalId,
+        GradingLaunchPayloadItem payloadItem,
+        CancellationToken cancellationToken)
+    {
+        // A short pause lets a reset connection drain at the FIEG edge before
+        // opening the single retry. The delay is bounded and does not extend
+        // the publication lease materially.
+        await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+        try
+        {
+            await mediator.Send(
+                new SaveAssignmentGradeCommand(
+                    userExternalId,
+                    payloadItem.AssignmentId,
+                    payloadItem.StudentId,
+                    payloadItem.Grade,
+                    payloadItem.FeedbackText,
+                    payloadItem.AttemptNumber ?? -1,
+                    AddAttempt: false,
+                    ApplyToAll: false,
+                    WorkflowState: "graded",
+                    CourseId: payloadItem.CourseId),
+                cancellationToken);
+            return new RetryWriteResult(true, null);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (!MoodleWriteExecutionClassifier.IsUnknown(exception))
+            {
+                return new RetryWriteResult(false, exception.Message);
+            }
+
+            var reconciliation = await ReconcileUnknownWriteAsync(
+                userExternalId,
+                payloadItem,
+                cancellationToken);
+            return reconciliation.Status == UnknownWriteReconciliationStatus.Applied
+                ? new RetryWriteResult(true, null)
+                : new RetryWriteResult(false, reconciliation.Message);
+        }
+    }
+
     private static bool FeedbackMatches(string? persistedFeedback, string expectedFeedback)
     {
         return string.Equals(
@@ -2191,6 +2290,10 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     private sealed record UnknownWriteReconciliationResult(
         UnknownWriteReconciliationStatus Status,
         string Message);
+
+    private sealed record RetryWriteResult(
+        bool Succeeded,
+        string? Message);
 
     private sealed record SubmissionAttemptValidationResult(
         AssignmentSubmissionAttemptStatus? CurrentStatus,

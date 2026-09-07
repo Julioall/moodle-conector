@@ -13,6 +13,30 @@ namespace MoodleConnector.Application.Tests.Grading;
 public sealed class PendingGradingRunCommandHandlerTests
 {
     [Fact]
+    public async Task RequeueBlockedItems_ReabreSomenteItemNaoPublicado()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.BlockAnalysis("Falha de leitura anterior.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+
+        var sut = new RequeueBlockedGradingItemsCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new RequeueBlockedGradingItemsCommand(batch.Id, [item.Id]),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.RequeuedItems);
+        Assert.Equal(0, result.FailedItems);
+        Assert.Equal(GradingItemStatus.AwaitingAiAnalysis, item.Status);
+        Assert.Equal(GradingCommitStatus.NotReady, item.CommitStatus);
+    }
+
+    [Fact]
     public async Task StartRun_ContinuaNosDemaisCursosQuandoUmCursoFalha()
     {
         var mediator = new RunMediator();

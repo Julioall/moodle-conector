@@ -31,6 +31,23 @@ public sealed record StartPendingGradingRunCommand(
     string? CourseId = null,
     IReadOnlyList<string>? AssignmentIds = null) : IRequest<StartPendingGradingRunResult>;
 
+public sealed record RequeueBlockedGradingItemsCommand(
+    Guid BatchJobId,
+    IReadOnlyList<Guid> GradingItemIds) : IRequest<RequeueBlockedGradingItemsResult>;
+
+public sealed record RequeueBlockedGradingItemsResult(
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("requestedItems")] int RequestedItems,
+    [property: JsonPropertyName("requeuedItems")] int RequeuedItems,
+    [property: JsonPropertyName("alreadyQueuedItems")] int AlreadyQueuedItems,
+    [property: JsonPropertyName("failedItems")] int FailedItems,
+    [property: JsonPropertyName("failures")] IReadOnlyList<RequeueBlockedGradingItemFailure> Failures,
+    [property: JsonPropertyName("nextStep")] string NextStep);
+
+public sealed record RequeueBlockedGradingItemFailure(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("message")] string Message);
+
 public sealed record StartPendingGradingRunResult(
     [property: JsonPropertyName("coursesDiscovered")] int CoursesDiscovered,
     [property: JsonPropertyName("coursesScanned")] int CoursesScanned,
@@ -823,6 +840,102 @@ public sealed class StartPendingGradingRunCommandHandler(
         {
             warnings.Add(warning);
         }
+    }
+}
+
+public sealed class RequeueBlockedGradingItemsCommandHandler(
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser)
+    : IRequestHandler<RequeueBlockedGradingItemsCommand, RequeueBlockedGradingItemsResult>
+{
+    public async Task<RequeueBlockedGradingItemsResult> Handle(
+        RequeueBlockedGradingItemsCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (request.BatchJobId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
+        }
+
+        var requestedIds = request.GradingItemIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (requestedIds.Length == 0)
+        {
+            throw new ArgumentException("Informe pelo menos um item para reprocessar.", nameof(request.GradingItemIds));
+        }
+
+        var scope = await GradingBatchScopeResolver.ResolveAsync(
+            repository,
+            currentUser,
+            request.BatchJobId,
+            cancellationToken);
+        var scopeBatchIds = scope.Batches.Select(batch => batch.Id).ToHashSet();
+        var items = await repository.GetItemsAsync(requestedIds, cancellationToken);
+        var failures = new List<RequeueBlockedGradingItemFailure>();
+        var requeuedItems = 0;
+        var alreadyQueuedItems = 0;
+
+        foreach (var gradingItemId in requestedIds)
+        {
+            if (!items.TryGetValue(gradingItemId, out var item))
+            {
+                failures.Add(new(gradingItemId, "Item de correcao nao encontrado."));
+                continue;
+            }
+
+            if (!scopeBatchIds.Contains(item.BatchId))
+            {
+                failures.Add(new(gradingItemId, "Item nao pertence ao lote ou execucao informada."));
+                continue;
+            }
+
+            if (item.CommitStatus == GradingCommitStatus.Succeeded ||
+                item.Status == GradingItemStatus.Committed)
+            {
+                failures.Add(new(gradingItemId, "Item ja publicado; reprocessamento recusado."));
+                continue;
+            }
+
+            if (item.FinalGrade is not null || !string.IsNullOrWhiteSpace(item.FinalFeedback))
+            {
+                failures.Add(new(gradingItemId, "Item possui revisao final; reprocessamento recusado para preservar a decisao humana."));
+                continue;
+            }
+
+            if (item.Status == GradingItemStatus.AwaitingAiAnalysis)
+            {
+                alreadyQueuedItems++;
+                continue;
+            }
+
+            if (item.Status is not (GradingItemStatus.Blocked or GradingItemStatus.Failed))
+            {
+                failures.Add(new(gradingItemId, $"Estado {item.Status} nao permite reprocessamento seguro."));
+                continue;
+            }
+
+            item.MarkAwaitingAiAnalysis("Reprocessamento manual autorizado para corrigir o bloqueio anterior.");
+            requeuedItems++;
+        }
+
+        if (requeuedItems > 0)
+        {
+            await repository.SaveChangesAsync(cancellationToken);
+        }
+
+        var failedItems = failures.Count;
+        return new RequeueBlockedGradingItemsResult(
+            request.BatchJobId,
+            requestedIds.Length,
+            requeuedItems,
+            alreadyQueuedItems,
+            failedItems,
+            failures,
+            requeuedItems > 0 || alreadyQueuedItems > 0
+                ? "Use prepare_ai_grading_batch no mesmo lote para gerar novos rascunhos; depois salve e gere uma nova previa."
+                : "Nenhum item foi reaberto; verifique as falhas retornadas.");
     }
 }
 

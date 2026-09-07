@@ -215,7 +215,13 @@ public sealed class PendingMoodleActionRepository(ConnectorDbContext dbContext) 
                  action.Status == PendingActionStatus.Authorized ||
                  (action.Status == PendingActionStatus.Executing &&
                   (action.ExecutionLeaseUntil == null || action.ExecutionLeaseUntil <= now))))
-            .OrderBy(action => action.CreatedAt)
+            // Current authorizations must not wait behind legacy Confirmed
+            // actions that can be permanently blocked by missing historical
+            // connection context. Prioritize the durable states that can
+            // actually advance, while preserving FIFO within each state.
+            .OrderBy(action => action.Status == PendingActionStatus.Authorized ? 0 :
+                               action.Status == PendingActionStatus.PartiallyCompleted ? 1 : 2)
+            .ThenBy(action => action.CreatedAt)
             .ThenBy(action => action.Id)
             .Take(safeLimit)
             .ToArrayAsync(cancellationToken);

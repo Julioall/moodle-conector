@@ -86,6 +86,74 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
+        Name = "requeue_blocked_grading_items",
+        Title = "Requeue Blocked Grading Items",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<RequeueBlockedGradingItemsResult>))]
+    [Description("Reabre somente os itens de correcao informados que estao bloqueados ou falharam, devolvendo-os para analise pela IA. Nao altera o Moodle, nao reabre itens publicados e exige os gradingItemIds explicitamente. Depois use prepare_ai_grading_batch no mesmo lote.")]
+    public async Task<CallToolResult> ReenfileirarItensBloqueadosAsync(
+        [Description("Identificador do lote original ou gradingRunId agregado.")]
+        Guid batchJobId,
+        [Description("IDs dos itens bloqueados a reprocessar; nunca informe itens ja publicados.")]
+        Guid[] gradingItemIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return ToolResultHelper.Error<RequeueBlockedGradingItemsResult>("Informe um identificador de lote valido.");
+        }
+
+        if (gradingItemIds.Length == 0)
+        {
+            return ToolResultHelper.Error<RequeueBlockedGradingItemsResult>("Informe pelo menos um gradingItemId para reprocessar.");
+        }
+
+        RequeueBlockedGradingItemsResult data;
+        try
+        {
+            data = await mediator.Send(
+                new RequeueBlockedGradingItemsCommand(batchJobId, gradingItemIds),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolResultHelper.Error<RequeueBlockedGradingItemsResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ToolResultHelper.Error<RequeueBlockedGradingItemsResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<RequeueBlockedGradingItemsResult>("Nao foi possivel reabrir os itens bloqueados neste momento.");
+        }
+
+        var response = new ToolResponse<RequeueBlockedGradingItemsResult>(
+            data.RequeuedItems > 0 || data.AlreadyQueuedItems > 0 ? "ok" : "partial_failure",
+            data,
+            data.Failures.Select(failure => failure.Message).ToArray(),
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock
+            {
+                Text = $"{data.RequeuedItems} item(ns) reaberto(s), {data.AlreadyQueuedItems} ja aguardando IA e {data.FailedItems} com falha."
+            }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    [McpServerTool(
         Name = "create_batch_grade_launch_preview",
         Title = "Create Batch Grade Launch Preview",
         ReadOnly = false,

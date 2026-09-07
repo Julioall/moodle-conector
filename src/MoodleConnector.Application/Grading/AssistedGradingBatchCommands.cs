@@ -2884,6 +2884,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- Tom acolhedor e profissional. Sem julgamentos pessoais, ironias ou comparacoes.\n" +
             "- Escreva em paragrafos (nao use listas com marcadores).\n" +
             "- O feedback inteiro deve ter entre 80 e 200 palavras.\n" +
+            "- Cada feedback deve ser individual: inclua pelo menos uma observacao factual da submissao deste aluno e uma lacuna ou proximo passo relacionado a essa evidencia. Nunca copie o mesmo feedback para alunos diferentes.\n" +
+            "- Se nao houver evidencia suficiente da submissao para individualizar o retorno, nao invente detalhes: marque a proposta para revisao humana e nao a trate como pronta para publicacao.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
             "- Quando houver resources com resourceType 'assignment_context', identifique automaticamente o enunciado priorizando o arquivo cujo nome e numero correspondam a atividade; ignore materiais genericos, folhas de resposta e arquivos de outra atividade. Se nenhum contexto corresponder com seguranca, nao invente criterios nem nota e sinalize revisao humana.\n" +
             "- Ao chamar save_ai_grading_batch, preencha proposal.resourceUris com todas e somente as URIs em resources cujo resourceType seja 'submission'. Nunca inclua resources de 'assignment_context' nesse campo; eles podem ser citados somente em proposal.evidence[].resourceUri. Sem todas as URIs de submission, o rascunho nao pode gerar uma previa de lancamento.\n" +
@@ -3124,6 +3126,32 @@ public sealed class SaveAiGradingBatchCommandHandler(
         var nextProposalVersions = proposalStore is null
             ? new Dictionary<Guid, int>()
             : new Dictionary<Guid, int>(await proposalStore.GetNextVersionsAsync(itemsById.Keys.ToArray(), cancellationToken));
+        var repeatedFeedbackItemIds = request.Items
+            .Where(input => itemsById.ContainsKey(input.GradingItemId))
+            .Select(input =>
+            {
+                var feedback = string.IsNullOrWhiteSpace(input.Proposal?.Feedback)
+                    ? input.Feedback
+                    : input.Proposal!.Feedback;
+                return new
+                {
+                    input.GradingItemId,
+                    AssignmentId = itemsById[input.GradingItemId].AssignmentId,
+                    StudentId = itemsById[input.GradingItemId].MoodleUserId,
+                    FeedbackKey = GradingFeedbackQuality.NormalizeForComparison(feedback)
+                };
+            })
+            .Where(entry => entry.FeedbackKey.Length > 0)
+            .GroupBy(entry => (entry.AssignmentId, entry.FeedbackKey))
+            .Where(group => group.Select(entry => entry.StudentId).Distinct().Count() > 1)
+            .SelectMany(group => group.Select(entry => entry.GradingItemId))
+            .ToHashSet();
+        if (repeatedFeedbackItemIds.Count > 0)
+        {
+            warnings.Add(
+                $"{repeatedFeedbackItemIds.Count} item(ns) ignorado(s): feedback reutilizado entre estudantes da mesma atividade. " +
+                "Gere um retorno individual com evidencia da submissao.");
+        }
         var resourcesById = new Dictionary<string, MoodleResource>(StringComparer.Ordinal);
         if (resourceRepository is not null)
         {
@@ -3210,6 +3238,21 @@ public sealed class SaveAiGradingBatchCommandHandler(
                 {
                     warnings.Add($"Item {input.GradingItemId} nao encontrado.");
                     failedCount++;
+                    continue;
+                }
+
+                if (repeatedFeedbackItemIds.Contains(input.GradingItemId))
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                if (input.Proposal is not null && !HasStructuredStudentEvidence(input.Proposal))
+                {
+                    warnings.Add(
+                        $"Item {input.GradingItemId} ignorado: a proposta nao possui evidencia estruturada da submissao. " +
+                        "Inclua evidencia por criterio ou uma referencia de recurso antes de salvar.");
+                    skippedCount++;
                     continue;
                 }
 
@@ -3503,6 +3546,20 @@ public sealed class SaveAiGradingBatchCommandHandler(
             queryCount: 5,
             itemCount: savedCount);
         return result;
+    }
+
+    private static bool HasStructuredStudentEvidence(AiGradingProposalInput proposal)
+    {
+        var criterionEvidence = (proposal.Criteria ?? [])
+            .Any(criterion =>
+                !string.IsNullOrWhiteSpace(criterion.EvidenceText) ||
+                !string.IsNullOrWhiteSpace(criterion.GapsText));
+        var submissionReferences = (proposal.Evidence ?? [])
+            .Any(evidence =>
+                evidence.ArtifactId != Guid.Empty ||
+                !string.IsNullOrWhiteSpace(evidence.ResourceUri) ||
+                !string.IsNullOrWhiteSpace(evidence.Reference));
+        return criterionEvidence || submissionReferences;
     }
 
     private static decimal? TryReadMaxGrade(string? payloadJson)
