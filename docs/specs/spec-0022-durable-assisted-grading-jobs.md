@@ -43,9 +43,11 @@ acadêmico além da política aprovada.
    transacional e compatível com duas réplicas (`FOR UPDATE SKIP LOCKED` ou equivalente).
 3. Startup recuperará `Pending` e `Processing` com lease expirado. Um lease renovável e
    heartbeat evitarão que trabalho longo seja reclamado prematuramente.
-4. Cada item será processado em chunks persistidos com operação idempotente. Repetição de
-   job poderá repetir apenas trabalho interno não publicado; nenhum worker relança uma nota
-   Moodle confirmada.
+4. Cada item será processado em chunks persistidos com operação idempotente. Repetições
+   automáticas de job poderão repetir apenas trabalho interno não publicado; nenhum worker
+   relança uma nota Moodle confirmada. Uma reavaliação de item publicado só pode começar por
+   pedido explícito, cria um novo item de correção e mantém a substituição da nota protegida
+   pela prévia `allowOverwriteExisting` e confirmação humana.
 5. Limites de concorrência serão aplicados no worker, não no request. `Priority` terá
    ordenação observável, aging/fairness e testes; se isso não for aceito, será removida do
    contrato antes do rollout.

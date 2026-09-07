@@ -47,7 +47,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<StartPendingGradingRunResult>))]
-    [Description("Inicia o fluxo de correcao de entregas pendentes. Quando courseId for informado, limita toda a descoberta e os sublotes a esse curso; quando omitido, percorre os cursos acessiveis. Nao escreve no Moodle. Use o gradingRunId retornado para paginar, preparar e salvar todos os sublotes; batchJobIds continuam disponiveis para compatibilidade. Em seguida escolha um destino: export_grading_corrections_csv para CSV externo ou create_batch_grade_launch_preview para revisar a publicacao no Moodle.")]
+    [Description("Inicia o fluxo de correcao de entregas pendentes. Quando courseId for informado, limita toda a descoberta e os sublotes a esse curso; quando omitido, percorre os cursos acessiveis. Nao escreve no Moodle. Use o gradingRunId retornado para paginar, preparar e salvar todos os sublotes; batchJobIds continuam disponiveis para compatibilidade. Em seguida escolha um destino: export_grading_corrections_csv para CSV externo ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Se o usuario tiver pedido explicitamente uma reavaliacao, use allowRegradeExisting=true para incluir submissaoes ja corrigidas; a sobrescrita no Moodle continua exigindo allowOverwriteExisting=true na previa e CONFIRMAR_PUBLICACAO.")]
     public Task<CallToolResult> IniciarFluxoCorrecaoPendentesAsync(
         [Description("Identificador opcional do curso a processar. Quando informado, nenhum outro curso e consultado.")]
         string? courseId = null,
@@ -67,6 +67,8 @@ public sealed class MoodleGradingTools(
         string? teacherInstructions = null,
         [Description("Prioridade sugerida: low, normal ou high.")]
         string priority = "normal",
+        [Description("Use true somente quando o usuario pedir explicitamente para reavaliar correcoes ja publicadas. Cria novos itens de correcao para as submissaoes entregues, sem alterar o Moodle nesta etapa.")]
+        bool allowRegradeExisting = false,
         [Description("Alias do Moodle a consultar. Quando omitido, usa o Moodle padrao do usuario.")]
         string? moodleAlias = null,
         CancellationToken cancellationToken = default)
@@ -80,6 +82,7 @@ public sealed class MoodleGradingTools(
             includeCourseMaterials,
             teacherInstructions,
             priority,
+            allowRegradeExisting,
             moodleAlias,
             assignmentIds,
             cancellationToken);
@@ -441,6 +444,7 @@ public sealed class MoodleGradingTools(
         bool includeCourseMaterials,
         string? teacherInstructions,
         string priority,
+        bool allowRegradeExisting,
         string? moodleAlias,
         IReadOnlyList<string>? assignmentIds,
         CancellationToken cancellationToken)
@@ -492,7 +496,8 @@ public sealed class MoodleGradingTools(
                     SnapshotClientId: snapshotClientId,
                     SnapshotConnectionAlias: snapshotConnectionAlias,
                     CourseId: courseId,
-                    AssignmentIds: assignmentIds),
+                    AssignmentIds: assignmentIds,
+                    AllowRegradeExisting: allowRegradeExisting),
                 cancellationToken);
         }
         catch (OperationCanceledException)

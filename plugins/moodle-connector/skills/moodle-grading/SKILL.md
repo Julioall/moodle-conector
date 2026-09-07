@@ -23,3 +23,12 @@ Separe leitura, preparacao, previa e confirmacao. A decisao pedagogica permanece
 5. Quando o usuario pedir correcao normal ou publicacao, use `create_batch_grade_launch_preview`. Mostre todos os alunos, notas, feedbacks, situacoes e avisos retornados, sem abrir ou exigir UI de revisao.
 6. So chame `confirm_batch_grade_launch` depois que o usuario responder exatamente `CONFIRMAR_PUBLICACAO`. A confirmacao revalida rascunho, submissao e dados atuais do Moodle antes de cada escrita.
 7. Para um aluno ou muitas atividades, use o mesmo lote e o mesmo par de previa/confirmacao. Nao use ferramentas de UI ou CSV como rota de publicacao.
+
+Quando o usuario pedir explicitamente uma reavaliacao de correcoes ja publicadas, inicie
+`start_pending_grading_run` com `allowRegradeExisting=true`, restringindo por `courseId` e
+`assignmentIds` quando esses dados forem informados. Esse modo cria novos itens com a
+submissao original entregue e preserva os itens/correcoes anteriores; ele nao escreve no
+Moodle. Depois de gerar e salvar os novos rascunhos, use
+`create_batch_grade_launch_preview` com `allowOverwriteExisting=true` somente se o usuario
+tambem autorizar substituir a nota/feedback existentes, e aguarde
+`CONFIRMAR_PUBLICACAO` antes da escrita.

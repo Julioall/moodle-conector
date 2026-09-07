@@ -87,6 +87,32 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreateBatch_ReavaliacaoExplicitaAceitaEntregaJaPresente()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var existingBatch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var existingItem = AssistedGradingItem.Create(existingBatch.Id, 10, 501, 9001, 101, 0);
+        existingItem.SetIdempotencyKey("correcao-original");
+        await repository.AddBatchAsync(existingBatch, CancellationToken.None);
+        await repository.AddItemAsync(existingItem, CancellationToken.None);
+
+        var sut = CreateHandler(repository, new FakeMediator());
+        var result = await sut.Handle(
+            new CreateAssistedGradingBatchCommand(
+                "321", "10", ["501"], ["9001"], 25,
+                OnlyAwaitingGrading: true,
+                AllowRegradeExisting: true),
+            CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result.BatchJobId);
+        Assert.Equal("Pending", result.Status);
+        Assert.Equal(2, repository.Items.Count);
+        var regradedItem = Assert.Single(repository.Items, item => item.Id != existingItem.Id);
+        Assert.Equal(9001, regradedItem.SubmissionId);
+        Assert.NotEqual(existingItem.IdempotencyKey, regradedItem.IdempotencyKey);
+    }
+
+    [Fact]
     public async Task CreateBatch_NaoRepeteFluxoCompostoQuandoAListagemFalha()
     {
         var repository = new FakeGradingReviewRepository();

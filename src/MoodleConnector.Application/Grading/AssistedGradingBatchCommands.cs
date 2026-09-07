@@ -32,7 +32,8 @@ public sealed record CreateAssistedGradingBatchCommand(
     string? IdempotencyKey = null,
     string? CourseDisplayName = null,
     string? MoodleConnectionId = null,
-    Guid? GradingRunId = null) : IRequest<CreateAssistedGradingBatchResult>;
+    Guid? GradingRunId = null,
+    bool AllowRegradeExisting = false) : IRequest<CreateAssistedGradingBatchResult>;
 
 public sealed record AssistedGradingBatchDiscoveryFailure(
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
@@ -288,7 +289,9 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 if (selectedItems.Count >= safeMaxItems ||
                     (selectedSubmissionIds.Count > 0 &&
                      (submission.SubmissionId is null || !selectedSubmissionIds.Contains(submission.SubmissionId))) ||
-                    (request.OnlyAwaitingGrading && !submission.NeedsGrading))
+                    (request.AllowRegradeExisting
+                        ? !IsSubmittedForRegrade(submission)
+                        : request.OnlyAwaitingGrading && !submission.NeedsGrading))
                 {
                     continue;
                 }
@@ -322,7 +325,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 submissionBatches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
                     request.UserExternalId,
                     assignmentIds,
-                    request.OnlyAwaitingGrading ? "submitted" : null,
+                    request.AllowRegradeExisting || request.OnlyAwaitingGrading ? "submitted" : null,
                     since: null,
                     before: null,
                     cancellationToken);
@@ -517,11 +520,13 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 {
                     if (selectedItems.Count >= safeMaxItems ||
                         (selectedSubmissionIds.Count > 0 && !selectedSubmissionIds.Contains(submission.SubmissionId)) ||
-                        (request.OnlyAwaitingGrading && !NeedsGrading(
-                            effectiveAssignmentIds[assignmentId],
-                            submission,
-                            noGradeAssignments,
-                            feedbackByAssignment)))
+                        (request.AllowRegradeExisting
+                            ? !IsSubmittedForRegrade(submission)
+                            : request.OnlyAwaitingGrading && !NeedsGrading(
+                                effectiveAssignmentIds[assignmentId],
+                                submission,
+                                noGradeAssignments,
+                                feedbackByAssignment)))
                     {
                         continue;
                     }
@@ -605,9 +610,11 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
 
         // A mesma submissão pode aparecer novamente quando o professor repete
         // a solicitação, quando dois usuários disparam o curso ao mesmo tempo
-        // ou quando um worker perde a resposta. Reaproveite o item já criado
-        // antes de abrir outro lote. O índice único da chave abaixo fecha a
-        // janela residual entre esta leitura e duas gravações concorrentes.
+        // ou quando um worker perde a resposta. No fluxo normal, reaproveite o
+        // item já criado antes de abrir outro lote. Uma reavaliação explícita
+        // é a exceção controlada: ela cria um novo item para preservar a
+        // correção anterior e deixa a prévia de publicação comparar/sobrescrever
+        // a nota antiga somente após autorização específica.
         var existingSubmissionIdentities = selectedItems
             .Where(seed => !string.IsNullOrWhiteSpace(seed.SubmissionId))
             .Select(seed => new GradingSubmissionIdentity(
@@ -617,7 +624,7 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 seed.AttemptNumber))
             .Distinct()
             .ToArray();
-        if (existingSubmissionIdentities.Length > 0)
+        if (existingSubmissionIdentities.Length > 0 && !request.AllowRegradeExisting)
         {
             var alreadyQueued = await repository.ListExistingSubmissionIdentitiesAsync(
                 existingSubmissionIdentities,
@@ -695,14 +702,21 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
 
             if (item.SubmissionId is long submissionId)
             {
-                item.SetIdempotencyKey(BuildSubmissionIdempotencyKey(
-                    connectorClientId,
-                    moodleConnectionId,
-                    connectionAlias,
-                    item.CourseId,
-                    item.AssignmentId,
-                    submissionId,
-                    item.AttemptNumber));
+                item.SetIdempotencyKey(request.AllowRegradeExisting
+                    ? BuildRegradeSubmissionIdempotencyKey(
+                        batch.Id,
+                        item.CourseId,
+                        item.AssignmentId,
+                        submissionId,
+                        item.AttemptNumber)
+                    : BuildSubmissionIdempotencyKey(
+                        connectorClientId,
+                        moodleConnectionId,
+                        connectionAlias,
+                        item.CourseId,
+                        item.AssignmentId,
+                        submissionId,
+                        item.AttemptNumber));
             }
 
             await repository.AddItemAsync(item, cancellationToken);
@@ -1090,6 +1104,17 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                string.Equals(submission.GradingStatus, "notmarked", StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool IsSubmittedForRegrade(AssignmentSubmissionSummary submission)
+    {
+        return submission.Submitted &&
+               string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSubmittedForRegrade(AssignmentSubmissionRecord submission)
+    {
+        return string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool NeedsGrading(
         string assignmentId,
         AssignmentSubmissionRecord submission,
@@ -1149,6 +1174,23 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             assignmentId.ToString(CultureInfo.InvariantCulture),
             submissionId.ToString(CultureInfo.InvariantCulture),
             attemptNumber?.ToString(CultureInfo.InvariantCulture) ?? "-");
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
+    }
+
+    private static string BuildRegradeSubmissionIdempotencyKey(
+        Guid batchId,
+        long courseId,
+        long assignmentId,
+        long submissionId,
+        int? attemptNumber)
+    {
+        var source = string.Join('|',
+            "regrade",
+            batchId.ToString("N"),
+            courseId.ToString(CultureInfo.InvariantCulture),
+            assignmentId.ToString(CultureInfo.InvariantCulture),
+            submissionId.ToString(CultureInfo.InvariantCulture),
+            attemptNumber?.ToString(CultureInfo.InvariantCulture) ?? "_");
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
     }
 

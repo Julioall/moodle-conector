@@ -155,6 +155,35 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task StartRun_ReavaliacaoExplicitaIncluiEntregaJaRevisada()
+    {
+        var mediator = new RunMediator();
+        var submissionsGateway = new RunSubmissionGateway();
+        var sut = new StartPendingGradingRunCommandHandler(
+            mediator,
+            new RunCourseContentsGateway(),
+            submissionsGateway: submissionsGateway);
+
+        var result = await sut.Handle(
+            new StartPendingGradingRunCommand(
+                "321",
+                MaxCourses: 0,
+                MaxItemsPerBatch: 400,
+                CourseId: "10",
+                AllowRegradeExisting: true),
+            CancellationToken.None);
+
+        Assert.Equal(2, result.TotalItems);
+        var request = Assert.Single(mediator.CreateBatchRequests);
+        Assert.True(request.AllowRegradeExisting);
+        Assert.False(request.OnlyAwaitingGrading);
+        Assert.Equal(
+            ["submission-pending", "submission-reviewed"],
+            request.PrefetchedSubmissions!.Select(submission => submission.SubmissionId!).ToArray());
+        Assert.Contains(result.Warnings, warning => warning.Contains("reavaliacao", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task StartRun_UsaSnapshotsSemLerCursosOuEntregasNoMoodle()
     {
         var mediator = new RunMediator(pendingSubmissionCount: 99);
