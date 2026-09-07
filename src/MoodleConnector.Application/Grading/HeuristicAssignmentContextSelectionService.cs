@@ -28,6 +28,16 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
         "manual"
     ];
 
+    private static readonly string[] GenericCourseMaterialKeywords =
+    [
+        "cronograma",
+        "calendario",
+        "plano de aula",
+        "plano_aula",
+        "agenda",
+        "programacao"
+    ];
+
     public Task<AssignmentContextSelectionResult> SelectAsync(
         AssignmentContextSelectionRequest request,
         CancellationToken cancellationToken)
@@ -154,6 +164,19 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
             }
         }
 
+        if (GenericCourseMaterialKeywords.Any(keyword => title.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+        {
+            // Keep generic planning documents available as supporting context,
+            // but never let them outrank an activity-specific statement.
+            score -= 14m;
+        }
+
+        if (expectedOrdinal is int expectedSap && candidateOrdinal == expectedSap &&
+            title.Contains("sap", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 8m;
+        }
+
         if (candidate.DistanceFromAssignment is int distance)
         {
             score += Math.Max(0, 3 - distance);
@@ -268,7 +291,7 @@ public sealed partial class HeuristicAssignmentContextSelectionService : IAssign
     [GeneratedRegex(@"[\p{L}\p{N}]+")]
     private static partial Regex TokenRegex();
 
-    [GeneratedRegex(@"(?:ead|atividade|sap|envio)\s*0*(?<number>\d{1,3})")]
+    [GeneratedRegex(@"(?:ead|atividade|sap|envio)\s*[-_:/]?\s*0*(?<number>\d{1,3})")]
     private static partial Regex ActivityOrdinalRegex();
 
     [GeneratedRegex(@"^0*(?<number>\d{1,3})(?=[_\-\s])")]

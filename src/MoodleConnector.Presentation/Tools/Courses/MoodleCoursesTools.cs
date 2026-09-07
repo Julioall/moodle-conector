@@ -118,7 +118,7 @@ public sealed class MoodleCoursesTools(
         {
             return ToolResultHelper.Error<ListMyCoursesResponse>(
                 ex.Message,
-                errorCode: MoodleErrorContract.ApiError);
+                errorCode: MoodleErrorContract.InvalidPage);
         }
         catch (MoodleApiException ex)
         {

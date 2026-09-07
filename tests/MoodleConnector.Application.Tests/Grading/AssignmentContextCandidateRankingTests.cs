@@ -101,6 +101,37 @@ public sealed class AssignmentContextCandidateRankingTests
         Assert.Equal("Atividade_EAD_01_Antes_da_Aula_01.docx", selected.File!.FileName);
     }
 
+    [Fact]
+    public void Select_PriorizaSapEspecificaSobreCronogramaGenerico()
+    {
+        var section = new CourseSectionSummary(
+            "section-1",
+            1,
+            "Atividades",
+            null,
+            true,
+            3,
+            false,
+            [
+                Resource("sap-02", "SAP - 02", "SAP - 02.pdf"),
+                Resource("calendar", "Cronograma do curso", "Cronograma.pdf"),
+                Assign("assign-02", "118397", "SAP 2")
+            ]);
+        var contents = new CourseContentsSummary("33447", [], true, false, [section]);
+
+        var result = AssignmentContextCandidateRanking.Select(
+            contents,
+            section,
+            section.Modules[2],
+            maxCandidates: 3,
+            includeCourseMaterials: true);
+
+        Assert.Equal("SAP - 02.pdf", result[0].File!.FileName);
+        Assert.DoesNotContain(result, candidate =>
+            candidate.File?.FileName?.Contains("Cronograma", StringComparison.OrdinalIgnoreCase) == true &&
+            candidate.StrongMatch);
+    }
+
     private static CourseModuleSummary Resource(string moduleId, string name, string fileName) =>
         new(
             moduleId,

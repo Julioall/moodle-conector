@@ -5,6 +5,7 @@ using MediatR;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Participants;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
@@ -165,7 +166,9 @@ public sealed class MoodleParticipantsTools(
 
         if (!TryParseStatus(status, out var statusFilter))
         {
-            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Filtro de status invalido. Use ativos, suspensos ou todos.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(
+                "Filtro de status invalido. Use ativos, suspensos ou todos.",
+                errorCode: MoodleErrorContract.InvalidFilter);
         }
 
         moodleSelection.Alias = moodleAlias;
@@ -254,7 +257,7 @@ public sealed class MoodleParticipantsTools(
         }
         catch (ArgumentOutOfRangeException ex)
         {
-            return ToolResultHelper.Error<ListCourseParticipantsResponse>(ex.Message);
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(ex.Message, errorCode: MoodleErrorContract.InvalidPage);
         }
         catch
         {
@@ -291,7 +294,9 @@ public sealed class MoodleParticipantsTools(
 
         if (!TryParseStatus(status, out var statusFilter))
         {
-            return ToolResultHelper.Error<ListCourseParticipantsResponse>("Filtro de status invalido. Use ativos, suspensos ou todos.");
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(
+                "Filtro de status invalido. Use ativos, suspensos ou todos.",
+                errorCode: MoodleErrorContract.InvalidFilter);
         }
 
         moodleSelection.Alias = moodleAlias;
@@ -321,7 +326,7 @@ public sealed class MoodleParticipantsTools(
         }
         catch (ArgumentOutOfRangeException ex)
         {
-            return ToolResultHelper.Error<ListCourseParticipantsResponse>(ex.Message);
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(ex.Message, errorCode: MoodleErrorContract.InvalidPage);
         }
         catch
         {

@@ -403,7 +403,9 @@ public sealed class MoodleCourseContentsTools(
 
         if (module is null)
         {
-            return ToolResultHelper.Error<CourseModuleDetailsResponse>("Modulo nao encontrado no curso informado.");
+            return ToolResultHelper.Error<CourseModuleDetailsResponse>(
+                "Modulo nao encontrado no curso informado.",
+                errorCode: MoodleErrorContract.ModuleNotFound);
         }
 
         var data = new CourseModuleDetailsResponse(ToModuleItem(module));

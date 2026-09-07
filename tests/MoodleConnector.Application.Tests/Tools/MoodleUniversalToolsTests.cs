@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.MoodleApi;
@@ -125,14 +126,46 @@ public sealed class MoodleUniversalToolsTests
         Assert.True(data.GetProperty("IsAvailable").GetBoolean());
     }
 
+    [Fact]
+    public async Task ExecuteReadAsync_RedigePayloadPublicoRecursivamente()
+    {
+        var payload = JsonNode.Parse(
+            """
+            {
+              "token": "token-real",
+              "nested": { "privateAccessKey": "private-real" },
+              "array": [{ "password": "password-real" }],
+              "safe": "visible"
+            }
+            """);
+        var sut = CreateSut(
+            new FakeCredentialsProvider(Connection()),
+            new FakeRestClient(SiteInfo()),
+            safeReadExecutor: new FakeSafeReadExecutor(payload));
+        using var parameters = JsonDocument.Parse("{}");
+
+        var result = await sut.ExecuteReadAsync(
+            "core_course_get_courses_by_field",
+            parameters.RootElement,
+            cancellationToken: CancellationToken.None);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var raw = structured.GetRawText();
+        Assert.DoesNotContain("token-real", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-real", raw, StringComparison.Ordinal);
+        Assert.DoesNotContain("password-real", raw, StringComparison.Ordinal);
+        Assert.Contains("visible", raw, StringComparison.Ordinal);
+    }
+
     private static MoodleUniversalTools CreateSut(
         IMoodleConnectorCredentialsProvider credentialsProvider,
         FakeRestClient restClient,
-        IReadOnlyList<MoodleFunctionDescriptor>? descriptors = null)
+        IReadOnlyList<MoodleFunctionDescriptor>? descriptors = null,
+        FakeSafeReadExecutor? safeReadExecutor = null)
     {
         return new MoodleUniversalTools(
             new FakeCatalog(descriptors),
-            new FakeSafeReadExecutor(),
+            safeReadExecutor ?? new FakeSafeReadExecutor(),
             new OperationRegistry(),
             new PolicyEngine(),
             new MoodleBusinessFlowRegistry(),
@@ -225,7 +258,7 @@ public sealed class MoodleUniversalToolsTests
             DateTimeOffset.UtcNow));
     }
 
-    private sealed class FakeSafeReadExecutor : ISafeReadExecutor
+    private sealed class FakeSafeReadExecutor(JsonNode? payload = null) : ISafeReadExecutor
     {
         public Task<System.Text.Json.Nodes.JsonNode?> ExecuteAsync(
             string functionName,
@@ -233,6 +266,6 @@ public sealed class MoodleUniversalToolsTests
             string? moodleAlias = null,
             NormalizationContext? context = null,
             CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            Task.FromResult(payload);
     }
 }

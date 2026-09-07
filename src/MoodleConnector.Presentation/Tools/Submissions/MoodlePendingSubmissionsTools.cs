@@ -60,6 +60,7 @@ public sealed class MoodlePendingSubmissionsTools(
 
         GetStudentsWithPendingSubmissionsResult data;
         ToolFreshness? freshness = null;
+        var freshnessWarnings = new List<string>();
         try
         {
             var resolvedCourseId = courseId;
@@ -88,10 +89,16 @@ public sealed class MoodlePendingSubmissionsTools(
                         var students = courseRead.Students;
                         var submissions = courseRead.Submissions;
                         var gradebook = courseRead.Gradebook;
-                        if (activities?.IsComplete == true) prefetchedContents = activities.Data;
-                        if (students?.IsComplete == true) prefetchedParticipants = students.Data;
-                        if (submissions?.Data is not null) prefetchedSubmissions = submissions.Data;
-                        if (gradebook?.Data is not null) prefetchedGradebook = gradebook.Data;
+                        var staleDatasets = courseRead.Metadata.StaleDatasets.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        if (activities is { IsComplete: true, IsStale: false }) prefetchedContents = activities.Data;
+                        if (students is { IsComplete: true, IsStale: false }) prefetchedParticipants = students.Data;
+                        if (submissions is { IsComplete: true, IsStale: false, Data: not null }) prefetchedSubmissions = submissions.Data;
+                        if (gradebook is { IsComplete: true, IsStale: false, Data: not null }) prefetchedGradebook = gradebook.Data;
+                        if (staleDatasets.Count > 0)
+                        {
+                            freshnessWarnings.Add(
+                                $"Snapshot stale ({string.Join(", ", staleDatasets)}); pendências decisórias serão revalidadas por leitura ao vivo.");
+                        }
 
                         if (submissions is not null || gradebook is not null)
                         {
@@ -101,13 +108,16 @@ public sealed class MoodlePendingSubmissionsTools(
                                 .OrderByDescending(value => value)
                                 .FirstOrDefault();
                             freshness = new ToolFreshness(
-                                "snapshot",
-                                updatedAt == default ? null : updatedAt,
-                                updatedAt == default ? null : Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt).TotalSeconds),
-                                courseRead.Metadata.StaleDatasets.Count > 0,
+                                staleDatasets.Count == 0 ? "snapshot" : "live",
+                                staleDatasets.Count == 0 && updatedAt != default ? updatedAt : null,
+                                staleDatasets.Count == 0 && updatedAt != default ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt).TotalSeconds) : null,
+                                false,
                                 courseRead.Metadata.RefreshQueued,
-                                courseRead.Metadata.IsComplete,
-                                (submissions?.RecordCount ?? 0) + (gradebook?.RecordCount ?? 0));
+                                staleDatasets.Count == 0 && courseRead.Metadata.IsComplete,
+                                staleDatasets.Count == 0 ? (submissions?.RecordCount ?? 0) + (gradebook?.RecordCount ?? 0) : 0,
+                                DecisionSafe: staleDatasets.Count == 0,
+                                Dataset: "course_read_snapshot",
+                                RecordType: "submissions_and_gradebook");
                         }
                     }
                 }
@@ -128,7 +138,8 @@ public sealed class MoodlePendingSubmissionsTools(
                     PrefetchedContents: prefetchedContents,
                     PrefetchedParticipants: prefetchedParticipants,
                     PrefetchedSubmissions: prefetchedSubmissions,
-                    PrefetchedGradebook: prefetchedGradebook),
+                    PrefetchedGradebook: prefetchedGradebook,
+                    ExcludeFutureActivities: true),
                 cancellationToken);
         }
         catch (OperationCanceledException) { throw; }
@@ -141,7 +152,21 @@ public sealed class MoodlePendingSubmissionsTools(
             return ToolResultHelper.Error<GetStudentsWithPendingSubmissionsResult>(exception);
         }
 
-        var response = new ToolResponse<GetStudentsWithPendingSubmissionsResult>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
+        if (freshness is { Source: "live" })
+        {
+            freshness = freshness with
+            {
+                Complete = data.IsComplete,
+                DecisionSafe = data.IsComplete,
+            };
+        }
+
+        var warnings = new List<string>(freshnessWarnings);
+        if (!string.IsNullOrWhiteSpace(data.Warning))
+        {
+            warnings.Add(data.Warning);
+        }
+        var response = new ToolResponse<GetStudentsWithPendingSubmissionsResult>("ok", data, warnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         var filter = dueDaysAhead > 0 ? $"nos próximos {dueDaysAhead} dias ou vencidas" : "sem filtro de prazo";
         var narration = $"Pendências de atividade — curso {courseId} ({filter}): {data.TotalStudentsAnalyzed} estudante(s) analisado(s). " +
                         $"{data.Students.Count} com pelo menos uma SA pendente.";

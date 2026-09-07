@@ -190,8 +190,8 @@ internal sealed class MoodleParticipantsGateway(
                 includedByStudentRoleCount,
                 includedByFallbackCount,
                 excludedKnownStaffCount,
-                hasEmptyRoles,
-                hasEmptyGroups,
+                participants.Take(pageSize).Any(participant => participant.Roles.Count == 0),
+                participants.Take(pageSize).Any(participant => participant.Groups.Count == 0),
                 ResolveClassificationMode(
                     evaluatedCount,
                     includedByStudentRoleCount,

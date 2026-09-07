@@ -92,7 +92,8 @@ public sealed class MoodleStudentPerformanceTools(
                             courseRead.Gradebook.IsStale,
                             courseRead.Metadata.RefreshQueued,
                             courseRead.Gradebook.IsComplete && courseRead.Gradebook.Data.Coverage.IsComplete,
-                            courseRead.Gradebook.RecordCount);
+                            courseRead.Gradebook.RecordCount,
+                            DecisionSafe: !courseRead.Gradebook.IsStale);
                     }
                     else
                     {
@@ -134,8 +135,11 @@ public sealed class MoodleStudentPerformanceTools(
             return ToolResultHelper.Error<StudentGradeItemsResult>(exception);
         }
 
+        var warnings = freshness?.Stale == true
+            ? new[] { "O boletim retornado vem de um snapshot stale; use-o apenas como leitura informativa enquanto a atualização é processada." }
+            : Array.Empty<string>();
         var response = new ToolResponse<StudentGradeItemsResult>(
-            "ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
+            "ok", data, warnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         var narration = $"Desempenho do estudante {studentId} no curso {courseId}: {data.Items.Count} atividade(s) avaliativa(s). " +
                         $"{data.BelowMinimumItems.Count} abaixo do mínimo de {data.MinGradePercent}%.";
 
@@ -192,6 +196,7 @@ public sealed class MoodleStudentPerformanceTools(
         CourseGradebookSnapshot? prefetchedGradebook = null;
         CourseParticipantsPage? prefetchedParticipants = null;
         ToolFreshness? freshness = null;
+        var freshnessWarnings = new List<string>();
         if (snapshotContext is not null)
         {
             try
@@ -201,30 +206,50 @@ public sealed class MoodleStudentPerformanceTools(
                         courseId,
                         moodleAlias,
                         moodleUserId.Value.ToString(),
-                        CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
+                        CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook,
+                        AllowStale: false),
                     cancellationToken);
                 if (courseRead is not null)
                 {
                     effectiveCourseId = courseRead.CourseId;
-                    prefetchedGradebook = courseRead.Gradebook?.Data;
-                    if (courseRead.Students?.Data is { HasMore: false } participants &&
-                        courseRead.Students.IsComplete)
+                    var gradebookSafe = courseRead.Gradebook is { IsStale: false, IsComplete: true } envelope &&
+                        envelope.Data.Coverage.IsComplete;
+                    var studentsSafe = courseRead.Students is { IsStale: false, IsComplete: true, Data.HasMore: false };
+                    if (gradebookSafe)
+                    {
+                        prefetchedGradebook = courseRead.Gradebook!.Data;
+                    }
+
+                    if (studentsSafe && courseRead.Students?.Data is { HasMore: false } participants)
                     {
                         prefetchedParticipants = participants;
                     }
 
+                    var staleDecisionDatasets = courseRead.Metadata.StaleDatasets
+                        .Where(dataset => dataset is MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Gradebook)
+                        .ToArray();
+                    if (staleDecisionDatasets.Length > 0)
+                    {
+                        freshnessWarnings.Add(
+                            $"Snapshot stale ({string.Join(", ", staleDecisionDatasets)}); a análise decisória foi desviada para leitura ao vivo e não usará esses dados antigos.");
+                    }
+
                     var updatedAt = courseRead.Metadata.OldestUpdatedAt;
                     freshness = new ToolFreshness(
-                        "snapshot",
-                        updatedAt,
-                        updatedAt.HasValue
+                        staleDecisionDatasets.Length == 0 ? "snapshot" : "live",
+                        staleDecisionDatasets.Length == 0 ? updatedAt : null,
+                        staleDecisionDatasets.Length == 0 && updatedAt.HasValue
                             ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
                             : null,
-                        courseRead.Metadata.StaleDatasets.Count > 0,
+                        staleDecisionDatasets.Length == 0 && courseRead.Metadata.StaleDatasets.Count > 0,
                         courseRead.Metadata.RefreshQueued,
-                        courseRead.Metadata.IsComplete,
-                        (courseRead.Students?.RecordCount ?? 0) +
-                        (courseRead.Gradebook?.RecordCount ?? 0));
+                        staleDecisionDatasets.Length == 0 && courseRead.Metadata.IsComplete,
+                        staleDecisionDatasets.Length == 0
+                            ? (courseRead.Students?.RecordCount ?? 0) + (courseRead.Gradebook?.RecordCount ?? 0)
+                            : 0,
+                        DecisionSafe: staleDecisionDatasets.Length == 0,
+                        Dataset: "course_read_snapshot",
+                        RecordType: "students_and_gradebook");
                 }
             }
             catch
@@ -256,8 +281,31 @@ public sealed class MoodleStudentPerformanceTools(
             return ToolResultHelper.Error<GetStudentsBelowMinGradeResult>(exception);
         }
 
+        var liveReadIsComplete = data.GradebookIncompleteStudentIds.Count == 0;
+        if (freshness is { Source: "live" })
+        {
+            // A stale snapshot only selects the live path; it must not make a
+            // successful live revalidation permanently unsafe for decisions.
+            freshness = freshness with
+            {
+                Complete = liveReadIsComplete,
+                DecisionSafe = liveReadIsComplete,
+            };
+        }
+
+        var decisionSafe = freshness?.Source == "live"
+            ? liveReadIsComplete
+            : freshness?.DecisionSafe != false && liveReadIsComplete;
+        if (!decisionSafe)
+        {
+            // A partial live read must not turn the rows that happened to be
+            // visible into a definitive pedagogical target list.
+            data = data with { Students = [], SuggestedRecipientIds = [] };
+            freshnessWarnings.Add("A análise não é segura para seleção pedagógica porque a cobertura do gradebook está incompleta.");
+        }
+
         var response = new ToolResponse<GetStudentsBelowMinGradeResult>(
-            "ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
+            "ok", data, freshnessWarnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         var narration = $"Análise do curso {courseId}: {data.TotalStudentsAnalyzed} estudante(s) analisado(s). " +
                         $"{data.Students.Count} com pelo menos uma SA abaixo de {data.MinGradePercent}%.";
 

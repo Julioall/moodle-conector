@@ -215,7 +215,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
-    [Description("Retorna uma pagina do pacote estruturado de uma correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. O identificador aceita um batchJobId legado ou o gradingRunId agregado; use page/nextPage para percorrer ate 10.000 itens sem carregar tudo na resposta. Leia os resources antes de gerar nota e feedback. Ao salvar, copie todas e somente as URIs com resourceType 'submission' para proposal.resourceUris; resources de 'assignment_context' podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e escolha um destino: export_grading_corrections_csv se o usuario pediu CSV ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Nao escreve no Moodle.")]
+    [Description("Retorna uma pagina do pacote estruturado de uma correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. Cada resource tambem informa artifactId, que deve ser usado em proposal.evidence para provar o arquivo analisado. O identificador aceita um batchJobId legado ou o gradingRunId agregado; use page/nextPage para percorrer ate 10.000 itens sem carregar tudo na resposta. Leia os resources antes de gerar nota e feedback. Se a entrega for de outra atividade, gere nota 0 quando houver escala e feedback especifico explicando a incompatibilidade, salvando como rascunho para revisao. Ao salvar, copie todas e somente as URIs com resourceType 'submission' para proposal.resourceUris; resources de 'assignment_context' podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e escolha um destino: export_grading_corrections_csv se o usuario pediu CSV ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
         [Description("Identificador retornado por start_pending_grading_run: pode ser batchJobId (compatibilidade) ou gradingRunId (recomendado para consolidar todos os sublotes).")]
         Guid batchJobId,
@@ -288,7 +288,7 @@ public sealed class MoodleGradingTools(
     public async Task<CallToolResult> SalvarCorrecoesIaLoteAsync(
         [Description("Identificador retornado por start_pending_grading_run: batchJobId legado ou gradingRunId agregado (recomendado).")]
         Guid batchJobId,
-    [Description("Array de correcoes. O formato legado usa gradingItemId, nota e feedback. Quando disponivel, proposal deve conter a versao/hash do contexto, criterios, evidencias, cobertura e feedback estruturado. Para um rascunho MCP que possa gerar previa de lancamento, proposal.resourceUris deve conter todas e somente as URIs do pacote com resourceType 'submission'; nao inclua recursos de contexto. A escala numerica continua sendo validada pelo Moodle.")]
+    [Description("Array de correcoes. O formato legado usa gradingItemId, nota e feedback. Quando disponivel, proposal deve conter a versao/hash do contexto, criterios, evidencias, cobertura e feedback estruturado; em evidence use artifactId real do pacote e descreva a observacao. Entregas incompatíveis devem receber nota 0 quando houver escala e feedback explicativo, permanecendo em revisao humana. Para um rascunho MCP que possa gerar previa de lancamento, proposal.resourceUris deve conter todas e somente as URIs do pacote com resourceType 'submission'; nao inclua recursos de contexto. A escala numerica continua sendo validada pelo Moodle.")]
         AiGradingItemInput[] items,
         CancellationToken cancellationToken = default)
     {
@@ -508,8 +508,16 @@ public sealed class MoodleGradingTools(
             return ToolResultHelper.Error<StartPendingGradingRunResult>(exception);
         }
 
+        var hasResolutionFailure = data.AssignmentResolution.Any(item => !item.Resolved);
+        var hasCourseFailure = data.Courses.Any(course =>
+            course.Status is "course_read_failed" or "partial_failure");
+        var responseStatus = hasResolutionFailure || hasCourseFailure
+            ? "partial_failure"
+            : data.Warnings.Count > 0
+                ? "ok_with_skips"
+                : "ok";
         var response = new ToolResponse<StartPendingGradingRunResult>(
-            data.Warnings.Count == 0 ? "ok" : "partial_failure",
+            responseStatus,
             data,
             data.Warnings,
             AuditId: null,
@@ -733,7 +741,10 @@ public sealed class MoodleGradingTools(
         foreach (var item in data.Items)
         {
             var resourceInfo = item.Resources?.Count > 0
-                ? $"{item.Resources.Count} arquivo(s) original(is) via MCP Resource"
+                ? $"{item.Resources.Count} arquivo(s) original(is) via MCP Resource" +
+                  (item.Resources.Any(resource => resource.ArtifactId is not null)
+                      ? $"; artifactId(s): {string.Join(", ", item.Resources.Where(resource => resource.ArtifactId is not null).Select(resource => resource.ArtifactId))}"
+                      : string.Empty)
                 : "sem arquivo original disponível";
             var gradeInfo = item.GradingMode == "feedback_only"
                 ? "modo: somente feedback (sem nota)"

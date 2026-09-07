@@ -15,7 +15,8 @@ public sealed record ListAssignmentSubmissionsQuery(
     DateTimeOffset? Since,
     DateTimeOffset? Before,
     bool IncludeLate,
-    bool IncludeUngraded) : IRequest<AssignmentSubmissionsPage?>;
+    bool IncludeUngraded,
+    bool ExcludeFutureActivity = false) : IRequest<AssignmentSubmissionsPage?>;
 
 public sealed record GetStudentSubmissionQuery(
     string UserExternalId,
@@ -28,7 +29,9 @@ internal sealed record AssignmentSubmissionRows(
     string AssignmentId,
     string AssignmentModuleId,
     string AssignmentName,
-    IReadOnlyList<AssignmentSubmissionSummary> Rows);
+    IReadOnlyList<AssignmentSubmissionSummary> Rows,
+    DateTimeOffset? OpenAt = null,
+    bool IsFutureActivity = false);
 
 public sealed class ListAssignmentSubmissionsQueryHandler(
     IMoodleCoursesGateway coursesGateway,
@@ -76,7 +79,11 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             request.Before,
             rows.Count,
             pagedRows.Length > pageSize,
-            pagedRows.Take(pageSize).ToArray());
+            pagedRows.Take(pageSize).ToArray())
+        {
+            OpenAt = rowsContext.OpenAt,
+            IsFutureActivity = rowsContext.IsFutureActivity,
+        };
     }
 
     internal async Task<AssignmentSubmissionRows?> BuildRowsAsync(
@@ -100,6 +107,19 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
         if (assignment is null)
         {
             return null;
+        }
+
+        var isFutureActivity = !ActivityEligibility.IsCurrentlyOpen(assignment.OpenAt, DateTimeOffset.UtcNow);
+        if (request.ExcludeFutureActivity && isFutureActivity)
+        {
+            return new AssignmentSubmissionRows(
+                course.CourseId,
+                assignment.InstanceId ?? assignment.ActivityId,
+                assignment.ActivityId,
+                assignment.Name,
+                [],
+                assignment.OpenAt,
+                IsFutureActivity: true);
         }
 
         var assignmentInstanceId = assignment.InstanceId ?? assignment.ActivityId;
@@ -158,7 +178,9 @@ public sealed class ListAssignmentSubmissionsQueryHandler(
             assignmentInstanceId,
             assignment.ActivityId,
             assignment.Name,
-            rows);
+            rows,
+            assignment.OpenAt,
+            isFutureActivity);
     }
 
     private async Task<AssignmentSettingsSummary?> ReadAssignmentSettingsAsync(

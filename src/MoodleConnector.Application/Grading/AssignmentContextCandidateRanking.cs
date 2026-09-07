@@ -34,6 +34,16 @@ internal static partial class AssignmentContextCandidateRanking
         "ead"
     ];
 
+    private static readonly string[] GenericCourseMaterialKeywords =
+    [
+        "cronograma",
+        "calendario",
+        "plano de aula",
+        "plano_aula",
+        "agenda",
+        "programacao"
+    ];
+
     private static readonly HashSet<string> StopWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "enviar", "envio", "atividade", "extra", "tarefa", "para", "com", "sem",
@@ -234,6 +244,14 @@ internal static partial class AssignmentContextCandidateRanking
         if (likelyAnswerTemplate)
         {
             score -= 8m;
+        }
+
+        if (GenericCourseMaterialKeywords.Any(keyword => normalizedTitle.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+        {
+            // A calendar or lesson plan may be useful supporting material,
+            // but it must not become the primary statement when a specific
+            // SAP/assignment document is available.
+            score -= 12m;
         }
 
         var hasContextKeywordInTitle = ContextKeywords.Any(keyword =>

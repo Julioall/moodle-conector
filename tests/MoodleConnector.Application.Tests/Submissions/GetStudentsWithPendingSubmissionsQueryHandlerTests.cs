@@ -331,6 +331,30 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandlerTests
         Assert.DoesNotContain(result.Evaluations, item => item.AssignmentId == "assign-future");
     }
 
+    [Fact]
+    public async Task Exclui_atividade_futura_por_padrao_para_manter_consistencia_das_pendencias()
+    {
+        var fixture = new Fixture
+        {
+            Contents = Contents(
+                ModuleWithDates("assign-open", "assign", new CourseModuleDate("Abre:", DateTimeOffset.UtcNow.AddHours(-1))),
+                ModuleWithDates("assign-future", "assign", new CourseModuleDate("Abre:", DateTimeOffset.UtcNow.AddDays(3)))),
+            Submissions =
+            [
+                new AssignmentSubmissionsBatch("assign-open", []),
+                new AssignmentSubmissionsBatch("assign-future", [])
+            ]
+        };
+
+        var result = await fixture.CreateHandler().Handle(
+            new GetStudentsWithPendingSubmissionsQuery("course-1"),
+            CancellationToken.None);
+
+        var student = Assert.Single(result.Students);
+        Assert.Equal("assign-open", Assert.Single(student.PendingAssignments).AssignmentId);
+        Assert.DoesNotContain(result.Evaluations, item => item.AssignmentId == "assign-future");
+    }
+
     private static CourseContentsSummary Contents(params CourseModuleSummary[] modules) =>
         new("course-1", ["assign"], false, false,
         [new CourseSectionSummary("section-1", 1, "Seção 1", null, true, modules.Length, modules.Length == 0, modules)]);

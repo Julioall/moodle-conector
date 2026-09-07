@@ -51,6 +51,7 @@ public class MoodleAssignmentSubmissionsToolsTests
 
         await sut.ListarEntregasPendentesAsync("CURSO", "11");
         Assert.Equal(AssignmentSubmissionFilter.NotSubmitted, mediator.LastListQuery!.Filter);
+        Assert.True(mediator.LastListQuery.ExcludeFutureActivity);
 
         await sut.ListarEntregasAtrasadasAsync("CURSO", "11");
         Assert.Equal(AssignmentSubmissionFilter.Late, mediator.LastListQuery!.Filter);
@@ -115,6 +116,7 @@ public class MoodleAssignmentSubmissionsToolsTests
         Assert.True(result.IsError ?? false);
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         Assert.Equal("error", structured.GetProperty("status").GetString());
+        Assert.Equal("invalid_filter", structured.GetProperty("errorCode").GetString());
     }
 
     [Fact]

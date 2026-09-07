@@ -93,7 +93,8 @@ public sealed class MoodleGradebookTools(
                             courseRead.Gradebook.IsStale,
                             courseRead.Metadata.RefreshQueued,
                             courseRead.Gradebook.IsComplete && courseRead.Gradebook.Data.Coverage.IsComplete,
-                            courseRead.Gradebook.RecordCount);
+                            courseRead.Gradebook.RecordCount,
+                            DecisionSafe: !courseRead.Gradebook.IsStale);
                     }
                     else
                     {
@@ -134,10 +135,13 @@ public sealed class MoodleGradebookTools(
             return ToolResultHelper.Error<CourseGradebook>("Nao foi possivel consultar o boletim do aluno neste momento.");
         }
 
+        var warnings = freshness?.Stale == true
+            ? new[] { "O boletim foi lido de um snapshot stale; os dados podem não refletir a configuração atual do Moodle." }
+            : Array.Empty<string>();
         var response = new ToolResponse<CourseGradebook>(
             "ok",
             data,
-            [],
+            warnings,
             AuditId: null,
             DateTimeOffset.UtcNow,
             Freshness: freshness);

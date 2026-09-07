@@ -276,6 +276,14 @@ dotnet test MoodleConnector.slnx
 
 A suíte cobre contratos MCP, autenticação JWT/API key, OAuth local, cadastro/login do app, pending actions, resolução de usuário Moodle e tools implementadas.
 
+Para executar também os 11 testes de integração PostgreSQL localmente, use Docker:
+
+```powershell
+./scripts/test-postgres.ps1
+```
+
+O script sobe um PostgreSQL efêmero em `localhost:5433`, injeta `MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION`, executa a suíte completa e remove o container ao final. Para manter o banco disponível após os testes, use `-KeepDatabase`.
+
 ## Endpoints
 
 - `POST /mcp`: endpoint MCP streamable HTTP.

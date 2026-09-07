@@ -6,6 +6,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Activities;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
 
@@ -364,7 +365,9 @@ public sealed class MoodleCourseActivitiesTools(
 
         if (activity is null)
         {
-            return ToolResultHelper.Error<CourseActivityDetailsResponse>("Atividade nao encontrada no curso informado.");
+            return ToolResultHelper.Error<CourseActivityDetailsResponse>(
+                "Atividade nao encontrada no curso informado.",
+                errorCode: MoodleErrorContract.ActivityNotFound);
         }
 
         var data = new CourseActivityDetailsResponse(ToActivityItem(activity));

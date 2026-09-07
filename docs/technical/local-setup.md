@@ -28,6 +28,18 @@ dotnet restore MoodleConnector.slnx
 dotnet test MoodleConnector.slnx
 ```
 
+Os testes PostgreSQL exigem uma instância real porque exercitam JSONB, índices,
+`ExecuteUpdateAsync`/`ExecuteDeleteAsync` e concorrência. Para subir essa instância
+local e executar a suíte completa:
+
+```powershell
+./scripts/test-postgres.ps1
+```
+
+O script usa `docker-compose.test.yml`, publica o PostgreSQL efêmero em
+`127.0.0.1:5433`, define `MOODLE_CONNECTOR_POSTGRES_TEST_CONNECTION` e remove o
+container ao terminar. Use `-KeepDatabase` para inspecionar o banco após a execução.
+
 ## Executar Com Docker Compose
 
 1. Crie o arquivo de ambiente:

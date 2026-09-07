@@ -92,7 +92,7 @@ public sealed record GetStudentsWithPendingSubmissionsQuery(
     CourseParticipantsPage? PrefetchedParticipants = null,
     CourseAssignmentSubmissionsSnapshot? PrefetchedSubmissions = null,
     CourseGradebookSnapshot? PrefetchedGradebook = null,
-    bool ExcludeFutureActivities = false) : IRequest<GetStudentsWithPendingSubmissionsResult>;
+    bool ExcludeFutureActivities = true) : IRequest<GetStudentsWithPendingSubmissionsResult>;
 
 public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
     IMoodleParticipantsGateway participantsGateway,
@@ -182,9 +182,7 @@ public sealed class GetStudentsWithPendingSubmissionsQueryHandler(
                 FindModuleDate(module, IsDueDateLabel),
                 FindModuleDate(module, IsOpenDateLabel)))
             .Where(context =>
-                (!request.ExcludeFutureActivities ||
-                 !context.OpenDate.HasValue ||
-                 context.OpenDate.Value <= now) &&
+                (!request.ExcludeFutureActivities || ActivityEligibility.IsCurrentlyOpen(context.OpenDate, now)) &&
                 (request.DueDaysAhead <= 0 ||
                  !context.DueDate.HasValue ||
                  (context.DueDate.Value - now).TotalDays <= request.DueDaysAhead))

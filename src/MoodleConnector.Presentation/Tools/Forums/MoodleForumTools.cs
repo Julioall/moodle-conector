@@ -202,7 +202,7 @@ public sealed class MoodleForumTools(
         }
         catch (ArgumentOutOfRangeException ex)
         {
-            return ToolResultHelper.Error<ReadForumResponse>(ex.Message);
+            return ToolResultHelper.Error<ReadForumResponse>(ex.Message, errorCode: MoodleErrorContract.InvalidPage);
         }
         catch (MoodleApiException exception)
         {

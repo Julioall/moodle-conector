@@ -49,4 +49,20 @@ public sealed class AuditPayloadSanitizerTests
             "https://moodle.tests/course/view.php?id=10",
             element.GetProperty("url").GetString());
     }
+
+    [Fact]
+    public void SerializeSanitized_RedigeSegredosAninhadosEmObjetosEArrays()
+    {
+        var json = AuditPayloadSanitizer.SerializeSanitized(new
+        {
+            token = "token-real",
+            nested = new { privateAccessKey = "private-real" },
+            array = new[] { new { password = "password-real" } }
+        });
+
+        Assert.DoesNotContain("token-real", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-real", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("password-real", json, StringComparison.Ordinal);
+        Assert.Equal(3, json.Split("[REDACTED]", StringSplitOptions.None).Length - 1);
+    }
 }

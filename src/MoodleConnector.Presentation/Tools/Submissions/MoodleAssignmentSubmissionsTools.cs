@@ -55,7 +55,9 @@ public sealed class MoodleAssignmentSubmissionsTools(
     {
         if (!TryParseFilter(status, out var filter))
         {
-            return Task.FromResult(ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Filtro de status invalido. Use todos, entregues, pendentes, atrasadas ou aguardando_correcao."));
+            return Task.FromResult(ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(
+                "Filtro de status invalido. Use todos, entregues, pendentes, atrasadas ou aguardando_correcao.",
+                errorCode: MoodleErrorContract.InvalidFilter));
         }
 
         return ListSubmissionsCoreAsync(
@@ -286,7 +288,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
                         // current grade rows as well as submission status.
                         // A snapshot only stores the latter, so it cannot
                         // distinguish an empty grade from Moodle's -1 marker.
-                        if (item is { IsComplete: true } &&
+                        if (filter != AssignmentSubmissionFilter.NotSubmitted &&
+                            item is { IsComplete: true } &&
                             (filter != AssignmentSubmissionFilter.NeedsGrading ||
                              item.Coverage?.NeedsGradingComplete == true) &&
                             (!IsFeedbackOnlySnapshot(item) || HasPersistedGraderEvidence(item)))
@@ -350,7 +353,8 @@ public sealed class MoodleAssignmentSubmissionsTools(
                     since,
                     before,
                     includeLate,
-                    includeUngraded),
+                    includeUngraded,
+                    ExcludeFutureActivity: filter == AssignmentSubmissionFilter.NotSubmitted),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -359,7 +363,7 @@ public sealed class MoodleAssignmentSubmissionsTools(
         }
         catch (ArgumentOutOfRangeException ex)
         {
-            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(ex.Message);
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(ex.Message, errorCode: MoodleErrorContract.InvalidPage);
         }
         catch (MoodleApiException ex)
         {
@@ -372,11 +376,20 @@ public sealed class MoodleAssignmentSubmissionsTools(
 
         if (submissionsPage is null)
         {
-            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>("Curso ou tarefa nao encontrados entre os dados autorizados do usuario.");
+            return ToolResultHelper.Error<ListAssignmentSubmissionsResponse>(
+                "Curso ou tarefa nao encontrados entre os dados autorizados do usuario.",
+                errorCode: MoodleErrorContract.AssignmentNotFound);
         }
 
         var data = ToListResponse(submissionsPage);
-        var response = new ToolResponse<ListAssignmentSubmissionsResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
+        var warnings = data.ActivityState == "future"
+            ? new[] { "A atividade ainda não está aberta; nenhum estudante é considerado pendente neste momento." }
+            : Array.Empty<string>();
+        if (freshness?.Stale == true)
+        {
+            warnings = [.. warnings, "A resposta vem de um snapshot stale; o status pode não refletir a entrega mais recente no Moodle."];
+        }
+        var response = new ToolResponse<ListAssignmentSubmissionsResponse>("ok", data, warnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult
         {
@@ -519,7 +532,12 @@ public sealed class MoodleAssignmentSubmissionsTools(
             page.Total,
             page.HasMore,
             page.Submissions.Count,
-            page.Submissions.Select(ToSubmissionItem).ToArray());
+            page.Submissions.Select(ToSubmissionItem).ToArray())
+        {
+            ActivityState = page.IsFutureActivity ? "future" : "open",
+            IsPending = !page.IsFutureActivity && page.Filter == AssignmentSubmissionFilter.NotSubmitted,
+            OpenAt = page.OpenAt,
+        };
     }
 
     private static SubmissionItem ToSubmissionItem(AssignmentSubmissionSummary submission)
@@ -545,6 +563,11 @@ public sealed class MoodleAssignmentSubmissionsTools(
     {
         if (response.Count == 0)
         {
+            if (response.ActivityState == "future")
+            {
+                return $"A atividade '{response.AssignmentName}' ainda não está aberta; não há pendências de entrega para listar.";
+            }
+
             if (response.Page > 1)
             {
                 return $"A pagina {response.Page} nao retornou entregas. O numero maximo de paginas pode ter sido ultrapassado.";
@@ -657,7 +680,17 @@ public sealed class MoodleAssignmentSubmissionsTools(
         [property: JsonPropertyName("total")] int Total,
         [property: JsonPropertyName("hasMore")] bool HasMore,
         [property: JsonPropertyName("count")] int Count,
-        [property: JsonPropertyName("submissions")] IReadOnlyList<SubmissionItem> Submissions);
+        [property: JsonPropertyName("submissions")] IReadOnlyList<SubmissionItem> Submissions)
+    {
+        [JsonPropertyName("activityState")]
+        public string ActivityState { get; init; } = "open";
+
+        [JsonPropertyName("isPending")]
+        public bool IsPending { get; init; }
+
+        [JsonPropertyName("openAt")]
+        public DateTimeOffset? OpenAt { get; init; }
+    }
 
     public sealed record StudentSubmissionResponse(
         [property: JsonPropertyName("courseId")] string CourseId,

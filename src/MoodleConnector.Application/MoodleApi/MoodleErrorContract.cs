@@ -33,6 +33,12 @@ public static class MoodleErrorContract
     public const string InvalidScormManifest = "invalid_scorm_manifest";
     public const string InvalidScormResponse = "invalid_scorm_response";
     public const string CourseNotFound = "moodle_course_not_found";
+    public const string ActivityNotFound = "moodle_activity_not_found";
+    public const string ModuleNotFound = "moodle_module_not_found";
+    public const string AssignmentNotFound = "assignment_not_found";
+    public const string InvalidFilter = "invalid_filter";
+    public const string InvalidPage = "invalid_page";
+    public const string UnknownMoodleFunction = "unknown_moodle_function";
     public const string SnapshotUnavailable = "snapshot_unavailable";
     public const string Unexpected = "unexpected_connector_error";
 
@@ -77,6 +83,12 @@ public static class MoodleErrorContract
             NetworkError or "moodle_unavailable" => NetworkError,
             InvalidResponse or "moodle_empty_response" => InvalidResponse,
             CourseNotFound or "invalidcourseid" or "course_not_found" => CourseNotFound,
+            ActivityNotFound or "activity_not_found" or "invalidactivityid" => ActivityNotFound,
+            ModuleNotFound or "module_not_found" or "invalidcoursemodule" => ModuleNotFound,
+            AssignmentNotFound or "assignment_not_found" => AssignmentNotFound,
+            InvalidFilter or "invalid_filter" => InvalidFilter,
+            InvalidPage or "invalid_page" => InvalidPage,
+            UnknownMoodleFunction or "unknown_function" => UnknownMoodleFunction,
             SnapshotUnavailable => SnapshotUnavailable,
             ApiError or "moodle_error" or "invalidparameter" or "invalid_parameter" => ApiError,
             ScormNotFound => ScormNotFound,
@@ -107,6 +119,12 @@ public static class MoodleErrorContract
         NetworkError => "Nao foi possivel estabelecer comunicacao com o Moodle.",
         InvalidResponse => "O Moodle retornou uma resposta invalida.",
         CourseNotFound => "O curso nao foi encontrado ou nao esta acessivel para o usuario autenticado.",
+        ActivityNotFound => "A atividade nao foi encontrada no curso informado.",
+        ModuleNotFound => "O modulo nao foi encontrado no curso informado.",
+        AssignmentNotFound => "A tarefa nao foi encontrada no curso informado.",
+        InvalidFilter => "O filtro informado nao e valido.",
+        InvalidPage => "A pagina informada nao e valida.",
+        UnknownMoodleFunction => "A funcao Moodle informada nao pertence ao catalogo conhecido do Connector.",
         SnapshotUnavailable => "O snapshot solicitado ainda nao esta disponivel ou esta incompleto.",
         ApiError => "O Moodle recusou ou nao conseguiu concluir a chamada solicitada.",
         ScormNotFound => "Nenhum pacote SCORM correspondente foi encontrado no curso.",

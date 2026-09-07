@@ -2283,7 +2283,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
     ICurrentUserContext currentUser,
     IMoodleAssignmentSettingsGateway settingsGateway,
     IMoodleResourceGateway? resourceGateway = null,
-    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null,
+    IAssignmentContextSelectionService? contextSelectionService = null)
     : IRequestHandler<PrepareGradingContextForChatQuery, GradingContextForChatResult>
 {
     public async Task<GradingContextForChatResult> Handle(
@@ -2354,7 +2355,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
                     descriptor.Filename,
                     descriptor.MimeType,
                     descriptor.SizeBytes,
-                    ResourceType: "submission"));
+                    ResourceType: "submission",
+                    ArtifactId: artifact.Id));
             }
 
             warnings.Add("Entrega fornecida por MCP Resource; leia os arquivos originais antes de propor a correção.");
@@ -2388,7 +2390,8 @@ public sealed class PrepareGradingContextForChatQueryHandler(
                     descriptor.Filename,
                     descriptor.MimeType,
                     descriptor.SizeBytes,
-                    ResourceType: "assignment_context"));
+                    ResourceType: "assignment_context",
+                    ArtifactId: artifact.Id));
             }
             catch (OperationCanceledException)
             {
@@ -2401,12 +2404,15 @@ public sealed class PrepareGradingContextForChatQueryHandler(
         }
 
         // Texto do enunciado da atividade
-        var contextArtifact = artifacts
-            .Where(a => a.ArtifactType == "assignment_context" &&
-                        ExtractionStatus.IsReadable(a.ExtractionStatus) &&
-                        !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
-            .OrderByDescending(a => a.ExtractedTextRef?.Length ?? 0)
-            .FirstOrDefault();
+        var contextSelection = await AssignmentContextArtifactSelector.SelectAsync(
+            artifacts,
+            item.CourseId.ToString(CultureInfo.InvariantCulture),
+            item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+            $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
+            contextSelectionService,
+            cancellationToken);
+        warnings.AddRange(contextSelection.Warnings);
+        var contextArtifact = contextSelection.Artifact;
         var assignmentStatement = contextArtifact?.ExtractedTextRef;
         // Prefer the official Moodle assignment name from the settings API;
         // fall back to the context artifact filename (usually the PDF name).
@@ -2470,7 +2476,9 @@ public sealed class PrepareGradingContextForChatQueryHandler(
             $"2) Indique melhorias especificas quando houver lacunas; " +
             (maxGrade is not null ? "3) Sugira uma nota somente dentro da escala confirmada. " : "3) Nao inclua nota numerica. ") +
             $"O feedback deve ser adequado para colar diretamente no Moodle. " +
+            $"Se a entrega pertencer claramente a outra atividade ou nao responder ao enunciado desta atividade, classifique-a como entrega_incompativel, sugira nota 0 quando houver escala numerica, e escreva um feedback especifico explicando que a atividade enviada nao corresponde a esta proposta e qual tipo de resposta deve ser enviada. Nunca descarte a entrega nem deixe o feedback vazio. " +
             $"Nao exija saudacao nominal: este contexto fornece apenas studentId, que nao e um nome. " +
+            $"Para uma proposta estruturada, cite pelo menos um artifactId real de resourceType submission em evidence e descreva o arquivo ou trecho observado; use os IDs exatamente como recebidos no pacote. " +
             $"Apos gerar, use save_ai_grading_batch para salvar o rascunho. Se o usuario pediu CSV, use export_grading_corrections_csv; caso contrario, use create_batch_grade_launch_preview e aguarde a confirmacao explicita antes de publicar.");
 
         return new GradingContextForChatResult(
@@ -2553,7 +2561,8 @@ public sealed record AiGradingResourceLink(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("mimeType")] string MimeType,
     [property: JsonPropertyName("size")] long? Size,
-    [property: JsonPropertyName("resourceType")] string ResourceType = "submission");
+    [property: JsonPropertyName("resourceType")] string ResourceType = "submission",
+    [property: JsonPropertyName("artifactId")] Guid? ArtifactId = null);
 
 public sealed class PrepareAiGradingBatchQueryHandler(
     IGradingReviewRepository repository,
@@ -2561,7 +2570,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
     IMoodleAssignmentSettingsGateway settingsGateway,
     IGradingOperationTelemetry? telemetry = null,
     IMoodleResourceGateway? resourceGateway = null,
-    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null,
+    IAssignmentContextSelectionService? contextSelectionService = null)
     : IRequestHandler<PrepareAiGradingBatchQuery, AiGradingBatchPackageResult>
 {
     private const int MaxPageSize = 400;
@@ -2682,8 +2692,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 "A correção assistida exige McpResourceSubmissionDeliveryEnabled=true e o gateway MCP Resource disponível.");
         }
 
-        var submissionRegistrationEntries = new List<(Guid ItemId, MoodleResourceRegistration Registration)>();
-        var contextRegistrationEntries = new List<(Guid ItemId, string Filename, MoodleResourceRegistration Registration)>();
+        var submissionRegistrationEntries = new List<(Guid ItemId, Guid ArtifactId, MoodleResourceRegistration Registration)>();
+        var contextRegistrationEntries = new List<(Guid ItemId, Guid ArtifactId, string Filename, MoodleResourceRegistration Registration)>();
         foreach (var item in pageItems)
         {
             var artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
@@ -2699,7 +2709,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             }
 
             submissionRegistrationEntries.AddRange(submissionArtifacts.Select(artifact =>
-                (item.Id, new MoodleResourceRegistration(
+                (item.Id, artifact.Id, new MoodleResourceRegistration(
                     "submission_attachment",
                     artifact.Filename!,
                     artifact.MimeType ?? "application/octet-stream",
@@ -2717,6 +2727,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                                    !string.IsNullOrWhiteSpace(artifact.Filename))
                 .Select(artifact => (
                     item.Id,
+                    artifact.Id,
                     artifact.Filename!,
                     new MoodleResourceRegistration(
                         "assignment_context_attachment",
@@ -2748,7 +2759,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                     descriptors[index].Filename,
                     descriptors[index].MimeType,
                     descriptors[index].SizeBytes,
-                    ResourceType: "submission")))
+                    ResourceType: "submission",
+                    ArtifactId: entry.ArtifactId)))
                 .GroupBy(entry => entry.ItemId)
                 .ToDictionary(group => group.Key, group => (IReadOnlyList<AiGradingResourceLink>)group.Select(entry => entry.Link).ToArray());
         }
@@ -2776,7 +2788,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                         descriptors[index].Filename,
                         descriptors[index].MimeType,
                         descriptors[index].SizeBytes,
-                        ResourceType: "assignment_context")))
+                        ResourceType: "assignment_context",
+                        ArtifactId: entry.ArtifactId)))
                     .GroupBy(entry => entry.ItemId)
                     .ToDictionary(group => group.Key, group => (IReadOnlyList<AiGradingResourceLink>)group.Select(entry => entry.Link).ToArray());
                 foreach (var (itemId, links) in contextLinks)
@@ -2813,13 +2826,22 @@ public sealed class PrepareAiGradingBatchQueryHandler(
 
             itemWarnings.Add("Entrega fornecida por MCP Resource; leia os arquivos originais antes de propor a correção.");
 
+            // Escala e nome vêm do snapshot canônico publicado pelo worker.
+            // O nome participa do ranking para que SAP-XX específico vença
+            // cronogramas e planos genéricos mesmo quando estes têm mais texto.
+            var snapshot = snapshotsByItem.GetValueOrDefault(item.Id);
+            var snapshotData = ParseSnapshotDisplay(snapshot?.PayloadJson);
+
             // Contexto da atividade
-            var contextArtifact = artifacts
-                .Where(a => a.ArtifactType == "assignment_context" &&
-                            ExtractionStatus.IsReadable(a.ExtractionStatus) &&
-                            !string.IsNullOrWhiteSpace(a.ExtractedTextRef))
-                .OrderByDescending(a => a.ExtractedTextRef?.Length ?? 0)
-                .FirstOrDefault();
+            var contextSelection = await AssignmentContextArtifactSelector.SelectAsync(
+                artifacts,
+                item.CourseId.ToString(CultureInfo.InvariantCulture),
+                item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                snapshotData.ActivityName ?? $"Tarefa {item.AssignmentId.ToString(CultureInfo.InvariantCulture)}",
+                contextSelectionService,
+                cancellationToken);
+            itemWarnings.AddRange(contextSelection.Warnings);
+            var contextArtifact = contextSelection.Artifact;
             var assignmentStatement = contextArtifact?.ExtractedTextRef;
             var assignmentName = contextArtifact?.Filename;
 
@@ -2831,8 +2853,6 @@ public sealed class PrepareAiGradingBatchQueryHandler(
 
             // Escala, nome e enunciado vêm do snapshot canônico publicado pelo
             // worker. A preparação da IA nunca reconstrói contexto no Moodle.
-            var snapshot = snapshotsByItem.GetValueOrDefault(item.Id);
-            var snapshotData = ParseSnapshotDisplay(snapshot?.PayloadJson);
             assignmentName = snapshotData.ActivityName ?? assignmentName;
             assignmentStatement ??= snapshotData.AssignmentStatement;
             var maxGrade = snapshotData.MaxGrade;
@@ -2887,7 +2907,9 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- Cada feedback deve ser individual: inclua pelo menos uma observacao factual da submissao deste aluno e uma lacuna ou proximo passo relacionado a essa evidencia. Nunca copie o mesmo feedback para alunos diferentes.\n" +
             "- Se nao houver evidencia suficiente da submissao para individualizar o retorno, nao invente detalhes: marque a proposta para revisao humana e nao a trate como pronta para publicacao.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
+            "- Uma entrega claramente de outra atividade deve receber nota 0 (quando a escala existir) e feedback individual explicando a incompatibilidade e o proximo passo do aluno; isso e um rascunho para revisao humana, nao um bloqueio tecnico.\n" +
             "- Quando houver resources com resourceType 'assignment_context', identifique automaticamente o enunciado priorizando o arquivo cujo nome e numero correspondam a atividade; ignore materiais genericos, folhas de resposta e arquivos de outra atividade. Se nenhum contexto corresponder com seguranca, nao invente criterios nem nota e sinalize revisao humana.\n" +
+            "- Para cada proposta, cite pelo menos um artifactId real de resourceType 'submission' em proposal.evidence[].artifactId e, se possivel, a URI correspondente. Nunca invente UUIDs.\n" +
             "- Ao chamar save_ai_grading_batch, preencha proposal.resourceUris com todas e somente as URIs em resources cujo resourceType seja 'submission'. Nunca inclua resources de 'assignment_context' nesse campo; eles podem ser citados somente em proposal.evidence[].resourceUri. Sem todas as URIs de submission, o rascunho nao pode gerar uma previa de lancamento.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
             "Apos gerar, use a tool save_ai_grading_batch para salvar os resultados. Se o usuario pediu CSV, chame export_grading_corrections_csv; caso contrario, chame create_batch_grade_launch_preview, mostre a previa e aguarde CONFIRMAR_PUBLICACAO.");
@@ -3119,6 +3141,9 @@ public sealed class SaveAiGradingBatchCommandHandler(
         var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(
             request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
             cancellationToken);
+        var artifactsByItem = await repository.ListArtifactsByItemsAsync(
+            request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
+            cancellationToken);
         var legacySettingsCache = new Dictionary<(long CourseId, long AssignmentId), AssignmentSettingsSummary?>();
         var itemsById = await repository.GetItemsAsync(
             request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
@@ -3247,11 +3272,24 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     continue;
                 }
 
-                if (input.Proposal is not null && !HasStructuredStudentEvidence(input.Proposal))
+                if (input.Proposal is not null && !HasStructuredStudentEvidence(
+                        input.Proposal,
+                        artifactsByItem.GetValueOrDefault(input.GradingItemId, [])))
                 {
                     warnings.Add(
                         $"Item {input.GradingItemId} ignorado: a proposta nao possui evidencia estruturada da submissao. " +
                         "Inclua evidencia por criterio ou uma referencia de recurso antes de salvar.");
+                    skippedCount++;
+                    continue;
+                }
+
+                if (input.Proposal is not null && !EvidenceArtifactsBelongToItem(
+                        input.Proposal,
+                        artifactsByItem.GetValueOrDefault(input.GradingItemId, [])))
+                {
+                    warnings.Add(
+                        $"Item {input.GradingItemId} ignorado: a proposta referencia artifactId que nao pertence ao pacote desta entrega. " +
+                        "Use os artifactId expostos em prepare_ai_grading_batch.");
                     skippedCount++;
                     continue;
                 }
@@ -3426,8 +3464,8 @@ public sealed class SaveAiGradingBatchCommandHandler(
                             {
                                 resource = await resourceRepository.FindAsync(resourceId, cancellationToken);
                             }
-                            if (resource is null || resource.IsExpired(DateTimeOffset.UtcNow) || resource.SubmissionId != item.SubmissionId)
-                                throw new InvalidOperationException("A evidencia nao esta vinculada a um resource valido da submissao.");
+                            if (resource is null || !IsEvidenceResourceForItem(resource, item))
+                                throw new InvalidOperationException("A evidencia nao esta vinculada a um resource valido da entrega ou do enunciado desta atividade.");
                         }
                     }
                     proposal = AiGradingProposalFactory.Create(
@@ -3437,10 +3475,6 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         proposalVersion,
                         input.Feedback,
                         submissionContentHash);
-                    if (proposalStore is not null)
-                    {
-                        proposalsToPublish.Add(proposal);
-                    }
                 }
                 else if (proposalStore is not null)
                 {
@@ -3466,6 +3500,14 @@ public sealed class SaveAiGradingBatchCommandHandler(
                                 ? $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao manual no CSV: {string.Join(", ", proposal.UncertaintyReasons)}."
                                 : $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao manual no CSV antes de qualquer uso posterior.",
                     maxGrade: maxGrade);
+
+                // Só persiste a proposta versionada depois que o item local
+                // foi aceito como rascunho. Assim uma falha de validação do
+                // item não deixa uma proposta órfã no store de auditoria.
+                if (proposalStore is not null && proposal is not null)
+                {
+                    proposalsToPublish.Add(proposal);
+                }
 
                 savedCount++;
                 updatedItems.Add(new SaveAiGradingBatchItemResult(
@@ -3548,18 +3590,78 @@ public sealed class SaveAiGradingBatchCommandHandler(
         return result;
     }
 
-    private static bool HasStructuredStudentEvidence(AiGradingProposalInput proposal)
+    private static bool HasStructuredStudentEvidence(
+        AiGradingProposalInput proposal,
+        IReadOnlyList<GradingArtifact> artifacts)
     {
-        var criterionEvidence = (proposal.Criteria ?? [])
-            .Any(criterion =>
-                !string.IsNullOrWhiteSpace(criterion.EvidenceText) ||
-                !string.IsNullOrWhiteSpace(criterion.GapsText));
         var submissionReferences = (proposal.Evidence ?? [])
             .Any(evidence =>
                 evidence.ArtifactId != Guid.Empty ||
                 !string.IsNullOrWhiteSpace(evidence.ResourceUri) ||
                 !string.IsNullOrWhiteSpace(evidence.Reference));
-        return criterionEvidence || submissionReferences;
+        var criterionArtifactReferences = (proposal.Criteria ?? [])
+            .Any(criterion => (criterion.ArtifactIds ?? []).Any(id => id != Guid.Empty));
+
+        if (submissionReferences || criterionArtifactReferences)
+        {
+            return true;
+        }
+
+        // Compatibilidade com lotes legados que não persistiram o catálogo de
+        // artifacts. Em lotes novos, EvidenceText/GapsText isolados não são
+        // suficientes: a proposta precisa apontar para o arquivo observado.
+        return artifacts.Count == 0 && (proposal.Criteria ?? [])
+            .Any(criterion =>
+                !string.IsNullOrWhiteSpace(criterion.EvidenceText) ||
+                !string.IsNullOrWhiteSpace(criterion.GapsText));
+    }
+
+    private static bool EvidenceArtifactsBelongToItem(
+        AiGradingProposalInput proposal,
+        IReadOnlyList<GradingArtifact> artifacts)
+    {
+        // Lotes legados podem não ter persistido os artifacts locais embora
+        // ainda tenham resources MCP válidos. Nesse caso a URI continua sendo
+        // a prova verificável e não há catálogo local contra o qual comparar.
+        if (artifacts.Count == 0)
+        {
+            return true;
+        }
+
+        var knownArtifactIds = artifacts.Select(artifact => artifact.Id).ToHashSet();
+        var referencedArtifactIds = (proposal.Criteria ?? [])
+            .SelectMany(criterion => criterion.ArtifactIds ?? [])
+            .Concat((proposal.Evidence ?? [])
+                .Where(evidence => evidence.ArtifactId != Guid.Empty)
+                .Select(evidence => evidence.ArtifactId))
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+
+        return referencedArtifactIds.Length == 0 || referencedArtifactIds.All(knownArtifactIds.Contains);
+    }
+
+    private static bool IsEvidenceResourceForItem(MoodleResource resource, AssistedGradingItem item)
+    {
+        if (resource.IsExpired(DateTimeOffset.UtcNow))
+        {
+            return false;
+        }
+
+        if (string.Equals(resource.ResourceType, "submission_attachment", StringComparison.OrdinalIgnoreCase))
+        {
+            return resource.SubmissionId == item.SubmissionId;
+        }
+
+        if (string.Equals(resource.ResourceType, "assignment_context_attachment", StringComparison.OrdinalIgnoreCase))
+        {
+            var assignmentMatches = resource.AssignmentId is null || resource.AssignmentId == item.AssignmentId;
+            var courseMatches = resource.CourseId is null || resource.CourseId == item.CourseId;
+            var itemScopedToSameSubmission = resource.SubmissionId is not null && resource.SubmissionId == item.SubmissionId;
+            return assignmentMatches && courseMatches && (resource.SubmissionId is null || itemScopedToSameSubmission);
+        }
+
+        return false;
     }
 
     private static decimal? TryReadMaxGrade(string? payloadJson)

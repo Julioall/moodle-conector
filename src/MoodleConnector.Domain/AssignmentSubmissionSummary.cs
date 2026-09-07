@@ -23,7 +23,11 @@ public sealed record AssignmentSubmissionsPage(
     DateTimeOffset? Before,
     int Total,
     bool HasMore,
-    IReadOnlyList<AssignmentSubmissionSummary> Submissions);
+    IReadOnlyList<AssignmentSubmissionSummary> Submissions)
+{
+    public DateTimeOffset? OpenAt { get; init; }
+    public bool IsFutureActivity { get; init; }
+}
 
 public sealed record AssignmentSubmissionSummary(
     string UserId,

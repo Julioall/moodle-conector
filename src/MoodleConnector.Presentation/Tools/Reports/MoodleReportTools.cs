@@ -368,16 +368,37 @@ public sealed class MoodleReportTools(
                             courseId,
                             moodleAlias,
                             moodleUserId.Value.ToString(),
-                            requirements),
+                            requirements,
+                            AllowStale: false),
                         cancellationToken);
                     if (courseRead is not null)
                     {
                         effectiveCourseId = courseRead.CourseId;
-                        prefetchedGradebook = courseRead.Gradebook?.Data;
-                        if (courseRead.Students?.Data is { HasMore: false } participants &&
-                            courseRead.Students.IsComplete)
+                        var staleDecisionDatasets = courseRead.Metadata.StaleDatasets
+                            .Where(dataset => requirements.HasFlag(CourseReadSnapshotRequirements.Gradebook) &&
+                                dataset == MoodleSnapshotDatasets.Gradebook ||
+                                requirements.HasFlag(CourseReadSnapshotRequirements.Students) &&
+                                dataset == MoodleSnapshotDatasets.Students)
+                            .ToArray();
+                        var gradebookSafe = !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Gradebook) &&
+                            courseRead.Gradebook is { IsStale: false, IsComplete: true } gradebook &&
+                            gradebook.Data.Coverage.IsComplete;
+                        var studentsSafe = !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Students) &&
+                            courseRead.Students is { IsStale: false, IsComplete: true, Data.HasMore: false };
+                        if (gradebookSafe)
+                        {
+                            prefetchedGradebook = courseRead.Gradebook!.Data;
+                        }
+
+                        if (studentsSafe && courseRead.Students?.Data is { HasMore: false } participants)
                         {
                             prefetchedParticipants = participants;
+                        }
+
+                        if (staleDecisionDatasets.Length > 0)
+                        {
+                            freshnessWarnings.Add(
+                                $"Snapshot stale ({string.Join(", ", staleDecisionDatasets)}); o relatório decisório foi revalidado por leitura ao vivo e não usará dados antigos.");
                         }
 
                         var hasSnapshotData = prefetchedParticipants is not null ||
@@ -388,15 +409,18 @@ public sealed class MoodleReportTools(
                             var recordCount = (courseRead.Students?.RecordCount ?? 0) +
                                 (courseRead.Gradebook?.RecordCount ?? 0);
                             freshness = new ToolFreshness(
-                                "snapshot",
-                                updatedAt,
-                                updatedAt.HasValue
+                                staleDecisionDatasets.Length == 0 ? "snapshot" : "live",
+                                staleDecisionDatasets.Length == 0 ? updatedAt : null,
+                                staleDecisionDatasets.Length == 0 && updatedAt.HasValue
                                     ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
                                     : null,
-                                courseRead.Metadata.StaleDatasets.Count > 0,
+                                false,
                                 courseRead.Metadata.RefreshQueued,
-                                courseRead.Metadata.IsComplete,
-                                recordCount);
+                                staleDecisionDatasets.Length == 0 && courseRead.Metadata.IsComplete,
+                                staleDecisionDatasets.Length == 0 ? recordCount : 0,
+                                DecisionSafe: true,
+                                Dataset: "course_read_snapshot",
+                                RecordType: "students_and_gradebook");
                         }
                         else
                         {
@@ -430,6 +454,19 @@ public sealed class MoodleReportTools(
         catch
         {
             return ToolResultHelper.Error<TResult>("Não foi possível gerar o relatório neste momento.");
+        }
+
+        if (data is GenerateWeeklyPerformanceReportResult weekly && !string.IsNullOrWhiteSpace(weekly.Warning))
+        {
+            freshnessWarnings.Add(weekly.Warning);
+        }
+        else if (data is GenerateClassCouncilReportResult council && !string.IsNullOrWhiteSpace(council.Warning))
+        {
+            freshnessWarnings.Add(council.Warning);
+        }
+        else if (data is GeneratePostExecutionReportResult postExecution && !string.IsNullOrWhiteSpace(postExecution.Warning))
+        {
+            freshnessWarnings.Add(postExecution.Warning);
         }
 
         var response = new ToolResponse<TResult>("ok", data, freshnessWarnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);

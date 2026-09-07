@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Courses;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Submissions;
 using MoodleConnector.Domain;
 using MoodleConnector.Domain.Grading;
@@ -57,7 +58,19 @@ public sealed record StartPendingGradingRunResult(
     [property: JsonPropertyName("courses")] IReadOnlyList<PendingGradingRunCourse> Courses,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
     [property: JsonPropertyName("nextStep")] string NextStep,
-    [property: JsonPropertyName("gradingRunId")] Guid? GradingRunId = null);
+    [property: JsonPropertyName("gradingRunId")] Guid? GradingRunId = null)
+{
+    [JsonPropertyName("assignmentResolution")]
+    public IReadOnlyList<AssignmentResolution> AssignmentResolution { get; init; } = [];
+}
+
+public sealed record AssignmentResolution(
+    [property: JsonPropertyName("courseId")] string CourseId,
+    [property: JsonPropertyName("requestedId")] string RequestedId,
+    [property: JsonPropertyName("resolved")] bool Resolved,
+    [property: JsonPropertyName("instanceId")] string? InstanceId,
+    [property: JsonPropertyName("cmid")] string? Cmid,
+    [property: JsonPropertyName("errorCode")] string? ErrorCode);
 
 public sealed record PendingGradingRunBatch(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -154,6 +167,7 @@ public sealed class StartPendingGradingRunCommandHandler(
         var batches = new List<PendingGradingRunBatch>();
         var courseResults = new List<PendingGradingRunCourse>();
         var warnings = new List<string>();
+        var assignmentResolutions = new List<AssignmentResolution>();
 
         if (requestedCourseId is not null && courses.Count == 0)
         {
@@ -215,23 +229,57 @@ public sealed class StartPendingGradingRunCommandHandler(
                 : request.AssignmentIds
                     .Where(id => !string.IsNullOrWhiteSpace(id))
                     .Select(id => id.Trim())
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+            var requestedAssignmentIdSet = requestedAssignmentIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (requestedAssignmentIds is { Length: > 0 })
+            {
+                foreach (var requestedId in requestedAssignmentIds)
+                {
+                    var resolvedModule = contents.Sections
+                        .SelectMany(section => section.Modules)
+                        .FirstOrDefault(module =>
+                            string.Equals(module.ModuleId, requestedId, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(module.InstanceId, requestedId, StringComparison.OrdinalIgnoreCase));
+                    assignmentResolutions.Add(resolvedModule is null
+                        ? new AssignmentResolution(
+                            course.CourseId,
+                            requestedId,
+                            Resolved: false,
+                            InstanceId: null,
+                            Cmid: null,
+                            ErrorCode: MoodleErrorContract.AssignmentNotFound)
+                        : new AssignmentResolution(
+                            course.CourseId,
+                            requestedId,
+                            Resolved: string.Equals(resolvedModule.ModuleType, "assign", StringComparison.OrdinalIgnoreCase),
+                            InstanceId: string.Equals(resolvedModule.ModuleType, "assign", StringComparison.OrdinalIgnoreCase)
+                                ? resolvedModule.InstanceId
+                                : null,
+                            Cmid: string.Equals(resolvedModule.ModuleType, "assign", StringComparison.OrdinalIgnoreCase)
+                                ? resolvedModule.ModuleId
+                                : null,
+                            ErrorCode: string.Equals(resolvedModule.ModuleType, "assign", StringComparison.OrdinalIgnoreCase)
+                                ? null
+                                : MoodleErrorContract.AssignmentNotFound));
+                }
+            }
             var assignmentIds = contents.Sections
                 .SelectMany(section => section.Modules)
                 .Where(module =>
                     string.Equals(module.ModuleType, "assign", StringComparison.OrdinalIgnoreCase) &&
                     !string.IsNullOrWhiteSpace(module.InstanceId) &&
-                    (requestedAssignmentIds is null ||
-                     requestedAssignmentIds.Contains(module.InstanceId!) ||
+                     (requestedAssignmentIdSet is null ||
+                     requestedAssignmentIdSet.Contains(module.InstanceId!) ||
                      (!string.IsNullOrWhiteSpace(module.ModuleId) &&
-                      requestedAssignmentIds.Contains(module.ModuleId!))))
+                      requestedAssignmentIdSet.Contains(module.ModuleId!))))
                 .Select(module => module.InstanceId!.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
             if (assignmentIds.Length == 0)
             {
-                var message = requestedAssignmentIds is { Count: > 0 }
+                var message = requestedAssignmentIds is { Length: > 0 }
                     ? $"Nenhuma das tarefas solicitadas ({string.Join(", ", requestedAssignmentIds)}) foi encontrada no curso."
                     : "Nenhuma atividade avaliativa do tipo assign foi encontrada.";
                 courseResults.Add(new PendingGradingRunCourse(
@@ -423,7 +471,10 @@ public sealed class StartPendingGradingRunCommandHandler(
             NextStep: batches.Count == 0
                 ? "Nao ha entregas pendentes elegiveis para iniciar a correcao. Consulte os cursos com falha para ajuste manual."
                 : $"Use o gradingRunId {gradingRunId} para paginar o pacote de IA, salvar os rascunhos e exportar CSV. Se o usuario pediu publicacao, gere a previa e aguarde CONFIRMAR_PUBLICACAO antes de qualquer escrita no Moodle; os batchJobIds sao detalhes internos de compatibilidade.",
-            GradingRunId: gradingRunId);
+            GradingRunId: gradingRunId)
+        {
+            AssignmentResolution = assignmentResolutions,
+        };
     }
 
     private async Task<IReadOnlyList<CourseSummary>> LoadCoursesFromSnapshotAsync(

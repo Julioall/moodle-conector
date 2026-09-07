@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Auditing;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Registry;
 using MoodleConnector.Domain.Registry;
@@ -300,14 +301,24 @@ public sealed class MoodleUniversalTools(
                 moodleAlias,
                 new NormalizationContext(NormalizationMode.Agent),
                 cancellationToken);
-            var payload = JsonSerializer.Deserialize<JsonElement>(normalized?.ToJsonString() ?? "null");
+            // Universal reads are intentionally open-ended. The normalizer is
+            // not a security boundary, so redact the final public payload as
+            // well as audit data before it reaches MCP/ChatGPT.
+            var payload = AuditPayloadSanitizer.ToSanitizedElement(normalized);
             var data = new MoodleFunctionResult(functionName.Trim(), payload);
             return Success(data, $"Funcao de leitura '{data.Function}' executada com sucesso.");
         }
         catch (OperationCanceledException) { throw; }
         catch (MoodleApiException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex); }
         catch (ArgumentException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
-        catch (InvalidOperationException ex) { return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message); }
+        catch (InvalidOperationException ex)
+        {
+            var errorCode = ex.Message.Contains("not registered", StringComparison.OrdinalIgnoreCase) ||
+                            ex.Message.Contains("unknown", StringComparison.OrdinalIgnoreCase)
+                ? MoodleErrorContract.UnknownMoodleFunction
+                : null;
+            return ToolResultHelper.Error<MoodleFunctionResult>(ex.Message, errorCode: errorCode);
+        }
     }
 
     private static CallToolResult Success<T>(
