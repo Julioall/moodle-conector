@@ -170,12 +170,13 @@ public sealed class PendingGradingRunCommandHandlerTests
                 MaxCourses: 0,
                 MaxItemsPerBatch: 400,
                 CourseId: "10",
-                AllowRegradeExisting: true),
+                IncludeAlreadyGraded: true),
             CancellationToken.None);
 
         Assert.Equal(2, result.TotalItems);
+        Assert.Null(submissionsGateway.LastStatus);
         var request = Assert.Single(mediator.CreateBatchRequests);
-        Assert.True(request.AllowRegradeExisting);
+        Assert.True(request.IncludeAlreadyGraded);
         Assert.False(request.OnlyAwaitingGrading);
         Assert.Equal(
             ["submission-pending", "submission-reviewed"],
@@ -963,6 +964,8 @@ public sealed class PendingGradingRunCommandHandlerTests
     {
         public int BatchCalls { get; private set; }
 
+        public string? LastStatus { get; private set; }
+
         public Task<IReadOnlyList<AssignmentSubmissionsBatch>> GetAssignmentSubmissionsBatchAsync(
             string userExternalId,
             IReadOnlyCollection<string> assignmentIds,
@@ -972,6 +975,7 @@ public sealed class PendingGradingRunCommandHandlerTests
             CancellationToken cancellationToken)
         {
             BatchCalls++;
+            LastStatus = status;
             return Task.FromResult<IReadOnlyList<AssignmentSubmissionsBatch>>([
                 new AssignmentSubmissionsBatch(
                     "501",

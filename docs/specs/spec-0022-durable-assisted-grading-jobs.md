@@ -46,8 +46,8 @@ acadêmico além da política aprovada.
 4. Cada item será processado em chunks persistidos com operação idempotente. Repetições
    automáticas de job poderão repetir apenas trabalho interno não publicado; nenhum worker
    relança uma nota Moodle confirmada. Uma reavaliação de item publicado só pode começar por
-   pedido explícito, cria um novo item de correção e mantém a substituição da nota protegida
-   pela prévia `allowOverwriteExisting` e confirmação humana.
+   pedido explícito com `includeAlreadyGraded=true`, cria um novo item de correção e mantém a
+   substituição da nota protegida pela prévia `allowOverwriteExisting` e confirmação humana.
 5. Limites de concorrência serão aplicados no worker, não no request. `Priority` terá
    ordenação observável, aging/fairness e testes; se isso não for aceito, será removida do
    contrato antes do rollout.

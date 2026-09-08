@@ -25,7 +25,7 @@ Separe leitura, preparacao, previa e confirmacao. A decisao pedagogica permanece
 7. Para um aluno ou muitas atividades, use o mesmo lote e o mesmo par de previa/confirmacao. Nao use ferramentas de UI ou CSV como rota de publicacao.
 
 Quando o usuario pedir explicitamente uma reavaliacao de correcoes ja publicadas, inicie
-`start_pending_grading_run` com `allowRegradeExisting=true`, restringindo por `courseId` e
+`start_pending_grading_run` com `includeAlreadyGraded=true`, restringindo por `courseId` e
 `assignmentIds` quando esses dados forem informados. Esse modo cria novos itens com a
 submissao original entregue e preserva os itens/correcoes anteriores; ele nao escreve no
 Moodle. Depois de gerar e salvar os novos rascunhos, use

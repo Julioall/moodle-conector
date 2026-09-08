@@ -31,7 +31,8 @@ public sealed record StartPendingGradingRunCommand(
     string? SnapshotConnectionAlias = null,
     string? CourseId = null,
     IReadOnlyList<string>? AssignmentIds = null,
-    bool AllowRegradeExisting = false) : IRequest<StartPendingGradingRunResult>;
+    bool AllowRegradeExisting = false,
+    bool IncludeAlreadyGraded = false) : IRequest<StartPendingGradingRunResult>;
 
 public sealed record RequeueBlockedGradingItemsCommand(
     Guid BatchJobId,
@@ -117,6 +118,7 @@ public sealed class StartPendingGradingRunCommandHandler(
 
         var maxCourses = request.MaxCourses == 0 ? int.MaxValue : Math.Clamp(request.MaxCourses, 1, 1000);
         var maxItemsPerBatch = Math.Clamp(request.MaxItemsPerBatch, 1, 400);
+        var includeAlreadyGraded = request.AllowRegradeExisting || request.IncludeAlreadyGraded;
         var gradingRunId = Guid.NewGuid();
         if (gradingRepository is not null)
         {
@@ -144,7 +146,7 @@ public sealed class StartPendingGradingRunCommandHandler(
         // reavaliação também exige leitura live para não reutilizar um snapshot
         // potencialmente desatualizado do arquivo/conteúdo que será corrigido.
         // Snapshots continuam sendo usados somente na varredura ampla normal.
-        var useSnapshots = !request.AllowRegradeExisting &&
+        var useSnapshots = !includeAlreadyGraded &&
             string.IsNullOrWhiteSpace(request.CourseId) &&
             request.UseSubmissionSnapshots &&
             request.SnapshotOwnerId is not null &&
@@ -172,7 +174,7 @@ public sealed class StartPendingGradingRunCommandHandler(
         var courseResults = new List<PendingGradingRunCourse>();
         var warnings = new List<string>();
         var assignmentResolutions = new List<AssignmentResolution>();
-        if (request.AllowRegradeExisting)
+        if (includeAlreadyGraded)
         {
             warnings.Add(
                 "Modo de reavaliacao explicita ativo: submissaoes ja corrigidas podem ser analisadas novamente; a nota existente so sera sobrescrita mediante previa com allowOverwriteExisting=true e confirmacao explicita.");
@@ -311,7 +313,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                         request.UserExternalId,
                         assignmentIds,
                         MaxAggregateRunItems - batches.Sum(batch => batch.TotalItems),
-                        request.AllowRegradeExisting,
+                        includeAlreadyGraded,
                         cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -347,7 +349,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                             course.CourseId,
                             assignmentId,
                             remainingRunItemsBeforeAssignment,
-                            request.AllowRegradeExisting,
+                            includeAlreadyGraded,
                             cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -386,8 +388,8 @@ public sealed class StartPendingGradingRunCommandHandler(
                                 AssignmentIds: [assignmentId],
                                 SubmissionIds: [],
                                 MaxItems: maxItemsPerBatch,
-                                OnlyAwaitingGrading: !request.AllowRegradeExisting,
-                                AllowRegradeExisting: request.AllowRegradeExisting,
+                                OnlyAwaitingGrading: !includeAlreadyGraded,
+                                IncludeAlreadyGraded: includeAlreadyGraded,
                                 IncludeRubric: request.IncludeRubric,
                                 IncludeSubmissionFiles: request.IncludeSubmissionFiles,
                                 IncludeCourseMaterials: request.IncludeCourseMaterials,
@@ -578,10 +580,11 @@ public sealed class StartPendingGradingRunCommandHandler(
 
         var batchesBeforeCourse = batches.Count;
         var courseMessages = new List<string>();
+        var includeAlreadyGraded = request.AllowRegradeExisting || request.IncludeAlreadyGraded;
         foreach (var assignment in snapshot.Data.Assignments)
         {
             if (!assignment.IsComplete ||
-                (!request.AllowRegradeExisting &&
+                (!includeAlreadyGraded &&
                  assignment.Coverage is not null && !assignment.Coverage.NeedsGradingComplete))
             {
                 var message = assignment.ErrorMessage ??
@@ -592,7 +595,7 @@ public sealed class StartPendingGradingRunCommandHandler(
             }
 
             var submissions = assignment.Submissions
-                .Where(submission => request.AllowRegradeExisting
+                .Where(submission => includeAlreadyGraded
                     ? IsSubmittedForRegrade(submission)
                     : submission.NeedsGrading)
                 .ToArray();
@@ -617,8 +620,8 @@ public sealed class StartPendingGradingRunCommandHandler(
                             AssignmentIds: [assignment.AssignmentId],
                             SubmissionIds: [],
                             MaxItems: maxItemsPerBatch,
-                            OnlyAwaitingGrading: !request.AllowRegradeExisting,
-                            AllowRegradeExisting: request.AllowRegradeExisting,
+                            OnlyAwaitingGrading: !includeAlreadyGraded,
+                            IncludeAlreadyGraded: includeAlreadyGraded,
                             IncludeRubric: request.IncludeRubric,
                             IncludeSubmissionFiles: request.IncludeSubmissionFiles,
                             IncludeCourseMaterials: request.IncludeCourseMaterials,
@@ -721,7 +724,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                     courseId,
                     assignmentId,
                     allowRegradeExisting
-                        ? AssignmentSubmissionFilter.Submitted
+                        ? AssignmentSubmissionFilter.All
                         : AssignmentSubmissionFilter.NeedsGrading,
                     page,
                     PageSize: 100,
@@ -776,7 +779,7 @@ public sealed class StartPendingGradingRunCommandHandler(
         var batches = await submissionsGateway.GetAssignmentSubmissionsBatchAsync(
             userExternalId,
             assignmentIds,
-            status: "submitted",
+            status: allowRegradeExisting ? null : "submitted",
             since: null,
             before: null,
             cancellationToken);
@@ -826,11 +829,14 @@ public sealed class StartPendingGradingRunCommandHandler(
     }
 
     private static bool IsSubmittedForRegrade(AssignmentSubmissionSummary submission) =>
-        submission.Submitted &&
-        string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
+        submission.Submitted && IsDeliveredSubmissionStatus(submission.Status);
 
     private static bool IsSubmittedForRegrade(AssignmentSubmissionRecord submission) =>
-        string.Equals(submission.Status, "submitted", StringComparison.OrdinalIgnoreCase);
+        IsDeliveredSubmissionStatus(submission.Status);
+
+    private static bool IsDeliveredSubmissionStatus(string? status) =>
+        string.Equals(status, "submitted", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(status, "graded", StringComparison.OrdinalIgnoreCase);
 
     private static SubmissionEvaluationState ResolveDirectState(AssignmentSubmissionRecord submission) =>
         SubmissionEvaluationStateResolver.Resolve(new SubmissionEvaluationEvidence(

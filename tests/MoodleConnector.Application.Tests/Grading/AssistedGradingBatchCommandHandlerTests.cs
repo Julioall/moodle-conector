@@ -96,17 +96,19 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         await repository.AddBatchAsync(existingBatch, CancellationToken.None);
         await repository.AddItemAsync(existingItem, CancellationToken.None);
 
-        var sut = CreateHandler(repository, new FakeMediator());
+        var submissionsGateway = new FakeAssignmentSubmissionsGateway();
+        var sut = CreateHandler(repository, new FakeMediator(), submissionsGateway);
         var result = await sut.Handle(
             new CreateAssistedGradingBatchCommand(
                 "321", "10", ["501"], ["9001"], 25,
                 OnlyAwaitingGrading: true,
-                AllowRegradeExisting: true),
+                IncludeAlreadyGraded: true),
             CancellationToken.None);
 
         Assert.NotEqual(Guid.Empty, result.BatchJobId);
         Assert.Equal("Pending", result.Status);
         Assert.Equal(2, repository.Items.Count);
+        Assert.Null(submissionsGateway.LastStatus);
         var regradedItem = Assert.Single(repository.Items, item => item.Id != existingItem.Id);
         Assert.Equal(9001, regradedItem.SubmissionId);
         Assert.NotEqual(existingItem.IdempotencyKey, regradedItem.IdempotencyKey);
@@ -1871,6 +1873,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     {
         public int CallCount { get; private set; }
 
+        public string? LastStatus { get; private set; }
+
         public bool ThrowOnRead { get; init; }
 
         public ISet<string> FailAssignmentIds { get; init; } = new HashSet<string>(StringComparer.Ordinal);
@@ -1886,6 +1890,7 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             CancellationToken cancellationToken)
         {
             CallCount++;
+            LastStatus = status;
             if (ThrowOnRead)
             {
                 throw new MoodleApiException(MoodleErrorContract.NetworkError, "falha de rede simulada", functionName: "mod_assign_get_submissions");
