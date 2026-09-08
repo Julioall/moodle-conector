@@ -66,6 +66,7 @@ public sealed class MoodleGradebookTools(
         var effectiveCourseId = courseId;
         CourseGradebookSnapshot? prefetchedGradebook = null;
         ToolFreshness? freshness = null;
+        var freshnessWarnings = new List<string>();
         var snapshotContainsStudent = false;
         if (snapshotContext is not null)
         {
@@ -81,7 +82,9 @@ public sealed class MoodleGradebookTools(
                 if (courseRead is not null)
                 {
                     effectiveCourseId = courseRead.CourseId;
-                    prefetchedGradebook = courseRead.Gradebook?.Data;
+                    var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
+                    freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
+                    prefetchedGradebook = snapshotUnsafe ? null : courseRead.Gradebook?.Data;
                     snapshotContainsStudent = prefetchedGradebook?.TryGetForStudent(studentId, out _) == true;
                     if (snapshotContainsStudent && courseRead.Gradebook is not null)
                     {
@@ -94,7 +97,7 @@ public sealed class MoodleGradebookTools(
                             courseRead.Metadata.RefreshQueued,
                             courseRead.Gradebook.IsComplete && courseRead.Gradebook.Data.Coverage.IsComplete,
                             courseRead.Gradebook.RecordCount,
-                            DecisionSafe: !courseRead.Gradebook.IsStale);
+                            DecisionSafe: !snapshotUnsafe && !courseRead.Gradebook.IsStale);
                     }
                     else
                     {
@@ -135,13 +138,14 @@ public sealed class MoodleGradebookTools(
             return ToolResultHelper.Error<CourseGradebook>("Nao foi possivel consultar o boletim do aluno neste momento.");
         }
 
-        var warnings = freshness?.Stale == true
-            ? new[] { "O boletim foi lido de um snapshot stale; os dados podem não refletir a configuração atual do Moodle." }
-            : Array.Empty<string>();
+        if (freshness?.Stale == true)
+        {
+            freshnessWarnings.Add("O boletim foi lido de um snapshot stale; os dados podem não refletir a configuração atual do Moodle.");
+        }
         var response = new ToolResponse<CourseGradebook>(
             "ok",
             data,
-            warnings,
+            freshnessWarnings,
             AuditId: null,
             DateTimeOffset.UtcNow,
             Freshness: freshness);

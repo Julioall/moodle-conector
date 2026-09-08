@@ -358,6 +358,10 @@ public sealed class MoodleCourseActivitiesTools(
         {
             throw;
         }
+        catch (MoodleApiException exception)
+        {
+            return ToolResultHelper.Error<CourseActivityDetailsResponse>(exception);
+        }
         catch
         {
             return ToolResultHelper.Error<CourseActivityDetailsResponse>("Nao foi possivel consultar a atividade no Moodle neste momento.");

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Participants;
 using MoodleConnector.Domain;
 using MoodleConnector.Presentation.Tools;
@@ -169,6 +170,41 @@ public class MoodleParticipantsToolsTests
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         Assert.Contains(structured.GetProperty("warnings").EnumerateArray(), warning =>
             warning.GetString()!.Contains("pagina", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public async Task Deve_rejeitar_pagina_menor_que_um(int pagina)
+    {
+        var mediator = new FakeMediator();
+        var sut = new MoodleParticipantsTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarAlunosCursoAsync("CURSO", pagina: pagina);
+
+        Assert.True(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("invalid_page", structured.GetProperty("errorCode").GetString());
+        Assert.Null(mediator.LastParticipantsQuery);
+    }
+
+    [Fact]
+    public async Task Deve_indicar_que_a_primeira_pagina_nao_tem_proxima_quando_tem_menos_registros_que_o_limite()
+    {
+        var sut = new MoodleParticipantsTools(
+            new FakeMediator(),
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarAlunosCursoAsync("CURSO", pagina: 1, tamanhoPagina: 20);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var data = structured.GetProperty("data");
+        Assert.Equal(1, data.GetProperty("count").GetInt32());
+        Assert.False(data.GetProperty("hasMore").GetBoolean());
     }
 
     [Fact]

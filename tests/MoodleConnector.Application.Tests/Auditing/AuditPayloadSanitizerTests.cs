@@ -56,13 +56,29 @@ public sealed class AuditPayloadSanitizerTests
         var json = AuditPayloadSanitizer.SerializeSanitized(new
         {
             token = "token-real",
-            nested = new { privateAccessKey = "private-real" },
+            nested = new { userprivateaccesskey = "private-real" },
             array = new[] { new { password = "password-real" } }
         });
 
         Assert.DoesNotContain("token-real", json, StringComparison.Ordinal);
         Assert.DoesNotContain("private-real", json, StringComparison.Ordinal);
         Assert.DoesNotContain("password-real", json, StringComparison.Ordinal);
+        Assert.Equal(3, json.Split("[REDACTED]", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
+    public void SerializeSanitized_RedigePayloadDesconhecidoComCasingDiferente()
+    {
+        var json = AuditPayloadSanitizer.SerializeSanitized(new
+        {
+            TOKEN = "SECRET_A",
+            nested = new { USER_PRIVATE_ACCESS_KEY = "SECRET_B" },
+            items = new[] { new { PASSWORD = "SECRET_C" } }
+        });
+
+        Assert.DoesNotContain("SECRET_A", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET_B", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET_C", json, StringComparison.Ordinal);
         Assert.Equal(3, json.Split("[REDACTED]", StringSplitOptions.None).Length - 1);
     }
 }

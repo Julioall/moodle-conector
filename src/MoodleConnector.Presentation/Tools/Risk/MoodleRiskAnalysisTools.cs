@@ -74,6 +74,7 @@ public sealed class MoodleRiskAnalysisTools(
         CourseGradebookSnapshot? prefetchedGradebook = null;
         CourseParticipantsPage? prefetchedParticipants = null;
         ToolFreshness? freshness = null;
+        var freshnessWarnings = new List<string>();
         if (snapshotContext is not null)
         {
             try
@@ -88,24 +89,29 @@ public sealed class MoodleRiskAnalysisTools(
                 if (courseRead is not null)
                 {
                     effectiveCourseId = courseRead.CourseId;
-                    prefetchedGradebook = courseRead.Gradebook?.Data;
-                    if (courseRead.Students?.Data is { HasMore: false } participants &&
+                    var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
+                    freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
+                    prefetchedGradebook = snapshotUnsafe ? null : courseRead.Gradebook?.Data;
+                    if (!snapshotUnsafe && courseRead.Students?.Data is { HasMore: false } participants &&
                         courseRead.Students.IsComplete)
                     {
                         prefetchedParticipants = participants;
                     }
                     var updatedAt = courseRead.Metadata.OldestUpdatedAt;
                     freshness = new ToolFreshness(
-                        "snapshot",
-                        updatedAt,
+                        snapshotUnsafe ? "live" : "snapshot",
+                        snapshotUnsafe ? null : updatedAt,
                         updatedAt.HasValue
-                            ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
+                            && !snapshotUnsafe ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
                             : null,
-                        courseRead.Metadata.StaleDatasets.Count > 0,
+                        !snapshotUnsafe && courseRead.Metadata.StaleDatasets.Count > 0,
                         courseRead.Metadata.RefreshQueued,
-                        courseRead.Metadata.IsComplete,
-                        (courseRead.Students?.RecordCount ?? 0) +
-                        (courseRead.Gradebook?.RecordCount ?? 0));
+                        !snapshotUnsafe && courseRead.Metadata.IsComplete,
+                        snapshotUnsafe ? 0 : (courseRead.Students?.RecordCount ?? 0) +
+                            (courseRead.Gradebook?.RecordCount ?? 0),
+                        DecisionSafe: !snapshotUnsafe,
+                        Dataset: "course_read_snapshot",
+                        RecordType: "students_and_gradebook");
                 }
             }
             catch
@@ -138,10 +144,12 @@ public sealed class MoodleRiskAnalysisTools(
         }
 
         var data = result.Reports;
+        var warnings = new List<string>(BuildWarnings(result));
+        warnings.AddRange(freshnessWarnings);
         var response = new ToolResponse<IReadOnlyList<StudentRiskReport>>(
             "ok",
             data,
-            BuildWarnings(result),
+            warnings,
             AuditId: null,
             DateTimeOffset.UtcNow,
             Freshness: freshness);

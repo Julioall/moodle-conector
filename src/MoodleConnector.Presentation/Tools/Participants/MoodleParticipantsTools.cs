@@ -164,6 +164,13 @@ public sealed class MoodleParticipantsTools(
             return ToolResultHelper.Error<ListCourseParticipantsResponse>("Informe um identificador de curso.");
         }
 
+        if (page < 1)
+        {
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(
+                "A pagina deve ser maior ou igual a 1. A paginacao comeca em 1.",
+                errorCode: MoodleErrorContract.InvalidPage);
+        }
+
         if (!TryParseStatus(status, out var statusFilter))
         {
             return ToolResultHelper.Error<ListCourseParticipantsResponse>(
@@ -205,7 +212,7 @@ public sealed class MoodleParticipantsTools(
                     ParticipantStatusFilter.Active,
                     true,
                     false,
-                    cached.HasMore || page * pageSize < allParticipants.Count,
+                    (long)page * pageSize < allParticipants.Count,
                     pagedParticipants,
                     cached.ClassificationDiagnostics);
 
@@ -290,6 +297,13 @@ public sealed class MoodleParticipantsTools(
         if (string.IsNullOrWhiteSpace(groupId))
         {
             return ToolResultHelper.Error<ListCourseParticipantsResponse>("Informe um identificador de grupo.");
+        }
+
+        if (page < 1)
+        {
+            return ToolResultHelper.Error<ListCourseParticipantsResponse>(
+                "A pagina deve ser maior ou igual a 1. A paginacao comeca em 1.",
+                errorCode: MoodleErrorContract.InvalidPage);
         }
 
         if (!TryParseStatus(status, out var statusFilter))

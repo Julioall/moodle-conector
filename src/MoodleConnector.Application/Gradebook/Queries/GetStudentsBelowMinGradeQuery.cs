@@ -58,7 +58,7 @@ public sealed class GetStudentsBelowMinGradeQueryHandler(
                 userExternalId: currentUserExternalId,
                 courseId: request.CourseId,
                 statusFilter: ParticipantStatusFilter.Active,
-                page: 0,
+                page: 1,
                 pageSize: requestedPageSize,
                 studentsOnly: true,
                 includeEmail: false,

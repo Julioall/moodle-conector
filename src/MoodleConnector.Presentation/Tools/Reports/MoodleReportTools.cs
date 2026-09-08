@@ -374,16 +374,19 @@ public sealed class MoodleReportTools(
                     if (courseRead is not null)
                     {
                         effectiveCourseId = courseRead.CourseId;
+                        var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
                         var staleDecisionDatasets = courseRead.Metadata.StaleDatasets
                             .Where(dataset => requirements.HasFlag(CourseReadSnapshotRequirements.Gradebook) &&
                                 dataset == MoodleSnapshotDatasets.Gradebook ||
                                 requirements.HasFlag(CourseReadSnapshotRequirements.Students) &&
                                 dataset == MoodleSnapshotDatasets.Students)
                             .ToArray();
-                        var gradebookSafe = !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Gradebook) &&
+                        var gradebookSafe = !snapshotUnsafe &&
+                            !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Gradebook) &&
                             courseRead.Gradebook is { IsStale: false, IsComplete: true } gradebook &&
                             gradebook.Data.Coverage.IsComplete;
-                        var studentsSafe = !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Students) &&
+                        var studentsSafe = !snapshotUnsafe &&
+                            !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Students) &&
                             courseRead.Students is { IsStale: false, IsComplete: true, Data.HasMore: false };
                         if (gradebookSafe)
                         {
@@ -418,7 +421,7 @@ public sealed class MoodleReportTools(
                                 courseRead.Metadata.RefreshQueued,
                                 staleDecisionDatasets.Length == 0 && courseRead.Metadata.IsComplete,
                                 staleDecisionDatasets.Length == 0 ? recordCount : 0,
-                                DecisionSafe: true,
+                                DecisionSafe: staleDecisionDatasets.Length == 0 && !snapshotUnsafe,
                                 Dataset: "course_read_snapshot",
                                 RecordType: "students_and_gradebook");
                         }
@@ -436,8 +439,7 @@ public sealed class MoodleReportTools(
                                 0);
                         }
 
-                        freshnessWarnings.AddRange(courseRead.Metadata.IncompleteDatasets
-                            .Select(dataset => $"O snapshot '{dataset}' esta incompleto; a resposta pode combinar snapshot e leitura live."));
+                        freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
                     }
                 }
             }

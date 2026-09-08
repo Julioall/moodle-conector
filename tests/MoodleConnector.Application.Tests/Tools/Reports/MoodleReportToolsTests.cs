@@ -75,6 +75,37 @@ public sealed class MoodleReportToolsTests
         Assert.True(freshness.GetProperty("refreshQueued").GetBoolean());
     }
 
+    [Fact]
+    public async Task Propaga_warning_de_snapshot_skew_para_relatorio_decisorio()
+    {
+        var snapshot = new CourseReadSnapshot(
+            "101",
+            Activities: null,
+            Students: null,
+            Groups: null,
+            Submissions: null,
+            Gradebook: null,
+            new CourseReadSnapshotMetadata(
+                [MoodleSnapshotDatasets.Students, MoodleSnapshotDatasets.Gradebook],
+                [],
+                [],
+                ["snapshot_skew"],
+                new DateTimeOffset(2026, 9, 7, 1, 0, 0, TimeSpan.Zero),
+                new DateTimeOffset(2026, 9, 7, 1, 30, 0, TimeSpan.Zero),
+                1800,
+                IsComplete: false,
+                RefreshQueued: true));
+        var tool = CreateTool(CreateReport(), new FakeSnapshotCoordinator(snapshot));
+
+        var result = await tool.GerarRelatorioNotasCursoAsync("101");
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Contains(
+            structured.GetProperty("warnings").EnumerateArray(),
+            warning => warning.GetString()!.Contains("snapshot_skew", StringComparison.Ordinal));
+        Assert.Equal("live", structured.GetProperty("freshness").GetProperty("source").GetString());
+    }
+
     private static MoodleReportTools CreateTool(
         GenerateCourseGradesReportResult report,
         IMoodleCourseReadSnapshotCoordinator? snapshotCoordinator = null) =>

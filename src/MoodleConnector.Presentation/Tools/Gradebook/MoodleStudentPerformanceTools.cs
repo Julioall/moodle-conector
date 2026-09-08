@@ -17,7 +17,8 @@ public sealed class MoodleStudentPerformanceTools(
     IMediator mediator,
     IMoodleConnectionSelection moodleSelection,
     IMoodleUserResolver moodleUserResolver,
-    MoodleSnapshotToolContext? snapshotContext = null)
+    MoodleSnapshotToolContext? snapshotContext = null,
+    IMoodleCourseReadSnapshotCoordinator? snapshotCoordinator = null)
 {
     // ── Desempenho por atividade ──────────────────────────────────────────────
 
@@ -66,12 +67,14 @@ public sealed class MoodleStudentPerformanceTools(
         var effectiveCourseId = courseId;
         CourseGradebookSnapshot? prefetchedGradebook = null;
         ToolFreshness? freshness = null;
+        var freshnessWarnings = new List<string>();
         var snapshotContainsStudent = false;
-        if (snapshotContext is not null)
+        var coordinator = snapshotCoordinator ?? snapshotContext as IMoodleCourseReadSnapshotCoordinator;
+        if (coordinator is not null)
         {
             try
             {
-                var courseRead = await snapshotContext.ReadAsync(
+                var courseRead = await coordinator.ReadAsync(
                     new CourseReadSnapshotRequest(
                         courseId,
                         moodleAlias,
@@ -81,7 +84,9 @@ public sealed class MoodleStudentPerformanceTools(
                 if (courseRead is not null)
                 {
                     effectiveCourseId = courseRead.CourseId;
-                    prefetchedGradebook = courseRead.Gradebook?.Data;
+                    var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
+                    freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
+                    prefetchedGradebook = snapshotUnsafe ? null : courseRead.Gradebook?.Data;
                     snapshotContainsStudent = prefetchedGradebook?.TryGetForStudent(studentId, out _) == true;
                     if (snapshotContainsStudent && courseRead.Gradebook is not null)
                     {
@@ -93,7 +98,7 @@ public sealed class MoodleStudentPerformanceTools(
                             courseRead.Metadata.RefreshQueued,
                             courseRead.Gradebook.IsComplete && courseRead.Gradebook.Data.Coverage.IsComplete,
                             courseRead.Gradebook.RecordCount,
-                            DecisionSafe: !courseRead.Gradebook.IsStale);
+                            DecisionSafe: !snapshotUnsafe && !courseRead.Gradebook.IsStale);
                     }
                     else
                     {
@@ -135,11 +140,12 @@ public sealed class MoodleStudentPerformanceTools(
             return ToolResultHelper.Error<StudentGradeItemsResult>(exception);
         }
 
-        var warnings = freshness?.Stale == true
-            ? new[] { "O boletim retornado vem de um snapshot stale; use-o apenas como leitura informativa enquanto a atualização é processada." }
-            : Array.Empty<string>();
+        if (freshness?.Stale == true)
+        {
+            freshnessWarnings.Add("O boletim retornado vem de um snapshot stale; use-o apenas como leitura informativa enquanto a atualização é processada.");
+        }
         var response = new ToolResponse<StudentGradeItemsResult>(
-            "ok", data, warnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
+            "ok", data, freshnessWarnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         var narration = $"Desempenho do estudante {studentId} no curso {courseId}: {data.Items.Count} atividade(s) avaliativa(s). " +
                         $"{data.BelowMinimumItems.Count} abaixo do mínimo de {data.MinGradePercent}%.";
 
@@ -197,11 +203,12 @@ public sealed class MoodleStudentPerformanceTools(
         CourseParticipantsPage? prefetchedParticipants = null;
         ToolFreshness? freshness = null;
         var freshnessWarnings = new List<string>();
-        if (snapshotContext is not null)
+        var coordinator = snapshotCoordinator ?? snapshotContext as IMoodleCourseReadSnapshotCoordinator;
+        if (coordinator is not null)
         {
             try
             {
-                var courseRead = await snapshotContext.ReadAsync(
+                var courseRead = await coordinator.ReadAsync(
                     new CourseReadSnapshotRequest(
                         courseId,
                         moodleAlias,
@@ -212,9 +219,11 @@ public sealed class MoodleStudentPerformanceTools(
                 if (courseRead is not null)
                 {
                     effectiveCourseId = courseRead.CourseId;
-                    var gradebookSafe = courseRead.Gradebook is { IsStale: false, IsComplete: true } envelope &&
+                    var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
+                    freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
+                    var gradebookSafe = !snapshotUnsafe && courseRead.Gradebook is { IsStale: false, IsComplete: true } envelope &&
                         envelope.Data.Coverage.IsComplete;
-                    var studentsSafe = courseRead.Students is { IsStale: false, IsComplete: true, Data.HasMore: false };
+                    var studentsSafe = !snapshotUnsafe && courseRead.Students is { IsStale: false, IsComplete: true, Data.HasMore: false };
                     if (gradebookSafe)
                     {
                         prefetchedGradebook = courseRead.Gradebook!.Data;
@@ -228,6 +237,7 @@ public sealed class MoodleStudentPerformanceTools(
                     var staleDecisionDatasets = courseRead.Metadata.StaleDatasets
                         .Where(dataset => dataset is MoodleSnapshotDatasets.Students or MoodleSnapshotDatasets.Gradebook)
                         .ToArray();
+                    var snapshotSafeForDecision = staleDecisionDatasets.Length == 0 && !snapshotUnsafe;
                     if (staleDecisionDatasets.Length > 0)
                     {
                         freshnessWarnings.Add(
@@ -236,18 +246,18 @@ public sealed class MoodleStudentPerformanceTools(
 
                     var updatedAt = courseRead.Metadata.OldestUpdatedAt;
                     freshness = new ToolFreshness(
-                        staleDecisionDatasets.Length == 0 ? "snapshot" : "live",
-                        staleDecisionDatasets.Length == 0 ? updatedAt : null,
-                        staleDecisionDatasets.Length == 0 && updatedAt.HasValue
+                        snapshotSafeForDecision ? "snapshot" : "live",
+                        snapshotSafeForDecision ? updatedAt : null,
+                        snapshotSafeForDecision && updatedAt.HasValue
                             ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
                             : null,
-                        staleDecisionDatasets.Length == 0 && courseRead.Metadata.StaleDatasets.Count > 0,
+                        snapshotSafeForDecision && courseRead.Metadata.StaleDatasets.Count > 0,
                         courseRead.Metadata.RefreshQueued,
-                        staleDecisionDatasets.Length == 0 && courseRead.Metadata.IsComplete,
-                        staleDecisionDatasets.Length == 0
+                        snapshotSafeForDecision && courseRead.Metadata.IsComplete,
+                        snapshotSafeForDecision
                             ? (courseRead.Students?.RecordCount ?? 0) + (courseRead.Gradebook?.RecordCount ?? 0)
                             : 0,
-                        DecisionSafe: staleDecisionDatasets.Length == 0,
+                        DecisionSafe: snapshotSafeForDecision,
                         Dataset: "course_read_snapshot",
                         RecordType: "students_and_gradebook");
                 }

@@ -2,6 +2,7 @@ using System.Text.Json;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Activities;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 using MoodleConnector.Presentation.Tools;
 
@@ -71,6 +72,38 @@ public class MoodleCourseActivitiesToolsTests
         Assert.NotNull(mediator.LastActivityQuery);
         Assert.Equal("11", mediator.LastActivityQuery!.ActivityId);
         Assert.Equal(["assign"], mediator.LastActivityQuery.AllowedActivityTypes);
+    }
+
+    [Fact]
+    public async Task Deve_mapear_atividade_inexistente_para_erro_de_atividade()
+    {
+        var mediator = new FakeMediator { ReturnNullActivity = true };
+        var sut = new MoodleCourseActivitiesTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ConsultarAtividadeAsync("CURSO", "999999999");
+
+        Assert.True(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("moodle_activity_not_found", structured.GetProperty("errorCode").GetString());
+    }
+
+    [Fact]
+    public async Task Deve_preservar_codigo_de_atividade_inexistente_quando_gateway_lancar_erro_contratual()
+    {
+        var mediator = new FakeMediator { ThrowActivityNotFound = true };
+        var sut = new MoodleCourseActivitiesTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ConsultarAtividadeAsync("CURSO", "999999999");
+
+        Assert.True(result.IsError ?? false);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal(MoodleErrorContract.ActivityNotFound, structured.GetProperty("errorCode").GetString());
     }
 
     [Fact]
@@ -151,6 +184,10 @@ public class MoodleCourseActivitiesToolsTests
 
         public bool ThrowOnActivities { get; init; }
 
+        public bool ReturnNullActivity { get; init; }
+
+        public bool ThrowActivityNotFound { get; init; }
+
         public Task Publish(object notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
@@ -178,7 +215,13 @@ public class MoodleCourseActivitiesToolsTests
             if (request is GetCourseActivityQuery activity)
             {
                 LastActivityQuery = activity;
-                return Task.FromResult((TResponse)(object)CreateActivity(ReturnActivityWithoutDates));
+                if (ThrowActivityNotFound)
+                {
+                    throw new MoodleApiException(MoodleErrorContract.ActivityNotFound, "not found");
+                }
+
+                object? response = ReturnNullActivity ? null : CreateActivity(ReturnActivityWithoutDates);
+                return Task.FromResult((TResponse)response!);
             }
 
             if (request is ListActivityDeadlinesQuery deadlines)
@@ -206,7 +249,7 @@ public class MoodleCourseActivitiesToolsTests
             if (request is GetCourseActivityQuery activity)
             {
                 LastActivityQuery = activity;
-                return Task.FromResult<object?>(CreateActivity(ReturnActivityWithoutDates));
+                return Task.FromResult<object?>(ReturnNullActivity ? null : CreateActivity(ReturnActivityWithoutDates));
             }
 
             if (request is ListActivityDeadlinesQuery deadlines)

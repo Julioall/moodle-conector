@@ -89,11 +89,13 @@ public sealed class MoodlePendingSubmissionsTools(
                         var students = courseRead.Students;
                         var submissions = courseRead.Submissions;
                         var gradebook = courseRead.Gradebook;
+                        var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
+                        freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
                         var staleDatasets = courseRead.Metadata.StaleDatasets.ToHashSet(StringComparer.OrdinalIgnoreCase);
-                        if (activities is { IsComplete: true, IsStale: false }) prefetchedContents = activities.Data;
-                        if (students is { IsComplete: true, IsStale: false }) prefetchedParticipants = students.Data;
-                        if (submissions is { IsComplete: true, IsStale: false, Data: not null }) prefetchedSubmissions = submissions.Data;
-                        if (gradebook is { IsComplete: true, IsStale: false, Data: not null }) prefetchedGradebook = gradebook.Data;
+                        if (!snapshotUnsafe && activities is { IsComplete: true, IsStale: false }) prefetchedContents = activities.Data;
+                        if (!snapshotUnsafe && students is { IsComplete: true, IsStale: false }) prefetchedParticipants = students.Data;
+                        if (!snapshotUnsafe && submissions is { IsComplete: true, IsStale: false, Data: not null }) prefetchedSubmissions = submissions.Data;
+                        if (!snapshotUnsafe && gradebook is { IsComplete: true, IsStale: false, Data: not null }) prefetchedGradebook = gradebook.Data;
                         if (staleDatasets.Count > 0)
                         {
                             freshnessWarnings.Add(
@@ -102,20 +104,21 @@ public sealed class MoodlePendingSubmissionsTools(
 
                         if (submissions is not null || gradebook is not null)
                         {
+                            var snapshotSafe = staleDatasets.Count == 0 && !snapshotUnsafe;
                             var updatedAt = new[] { submissions?.UpdatedAt, gradebook?.UpdatedAt }
                                 .Where(value => value.HasValue)
                                 .Select(value => value!.Value)
                                 .OrderByDescending(value => value)
                                 .FirstOrDefault();
                             freshness = new ToolFreshness(
-                                staleDatasets.Count == 0 ? "snapshot" : "live",
-                                staleDatasets.Count == 0 && updatedAt != default ? updatedAt : null,
-                                staleDatasets.Count == 0 && updatedAt != default ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt).TotalSeconds) : null,
+                                snapshotSafe ? "snapshot" : "live",
+                                snapshotSafe && updatedAt != default ? updatedAt : null,
+                                snapshotSafe && updatedAt != default ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt).TotalSeconds) : null,
                                 false,
                                 courseRead.Metadata.RefreshQueued,
-                                staleDatasets.Count == 0 && courseRead.Metadata.IsComplete,
-                                staleDatasets.Count == 0 ? (submissions?.RecordCount ?? 0) + (gradebook?.RecordCount ?? 0) : 0,
-                                DecisionSafe: staleDatasets.Count == 0,
+                                snapshotSafe && courseRead.Metadata.IsComplete,
+                                snapshotSafe ? (submissions?.RecordCount ?? 0) + (gradebook?.RecordCount ?? 0) : 0,
+                                DecisionSafe: snapshotSafe,
                                 Dataset: "course_read_snapshot",
                                 RecordType: "submissions_and_gradebook");
                         }
