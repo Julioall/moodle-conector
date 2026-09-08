@@ -104,7 +104,9 @@ public sealed class MoodlePendingSubmissionsTools(
 
                         if (submissions is not null || gradebook is not null)
                         {
-                            var snapshotSafe = staleDatasets.Count == 0 && !snapshotUnsafe;
+                            var snapshotSafe = staleDatasets.Count == 0 &&
+                                courseRead.Metadata.IsComplete &&
+                                !snapshotUnsafe;
                             var updatedAt = new[] { submissions?.UpdatedAt, gradebook?.UpdatedAt }
                                 .Where(value => value.HasValue)
                                 .Select(value => value!.Value)
@@ -161,6 +163,7 @@ public sealed class MoodlePendingSubmissionsTools(
             {
                 Complete = data.IsComplete,
                 DecisionSafe = data.IsComplete,
+                RecordCount = data.Students.Count,
             };
         }
 

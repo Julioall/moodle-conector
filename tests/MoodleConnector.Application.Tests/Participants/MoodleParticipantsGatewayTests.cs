@@ -167,6 +167,23 @@ public sealed class MoodleParticipantsGatewayTests
     }
 
     [Fact]
+    public async Task Nao_sinaliza_grupo_vazio_de_equipe_como_grupo_vazio_de_aluno()
+    {
+        var sut = CreateGateway(new JsonHandler("""
+            [
+              {"id":1,"fullname":"Professor","suspended":false,"roles":[{"roleid":3,"shortname":"editingteacher","name":"Professor"}],"groups":[]},
+              {"id":2,"fullname":"Aluna","suspended":false,"roles":[{"roleid":5,"shortname":"student","name":"Estudante"}],"groups":[{"id":9,"name":"Turma A"}]}
+            ]
+            """));
+
+        var result = await sut.GetCourseParticipantsAsync(
+            "42", "10", ParticipantStatusFilter.Active, 1, 20, false, false, null, CancellationToken.None);
+
+        Assert.True(result.ClassificationDiagnostics!.HasEmptyGroups);
+        Assert.False(result.ClassificationDiagnostics.HasEmptyStudentGroups);
+    }
+
+    [Fact]
     public async Task Usa_populacao_sem_filtro_quando_onlyactive_e_negado_e_preserva_alunos()
     {
         var sut = CreateGateway(new JsonHandler(

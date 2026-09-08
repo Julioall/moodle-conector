@@ -331,7 +331,11 @@ public sealed class MoodleAssignmentSubmissionsTools(
                                 priority: 10,
                                 force: snapshot is not null,
                                 cancellationToken);
-                            freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+                            freshness = new ToolFreshness(
+                                "live", null, null, false, refreshQueued, false, 0,
+                                DecisionSafe: false,
+                                Dataset: MoodleSnapshotDatasets.Submissions,
+                                RecordType: "assignment_submissions");
                         }
                     }
                 }
@@ -382,6 +386,15 @@ public sealed class MoodleAssignmentSubmissionsTools(
         }
 
         var data = ToListResponse(submissionsPage);
+        if (freshness is { Source: "live" })
+        {
+            freshness = freshness with
+            {
+                Complete = false,
+                DecisionSafe = false,
+                RecordCount = data.Total,
+            };
+        }
         var warnings = data.ActivityState == "future"
             ? new[] { "A atividade ainda não está aberta; nenhum estudante é considerado pendente neste momento." }
             : Array.Empty<string>();
@@ -468,7 +481,11 @@ public sealed class MoodleAssignmentSubmissionsTools(
                                 priority: 10,
                                 force: snapshot is not null,
                                 cancellationToken);
-                            freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+                            freshness = new ToolFreshness(
+                                "live", null, null, false, refreshQueued, false, 0,
+                                DecisionSafe: false,
+                                Dataset: MoodleSnapshotDatasets.Submissions,
+                                RecordType: "student_submission");
                         }
                     }
                 }
@@ -505,6 +522,15 @@ public sealed class MoodleAssignmentSubmissionsTools(
         }
 
         var data = new StudentSubmissionResponse(resolvedCourseId, assignmentId, ToSubmissionItem(submission));
+        if (freshness is { Source: "live" })
+        {
+            freshness = freshness with
+            {
+                Complete = false,
+                DecisionSafe = false,
+                RecordCount = 1,
+            };
+        }
         var response = new ToolResponse<StudentSubmissionResponse>("ok", data, [], AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
 
         return new CallToolResult

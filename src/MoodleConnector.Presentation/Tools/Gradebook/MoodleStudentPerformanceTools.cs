@@ -109,7 +109,10 @@ public sealed class MoodleStudentPerformanceTools(
                             false,
                             courseRead.Metadata.RefreshQueued,
                             false,
-                            0);
+                            0,
+                            DecisionSafe: false,
+                            Dataset: MoodleSnapshotDatasets.Gradebook,
+                            RecordType: "student_grade_items");
                     }
                 }
             }

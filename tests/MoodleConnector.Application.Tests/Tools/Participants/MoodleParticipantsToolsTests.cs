@@ -157,6 +157,22 @@ public class MoodleParticipantsToolsTests
     }
 
     [Fact]
+    public async Task Nao_alerta_grupos_vazios_de_equipe_ao_listar_todos_os_participantes()
+    {
+        var mediator = new FakeMediator { ReturnFallbackDiagnostics = true };
+        var sut = new MoodleParticipantsTools(
+            mediator,
+            new FakeMoodleConnectionSelection(),
+            new FakeMoodleUserResolver(777));
+
+        var result = await sut.ListarParticipantesCursoAsync("CURSO");
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.DoesNotContain(structured.GetProperty("warnings").EnumerateArray(), warning =>
+            warning.GetString()!.Contains("alunos sem grupos", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Deve_distinguir_pagina_vazia_fora_do_intervalo()
     {
         var mediator = new FakeMediator { ReturnEmptyParticipants = true };

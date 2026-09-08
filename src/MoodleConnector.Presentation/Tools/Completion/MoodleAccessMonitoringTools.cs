@@ -115,7 +115,11 @@ public sealed class MoodleAccessMonitoringTools(
             }
             else if (scope is not null)
             {
-                freshness = new ToolFreshness("live", null, null, false, refreshQueued, false, 0);
+                freshness = new ToolFreshness(
+                    "live", null, null, false, refreshQueued, false, data.Students.Count,
+                    DecisionSafe: false,
+                    Dataset: MoodleSnapshotDatasets.Students,
+                    RecordType: "students_without_recent_access");
             }
         }
         catch (OperationCanceledException) { throw; }

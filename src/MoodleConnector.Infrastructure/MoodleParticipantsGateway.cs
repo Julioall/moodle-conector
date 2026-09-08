@@ -196,7 +196,11 @@ internal sealed class MoodleParticipantsGateway(
                     evaluatedCount,
                     includedByStudentRoleCount,
                     includedByFallbackCount),
-                usedStatusFilterFallback));
+                usedStatusFilterFallback,
+                participants.Take(pageSize).Any(participant =>
+                    (ParticipantClassification.Classify(participant) == ParticipantClassificationKind.Student ||
+                     (studentsOnly && ParticipantClassification.Classify(participant) == ParticipantClassificationKind.UncertainFallback)) &&
+                    participant.Groups.Count == 0)));
     }
 
     private async Task<CourseParticipantsPage> GetParticipantsAcrossEnrollmentStatusesAsync(
@@ -300,7 +304,8 @@ internal sealed class MoodleParticipantsGateway(
             diagnostics.Any(item => item.HasEmptyRoles),
             diagnostics.Any(item => item.HasEmptyGroups),
             ResolveClassificationMode(evaluated, roleBased, fallback),
-            diagnostics.Any(item => item.UsedStatusFilterFallback));
+            diagnostics.Any(item => item.UsedStatusFilterFallback),
+            diagnostics.Any(item => item.HasEmptyStudentGroups));
     }
 
     public async Task<IReadOnlyList<CourseGroupSummary>> GetCourseGroupsAsync(

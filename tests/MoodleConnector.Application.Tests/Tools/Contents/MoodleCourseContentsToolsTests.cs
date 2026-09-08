@@ -52,6 +52,7 @@ public class MoodleCourseContentsToolsTests
         Assert.True(result.IsError ?? false);
         var structured = Assert.IsType<JsonElement>(result.StructuredContent);
         Assert.Equal("error", structured.GetProperty("status").GetString());
+        Assert.Equal("invalid_filter", structured.GetProperty("errorCode").GetString());
         Assert.Equal("Tipo de modulo invalido. Use resource, page, url, book, folder, label, assign, quiz, scorm ou forum.", structured.GetProperty("warnings")[0].GetString());
     }
 

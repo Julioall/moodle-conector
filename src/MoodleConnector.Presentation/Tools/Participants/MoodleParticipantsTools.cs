@@ -523,9 +523,11 @@ public sealed class MoodleParticipantsTools(
             warnings.Add("O Moodle retornou participantes sem roles; a classificacao pode estar incompleta.");
         }
 
-        if (diagnostics.HasEmptyGroups)
+        var hasEmptyStudentGroups = diagnostics.HasEmptyStudentGroups ||
+            (page.StudentsOnly && diagnostics.HasEmptyGroups);
+        if (hasEmptyStudentGroups)
         {
-            warnings.Add("O Moodle retornou participantes sem grupos; o curso pode nao usar grupos ou a informacao pode estar indisponivel.");
+            warnings.Add("O Moodle retornou alunos sem grupos; a associação de turma pode estar incompleta ou indisponível.");
         }
 
         if (diagnostics.UsedStatusFilterFallback)

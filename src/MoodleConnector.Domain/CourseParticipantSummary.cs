@@ -23,7 +23,8 @@ public sealed record ParticipantClassificationDiagnostics(
     bool HasEmptyRoles,
     bool HasEmptyGroups,
     ParticipantClassificationMode Mode,
-    bool UsedStatusFilterFallback = false)
+    bool UsedStatusFilterFallback = false,
+    bool HasEmptyStudentGroups = false)
 {
     public static ParticipantClassificationDiagnostics Empty { get; } =
         new(0, 0, 0, 0, false, false, ParticipantClassificationMode.NotRequested);

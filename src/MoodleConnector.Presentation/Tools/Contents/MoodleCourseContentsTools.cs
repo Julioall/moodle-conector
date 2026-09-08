@@ -208,7 +208,9 @@ public sealed class MoodleCourseContentsTools(
     {
         if (!TryParseModuleType(moduleType, out var moduleTypes, out var error))
         {
-            return Task.FromResult(ToolResultHelper.Error<ListCourseContentsResponse>(error));
+            return Task.FromResult(ToolResultHelper.Error<ListCourseContentsResponse>(
+                error,
+                errorCode: MoodleErrorContract.InvalidFilter));
         }
 
         return ListContentsCoreAsync(courseId, moduleTypes, includeHidden, onlyWithFiles, moodleAlias, cancellationToken);

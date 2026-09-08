@@ -71,7 +71,9 @@ public sealed class MoodleReportToolsTests
         var freshness = structured.GetProperty("freshness");
         Assert.Equal("live", freshness.GetProperty("source").GetString());
         Assert.Equal(JsonValueKind.Null, freshness.GetProperty("snapshotAt").ValueKind);
-        Assert.Equal(0, freshness.GetProperty("recordCount").GetInt32());
+        Assert.Equal(2, freshness.GetProperty("recordCount").GetInt32());
+        Assert.False(freshness.GetProperty("complete").GetBoolean());
+        Assert.False(freshness.GetProperty("decisionSafe").GetBoolean());
         Assert.True(freshness.GetProperty("refreshQueued").GetBoolean());
     }
 

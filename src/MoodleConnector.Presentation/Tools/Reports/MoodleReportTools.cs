@@ -436,7 +436,10 @@ public sealed class MoodleReportTools(
                                 false,
                                 courseRead.Metadata.RefreshQueued,
                                 false,
-                                0);
+                                0,
+                                DecisionSafe: false,
+                                Dataset: "course_read_snapshot",
+                                RecordType: "students_and_gradebook");
                         }
 
                         freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
@@ -471,6 +474,19 @@ public sealed class MoodleReportTools(
             freshnessWarnings.Add(postExecution.Warning);
         }
 
+        if (freshness is { Source: "live" })
+        {
+            freshness = freshness with
+            {
+                // Reports do not expose a complete-live-read contract. A live
+                // fallback therefore remains non-decision-safe until the
+                // durable snapshot is complete.
+                Complete = false,
+                DecisionSafe = false,
+                RecordCount = GetReportRecordCount(data),
+            };
+        }
+
         var response = new ToolResponse<TResult>("ok", data, freshnessWarnings, AuditId: null, DateTimeOffset.UtcNow, Freshness: freshness);
         return new CallToolResult
         {
@@ -479,4 +495,13 @@ public sealed class MoodleReportTools(
             IsError = false
         };
     }
+
+    private static int GetReportRecordCount<TResult>(TResult data) => data switch
+    {
+        GenerateCourseGradesReportResult report => report.Students.Count,
+        GenerateWeeklyPerformanceReportResult report => report.Students.Count,
+        GenerateClassCouncilReportResult report => report.Students.Count,
+        GeneratePostExecutionReportResult report => report.Students.Count,
+        _ => 0,
+    };
 }
