@@ -99,21 +99,21 @@ public sealed class ConnectorBuildInfoProvider(IConfiguration configuration)
         IReadOnlyList<string> environmentKeys,
         IReadOnlyList<string> configurationKeys)
     {
-        foreach (var key in environmentKeys)
-        {
-            var value = Normalize(environmentLookup(key));
-            if (value is not null)
-            {
-                return (value, $"environment:{key}");
-            }
-        }
-
         foreach (var key in configurationKeys.Concat(environmentKeys))
         {
             var value = Normalize(configuration[key]);
             if (value is not null)
             {
                 return (value, $"configuration:{key}");
+            }
+        }
+
+        foreach (var key in environmentKeys)
+        {
+            var value = Normalize(environmentLookup(key));
+            if (value is not null)
+            {
+                return (value, $"environment:{key}");
             }
         }
 

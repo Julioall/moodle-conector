@@ -84,4 +84,21 @@ public sealed class MoodleBuildInfoToolsTests
         Assert.True(structured.GetProperty("data").GetProperty("canCompareToRepository").GetBoolean());
         Assert.DoesNotContain("password", structured.GetRawText(), StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Explicit_configuration_wins_over_ambient_ci_sha()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["MOODLE_CONNECTOR_COMMIT"] = "explicit-runtime-commit"
+            })
+            .Build();
+        var provider = new ConnectorBuildInfoProvider(configuration);
+
+        var info = provider.Get(key => key == "GITHUB_SHA" ? "ambient-ci-commit" : null);
+
+        Assert.Equal("explicit-runtime-commit", info.Commit);
+        Assert.Equal("configuration:MOODLE_CONNECTOR_COMMIT", info.CommitSource);
+    }
 }
