@@ -2586,7 +2586,25 @@ public sealed record AiGradingBatchPackageResult(
     [property: JsonPropertyName("page")] int Page = 1,
     [property: JsonPropertyName("pageSize")] int PageSize = 400,
     [property: JsonPropertyName("hasMore")] bool HasMore = false,
-    [property: JsonPropertyName("nextPage")] int? NextPage = null);
+    [property: JsonPropertyName("nextPage")] int? NextPage = null,
+    [property: JsonPropertyName("expectedItems")] int ExpectedItems = 0,
+    [property: JsonPropertyName("preparedItems")] int PreparedItems = 0,
+    [property: JsonPropertyName("missingItems")] int MissingItems = 0,
+    [property: JsonPropertyName("missingBatchCount")] int MissingBatchCount = 0,
+    [property: JsonPropertyName("decisionSafe")] bool DecisionSafe = true,
+    [property: JsonPropertyName("assignments")] IReadOnlyList<AiGradingAssignmentPackage>? Assignments = null);
+
+public sealed record AiGradingAssignmentPackage(
+    [property: JsonPropertyName("assignmentId")] string AssignmentId,
+    [property: JsonPropertyName("contextResources")] IReadOnlyList<AiGradingAssignmentContextResource> ContextResources);
+
+public sealed record AiGradingAssignmentContextResource(
+    [property: JsonPropertyName("resourceId")] string ResourceId,
+    [property: JsonPropertyName("uri")] string Uri,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("mimeType")] string MimeType,
+    [property: JsonPropertyName("size")] long? Size,
+    [property: JsonPropertyName("contentHash")] string? ContentHash = null);
 
 public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -2604,7 +2622,8 @@ public sealed record AiGradingBatchItemPackage(
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
     [property: JsonPropertyName("contextHash")] string? ContextHash = null,
     [property: JsonPropertyName("resourceDeliveryMode")] string ResourceDeliveryMode = "mcp_resource",
-    [property: JsonPropertyName("resources")] IReadOnlyList<AiGradingResourceLink>? Resources = null);
+    [property: JsonPropertyName("resources")] IReadOnlyList<AiGradingResourceLink>? Resources = null,
+    [property: JsonPropertyName("contextResourceRefs")] IReadOnlyList<string>? ContextResourceRefs = null);
 
 public sealed record AiGradingResourceLink(
     [property: JsonPropertyName("uri")] string Uri,
@@ -2646,6 +2665,11 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         if (batch is null)
         {
             const string emptyInstructions = "Nao ha itens elegiveis para preparar nesta execucao. Se a execucao ainda estiver em processamento, repita a chamada usando o mesmo gradingRunId quando os sublotes estiverem prontos.";
+            var emptyCoverage = await GradingRunCoverageCalculator.CalculateAsync(
+                repository,
+                scope,
+                preparedItems: 0,
+                cancellationToken: cancellationToken);
             return new AiGradingBatchPackageResult(
                 request.BatchJobId,
                 string.Empty,
@@ -2654,11 +2678,16 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 [],
                 emptyInstructions,
                 ["A execucao ainda nao possui sublotes com itens elegiveis."],
-                scope.Run?.Id ?? Guid.Empty,
+                scope.Run?.Id ?? scope.DestinationRun?.Id,
                 Math.Max(1, request.Page),
                 Math.Clamp(request.PageSize, 1, MaxPageSize),
                 false,
-                null);
+                null,
+                ExpectedItems: emptyCoverage.ExpectedItems,
+                PreparedItems: emptyCoverage.PreparedItems,
+                MissingItems: emptyCoverage.MissingItems,
+                MissingBatchCount: emptyCoverage.MissingBatchCount,
+                DecisionSafe: emptyCoverage.DecisionSafe);
         }
 
         var globalWarnings = new List<string>();
@@ -2743,7 +2772,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         }
 
         var submissionRegistrationEntries = new List<(Guid ItemId, Guid ArtifactId, MoodleResourceRegistration Registration)>();
-        var contextRegistrationEntries = new List<(Guid ItemId, Guid ArtifactId, string Filename, MoodleResourceRegistration Registration)>();
+        var contextRegistrationEntries = new List<(long AssignmentId, string ResourceId, string Filename, string? ContentHash, MoodleResourceRegistration Registration)>();
         foreach (var item in pageItems)
         {
             var artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
@@ -2776,9 +2805,10 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                                    !string.IsNullOrWhiteSpace(artifact.SourceUrl) &&
                                    !string.IsNullOrWhiteSpace(artifact.Filename))
                 .Select(artifact => (
-                    item.Id,
-                    artifact.Id,
+                    item.AssignmentId,
+                    BuildAssignmentContextResourceId(item.CourseId, item.AssignmentId, artifact),
                     artifact.Filename!,
+                    artifact.Sha256,
                     new MoodleResourceRegistration(
                         "assignment_context_attachment",
                         artifact.Filename!,
@@ -2815,39 +2845,47 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 .ToDictionary(group => group.Key, group => (IReadOnlyList<AiGradingResourceLink>)group.Select(entry => entry.Link).ToArray());
         }
 
-        // Context attachments are optional, but registering them one by one
-        // made a 400-item page perform hundreds of credential/DB round trips.
-        // Keep the submission path strict and bulk the optional context path
-        // separately so one optional failure only produces item warnings.
-        var contextWarningsByItem = new Dictionary<Guid, IReadOnlyList<string>>();
-        if (contextRegistrationEntries.Count > 0)
+        // Assignment context is shared by all students in one activity. It is
+        // registered and serialized once per stable context identity, while
+        // each item only carries compact references to that assignment-level
+        // material. Submission resources remain individual and strict.
+        var assignmentContexts = new List<AiGradingAssignmentPackage>();
+        var contextResourceRefsByAssignment = new Dictionary<long, IReadOnlyList<string>>();
+        var uniqueContextEntries = contextRegistrationEntries
+            .GroupBy(entry => entry.ResourceId, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .ToArray();
+        if (uniqueContextEntries.Length > 0)
         {
             try
             {
                 var descriptors = await resourceGateway!.RegisterManyAsync(
-                    contextRegistrationEntries.Select(entry => entry.Registration).ToArray(),
+                    uniqueContextEntries.Select(entry => entry.Registration).ToArray(),
                     cancellationToken);
-                if (descriptors.Count != contextRegistrationEntries.Count)
+                if (descriptors.Count != uniqueContextEntries.Length)
                 {
                     throw new InvalidOperationException("O gateway MCP Resource retornou uma quantidade inconsistente de materiais de contexto registrados.");
                 }
 
-                var contextLinks = contextRegistrationEntries
-                    .Select((entry, index) => (entry.ItemId, Link: new AiGradingResourceLink(
+                assignmentContexts = uniqueContextEntries
+                    .Select((entry, index) => (entry.AssignmentId, Resource: new AiGradingAssignmentContextResource(
+                        entry.ResourceId,
                         descriptors[index].Uri,
                         descriptors[index].Filename,
                         descriptors[index].MimeType,
                         descriptors[index].SizeBytes,
-                        ResourceType: "assignment_context",
-                        ArtifactId: entry.ArtifactId)))
-                    .GroupBy(entry => entry.ItemId)
-                    .ToDictionary(group => group.Key, group => (IReadOnlyList<AiGradingResourceLink>)group.Select(entry => entry.Link).ToArray());
-                foreach (var (itemId, links) in contextLinks)
-                {
-                    resourceLinksByItem[itemId] = resourceLinksByItem.TryGetValue(itemId, out var existing)
-                        ? existing.Concat(links).ToArray()
-                        : links;
-                }
+                        descriptors[index].Sha256 ?? entry.ContentHash)))
+                    .GroupBy(entry => entry.AssignmentId)
+                    .OrderBy(group => group.Key)
+                    .Select(group => new AiGradingAssignmentPackage(
+                        group.Key.ToString(CultureInfo.InvariantCulture),
+                        group.Select(entry => entry.Resource).ToArray()))
+                    .ToList();
+                contextResourceRefsByAssignment = assignmentContexts.ToDictionary(
+                    assignment => long.Parse(assignment.AssignmentId, CultureInfo.InvariantCulture),
+                    assignment => (IReadOnlyList<string>)assignment.ContextResources
+                        .Select(resource => resource.ResourceId)
+                        .ToArray());
             }
             catch (OperationCanceledException)
             {
@@ -2855,11 +2893,15 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             }
             catch (Exception exception)
             {
-                foreach (var itemGroup in contextRegistrationEntries.GroupBy(entry => entry.ItemId))
+                foreach (var assignment in uniqueContextEntries
+                    .GroupBy(entry => entry.AssignmentId)
+                    .OrderBy(group => group.Key))
                 {
-                    contextWarningsByItem[itemGroup.Key] = itemGroup
-                        .Select(entry => $"Material de contexto {entry.Filename} não foi disponibilizado como MCP Resource ({exception.GetType().Name}).")
-                        .ToArray();
+                    var files = string.Join(", ", assignment
+                        .Select(entry => entry.Filename)
+                        .Distinct(StringComparer.Ordinal));
+                    globalWarnings.Add(
+                        $"Atividade {assignment.Key}: materiais de contexto ({files}) não foram disponibilizados como MCP Resource ({exception.GetType().Name}).");
                 }
             }
         }
@@ -2869,10 +2911,7 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             var itemWarnings = new List<string>();
             IReadOnlyList<GradingArtifact> artifacts = artifactsByItem.GetValueOrDefault(item.Id, []);
             var resourceLinks = resourceLinksByItem.GetValueOrDefault(item.Id, []).ToList();
-            if (contextWarningsByItem.TryGetValue(item.Id, out var contextWarnings))
-            {
-                itemWarnings.AddRange(contextWarnings);
-            }
+            var contextResourceRefs = contextResourceRefsByAssignment.GetValueOrDefault(item.AssignmentId, []);
 
             itemWarnings.Add("Entrega fornecida por MCP Resource; leia os arquivos originais antes de propor a correção.");
 
@@ -2932,7 +2971,8 @@ public sealed class PrepareAiGradingBatchQueryHandler(
                 itemWarnings,
                 item.ContextHash,
                 ResourceDeliveryMode: "mcp_resource",
-                resourceLinks));
+                Resources: resourceLinks,
+                ContextResourceRefs: contextResourceRefs));
         }
 
         if (packageItems.Count == 0)
@@ -2958,9 +2998,9 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             "- Se nao houver evidencia suficiente da submissao para individualizar o retorno, nao invente detalhes: marque a proposta para revisao humana e nao a trate como pronta para publicacao.\n" +
             "- Atribua nota numerica somente quando maxGrade estiver informado; caso contrario, nao inclua nota.\n" +
             "- Uma entrega claramente de outra atividade deve receber nota 0 (quando a escala existir) e feedback individual explicando a incompatibilidade e o proximo passo do aluno; isso e um rascunho para revisao humana, nao um bloqueio tecnico.\n" +
-            "- Quando houver resources com resourceType 'assignment_context', identifique automaticamente o enunciado priorizando o arquivo cujo nome e numero correspondam a atividade; ignore materiais genericos, folhas de resposta e arquivos de outra atividade. Se nenhum contexto corresponder com seguranca, nao invente criterios nem nota e sinalize revisao humana.\n" +
+            "- Os materiais compartilhados da atividade ficam em assignments[].contextResources. Cada item informa em contextResourceRefs quais resourceIds deve consultar. Identifique automaticamente o enunciado priorizando o arquivo cujo nome e numero correspondam a atividade; ignore materiais genericos, folhas de resposta e arquivos de outra atividade. Se nenhum contexto corresponder com seguranca, nao invente criterios nem nota e sinalize revisao humana.\n" +
             "- Para cada proposta, cite pelo menos um artifactId real de resourceType 'submission' em proposal.evidence[].artifactId e, se possivel, a URI correspondente. Nunca invente UUIDs.\n" +
-            "- Ao chamar save_ai_grading_batch, preencha proposal.resourceUris com todas e somente as URIs em resources cujo resourceType seja 'submission'. Nunca inclua resources de 'assignment_context' nesse campo; eles podem ser citados somente em proposal.evidence[].resourceUri. Sem todas as URIs de submission, o rascunho nao pode gerar uma previa de lancamento.\n" +
+            "- Ao chamar save_ai_grading_batch, preencha proposal.resourceUris com todas e somente as URIs em resources, que sempre representam a submissao individual. Nunca inclua contextResources nesse campo; eles podem ser citados somente em proposal.evidence[].resourceUri. Sem todas as URIs de submission, o rascunho nao pode gerar uma previa de lancamento.\n" +
             "O feedback deve ser adequado para colar diretamente no Moodle. " +
             "Apos gerar, use a tool save_ai_grading_batch para salvar os resultados. Se o usuario pediu CSV, chame export_grading_corrections_csv; caso contrario, chame create_batch_grade_launch_preview, mostre a previa e aguarde CONFIRMAR_PUBLICACAO.");
 
@@ -2969,6 +3009,16 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         // This avoids skipping work when saving a previous page changes item
         // statuses between requests.
         var hasMore = totalScopedItems > page * pageSize;
+        var coverage = await GradingRunCoverageCalculator.CalculateAsync(
+            repository,
+            scope,
+            totalScopedItems,
+            cancellationToken);
+        if (!coverage.DecisionSafe)
+        {
+            globalWarnings.Add(
+                $"Cobertura incompleta da execucao: esperados {coverage.ExpectedItems}, preparados {coverage.PreparedItems}, ausentes {coverage.MissingItems} em {coverage.MissingBatchCount} sublote(s). Nao use esta pagina para publicacao global sem allowPartial=true.");
+        }
         var result = new AiGradingBatchPackageResult(
             scope.RequestedId,
             scope.CourseId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
@@ -2977,11 +3027,17 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             packageItems,
             instructions,
             globalWarnings,
-            scope.Run?.Id ?? Guid.Empty,
+            scope.Run?.Id ?? scope.DestinationRun?.Id,
             page,
             pageSize,
             hasMore,
-            hasMore ? page + 1 : null);
+            hasMore ? page + 1 : null,
+            ExpectedItems: coverage.ExpectedItems,
+            PreparedItems: coverage.PreparedItems,
+            MissingItems: coverage.MissingItems,
+            MissingBatchCount: coverage.MissingBatchCount,
+            DecisionSafe: coverage.DecisionSafe,
+            Assignments: assignmentContexts);
         telemetry?.RecordPhase(
             "grading",
             "package",
@@ -2990,6 +3046,24 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             queryCount: 5,
             itemCount: packageItems.Count);
         return result;
+    }
+
+    private static string BuildAssignmentContextResourceId(
+        long courseId,
+        long assignmentId,
+        GradingArtifact artifact)
+    {
+        var identity = string.Join(
+            "\n",
+            courseId.ToString(CultureInfo.InvariantCulture),
+            assignmentId.ToString(CultureInfo.InvariantCulture),
+            artifact.SourceUrl?.Trim() ?? string.Empty,
+            artifact.Filename?.Trim() ?? string.Empty,
+            artifact.MimeType?.Trim() ?? string.Empty,
+            artifact.SizeBytes?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+            artifact.Sha256?.Trim() ?? string.Empty);
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
+        return $"ctx-{hash[..24]}";
     }
 
     private async Task<IReadOnlyList<AssistedGradingItem>> LoadAllScopeItemsAsync(

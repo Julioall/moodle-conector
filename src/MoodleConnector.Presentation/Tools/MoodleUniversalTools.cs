@@ -191,7 +191,10 @@ public sealed class MoodleUniversalTools(
                 ? profile.Functions
                 : profile.Functions.Where(function => function.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
             functions = functions.Where(function => function.IsAvailable).ToArray();
-            return Success<IReadOnlyList<MoodleFunctionDescriptor>>(functions, $"{functions.Count} funcao(oes) encontrada(s).");
+            return Success<IReadOnlyList<MoodleFunctionDescriptor>>(
+                functions,
+                $"{functions.Count} funcao(oes) encontrada(s).",
+                freshness: BuildCapabilitiesFreshness(profile, functions.Count, "moodle_functions"));
         }
         catch (OperationCanceledException) { throw; }
         catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyList<MoodleFunctionDescriptor>>(ex); }
@@ -261,7 +264,10 @@ public sealed class MoodleUniversalTools(
             EnsureSiteInfoDiscoveryIsAllowed();
             var profile = await functionCatalog.GetCurrentAsync(forceRefresh, cancellationToken);
             var flows = businessFlows.EvaluateAll(profile);
-            return Success<IReadOnlyCollection<BusinessFlowAvailability>>(flows, $"{flows.Count(flow => flow.IsAvailable)} fluxo(s) Moodle disponível(is).");
+            return Success<IReadOnlyCollection<BusinessFlowAvailability>>(
+                flows,
+                $"{flows.Count(flow => flow.IsAvailable)} fluxo(s) Moodle disponível(is).",
+                freshness: BuildCapabilitiesFreshness(profile, flows.Count, "available_flows"));
         }
         catch (OperationCanceledException) { throw; }
         catch (MoodleApiException ex) { return ToolResultHelper.Error<IReadOnlyCollection<BusinessFlowAvailability>>(ex); }
@@ -325,7 +331,8 @@ public sealed class MoodleUniversalTools(
         T data,
         string narration,
         string? auditId = null,
-        IReadOnlyList<string>? warnings = null)
+        IReadOnlyList<string>? warnings = null,
+        ToolFreshness? freshness = null)
     {
         var response = new ToolResponse<T>(
             "ok",
@@ -333,7 +340,8 @@ public sealed class MoodleUniversalTools(
             warnings ?? [],
             AuditId: auditId ?? Guid.NewGuid().ToString("N"),
             DateTimeOffset.UtcNow,
-            Message: narration);
+            Message: narration,
+            Freshness: freshness);
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = narration }],
@@ -341,6 +349,22 @@ public sealed class MoodleUniversalTools(
             IsError = false
         };
     }
+
+    private static ToolFreshness BuildCapabilitiesFreshness(
+        MoodleFunctionProfile profile,
+        int recordCount,
+        string recordType) =>
+        new(
+            profile.IsCached ? "cache" : "live",
+            profile.DiscoveredAt,
+            Math.Max(0, (long)(DateTimeOffset.UtcNow - profile.DiscoveredAt).TotalSeconds),
+            Stale: false,
+            RefreshQueued: false,
+            Complete: true,
+            RecordCount: recordCount,
+            DecisionSafe: true,
+            Dataset: "capabilities",
+            RecordType: recordType);
 
     private void EnsureSiteInfoDiscoveryIsAllowed()
     {

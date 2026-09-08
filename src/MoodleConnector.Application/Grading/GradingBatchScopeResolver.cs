@@ -93,3 +93,58 @@ internal sealed record GradingBatchScope(
         .OrderBy(id => id)
         .ToArray();
 }
+
+/// <summary>
+/// Explicit coverage contract for an aggregate run. <c>PreparedItems</c>
+/// means durable items actually reachable from the current run lineage; it
+/// is deliberately distinct from the number of items already drafted by AI.
+/// </summary>
+internal sealed record GradingRunCoverage(
+    int ExpectedItems,
+    int PreparedItems,
+    int MissingItems,
+    int MissingBatchCount)
+{
+    public bool DecisionSafe => MissingItems == 0 && MissingBatchCount == 0;
+}
+
+internal static class GradingRunCoverageCalculator
+{
+    public static async Task<GradingRunCoverage> CalculateAsync(
+        IGradingReviewRepository repository,
+        GradingBatchScope scope,
+        int preparedItems,
+        CancellationToken cancellationToken)
+    {
+        var declaredItems = scope.Batches.Sum(batch => batch.TotalItems);
+        var expectedItems = scope.Run?.ExpectedItemCount > 0
+            ? scope.Run.ExpectedItemCount
+            : declaredItems;
+        var expectedBatchCount = scope.Run?.ExpectedBatchCount > 0
+            ? scope.Run.ExpectedBatchCount
+            : scope.Batches.Count;
+        var missingItems = Math.Max(0, expectedItems - preparedItems);
+        var missingBatchCount = Math.Max(0, expectedBatchCount - scope.Batches.Count);
+
+        // In the normal (complete) path no extra database queries are made.
+        // When coverage is already short but all expected batch rows exist,
+        // identify partial children for an actionable diagnostic.
+        if (missingItems > 0 && missingBatchCount == 0)
+        {
+            foreach (var batch in scope.Batches)
+            {
+                var actual = await repository.CountItemsByBatchAsync(batch.Id, cancellationToken);
+                if (actual < batch.TotalItems)
+                {
+                    missingBatchCount++;
+                }
+            }
+        }
+
+        return new GradingRunCoverage(
+            expectedItems,
+            preparedItems,
+            missingItems,
+            missingBatchCount);
+    }
+}

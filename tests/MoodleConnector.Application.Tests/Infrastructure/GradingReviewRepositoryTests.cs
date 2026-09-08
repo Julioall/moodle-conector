@@ -31,6 +31,51 @@ public sealed class GradingReviewRepositoryTests
     }
 
     [Fact]
+    public async Task GradingRun_RecuperaSubloteOrfaoPelaLinhagemIdempotenteESinalizaCoberturaEsperada()
+    {
+        await using var dbContext = CreateDbContext();
+        IGradingReviewRepository repository = new GradingReviewRepository(dbContext);
+        var run = GradingRun.Create("teacher-1");
+        run.SetExpectedCoverage(expectedItemCount: 2, expectedBatchCount: 1);
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 2,
+            // Simula uma linha antiga/interrompida que persistiu a chave de
+            // idempotencia, mas perdeu a FK de agregacao.
+            idempotencyKey: $"pending-run:{run.Id:N}:course:10:assignment:501:chunk:0");
+        var first = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var second = AssistedGradingItem.Create(batch.Id, 10, 501, 9002, 102, 0);
+
+        await repository.AddGradingRunAsync(run, CancellationToken.None);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(first, CancellationToken.None);
+        await repository.AddItemAsync(second, CancellationToken.None);
+        await repository.SaveChangesAsync(CancellationToken.None);
+
+        var children = await repository.ListBatchesByGradingRunAsync(run.Id, CancellationToken.None);
+        var items = await repository.ListItemsByGradingRunAsync(
+            run.Id,
+            page: 1,
+            pageSize: 10,
+            status: null,
+            cancellationToken: CancellationToken.None);
+        var count = await repository.CountItemsByGradingRunAsync(
+            run.Id,
+            status: null,
+            cancellationToken: CancellationToken.None);
+        var loadedRun = await repository.GetGradingRunAsync(run.Id, CancellationToken.None);
+
+        Assert.Equal([batch.Id], children.Select(child => child.Id));
+        Assert.Equal([first.Id, second.Id], items.Select(item => item.Id));
+        Assert.Equal(2, count);
+        Assert.Equal(2, loadedRun!.ExpectedItemCount);
+        Assert.Equal(1, loadedRun.ExpectedBatchCount);
+    }
+
+    [Fact]
     public async Task PublicationClaims_MantemAlvosNaoConflitantesQuandoParteDoLoteEstaOcupada()
     {
         await using var dbContext = CreateDbContext();

@@ -37,6 +37,19 @@ public sealed class GradingRun
 
     public string? CourseIdScope { get; private init; }
 
+    /// <summary>
+    /// Quantidade de itens declarada pela descoberta quando a execução foi
+    /// fechada. Ela é a referência de cobertura do run e não pode ser
+    /// inferida apenas dos sublotes que uma leitura posterior encontrou.
+    /// </summary>
+    public int ExpectedItemCount { get; private set; }
+
+    /// <summary>
+    /// Quantidade de sublotes declarada pela descoberta quando a execução foi
+    /// fechada. Mantém observável a perda de um sublote inteiro.
+    /// </summary>
+    public int ExpectedBatchCount { get; private set; }
+
     /// <summary>"undecided", "csv" or "publish".</summary>
     public string Destination { get; private set; } = "undecided";
 
@@ -109,6 +122,23 @@ public sealed class GradingRun
         MoodleConnectionId = Normalize(moodleConnectionId, 64);
         ConnectorClientId = Normalize(connectorClientId, 64);
         ConnectionAlias = Normalize(connectionAlias, 64);
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void SetExpectedCoverage(int expectedItemCount, int expectedBatchCount)
+    {
+        if (expectedItemCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedItemCount));
+        }
+
+        if (expectedBatchCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(expectedBatchCount));
+        }
+
+        ExpectedItemCount = expectedItemCount;
+        ExpectedBatchCount = expectedBatchCount;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

@@ -22,7 +22,8 @@ public sealed record MoodleFunctionProfile(
     string? Release,
     long? MoodleUserId,
     IReadOnlyList<MoodleFunctionDescriptor> Functions,
-    DateTimeOffset DiscoveredAt);
+    DateTimeOffset DiscoveredAt,
+    bool IsCached = false);
 
 public sealed record MoodleFunctionResult(
     string Function,

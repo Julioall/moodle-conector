@@ -541,6 +541,8 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         run.Property(x => x.ConnectorClientId).HasMaxLength(64);
         run.Property(x => x.ConnectionAlias).HasMaxLength(64);
         run.Property(x => x.CourseIdScope).HasMaxLength(64);
+        run.Property(x => x.ExpectedItemCount).IsRequired();
+        run.Property(x => x.ExpectedBatchCount).IsRequired();
         run.Property(x => x.Destination).HasMaxLength(32).IsRequired();
         run.Property(x => x.Status).HasConversion<string>().HasMaxLength(40).IsRequired();
         run.Property(x => x.CreatedAt).IsRequired();

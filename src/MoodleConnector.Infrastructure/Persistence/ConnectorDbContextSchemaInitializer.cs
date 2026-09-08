@@ -69,6 +69,7 @@ public static class ConnectorDbContextSchemaInitializer
         ,new(Path.Combine("Database", "Scripts", "062_moodle_resource_reuse_index.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "063_grading_publication_action_binding.sql"), true)
         ,new(Path.Combine("Database", "Scripts", "064_moodle_resource_reuse_reference_index.sql"), true)
+        ,new(Path.Combine("Database", "Scripts", "065_grading_run_expected_coverage.sql"), true)
     ];
 
     public static async Task ApplyVersionedSchemaAsync(

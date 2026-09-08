@@ -24,7 +24,9 @@ public sealed record ScormReadResult(
     [property: JsonPropertyName("organizationTitle")] string? OrganizationTitle,
     [property: JsonPropertyName("scos")] IReadOnlyList<ScormScoResult> Scos,
     [property: JsonPropertyName("files")] IReadOnlyList<ScormContentFileResult> Files,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("contentExtractionStatus")] string ContentExtractionStatus = "extracted",
+    [property: JsonPropertyName("contentCoverage")] string ContentCoverage = "content");
 
 public sealed record ScormScoResult(
     [property: JsonPropertyName("identifier")] string Identifier,

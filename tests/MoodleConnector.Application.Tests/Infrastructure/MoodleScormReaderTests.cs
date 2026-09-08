@@ -42,6 +42,31 @@ public sealed class MoodleScormReaderTests
         Assert.Equal("scorm_manifest_missing", error.ErrorCode);
     }
 
+    [Fact]
+    public async Task ReadAsync_ConverteArquivoSCORMAusenteEmErroEspecifico()
+    {
+        var reader = CreateReader(
+            new FileGateway([], new HttpRequestException("Not Found", null, System.Net.HttpStatusCode.NotFound)),
+            new RestClient());
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() =>
+            reader.ReadAsync("user-1", "101", null, CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.ScormPackageNotFound, error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task ReadAsync_IdentificaPacoteComApenasMiddleware()
+    {
+        var reader = CreateReader(new FileGateway(CreatePackage(middlewareOnly: true)), new RestClient());
+
+        var result = await reader.ReadAsync("user-1", "101", null, CancellationToken.None);
+
+        Assert.Equal("middleware_only", result.ContentExtractionStatus);
+        Assert.Equal("structural_only", result.ContentCoverage);
+        Assert.Contains(result.Warnings, warning => warning.Contains("middleware", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static MoodleScormReader CreateReader(FileGateway fileGateway, RestClient restClient) => new(
         Options.Create(new MoodleApiOptions()),
         Options.Create(new GradingLimitsOptions { MaxFileSizeMb = 10, MaxTextCharsPerSubmission = 10_000 }),
@@ -51,7 +76,7 @@ public sealed class MoodleScormReaderTests
         restClient,
         fileGateway);
 
-    private static byte[] CreatePackage(bool includeManifest = true)
+    private static byte[] CreatePackage(bool includeManifest = true, bool middlewareOnly = false)
     {
         using var stream = new MemoryStream();
         using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
@@ -60,14 +85,25 @@ public sealed class MoodleScormReaderTests
             {
                 var manifest = archive.CreateEntry("imsmanifest.xml");
                 using var writer = new StreamWriter(manifest.Open(), Encoding.UTF8);
-                writer.Write("<manifest identifier=\"manifest-1\" version=\"1.2\" xmlns:adlcp=\"urn:adlcp\"><organizations><organization><title>Treinamento</title><item identifier=\"i1\" identifierref=\"r1\"><title>Aula 1</title></item><item identifier=\"i2\" identifierref=\"r2\"><title>Aula 2</title></item></organization></organizations><resources><resource identifier=\"r1\" href=\"index.html\" adlcp:scormType=\"sco\"/><resource identifier=\"r2\" href=\"lesson.html\" adlcp:scormType=\"sco\"/></resources></manifest>");
+                var firstHref = middlewareOnly ? "middleware.html?scoid=1" : "index.html";
+                var secondHref = middlewareOnly ? "middleware.html?scoid=2" : "lesson.html";
+                writer.Write($"<manifest identifier=\"manifest-1\" version=\"1.2\" xmlns:adlcp=\"urn:adlcp\"><organizations><organization><title>Treinamento</title><item identifier=\"i1\" identifierref=\"r1\"><title>Aula 1</title></item><item identifier=\"i2\" identifierref=\"r2\"><title>Aula 2</title></item></organization></organizations><resources><resource identifier=\"r1\" href=\"{firstHref}\" adlcp:scormType=\"sco\"/><resource identifier=\"r2\" href=\"{secondHref}\" adlcp:scormType=\"sco\"/></resources></manifest>");
             }
-            var page = archive.CreateEntry("index.html");
-            using (var writer = new StreamWriter(page.Open(), Encoding.UTF8))
-                writer.Write("<html><body><h1>Olá aluno</h1><script>alert('secret')</script></body></html>");
-            var lesson = archive.CreateEntry("lesson.html");
-            using (var writer = new StreamWriter(lesson.Open(), Encoding.UTF8))
-                writer.Write("<p>Segunda aula &amp; prática.</p>");
+            if (middlewareOnly)
+            {
+                var middleware = archive.CreateEntry("middleware.html");
+                using var writer = new StreamWriter(middleware.Open(), Encoding.UTF8);
+                writer.Write("<html><body><h1>SCORM Middleware</h1></body></html>");
+            }
+            else
+            {
+                var page = archive.CreateEntry("index.html");
+                using (var writer = new StreamWriter(page.Open(), Encoding.UTF8))
+                    writer.Write("<html><body><h1>Olá aluno</h1><script>alert('secret')</script></body></html>");
+                var lesson = archive.CreateEntry("lesson.html");
+                using (var writer = new StreamWriter(lesson.Open(), Encoding.UTF8))
+                    writer.Write("<p>Segunda aula &amp; prática.</p>");
+            }
         }
         return stream.ToArray();
     }
@@ -100,12 +136,17 @@ public sealed class MoodleScormReaderTests
             Task.FromResult(JsonSerializer.Deserialize<JsonElement>("{\"scorms\":[{\"id\":42,\"name\":\"Treinamento\",\"version\":\"1.2\",\"reference\":\"package.zip\",\"packageurl\":\"https://moodle.example/pluginfile.php/42/package.zip\"}]}")!);
     }
 
-    private sealed class FileGateway(byte[] package) : IMoodleSubmissionFileGateway
+    private sealed class FileGateway(byte[] package, Exception? error = null) : IMoodleSubmissionFileGateway
     {
         public string? Url { get; private set; }
         public Task<SubmissionFileDownloadResult> DownloadFileAsync(string userExternalId, string fileUrl, string filename, long maxBytes, CancellationToken cancellationToken)
         {
             Url = fileUrl;
+            if (error is not null)
+            {
+                return Task.FromException<SubmissionFileDownloadResult>(error);
+            }
+
             return Task.FromResult(new SubmissionFileDownloadResult(filename, "application/zip", package.Length, "sha", package, false));
         }
     }

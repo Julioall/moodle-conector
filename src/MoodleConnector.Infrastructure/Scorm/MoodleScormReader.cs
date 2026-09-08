@@ -69,7 +69,19 @@ internal sealed class MoodleScormReader(
 
             var fileName = InferFileName(package);
             var maxBytes = Math.Clamp(_limits.MaxFileSizeMb, 1, 100) * 1024L * 1024L;
-            var download = await fileGateway.DownloadFileAsync(userExternalId, package.PackageUrl, fileName, maxBytes, cancellationToken);
+            SubmissionFileDownloadResult download;
+            try
+            {
+                download = await fileGateway.DownloadFileAsync(userExternalId, package.PackageUrl, fileName, maxBytes, cancellationToken);
+            }
+            catch (MoodleApiException)
+            {
+                throw;
+            }
+            catch (Exception error) when (error is HttpRequestException or InvalidOperationException or IOException)
+            {
+                throw MapPackageDownloadError(error);
+            }
             if (download.Truncated || download.SizeBytes > maxBytes)
                 throw new MoodleApiException("scorm_package_too_large", "O pacote SCORM excede o limite configurado para leitura.");
 
@@ -163,6 +175,12 @@ internal sealed class MoodleScormReader(
                 })
                 .ToArray();
 
+            var (contentExtractionStatus, contentCoverage) = DetermineContentCoverage(scos);
+            if (contentExtractionStatus == "middleware_only")
+            {
+                warnings.Add("O pacote SCORM exibe apenas o middleware de navegacao; o conteudo pedagogico real nao foi extraido.");
+            }
+
             return new ScormReadResult(
                 courseId,
                 package.Id,
@@ -176,7 +194,9 @@ internal sealed class MoodleScormReader(
                 organizationTitle,
                 scos,
                 files,
-                warnings);
+                warnings,
+                contentExtractionStatus,
+                contentCoverage);
         }
         catch (MoodleApiException)
         {
@@ -316,6 +336,58 @@ internal sealed class MoodleScormReader(
     private static bool IsText(string path) => IsHtml(path) || path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
     private static string ContentType(string path) => IsHtml(path) ? "text/html" : "text/plain";
     private static string InferFileName(ScormPackageDescriptor package) => Path.GetFileName(package.PackageFileName).EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? Path.GetFileName(package.PackageFileName) : $"{package.Name}.zip";
+
+    private static MoodleApiException MapPackageDownloadError(Exception error)
+    {
+        if (error is HttpRequestException httpError)
+        {
+            var errorCode = httpError.StatusCode switch
+            {
+                System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone => MoodleErrorContract.ScormPackageNotFound,
+                System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden => MoodleErrorContract.ScormPackageAccessDenied,
+                null => MoodleErrorContract.NetworkError,
+                _ => MoodleErrorContract.ScormPackageDownloadFailed,
+            };
+            return new MoodleApiException(errorCode, error.Message, (int?)httpError.StatusCode, error);
+        }
+
+        if (error is InvalidOperationException invalidOperation &&
+            invalidOperation.Message.Contains("excede o limite", StringComparison.OrdinalIgnoreCase))
+        {
+            return new MoodleApiException(MoodleErrorContract.ScormPackageTooLarge, invalidOperation.Message, innerException: error);
+        }
+
+        if (error is InvalidOperationException)
+        {
+            return new MoodleApiException(MoodleErrorContract.ScormPackageUrlInvalid, error.Message, innerException: error);
+        }
+
+        return new MoodleApiException(MoodleErrorContract.ScormPackageDownloadFailed, error.Message, innerException: error);
+    }
+
+    private static (string Status, string Coverage) DetermineContentCoverage(IReadOnlyList<ScormScoResult> scos)
+    {
+        if (scos.Count == 0)
+        {
+            return ("structural_only", "none");
+        }
+
+        if (scos.All(IsMiddlewareOnly))
+        {
+            return ("middleware_only", "structural_only");
+        }
+
+        return scos.Any(sco => !sco.Available)
+            ? ("partial", "partial")
+            : ("extracted", "content");
+    }
+
+    private static bool IsMiddlewareOnly(ScormScoResult sco)
+    {
+        var launchPath = (sco.LaunchPath ?? sco.Href ?? string.Empty).Split(['?', '#'], 2)[0];
+        return string.Equals(Path.GetFileName(launchPath), "middleware.html", StringComparison.OrdinalIgnoreCase) ||
+            sco.Text?.Contains("SCORM Middleware", StringComparison.OrdinalIgnoreCase) == true;
+    }
 
     private static byte[] CreateStubPackage()
     {

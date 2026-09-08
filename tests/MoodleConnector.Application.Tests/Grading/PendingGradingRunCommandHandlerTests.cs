@@ -742,12 +742,22 @@ public sealed class PendingGradingRunCommandHandlerTests
         var contextRequests = resources.Requests
             .Where(request => request.ResourceType == "assignment_context_attachment")
             .ToArray();
-        Assert.Equal(2, contextRequests.Length);
+        Assert.Single(contextRequests);
         Assert.All(contextRequests, request =>
         {
             Assert.Null(request.SubmissionId);
             Assert.Null(request.StudentId);
             Assert.Equal(501, request.AssignmentId);
+        });
+        var assignment = Assert.Single(result.Assignments!);
+        Assert.Equal("501", assignment.AssignmentId);
+        var context = Assert.Single(assignment.ContextResources);
+        Assert.StartsWith("ctx-", context.ResourceId, StringComparison.Ordinal);
+        Assert.All(result.Items, item =>
+        {
+            Assert.Single(item.Resources!);
+            Assert.Equal("submission", Assert.Single(item.Resources!).ResourceType);
+            Assert.Equal([context.ResourceId], item.ContextResourceRefs);
         });
         var submissionRequests = resources.Requests
             .Where(request => request.ResourceType == "submission_attachment")

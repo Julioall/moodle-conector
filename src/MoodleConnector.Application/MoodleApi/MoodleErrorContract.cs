@@ -27,6 +27,10 @@ public static class MoodleErrorContract
     public const string ScormNotFound = "scorm_not_found";
     public const string ScormSelectionRequired = "scorm_selection_required";
     public const string ScormPackageUnavailable = "scorm_package_unavailable";
+    public const string ScormPackageNotFound = "scorm_package_not_found";
+    public const string ScormPackageAccessDenied = "scorm_package_access_denied";
+    public const string ScormPackageDownloadFailed = "scorm_package_download_failed";
+    public const string ScormPackageUrlInvalid = "scorm_package_url_invalid";
     public const string ScormPackageTooLarge = "scorm_package_too_large";
     public const string ScormManifestMissing = "scorm_manifest_missing";
     public const string InvalidScormPackage = "invalid_scorm_package";
@@ -94,6 +98,10 @@ public static class MoodleErrorContract
             ScormNotFound => ScormNotFound,
             ScormSelectionRequired => ScormSelectionRequired,
             ScormPackageUnavailable => ScormPackageUnavailable,
+            ScormPackageNotFound => ScormPackageNotFound,
+            ScormPackageAccessDenied => ScormPackageAccessDenied,
+            ScormPackageDownloadFailed => ScormPackageDownloadFailed,
+            ScormPackageUrlInvalid => ScormPackageUrlInvalid,
             ScormPackageTooLarge => ScormPackageTooLarge,
             ScormManifestMissing => ScormManifestMissing,
             InvalidScormPackage => InvalidScormPackage,
@@ -130,6 +138,10 @@ public static class MoodleErrorContract
         ScormNotFound => "Nenhum pacote SCORM correspondente foi encontrado no curso.",
         ScormSelectionRequired => "O curso possui mais de um pacote SCORM; informe o identificador do pacote.",
         ScormPackageUnavailable => "O Moodle nao forneceu um pacote SCORM baixavel para esta atividade.",
+        ScormPackageNotFound => "O arquivo do pacote SCORM nao foi encontrado no Moodle.",
+        ScormPackageAccessDenied => "O Moodle negou acesso ao arquivo do pacote SCORM.",
+        ScormPackageDownloadFailed => "Nao foi possivel baixar o arquivo do pacote SCORM.",
+        ScormPackageUrlInvalid => "A URL do pacote SCORM nao pertence ao endpoint Moodle permitido.",
         ScormPackageTooLarge => "O pacote SCORM excede o limite configurado para leitura.",
         ScormManifestMissing => "O pacote SCORM nao contem imsmanifest.xml.",
         InvalidScormPackage => "O pacote baixado nao e um ZIP SCORM valido.",

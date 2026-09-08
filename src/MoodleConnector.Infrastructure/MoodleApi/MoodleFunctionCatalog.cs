@@ -25,7 +25,12 @@ internal sealed class MoodleFunctionCatalog(
             cache.Remove(cacheKey);
         }
 
-        return await cache.GetOrCreateAsync(cacheKey, async entry =>
+        if (!forceRefresh && cache.TryGetValue<MoodleFunctionProfile>(cacheKey, out var cachedProfile) && cachedProfile is not null)
+        {
+            return cachedProfile with { IsCached = true };
+        }
+
+        var profile = await cache.GetOrCreateAsync(cacheKey, async entry =>
         {
             entry.AbsoluteExpirationRelativeToNow = ProfileCacheDuration;
             var payload = await restClient.CallAsync(
@@ -37,6 +42,8 @@ internal sealed class MoodleFunctionCatalog(
 
             return MoodleFunctionProfileParser.Parse(connection, payload);
         }) ?? throw new MoodleApiException("moodle_profile_unavailable", "Nao foi possivel criar o perfil de funcoes Moodle.");
+
+        return profile with { IsCached = false };
     }
 
     private static string CreateCredentialFingerprint(MoodleConnectorCredentials connection)

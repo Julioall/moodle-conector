@@ -150,6 +150,54 @@ public sealed class GradingRunAggregationTests
     }
 
     [Fact]
+    public async Task PrepareRun_ExplicitaCoberturaIncompletaEmVezDeParecerCompleto()
+    {
+        var repository = new AggregateRepository();
+        var run = GradingRun.Create("teacher-1");
+        run.SetExpectedCoverage(expectedItemCount: 3, expectedBatchCount: 2);
+        await repository.AddGradingRunAsync(run, CancellationToken.None);
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 2,
+            gradingRunId: run.Id);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        for (var index = 0; index < 2; index++)
+        {
+            var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001 + index, 101 + index, 0);
+            item.MarkAwaitingAiAnalysis(null);
+            await repository.AddItemAsync(item, CancellationToken.None);
+            await repository.AddArtifactAsync(
+                new GradingArtifact(
+                    Guid.NewGuid(), item.Id, "submission_file", "resposta.txt", "text/plain",
+                    null, 10, ExtractionStatus.Failed, null, "pending_resource", DateTimeOffset.UtcNow,
+                    $"https://moodle.example/file/{item.Id:N}"),
+                CancellationToken.None);
+        }
+
+        var handler = new PrepareAiGradingBatchQueryHandler(
+            repository,
+            new AggregateCurrentUser("teacher-1"),
+            new AggregateSettingsGateway(),
+            resourceGateway: new CountingResourceGateway(),
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
+
+        var result = await handler.Handle(new PrepareAiGradingBatchQuery(run.Id), CancellationToken.None);
+
+        Assert.Equal(3, result.ExpectedItems);
+        Assert.Equal(2, result.PreparedItems);
+        Assert.Equal(1, result.MissingItems);
+        Assert.Equal(1, result.MissingBatchCount);
+        Assert.False(result.DecisionSafe);
+        Assert.Contains(result.Warnings, warning => warning.Contains("Cobertura incompleta", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunScope_NaoPermiteAcessoPorOutroUsuario()
     {
         var repository = new AggregateRepository();
@@ -200,6 +248,44 @@ public sealed class GradingRunAggregationTests
 
         Assert.Null(scope.Run);
         Assert.Equal(run.Id, scope.DestinationRun?.Id);
+    }
+
+    [Fact]
+    public async Task PrepareBatchFilho_RetornaGradingRunPaiReal()
+    {
+        var repository = new AggregateRepository();
+        var run = GradingRun.Create("teacher-1");
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            gradingRunId: run.Id);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis(null);
+        await repository.AddGradingRunAsync(run, CancellationToken.None);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        await repository.AddArtifactAsync(
+            new GradingArtifact(
+                Guid.NewGuid(), item.Id, "submission_file", "resposta.txt", "text/plain",
+                null, 10, ExtractionStatus.Failed, null, "pending_resource", DateTimeOffset.UtcNow,
+                "https://moodle.example/file/9001"),
+            CancellationToken.None);
+        var handler = new PrepareAiGradingBatchQueryHandler(
+            repository,
+            new AggregateCurrentUser("teacher-1"),
+            new AggregateSettingsGateway(),
+            resourceGateway: new CountingResourceGateway(),
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpResourceSubmissionDeliveryEnabled = true
+            }));
+
+        var result = await handler.Handle(new PrepareAiGradingBatchQuery(batch.Id), CancellationToken.None);
+
+        Assert.Equal(run.Id, result.GradingRunId);
     }
 
     private sealed class AggregateCurrentUser(string subject) : ICurrentUserContext

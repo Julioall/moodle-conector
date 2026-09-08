@@ -14,6 +14,8 @@ internal static class MoodleSnapshotFreshnessWarnings
         metadata.IncompleteDatasets.Count > 0 ||
         metadata.StaleDatasets.Count > 0;
 
+    public static bool IsDecisionSafe(bool complete, bool stale) => complete && !stale;
+
     public static IReadOnlyList<string> BuildWarnings(CourseReadSnapshotMetadata metadata)
     {
         var warnings = metadata.IncompleteDatasets

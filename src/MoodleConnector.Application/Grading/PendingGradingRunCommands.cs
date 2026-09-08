@@ -469,6 +469,13 @@ public sealed class StartPendingGradingRunCommandHandler(
                         firstChild.ConnectorClientId,
                         firstChild.ConnectionAlias);
                 }
+                // Freeze the discovery contract before exposing the run. A
+                // later aggregate read must be able to prove it still covers
+                // every declared child/item instead of treating a missing
+                // lineage row as a smaller, apparently valid execution.
+                run.SetExpectedCoverage(
+                    batches.Sum(batch => batch.TotalItems),
+                    batches.Count);
                 run.MarkReady();
                 await gradingRepository.SaveChangesAsync(cancellationToken);
             }

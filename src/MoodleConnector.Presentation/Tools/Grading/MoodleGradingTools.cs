@@ -175,6 +175,8 @@ public sealed class MoodleGradingTools(
         bool onlyReviewed = false,
         [Description("Quando true, a confirmacao autoriza explicitamente sobrescrever notas e feedbacks que ja existem no Moodle.")]
         bool allowOverwriteExisting = false,
+        [Description("Quando true, permite criar previa global mesmo se a cobertura declarada do gradingRun estiver incompleta. Use somente apos revisar expectedItems, preparedItems, missingItems e missingBatchCount.")]
+        bool allowPartial = false,
         CancellationToken cancellationToken = default)
     {
         return CreateLaunchPreviewCoreAsync(
@@ -182,6 +184,7 @@ public sealed class MoodleGradingTools(
             gradingItemIds ?? [],
             onlyReviewed,
             allowOverwriteExisting,
+            allowPartial,
             cancellationToken);
     }
 
@@ -218,7 +221,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
-    [Description("Retorna uma pagina do pacote estruturado de uma correcao via IA: enunciado, criterios, nota maxima e links MCP Resource dos arquivos originais por aluno. Cada resource tambem informa artifactId, que deve ser usado em proposal.evidence para provar o arquivo analisado. O identificador aceita um batchJobId legado ou o gradingRunId agregado; use page/nextPage para percorrer ate 10.000 itens sem carregar tudo na resposta. Leia os resources antes de gerar nota e feedback. Se a entrega for de outra atividade, gere nota 0 quando houver escala e feedback especifico explicando a incompatibilidade, salvando como rascunho para revisao. Ao salvar, copie todas e somente as URIs com resourceType 'submission' para proposal.resourceUris; resources de 'assignment_context' podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e escolha um destino: export_grading_corrections_csv se o usuario pediu CSV ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Nao escreve no Moodle.")]
+    [Description("Retorna uma pagina do pacote estruturado de uma correcao via IA: criterios, nota maxima, resources individuais da submissao e assignments[].contextResources compartilhados por atividade. Cada item aponta os materiais aplicaveis em contextResourceRefs; eles nao se repetem por aluno. Resources de submissao informam artifactId e devem fundamentar proposal.evidence. O identificador aceita um batchJobId legado ou o gradingRunId agregado; use page/nextPage para percorrer ate 10.000 itens sem carregar tudo na resposta e confira expectedItems/preparedItems/missingItems antes de uma publicacao global. Leia os resources antes de gerar nota e feedback. Se a entrega for de outra atividade, gere nota 0 quando houver escala e feedback especifico explicando a incompatibilidade, salvando como rascunho para revisao. Ao salvar, copie todas e somente as URIs de submission resources para proposal.resourceUris; contextResources podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e escolha um destino: export_grading_corrections_csv se o usuario pediu CSV ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
         [Description("Identificador retornado por start_pending_grading_run: pode ser batchJobId (compatibilidade) ou gradingRunId (recomendado para consolidar todos os sublotes).")]
         Guid batchJobId,
@@ -554,6 +557,7 @@ public sealed class MoodleGradingTools(
         IReadOnlyList<Guid> gradingItemIds,
         bool onlyReviewed,
         bool allowOverwriteExisting,
+        bool allowPartial,
         CancellationToken cancellationToken)
     {
         if (batchJobId == Guid.Empty)
@@ -565,7 +569,12 @@ public sealed class MoodleGradingTools(
         try
         {
             data = await mediator.Send(
-                new CreateGradingLaunchPreviewCommand(batchJobId, gradingItemIds, onlyReviewed, allowOverwriteExisting),
+                new CreateGradingLaunchPreviewCommand(
+                    batchJobId,
+                    gradingItemIds,
+                    onlyReviewed,
+                    allowOverwriteExisting,
+                    allowPartial),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -676,6 +685,11 @@ public sealed class MoodleGradingTools(
     {
         if (response.PendingActionId == Guid.Empty)
         {
+            if (!response.DecisionSafe)
+            {
+                return $"Previa global bloqueada por cobertura incompleta: esperados {response.ExpectedItems}, preparados {response.PreparedItems}, ausentes {response.MissingItems} em {response.MissingBatchCount} sublote(s). Corrija a cobertura ou use allowPartial=true de forma explicita.";
+            }
+
             return "Nenhum item pronto para lancamento foi encontrado.";
         }
 

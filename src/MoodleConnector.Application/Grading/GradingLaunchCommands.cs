@@ -21,7 +21,8 @@ public sealed record CreateGradingLaunchPreviewCommand(
     Guid BatchJobId,
     IReadOnlyList<Guid> GradingItemIds,
     bool OnlyReviewed,
-    bool AllowOverwriteExisting = false) : IRequest<CreateGradingLaunchPreviewResult>;
+    bool AllowOverwriteExisting = false,
+    bool AllowPartial = false) : IRequest<CreateGradingLaunchPreviewResult>;
 
 public sealed record CreateGradingLaunchPreviewResult(
     [property: JsonPropertyName("pendingActionId")] Guid PendingActionId,
@@ -32,7 +33,12 @@ public sealed record CreateGradingLaunchPreviewResult(
     [property: JsonPropertyName("launches")] IReadOnlyList<GradingLaunchPreviewItem> Launches,
     [property: JsonPropertyName("confirmationText")] string ConfirmationText,
     [property: JsonPropertyName("expiresAt")] DateTimeOffset? ExpiresAt,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
+    [property: JsonPropertyName("expectedItems")] int ExpectedItems = 0,
+    [property: JsonPropertyName("preparedItems")] int PreparedItems = 0,
+    [property: JsonPropertyName("missingItems")] int MissingItems = 0,
+    [property: JsonPropertyName("missingBatchCount")] int MissingBatchCount = 0,
+    [property: JsonPropertyName("decisionSafe")] bool DecisionSafe = true);
 
 public sealed record GradingLaunchPreviewItem(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -152,10 +158,37 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         {
             allItems.AddRange(await LoadBatchItemsAsync(child.Id, cancellationToken));
         }
+        var coverage = await GradingRunCoverageCalculator.CalculateAsync(
+            repository,
+            scope,
+            allItems.Count,
+            cancellationToken);
         var selectedIds = request.GradingItemIds.ToHashSet();
         var selected = selectedIds.Count == 0
             ? allItems.ToArray()
             : allItems.Where(item => selectedIds.Contains(item.Id)).ToArray();
+        if (scope.IsRun && selectedIds.Count == 0 && !coverage.DecisionSafe && !request.AllowPartial)
+        {
+            return new CreateGradingLaunchPreviewResult(
+                Guid.Empty,
+                request.BatchJobId,
+                selected.Length,
+                ReadyItems: 0,
+                BlockedItems: selected.Length,
+                Launches: [],
+                ConfirmationText: string.Empty,
+                ExpiresAt: null,
+                Warnings:
+                [
+                    $"Cobertura incompleta da execucao: esperados {coverage.ExpectedItems}, preparados {coverage.PreparedItems}, ausentes {coverage.MissingItems} em {coverage.MissingBatchCount} sublote(s).",
+                    "A previa global foi bloqueada. Corrija a cobertura ou envie allowPartial=true para autorizar conscientemente uma publicacao parcial."
+                ],
+                ExpectedItems: coverage.ExpectedItems,
+                PreparedItems: coverage.PreparedItems,
+                MissingItems: coverage.MissingItems,
+                MissingBatchCount: coverage.MissingBatchCount,
+                DecisionSafe: coverage.DecisionSafe);
+        }
         var launchable = selected
             .Select(item => ToLaunchCandidate(item, request.OnlyReviewed))
             .Where(candidate => candidate is not null)
@@ -173,6 +206,11 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         var restoredContextIdentity = false;
         var scaleWarnings = new List<string>();
         var contextWarnings = new List<string>();
+        if (scope.IsRun && !coverage.DecisionSafe && request.AllowPartial)
+        {
+            contextWarnings.Add(
+                $"Publicacao parcial explicitamente autorizada: esperados {coverage.ExpectedItems}, preparados {coverage.PreparedItems}, ausentes {coverage.MissingItems} em {coverage.MissingBatchCount} sublote(s).");
+        }
         var ready = new List<GradingLaunchCandidate>();
         var settingsCache = new Dictionary<(long CourseId, long AssignmentId), AssignmentSettingsSummary?>();
         // Enrollment preflight is cached at course scope. The previous
@@ -434,7 +472,12 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 ExpiresAt: null,
                 Warnings: scaleWarnings.Count > 0 || contextWarnings.Count > 0
             ? [.. contextWarnings, .. scaleWarnings]
-                    : ["Nenhuma correcao salva e pronta para lancamento foi encontrada."]);
+                    : ["Nenhuma correcao salva e pronta para lancamento foi encontrada."],
+                ExpectedItems: coverage.ExpectedItems,
+                PreparedItems: coverage.PreparedItems,
+                MissingItems: coverage.MissingItems,
+                MissingBatchCount: coverage.MissingBatchCount,
+                DecisionSafe: coverage.DecisionSafe);
         }
 
         var publicationId = Guid.NewGuid();
@@ -513,7 +556,12 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 Launches: [],
                 ConfirmationText: string.Empty,
                 ExpiresAt: null,
-                Warnings: [.. contextWarnings, .. scaleWarnings]);
+                Warnings: [.. contextWarnings, .. scaleWarnings],
+                ExpectedItems: coverage.ExpectedItems,
+                PreparedItems: coverage.PreparedItems,
+                MissingItems: coverage.MissingItems,
+                MissingBatchCount: coverage.MissingBatchCount,
+                DecisionSafe: coverage.DecisionSafe);
         }
 
         if (destinationRun is not null)
@@ -591,7 +639,12 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             previewItems,
             pending.ConfirmationText,
             pending.ExpiresAt,
-            Warnings: warnings);
+            Warnings: warnings,
+            ExpectedItems: coverage.ExpectedItems,
+            PreparedItems: coverage.PreparedItems,
+            MissingItems: coverage.MissingItems,
+            MissingBatchCount: coverage.MissingBatchCount,
+            DecisionSafe: coverage.DecisionSafe);
     }
 
     private async Task<IReadOnlyList<AssistedGradingItem>> LoadBatchItemsAsync(

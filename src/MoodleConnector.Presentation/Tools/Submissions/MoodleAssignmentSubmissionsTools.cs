@@ -319,7 +319,10 @@ public sealed class MoodleAssignmentSubmissionsTools(
                                 snapshot.IsStale,
                                 refreshQueued,
                                 snapshot.IsComplete,
-                                snapshot.RecordCount);
+                                snapshot.RecordCount,
+                                DecisionSafe: MoodleSnapshotFreshnessWarnings.IsDecisionSafe(snapshot.IsComplete, snapshot.IsStale),
+                                Dataset: MoodleSnapshotDatasets.Submissions,
+                                RecordType: "assignment_submissions");
                         }
                         else
                         {
@@ -469,7 +472,17 @@ public sealed class MoodleAssignmentSubmissionsTools(
                                 priority: 10,
                                 force: true,
                                 cancellationToken);
-                            freshness = new ToolFreshness("snapshot", snapshot.UpdatedAt, Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds), snapshot.IsStale, refreshQueued, snapshot.IsComplete, snapshot.RecordCount);
+                            freshness = new ToolFreshness(
+                                "snapshot",
+                                snapshot.UpdatedAt,
+                                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                                snapshot.IsStale,
+                                refreshQueued,
+                                snapshot.IsComplete,
+                                snapshot.RecordCount,
+                                DecisionSafe: MoodleSnapshotFreshnessWarnings.IsDecisionSafe(snapshot.IsComplete, snapshot.IsStale),
+                                Dataset: MoodleSnapshotDatasets.Submissions,
+                                RecordType: "student_submission");
                         }
                         else
                         {

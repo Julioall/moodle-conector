@@ -48,6 +48,46 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreviewDoRun_BloqueiaPublicacaoGlobalQuandoCoberturaEstaIncompleta()
+    {
+        var fixture = new Fixture();
+        var run = GradingRun.Create("teacher-1");
+        run.SetExpectedCoverage(expectedItemCount: 2, expectedBatchCount: 2);
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            gradingRunId: run.Id);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        item.ApplyTeacherReview(8.5m, "Feedback final revisado.", "teacher-1", 321, "approved", "ok");
+        AttachVersionedContext(item, batch);
+        fixture.GradingRepository.Runs.Add(run);
+        fixture.GradingRepository.Batches.Add(batch);
+        fixture.GradingRepository.Items.Add(item);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(run.Id, [], OnlyReviewed: true),
+            CancellationToken.None);
+
+        Assert.Equal(Guid.Empty, result.PendingActionId);
+        Assert.Equal(2, result.ExpectedItems);
+        Assert.Equal(1, result.PreparedItems);
+        Assert.Equal(1, result.MissingItems);
+        Assert.Equal(1, result.MissingBatchCount);
+        Assert.False(result.DecisionSafe);
+        Assert.Null(fixture.PendingActions.LastPayload);
+        Assert.Contains(result.Warnings, warning => warning.Contains("allowPartial=true", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CreatePreview_BloqueiaFeedbackReutilizadoNaMesmaAtividade()
     {
         var fixture = new Fixture();
@@ -1309,6 +1349,7 @@ public sealed class GradingLaunchCommandHandlerTests
 
     private sealed class FakeGradingReviewRepository : IGradingReviewRepository
     {
+        public List<GradingRun> Runs { get; } = [];
         public List<AssistedGradingBatch> Batches { get; } = [];
         public List<AssistedGradingItem> Items { get; } = [];
         public List<GradingEvidence> Evidence { get; } = [];
@@ -1319,6 +1360,24 @@ public sealed class GradingLaunchCommandHandlerTests
             Batches.Add(batch);
             return Task.CompletedTask;
         }
+
+        public Task AddGradingRunAsync(GradingRun run, CancellationToken cancellationToken)
+        {
+            Runs.Add(run);
+            return Task.CompletedTask;
+        }
+
+        public Task<GradingRun?> GetGradingRunAsync(Guid id, CancellationToken cancellationToken) =>
+            Task.FromResult(Runs.SingleOrDefault(run => run.Id == id));
+
+        public Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByGradingRunAsync(
+            Guid gradingRunId,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<AssistedGradingBatch>>(Batches
+                .Where(batch => batch.GradingRunId == gradingRunId)
+                .OrderBy(batch => batch.CreatedAt)
+                .ThenBy(batch => batch.Id)
+                .ToArray());
 
         public Task<AssistedGradingBatch?> GetBatchAsync(Guid id, CancellationToken cancellationToken)
         {

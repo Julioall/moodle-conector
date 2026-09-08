@@ -127,6 +127,25 @@ public sealed class MoodleUniversalToolsTests
     }
 
     [Fact]
+    public async Task ListAvailableFlowsAsync_ExpoeFreshnessDoCatalogoDeCapabilities()
+    {
+        var sut = CreateSut(
+            new FakeCredentialsProvider(Connection()),
+            new FakeRestClient(SiteInfo()),
+            [new MoodleFunctionDescriptor("core_course_get_courses_by_field", MoodleFunctionRisk.Read, true)]);
+
+        var result = await sut.ListAvailableFlowsAsync(forceRefresh: true);
+
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        var freshness = structured.GetProperty("freshness");
+        Assert.Equal("live", freshness.GetProperty("source").GetString());
+        Assert.Equal("capabilities", freshness.GetProperty("dataset").GetString());
+        Assert.Equal("available_flows", freshness.GetProperty("recordType").GetString());
+        Assert.True(freshness.GetProperty("complete").GetBoolean());
+        Assert.True(freshness.GetProperty("decisionSafe").GetBoolean());
+    }
+
+    [Fact]
     public async Task ExecuteReadAsync_RedigePayloadPublicoRecursivamente()
     {
         var payload = JsonNode.Parse(

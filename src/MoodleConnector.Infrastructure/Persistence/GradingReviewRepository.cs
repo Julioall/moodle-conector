@@ -84,8 +84,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return [];
         }
 
-        return await dbContext.GradingBatches
-            .Where(batch => batch.GradingRunId == gradingRunId)
+        return await QueryBatchesForRun(gradingRunId)
             .OrderBy(batch => batch.CreatedAt)
             .ThenBy(batch => batch.Id)
             .ToArrayAsync(cancellationToken);
@@ -435,10 +434,10 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             return [];
         }
 
+        var batchIds = QueryBatchesForRun(gradingRunId).Select(batch => batch.Id);
         var query = dbContext.GradingItems
             .AsNoTracking()
-            .Where(item => dbContext.GradingBatches.Any(batch =>
-                batch.Id == item.BatchId && batch.GradingRunId == gradingRunId));
+            .Where(item => batchIds.Contains(item.BatchId));
         if (status is not null)
         {
             query = query.Where(item => item.Status == status.Value);
@@ -457,15 +456,31 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         GradingItemStatus? status,
         CancellationToken cancellationToken)
     {
+        var batchIds = QueryBatchesForRun(gradingRunId).Select(batch => batch.Id);
         var query = dbContext.GradingItems
-            .Where(item => dbContext.GradingBatches.Any(batch =>
-                batch.Id == item.BatchId && batch.GradingRunId == gradingRunId));
+            .Where(item => batchIds.Contains(item.BatchId));
         if (status is not null)
         {
             query = query.Where(item => item.Status == status.Value);
         }
 
         return query.CountAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// The persisted foreign key is the primary run lineage. The idempotency
+    /// key is an immutable, run-scoped recovery marker written while every
+    /// child batch is created. Including an orphaned legacy row prevents a
+    /// lineage persistence fault from silently becoming a partial aggregate.
+    /// </summary>
+    private IQueryable<AssistedGradingBatch> QueryBatchesForRun(Guid gradingRunId)
+    {
+        var lineagePrefix = $"pending-run:{gradingRunId:N}:";
+        return dbContext.GradingBatches.Where(batch =>
+            batch.GradingRunId == gradingRunId ||
+            (batch.GradingRunId == null &&
+             batch.IdempotencyKey != null &&
+             batch.IdempotencyKey.StartsWith(lineagePrefix)));
     }
 
     public async Task<IReadOnlyList<GradingArtifact>> ListArtifactsByItemAsync(
