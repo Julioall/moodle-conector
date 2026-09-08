@@ -8,6 +8,7 @@ meio de `.app.json`.
 
 - O manifesto `.codex-plugin/plugin.json` está validado e referencia as onze skills em `skills/`.
 - `.app.json` vincula o pacote à conexão MCP remota registrada no ChatGPT.
+- A tool `get_connector_build_info` permite confirmar a identidade do runtime (versão, commit, build ID e timestamps) sem consultar o Moodle.
 - Não há `.mcp.json`: o servidor Moodle Connector é remoto e não deve ser empacotado como processo
   local.
 

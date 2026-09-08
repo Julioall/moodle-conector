@@ -147,7 +147,7 @@ public class ToolMetadataRegistryTests
     {
         var reg = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
 
-        Assert.Equal(83, reg.Entries.Count);
+        Assert.Equal(84, reg.Entries.Count);
         Assert.All(reg.Entries, entry =>
         {
             Assert.False(string.IsNullOrWhiteSpace(entry.Key));
@@ -166,6 +166,11 @@ public class ToolMetadataRegistryTests
         Assert.True(reg.TryGet("moodle_execute_read", out var universalRead));
         Assert.Equal(MoodleScopePolicies.ReadAny, universalRead!.RequiredOAuthScopes);
         Assert.DoesNotContain(MoodleScopePolicies.WriteAny, universalRead.RequiredOAuthScopes, StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(reg.TryGet("get_connector_build_info", out var buildInfo));
+        Assert.Equal("tool.connections.manage", buildInfo!.RequiredPlatformPermission);
+        Assert.Equal(MoodleScopePolicies.ReadAny, buildInfo.RequiredOAuthScopes);
+        Assert.True(buildInfo.Structural);
 
         Assert.False(reg.TryGet("list_all_gradable_submissions", out _));
 

@@ -23,6 +23,11 @@ curl http://127.0.0.1:8787/health
 curl http://127.0.0.1:8787/api/status
 ```
 
+`/api/status` e a tool MCP `get_connector_build_info` retornam a identidade do
+runtime (`version`, `commit`, `buildId`, `builtAt` e `deployedAt`). O campo
+`commit` deve ser comparado com o SHA do commit esperado no repositorio; a
+instancia nao declara automaticamente que esta no ultimo commit da branch.
+
 ## VPS Com Domínio
 
 Configure DNS apontando `APP_DOMAIN` para a VPS e habilite o profile HTTPS. O Caddy deste projeto publica somente o Moodle Connector e sua SPA integrada:
@@ -120,6 +125,12 @@ Variables opcionais:
 - `OAUTH_REFRESH_TOKEN_DAYS` - padrão `30`
 - `OAUTH_KEY_STORAGE_PATH` - padrão `/app/data/oauth`
 - `OAUTH_CERTIFICATE_YEARS` - padrão `5`
+- `MOODLE_CONNECTOR_VERSION` - versão ou ref publicada no runtime
+- `MOODLE_CONNECTOR_COMMIT` - SHA imutável do commit implantado
+- `MOODLE_CONNECTOR_BUILD_ID` - identificador único da execução de CI/CD
+- `MOODLE_CONNECTOR_BUILD_AT` - timestamp UTC da build
+- `MOODLE_CONNECTOR_DEPLOYED_AT` - timestamp UTC do deploy
+- `MOODLE_CONNECTOR_SOURCE_REF` - branch ou tag de origem
 - `RATE_LIMIT_WINDOW_SECONDS` - padrão `60`
 - `RATE_LIMIT_APP_AUTH_PERMIT_LIMIT` - padrão `12`
 - `RATE_LIMIT_ADMIN_API_PERMIT_LIMIT` - padrão `30`

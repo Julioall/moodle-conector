@@ -190,7 +190,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                                exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
 
-        Assert.Equal(79, contracts.Count);
+        Assert.Equal(80, contracts.Count);
         Assert.Equal(
             contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
             submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));

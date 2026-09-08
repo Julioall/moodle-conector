@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Presentation.Configuration;
 using MoodleConnector.Presentation.Security;
+using MoodleConnector.Presentation.Tools;
 
 namespace MoodleConnector.Presentation.Endpoints;
 
@@ -17,7 +18,6 @@ internal static class OperationalEndpoints
 {
     public static void MapStatusAndHealth(
         WebApplication app,
-        IConfiguration configuration,
         string mcpPath)
     {
         app.MapGet("/api/status", (
@@ -26,11 +26,11 @@ internal static class OperationalEndpoints
             IOptions<OAuthBrokerOptions> oauth,
             IOptions<AssignmentWriteFeatureOptions> assignmentWrites,
             IOptions<FeatureOptions> features,
-            ToolSurfaceInventory inventory) =>
+            ToolSurfaceInventory inventory,
+            ConnectorBuildInfoProvider buildInfoProvider) =>
         {
             var publicBaseUrl = GetPublicBaseUrl(context);
-            var gitCommit = configuration["GIT_COMMIT"] ?? "unknown";
-            var buildDate = configuration["BUILD_DATE"] ?? "unknown";
+            var build = buildInfoProvider.Get();
             var individualGradeToolCount = inventory.Entries.Count(entry =>
                 entry.Family.Contains("individualgrade", StringComparison.OrdinalIgnoreCase));
             var disabledToolCount =
@@ -44,9 +44,12 @@ internal static class OperationalEndpoints
                 transport = "mcp-streamable-http",
                 endpoint = mcpPath,
                 source = "aspnetcore-mcp",
-                version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown",
-                gitCommit,
-                buildDate,
+                version = build.Version ?? "unknown",
+                gitCommit = build.Commit ?? "unknown",
+                buildDate = build.BuiltAt?.ToString("O") ?? "unknown",
+                buildId = build.BuildId ?? "unknown",
+                deployedAt = build.DeployedAt?.ToString("O") ?? "unknown",
+                build,
                 toolsCount,
                 universalExecutorEnabled = true,
                 capabilityDiscoveryEnabled = true,

@@ -8,6 +8,12 @@
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
+      MOODLE_CONNECTOR_VERSION: "${MOODLE_CONNECTOR_VERSION:-local}"
+      MOODLE_CONNECTOR_COMMIT: "${MOODLE_CONNECTOR_COMMIT:-unknown}"
+      MOODLE_CONNECTOR_BUILD_ID: "${MOODLE_CONNECTOR_BUILD_ID:-local}"
+      MOODLE_CONNECTOR_BUILD_AT: "${MOODLE_CONNECTOR_BUILD_AT:-}"
+      MOODLE_CONNECTOR_DEPLOYED_AT: "${MOODLE_CONNECTOR_DEPLOYED_AT:-}"
+      MOODLE_CONNECTOR_SOURCE_REF: "${MOODLE_CONNECTOR_SOURCE_REF:-working-tree}"
       Features__AppV2Enabled: "true"
       DataProtection__KeyStoragePath: /app/data/keys
       # O perfil local continua previsível para testes. Defina ambas como false

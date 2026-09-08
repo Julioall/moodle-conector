@@ -123,7 +123,8 @@ public sealed class McpToolMetadataTests
             typeof(MoodleMemoryDocumentTools),
             typeof(MoodlePedagogyTools),
             typeof(MoodleTutorMessageTools),
-            typeof(MoodleUniversalWriteTools)
+            typeof(MoodleUniversalWriteTools),
+            typeof(MoodleBuildInfoTools)
         };
 
         foreach (var toolType in toolTypes)

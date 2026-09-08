@@ -343,6 +343,7 @@ var mcpServerBuilder = builder.Services
     .AddScoped<PortalMcpIdentityResolver>()
     .AddScoped<MoodleSnapshotToolContext>()
     .AddScoped<IMoodleCourseReadSnapshotCoordinator>(sp => sp.GetRequiredService<MoodleSnapshotToolContext>())
+    .AddSingleton<ConnectorBuildInfoProvider>()
     .AddSingleton<DashboardOverviewRefreshQueue>()
     .AddSingleton<IDashboardOverviewRefreshQueue>(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
     .AddHostedService(sp => sp.GetRequiredService<DashboardOverviewRefreshQueue>())
@@ -375,7 +376,7 @@ var mcpServerBuilder = builder.Services
                 }
 
                 var httpContext = request.Services?.GetService<IHttpContextAccessor>()?.HttpContext;
-                if (!HasLinkedMoodleConnection(httpContext?.User))
+                if (!IsConnectorOnlyTool(toolName) && !HasLinkedMoodleConnection(httpContext?.User))
                 {
                     errorCode = "moodle_connection_not_linked";
                     outcome = "denied";
@@ -706,7 +707,7 @@ app.Use(async (context, next) =>
 app.UseRateLimiter();
 app.UseMiddleware<AdminApiKeyAuthorizationMiddleware>();
 
-OperationalEndpoints.MapStatusAndHealth(app, builder.Configuration, mcpPath);
+OperationalEndpoints.MapStatusAndHealth(app, mcpPath);
 OperationalEndpoints.MapOAuthDiscovery(app, mcpPath);
 OAuthAuthorizationEndpoints.MapAuthorization(app, mcpPath);
 
@@ -3171,6 +3172,9 @@ static bool HasLinkedMoodleConnection(ClaimsPrincipal? principal)
     var connectorClientId = principal.FindFirst("connector_client_id")?.Value;
     return !string.IsNullOrWhiteSpace(connectorClientId);
 }
+
+static bool IsConnectorOnlyTool(string toolName) =>
+    toolName.Equals(MoodleBuildInfoTools.ToolName, StringComparison.OrdinalIgnoreCase);
 
 static bool HasRequiredOAuthScopes(ClaimsPrincipal principal, string toolName, MoodleToolMetadataAttribute metadata)
 {

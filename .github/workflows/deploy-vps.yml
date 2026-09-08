@@ -475,11 +475,23 @@ jobs:
           OAUTH_ISSUER_EFFECTIVE="${OAUTH_ISSUER:-https://$APP_DOMAIN}"
           OAUTH_AUDIENCE_EFFECTIVE="${OAUTH_AUDIENCE:-https://$APP_DOMAIN/mcp}"
           CONNECTION_STRING="Host=postgres;Port=5432;Database=$POSTGRES_DB;Username=$POSTGRES_USER;Password=$POSTGRES_PASSWORD"
+          DEPLOY_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          BUILD_ID="${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+          RELEASE_VERSION=""
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            RELEASE_VERSION="$GITHUB_REF_NAME"
+          fi
 
           {
             printf 'APP_PORT=%s\n' "$APP_PORT"
             printf 'GIT_COMMIT=%s\n' "$GITHUB_SHA"
-            printf 'BUILD_DATE=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            printf 'BUILD_DATE=%s\n' "$DEPLOY_TIMESTAMP"
+            printf 'MOODLE_CONNECTOR_VERSION=%s\n' "$RELEASE_VERSION"
+            printf 'MOODLE_CONNECTOR_COMMIT=%s\n' "$GITHUB_SHA"
+            printf 'MOODLE_CONNECTOR_BUILD_ID=%s\n' "$BUILD_ID"
+            printf 'MOODLE_CONNECTOR_BUILD_AT=%s\n' "$DEPLOY_TIMESTAMP"
+            printf 'MOODLE_CONNECTOR_DEPLOYED_AT=%s\n' "$DEPLOY_TIMESTAMP"
+            printf 'MOODLE_CONNECTOR_SOURCE_REF=%s\n' "$GITHUB_REF_NAME"
             printf 'APP_DOMAIN=%s\n' "$APP_DOMAIN"
             printf 'COMPOSE_PROFILES=%s\n' "$COMPOSE_PROFILES"
             printf 'CADDYFILE=%s\n' "$CADDYFILE"

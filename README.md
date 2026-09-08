@@ -288,7 +288,8 @@ O script sobe um PostgreSQL efêmero em `localhost:5433`, injeta `MOODLE_CONNECT
 
 - `POST /mcp`: endpoint MCP streamable HTTP.
 - `GET /health`: healthcheck.
-- `GET /api/status`: status da API e configuração de autenticação.
+- `GET /api/status`: status da API, configuração de autenticação e identidade do runtime (`version`, `commit`, `buildId`, `builtAt`, `deployedAt`).
+- MCP `get_connector_build_info`: leitura somente da mesma identidade, sem depender de uma conexão Moodle vinculada; compare `commit` com o SHA esperado do repositório.
 - `GET /.well-known/oauth-protected-resource/mcp`: metadata OAuth Protected Resource para descoberta pelo ChatGPT.
 - `GET /.well-known/oauth-authorization-server`: metadata do authorization server local.
 - `GET /.well-known/openid-configuration`: discovery OIDC publicado pelo OpenIddict.
