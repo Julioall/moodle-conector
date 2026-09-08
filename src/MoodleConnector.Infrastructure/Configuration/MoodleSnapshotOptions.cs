@@ -20,7 +20,9 @@ public sealed class MoodleSnapshotOptions
     public int MaxAnalyticalSnapshotSkewMinutes { get; init; } = 15;
     public int MaxPayloadBytes { get; init; } = 10 * 1024 * 1024;
     public int CoursePageSize { get; init; } = 100;
-    public int MaxCoursePages { get; init; } = 10;
+    // Keep enough headroom for large institutional catalogues. The worker
+    // still reports an incomplete snapshot if this safety cap is reached.
+    public int MaxCoursePages { get; init; } = 100;
     public int ParticipantPageSize { get; init; } = 1000;
     public int MaxParticipantPages { get; init; } = 100;
     public int AssignmentBatchSize { get; init; } = 100;

@@ -9,6 +9,12 @@ describe('courses gateway', () => {
     expect(get).toHaveBeenCalledWith('/api/courses/senai-go/42/activities?page=1&pageSize=20');
   });
 
+  it('searches the catalogue without loading every course page', async () => {
+    const get = vi.fn().mockResolvedValue({ data: [], meta: { page: 1, pageSize: 100, returned: 0, hasMore: false, generatedAt: '2026-08-10T00:00:00Z' }});
+    await createCoursesGateway({ get } as never).search('Técnico em Segurança', 'monitora', 100);
+    expect(get).toHaveBeenCalledWith('/api/courses/search?query=T%C3%A9cnico+em+Seguran%C3%A7a&connectionRef=monitora&limit=100');
+  });
+
   it('adds refresh to activity requests when requested', async () => {
     const get = vi.fn().mockResolvedValue({ data: [], meta: { page: 1, pageSize: 20, returned: 0, hasMore: false, generatedAt: '2026-08-10T00:00:00Z' }});
     await createCoursesGateway({ get } as never).activities('senai-go', '42', 1, 20, false, true);

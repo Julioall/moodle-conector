@@ -1145,6 +1145,15 @@ internal sealed class MoodleSnapshotSyncQueue(
             }
         }
 
+        if (partial)
+        {
+            logger.LogWarning(
+                "Moodle course snapshot reached the configured page cap. CourseCount={CourseCount} PageSize={PageSize} MaxPages={MaxPages}",
+                courses.Count,
+                _options.CoursePageSize,
+                _options.MaxCoursePages);
+        }
+
         return new CourseReadResult(courses, partial);
     }
 

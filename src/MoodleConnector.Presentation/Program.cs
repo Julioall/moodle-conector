@@ -2153,7 +2153,7 @@ app.MapGet("/api/schools", async (
         var refreshQueued = (!snapshot.IsComplete || categoriesMissing) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
             await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
                 identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
-                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: categoriesMissing), cancellationToken);
+                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: !snapshot.IsComplete || categoriesMissing), cancellationToken);
         var snapshotNodes = BuildCourseHierarchy(snapshot.Data);
         return Results.Ok(new
         {
@@ -2165,6 +2165,25 @@ app.MapGet("/api/schools", async (
                 source = "snapshot",
                 refreshQueued,
                 complete = snapshot.IsComplete,
+            }
+        });
+    }
+
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        var refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
+            Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: true), cancellationToken);
+        return Results.Ok(new
+        {
+            data = Array.Empty<CourseHierarchyNode>(),
+            meta = new
+            {
+                generatedAt = DateTimeOffset.UtcNow,
+                connectionRef = resolved.Alias,
+                source = "snapshot",
+                refreshQueued,
+                complete = false,
             }
         });
     }
@@ -2182,6 +2201,8 @@ app.MapGet("/api/schools/courses", async (
     ConnectorDbContext dbContext,
     IConnectionRegistry connectionRegistry,
     IMoodleCoursesGateway coursesGateway,
+    IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
     CancellationToken cancellationToken) =>
 {
     var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
@@ -2190,9 +2211,112 @@ app.MapGet("/api/schools/courses", async (
     if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
     var currentPage = Math.Max(page ?? 1, 1);
     var size = Math.Clamp(pageSize ?? 50, 1, 100);
+
+    var snapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
+    if (snapshot is not null)
+    {
+        var categoriesMissing = snapshot.Data.Any(course => course.CategoryId is > 0 && string.IsNullOrWhiteSpace(course.CategoryName));
+        var refreshQueued = (!snapshot.IsComplete || categoriesMissing) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
+            await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
+                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: !snapshot.IsComplete || categoriesMissing), cancellationToken);
+        var filtered = snapshot.Data
+            .Where(course => string.Equals(course.CategoryName ?? "Sem categoria", categoryPath.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var items = filtered.Skip((currentPage - 1) * size).Take(size).ToArray();
+        var warnings = new List<string>();
+        if (snapshot.IsStale)
+            warnings.Add("Dados locais podem estar desatualizados; use Atualizar para consultar agora.");
+        if (!snapshot.IsComplete)
+            warnings.Add("O catálogo ainda está sendo carregado; os cursos podem aparecer gradualmente.");
+
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            items.Select(course => AppCourseContractMapper.ToDto(course, resolved.Alias)).ToArray(),
+            new(currentPage, size, items.Length, currentPage * size < filtered.Length, snapshot.UpdatedAt,
+                resolved.Alias, warnings.Count == 0 ? null : warnings.ToArray(), filtered.Length,
+                "snapshot", snapshot.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                snapshot.IsStale, refreshQueued, snapshot.IsComplete)));
+    }
+
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        var refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
+            Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: true), cancellationToken);
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            Array.Empty<AppCourseDto>(),
+            new(currentPage, size, 0, false, DateTimeOffset.UtcNow, resolved.Alias,
+                ["Preparando o catálogo de cursos do Moodle."], 0, "snapshot", null, null, false,
+                refreshQueued, false)));
+    }
+
     var result = await coursesGateway.GetMyCoursesByCategoryAsync(identity.Id.ToString(), categoryPath, size, currentPage, cancellationToken);
     var data = result.Items.Select(course => AppCourseContractMapper.ToDto(course, resolved.Alias)).ToArray();
     return Results.Ok(new AppListEnvelope<AppCourseDto>(data, new(currentPage, size, data.Length, result.HasNextPage, DateTimeOffset.UtcNow, resolved.Alias, null, result.TotalCount)));
+}).RequireRateLimiting(AppAuthRateLimitPolicy);
+
+app.MapGet("/api/courses/search", async (
+    string query,
+    string? connectionRef,
+    int? limit,
+    HttpContext context,
+    ConnectorDbContext dbContext,
+    IMediator mediator,
+    IConnectionRegistry connectionRegistry,
+    IMoodleSnapshotStore snapshotStore,
+    IMoodleSnapshotSyncQueue snapshotSyncQueue,
+    CancellationToken cancellationToken) =>
+{
+    var identity = await ResolveAppIdentityAsync(context, dbContext, cancellationToken);
+    if (identity is null) return Results.Unauthorized();
+    var resolved = await connectionRegistry.ResolveConnectionAsync(connectionRef, cancellationToken);
+    if (resolved is null) return AppErrorResults.NotFound("connection_not_found", "Conexão Moodle não encontrada.");
+    var normalizedQuery = query.Trim();
+    var size = Math.Clamp(limit ?? 100, 1, 100);
+    if (normalizedQuery.Length == 0)
+    {
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            Array.Empty<AppCourseDto>(), new(1, size, 0, false, DateTimeOffset.UtcNow, resolved.Alias, null, 0)));
+    }
+
+    var snapshot = await snapshotStore.GetCoursesAsync(identity.Id, resolved.Alias, cancellationToken);
+    if (snapshot is not null)
+    {
+        var categoriesMissing = snapshot.Data.Any(course => course.CategoryId is > 0 && string.IsNullOrWhiteSpace(course.CategoryName));
+        var refreshQueued = (!snapshot.IsComplete || categoriesMissing) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
+            await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+                identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
+                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: !snapshot.IsComplete || categoriesMissing), cancellationToken);
+        var matched = snapshot.Data.Where(course => CourseMatchesQuery(course, normalizedQuery)).ToArray();
+        var items = matched.Take(size).ToArray();
+        var warnings = !snapshot.IsComplete
+            ? ["O catálogo ainda está sendo carregado; os resultados podem aparecer gradualmente."]
+            : (IReadOnlyList<string>?)null;
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            items.Select(course => AppCourseContractMapper.ToDto(course, resolved.Alias)).ToArray(),
+            new(1, size, items.Length, matched.Length > size, snapshot.UpdatedAt, resolved.Alias, warnings,
+                matched.Length, "snapshot", snapshot.UpdatedAt,
+                Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+                snapshot.IsStale, refreshQueued, snapshot.IsComplete)));
+    }
+
+    if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
+    {
+        var refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
+            Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: true), cancellationToken);
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            Array.Empty<AppCourseDto>(),
+            new(1, size, 0, false, DateTimeOffset.UtcNow, resolved.Alias,
+                ["Preparando o catálogo de cursos do Moodle."], 0, "snapshot", null, null, false,
+                refreshQueued, false)));
+    }
+
+    var result = await mediator.Send(new SearchCoursesQuery(identity.Id.ToString(), normalizedQuery, size), cancellationToken);
+    var data = result.Select(course => AppCourseContractMapper.ToDto(course, resolved.Alias)).ToArray();
+    return Results.Ok(new AppListEnvelope<AppCourseDto>(data,
+        new(1, size, data.Length, false, DateTimeOffset.UtcNow, resolved.Alias, null, data.Length)));
 }).RequireRateLimiting(AppAuthRateLimitPolicy);
 
 app.MapGet("/api/courses", async (
@@ -2235,7 +2359,7 @@ app.MapGet("/api/courses", async (
         var refreshQueued = (!snapshot.IsComplete || categoriesMissing) && !string.IsNullOrWhiteSpace(identity.ConnectorClientId) &&
             await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
                 identity.Id, identity.ConnectorClientId!, resolved.Alias, identity.Id.ToString(),
-                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: categoriesMissing), cancellationToken);
+                Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: !snapshot.IsComplete || categoriesMissing), cancellationToken);
         var snapshotItems = snapshot.Data.Skip((currentPage - 1) * size).Take(size).ToArray();
         return Results.Ok(new AppListEnvelope<AppCourseDto>(
             snapshotItems.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray(),
@@ -2246,7 +2370,17 @@ app.MapGet("/api/courses", async (
                 snapshot.IsStale, refreshQueued, snapshot.IsComplete)));
     }
     if (!string.IsNullOrWhiteSpace(identity.ConnectorClientId))
-        await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(), Dataset: MoodleSnapshotDatasets.Courses, Priority: 30), cancellationToken);
+    {
+        var refreshQueued = await snapshotSyncQueue.EnqueueAsync(new MoodleSnapshotSyncRequest(
+            identity.Id, identity.ConnectorClientId, resolved.Alias, identity.Id.ToString(),
+            Dataset: MoodleSnapshotDatasets.Courses, Priority: 30, Force: true), cancellationToken);
+        return Results.Ok(new AppListEnvelope<AppCourseDto>(
+            Array.Empty<AppCourseDto>(),
+            new(currentPage, size, 0, false, DateTimeOffset.UtcNow, effectiveConnectionRef,
+                ["Preparando o catálogo de cursos do Moodle."], 0, "snapshot", null, null, false,
+                refreshQueued, false)));
+    }
+
     var result = await mediator.Send(new ListMyCoursesQuery(identity.Id.ToString(), size, currentPage), cancellationToken);
     var data = result.Items.Select(course => AppCourseContractMapper.ToDto(course, effectiveConnectionRef)).ToArray();
     return Results.Ok(new AppListEnvelope<AppCourseDto>(data,
@@ -2707,6 +2841,17 @@ static IReadOnlyList<CourseHierarchyNode> BuildCourseHierarchy(IReadOnlyList<Cou
         .OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
         .ToArray();
 }
+
+static bool CourseMatchesQuery(CourseSummary course, string query) =>
+    ContainsCourseValue(course.CourseId, query) ||
+    ContainsCourseValue(course.IdNumber, query) ||
+    ContainsCourseValue(course.ShortName, query) ||
+    ContainsCourseValue(course.FullName, query) ||
+    ContainsCourseValue(course.DisplayName, query) ||
+    ContainsCourseValue(course.CategoryName, query);
+
+static bool ContainsCourseValue(string? value, string query) =>
+    !string.IsNullOrWhiteSpace(value) && value.Contains(query, StringComparison.OrdinalIgnoreCase);
 
 static DateTimeOffset GetBrazilTodayStart(DateTimeOffset value)
 {

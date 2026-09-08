@@ -9,6 +9,7 @@ export type CourseHierarchyNode = { path: string; name: string; level: number; c
 export const createCoursesGateway = (client = createAppClient()) => {
   const list = (connectionRef?: string, page = 1, pageSize = 20) => client.get<ListResponse<Course>>(`/api/courses?${new URLSearchParams({ ...(connectionRef ? { connectionRef } : {}), page: String(page), pageSize: String(pageSize) })}`);
   const byCategory = (categoryPath: string, connectionRef?: string, page = 1, pageSize = 50) => client.get<ListResponse<Course>>(`/api/schools/courses?${new URLSearchParams({ categoryPath, ...(connectionRef ? { connectionRef } : {}), page: String(page), pageSize: String(pageSize) })}`);
+  const search = (query: string, connectionRef?: string, limit = 100) => client.get<ListResponse<Course>>(`/api/courses/search?${new URLSearchParams({ query, ...(connectionRef ? { connectionRef } : {}), limit: String(limit) })}`);
 
   const listAll = async (connectionRef?: string, pageSize = 100) => {
     const firstPage = await list(connectionRef, 1, pageSize);
@@ -51,6 +52,7 @@ export const createCoursesGateway = (client = createAppClient()) => {
   return {
   hierarchy: (connectionRef?: string) => client.get<{ data: CourseHierarchyNode[]; meta: { generatedAt: string; connectionRef?: string; source?: string; refreshQueued?: boolean; complete?: boolean } }>(`/api/schools?${new URLSearchParams(connectionRef ? { connectionRef } : {})}`),
   byCategory,
+  search,
   listAllByCategory,
   list,
   listAll,

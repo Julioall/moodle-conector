@@ -23,6 +23,7 @@ internal sealed class MoodleCoursesGateway(
     IMoodleResourceResolver resourceResolver,
     ILogger<MoodleCoursesGateway>? logger = null) : IMoodleCoursesGateway
 {
+    private const int MaxUnboundedCategoryEnrichmentCourses = 1_000;
     private readonly MoodleApiOptions _options = options.Value;
     private readonly ILogger<MoodleCoursesGateway> _logger = logger ?? NullLogger<MoodleCoursesGateway>.Instance;
     private static readonly TimeSpan CourseListCacheDuration = TimeSpan.FromMinutes(10);
@@ -317,10 +318,54 @@ internal sealed class MoodleCoursesGateway(
         var strategy = businessFlows.ResolveStrategy("listar_cursos_ativos", profile);
         if (strategy?.StrategyName == "timeline")
         {
-            // The timeline endpoint is available on some Moodle installations,
-            // but it commonly omits categoryid and can be slow. The enrolled
-            // endpoint contains the category reference needed by the portal,
-            // so use it first whenever the connection advertises it.
+            // Prefer the timeline endpoint for large catalogues. Unlike
+            // core_enrol_get_users_courses, it supports limit/offset and avoids
+            // one unbounded response for users enrolled in many courses.
+            try
+            {
+                var timelineCourses = await GetTimelineCoursesAsync(credentials, cancellationToken);
+                if (timelineCourses.Count > 0)
+                {
+                    if (RequiresTimelineCategoryEnrichment(timelineCourses) &&
+                        timelineCourses.Count <= MaxUnboundedCategoryEnrichmentCourses &&
+                        IsFunctionAvailable(profile, "core_enrol_get_users_courses"))
+                    {
+                        try
+                        {
+                            var enrolledCourses = await GetEnrolledCoursesAsync(credentials, moodleUserId, cancellationToken);
+                            var enrichedCourses = MergeCourseCategoryData(timelineCourses, enrolledCourses);
+                            if (!ReferenceEquals(enrichedCourses, timelineCourses))
+                            {
+                                _logger.LogInformation(
+                                    "Moodle timeline courses were enriched with enrolled-course category data. ConnectionId={ConnectionId} Alias={Alias}",
+                                    credentials.ConnectionId,
+                                    credentials.Alias);
+                            }
+
+                            return enrichedCourses;
+                        }
+                        catch (MoodleApiException exception)
+                        {
+                            _logger.LogWarning(exception, "Moodle enrolled-course category enrichment failed; using timeline courses as-is.");
+                        }
+                    }
+                    else if (RequiresTimelineCategoryEnrichment(timelineCourses))
+                    {
+                        _logger.LogWarning(
+                            "Skipping unbounded enrolled-course category enrichment for a large catalogue. ConnectionId={ConnectionId} Alias={Alias} CourseCount={CourseCount}",
+                            credentials.ConnectionId,
+                            credentials.Alias,
+                            timelineCourses.Count);
+                    }
+
+                    return timelineCourses;
+                }
+            }
+            catch (MoodleApiException exception)
+            {
+                _logger.LogWarning(exception, "Moodle timeline course listing unavailable; trying enrolled courses fallback.");
+            }
+
             if (IsFunctionAvailable(profile, "core_enrol_get_users_courses"))
             {
                 try
@@ -328,35 +373,12 @@ internal sealed class MoodleCoursesGateway(
                     var enrolledCourses = await GetEnrolledCoursesAsync(credentials, moodleUserId, cancellationToken);
                     if (enrolledCourses.Count > 0)
                     {
-                        if (RequiresTimelineCategoryEnrichment(enrolledCourses) &&
-                            IsFunctionAvailable(profile, "core_course_get_enrolled_courses_by_timeline_classification"))
-                        {
-                            try
-                            {
-                                var timelineCourses = await GetTimelineCoursesAsync(credentials, cancellationToken);
-                                var enrichedCourses = MergeCourseCategoryData(enrolledCourses, timelineCourses);
-                                if (!ReferenceEquals(enrichedCourses, enrolledCourses))
-                                {
-                                    _logger.LogInformation(
-                                        "Moodle enrolled courses were enriched with timeline category data. ConnectionId={ConnectionId} Alias={Alias}",
-                                        credentials.ConnectionId,
-                                        credentials.Alias);
-                                }
-
-                                return enrichedCourses;
-                            }
-                            catch (MoodleApiException exception)
-                            {
-                                _logger.LogWarning(exception, "Moodle timeline category enrichment failed; using enrolled courses payload as-is.");
-                            }
-                        }
-
                         return enrolledCourses;
                     }
                 }
                 catch (MoodleApiException exception)
                 {
-                    _logger.LogWarning(exception, "Moodle enrolled courses preferred path unavailable; falling back to timeline courses.");
+                    _logger.LogWarning(exception, "Moodle enrolled courses fallback unavailable.");
                 }
             }
 
@@ -401,23 +423,58 @@ internal sealed class MoodleCoursesGateway(
         MoodleConnectorCredentials credentials,
         CancellationToken cancellationToken)
     {
-        var timelinePayload = await restClient.CallAsync(
+        const int pageSize = 500;
+        const int maxPages = 100;
+        var courses = new List<CourseDto>();
+        var seenCourseIds = new HashSet<int>();
+        var offset = 0;
+
+        for (var page = 0; page < maxPages; page++)
+        {
+            var timelinePayload = await restClient.CallAsync(
                 credentials,
                 "core_course_get_enrolled_courses_by_timeline_classification",
                 new Dictionary<string, object?>
                 {
-                    // The portal needs the complete enrolled catalogue. Moodle
-                    // still scopes this response to the authenticated user; an
-                    // in-progress-only view made valid past/future courses look
-                    // like a failed course import in Claris.
+                    // Moodle scopes this response to the authenticated user. Use
+                    // all classifications, but page the response so large
+                    // connections do not produce one giant JSON payload.
                     ["classification"] = "all",
-                    ["limit"] = 1_000,
-                    ["offset"] = 0,
+                    ["limit"] = pageSize,
+                    ["offset"] = offset,
                     ["sort"] = "fullname"
                 },
                 cancellationToken);
-        var timeline = JsonSerializer.Deserialize<TimelineCoursesResponseDto>(timelinePayload.GetRawText());
-        return timeline?.Courses ?? [];
+            var timeline = JsonSerializer.Deserialize<TimelineCoursesResponseDto>(timelinePayload.GetRawText());
+            var pageCourses = timeline?.Courses ?? [];
+            if (pageCourses.Count == 0)
+            {
+                break;
+            }
+
+            var newCourses = pageCourses.Where(course => seenCourseIds.Add(course.Id)).ToArray();
+            courses.AddRange(newCourses);
+            var nextOffset = offset + pageCourses.Count;
+            if (newCourses.Length == 0 ||
+                pageCourses.Count < pageSize ||
+                timeline?.Total is { } total && total <= nextOffset)
+            {
+                break;
+            }
+
+            offset = nextOffset;
+        }
+
+        if (courses.Count > 0)
+        {
+            _logger.LogInformation(
+                "Moodle timeline courses loaded in pages. ConnectionId={ConnectionId} Alias={Alias} CourseCount={CourseCount}",
+                credentials.ConnectionId,
+                credentials.Alias,
+                courses.Count);
+        }
+
+        return courses;
     }
 
     private static bool IsFunctionAvailable(MoodleFunctionProfile profile, string functionName) =>
@@ -727,6 +784,9 @@ internal sealed class MoodleCoursesGateway(
     {
         [JsonPropertyName("courses")]
         public IReadOnlyList<CourseDto>? Courses { get; init; }
+
+        [JsonPropertyName("total")]
+        public int? Total { get; init; }
     }
 
     private sealed class EnrolledUserDto
