@@ -2592,7 +2592,10 @@ public sealed record AiGradingBatchPackageResult(
     [property: JsonPropertyName("missingItems")] int MissingItems = 0,
     [property: JsonPropertyName("missingBatchCount")] int MissingBatchCount = 0,
     [property: JsonPropertyName("decisionSafe")] bool DecisionSafe = true,
-    [property: JsonPropertyName("assignments")] IReadOnlyList<AiGradingAssignmentPackage>? Assignments = null);
+    [property: JsonPropertyName("assignments")] IReadOnlyList<AiGradingAssignmentPackage>? Assignments = null,
+    [property: JsonPropertyName("eligibleItems")] int EligibleItems = 0,
+    [property: JsonPropertyName("itemsExcludedByStatus")] int ItemsExcludedByStatus = 0,
+    [property: JsonPropertyName("itemsOnPage")] int ItemsOnPage = 0);
 
 public sealed record AiGradingAssignmentPackage(
     [property: JsonPropertyName("assignmentId")] string AssignmentId,
@@ -2762,6 +2765,13 @@ public sealed class PrepareAiGradingBatchQueryHandler(
         {
             globalWarnings.Add(
                 $"Itens fora da pre-validacao da IA foram ignorados: {string.Join(", ", skippedByStatus)}.");
+        }
+
+        var itemsExcludedByStatus = Math.Max(0, totalScopedItems - eligibleItemCount);
+        if (scope.Run is not null && itemsExcludedByStatus > 0)
+        {
+            globalWarnings.Add(
+                $"A execucao possui {itemsExcludedByStatus} item(ns) ja fora da fila de analise da IA; eles nao foram repetidos neste pacote. Use preparedItems/expectedItems para validar a cobertura total.");
         }
 
         if (pageItems.Count > 0 &&
@@ -3037,7 +3047,10 @@ public sealed class PrepareAiGradingBatchQueryHandler(
             MissingItems: coverage.MissingItems,
             MissingBatchCount: coverage.MissingBatchCount,
             DecisionSafe: coverage.DecisionSafe,
-            Assignments: assignmentContexts);
+            Assignments: assignmentContexts,
+            EligibleItems: eligibleItemCount,
+            ItemsExcludedByStatus: itemsExcludedByStatus,
+            ItemsOnPage: packageItems.Count);
         telemetry?.RecordPhase(
             "grading",
             "package",

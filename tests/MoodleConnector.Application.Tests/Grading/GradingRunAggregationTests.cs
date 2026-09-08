@@ -144,6 +144,12 @@ public sealed class GradingRunAggregationTests
             new PrepareAiGradingBatchQuery(run.Id, Page: 2, PageSize: 400),
             CancellationToken.None);
 
+        Assert.Equal(400, secondPage.TotalItems);
+        Assert.Equal(400, secondPage.EligibleItems);
+        Assert.Equal(400, secondPage.ItemsExcludedByStatus);
+        Assert.Equal(400, secondPage.ItemsOnPage);
+        Assert.Equal(400, secondPage.Items.Count);
+        Assert.Contains(secondPage.Warnings, warning => warning.Contains("fora da fila", StringComparison.Ordinal));
         Assert.Equal(
             repository.Items.Skip(400).Take(400).Select(item => item.Id),
             secondPage.Items.Select(item => item.GradingItemId));

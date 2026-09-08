@@ -221,7 +221,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<AiGradingBatchPackageResult>))]
-    [Description("Retorna uma pagina do pacote estruturado de uma correcao via IA: criterios, nota maxima, resources individuais da submissao e assignments[].contextResources compartilhados por atividade. Cada item aponta os materiais aplicaveis em contextResourceRefs; eles nao se repetem por aluno. Resources de submissao informam artifactId e devem fundamentar proposal.evidence. O identificador aceita um batchJobId legado ou o gradingRunId agregado; use page/nextPage para percorrer ate 10.000 itens sem carregar tudo na resposta e confira expectedItems/preparedItems/missingItems antes de uma publicacao global. Leia os resources antes de gerar nota e feedback. Se a entrega for de outra atividade, gere nota 0 quando houver escala e feedback especifico explicando a incompatibilidade, salvando como rascunho para revisao. Ao salvar, copie todas e somente as URIs de submission resources para proposal.resourceUris; contextResources podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e escolha um destino: export_grading_corrections_csv se o usuario pediu CSV ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Nao escreve no Moodle.")]
+    [Description("Retorna uma pagina do pacote estruturado de uma correcao via IA: criterios, nota maxima, resources individuais da submissao e assignments[].contextResources compartilhados por atividade. Cada item aponta os materiais aplicaveis em contextResourceRefs; eles nao se repetem por aluno. Resources de submissao informam artifactId e devem fundamentar proposal.evidence. O identificador aceita um batchJobId legado ou o gradingRunId agregado; use page/nextPage para percorrer ate 10.000 itens sem carregar tudo na resposta. totalItems e eligibleItems representam somente itens ainda aptos para analise da IA; itemsOnPage informa quantos objetos existem efetivamente em items; itemsExcludedByStatus informa itens ja salvos ou em outro status que nao serao reprocessados. Para validar cobertura total, compare expectedItems com preparedItems e confirme missingItems=0, sem exigir que totalItems seja igual a expectedItems. Leia os resources antes de gerar nota e feedback. Se a entrega for de outra atividade, gere nota 0 quando houver escala e feedback especifico explicando a incompatibilidade, salvando como rascunho para revisao. Ao salvar, copie todas e somente as URIs de submission resources para proposal.resourceUris; contextResources podem ser citados apenas nas evidencias. Depois use save_ai_grading_batch e escolha um destino: export_grading_corrections_csv se o usuario pediu CSV ou create_batch_grade_launch_preview para revisar a publicacao no Moodle. Nao escreve no Moodle.")]
     public async Task<CallToolResult> PrepararLoteCorrecaoIaAsync(
         [Description("Identificador retornado por start_pending_grading_run: pode ser batchJobId (compatibilidade) ou gradingRunId (recomendado para consolidar todos os sublotes).")]
         Guid batchJobId,
@@ -754,7 +754,11 @@ public sealed class MoodleGradingTools(
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"## Pacote IA — Lote {data.BatchJobId}");
         sb.AppendLine();
-        sb.AppendLine($"**{data.TotalItems} aluno(s)** com contexto de correcao preparado.");
+        sb.AppendLine($"**{data.ItemsOnPage} item(ns)** nesta pagina; **{data.EligibleItems}** ainda elegiveis para analise pela IA.");
+        if (data.ItemsExcludedByStatus > 0)
+        {
+            sb.AppendLine($"**{data.ItemsExcludedByStatus} item(ns)** ja fora da fila da IA nao foram repetidos. Cobertura persistida: **{data.PreparedItems}/{data.ExpectedItems}**; faltantes: **{data.MissingItems}**.");
+        }
         sb.AppendLine();
 
         foreach (var item in data.Items)
