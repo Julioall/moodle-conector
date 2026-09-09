@@ -46,6 +46,7 @@ env:
   FEATURES_MCP_RESOURCE_ZIP_ENABLED: ${{ vars.FEATURES_MCP_RESOURCE_ZIP_ENABLED || 'false' }}
   FEATURES_MCP_GRADING_DRAFT_ENABLED: ${{ vars.FEATURES_MCP_GRADING_DRAFT_ENABLED || 'true' }}
   FEATURES_MCP_GRADING_WRITE_ENABLED: ${{ vars.FEATURES_MCP_GRADING_WRITE_ENABLED || 'true' }}
+  FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED: ${{ vars.FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED || 'true' }}
   OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || 'moodle' }}
   OAUTH_SCOPE_NAME: ${{ vars.OAUTH_SCOPE_NAME || 'moodle-mcp-audience' }}
   OAUTH_REQUIRE_HTTPS_METADATA: ${{ vars.OAUTH_REQUIRE_HTTPS_METADATA || 'true' }}
@@ -171,6 +172,7 @@ jobs:
           require_bool FEATURES_MCP_RESOURCE_ZIP_ENABLED "$FEATURES_MCP_RESOURCE_ZIP_ENABLED"
           require_bool FEATURES_MCP_GRADING_DRAFT_ENABLED "$FEATURES_MCP_GRADING_DRAFT_ENABLED"
           require_bool FEATURES_MCP_GRADING_WRITE_ENABLED "$FEATURES_MCP_GRADING_WRITE_ENABLED"
+          require_bool FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED "$FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED"
           require_bool RESET_DATABASE_ON_DEPLOY "$RESET_DATABASE_ON_DEPLOY"
           require_bool OAUTH_REQUIRE_HTTPS_METADATA "$OAUTH_REQUIRE_HTTPS_METADATA"
           require_int_range APP_PORT "$APP_PORT" 1 65535
@@ -517,6 +519,7 @@ jobs:
             printf 'Features__McpResourceZipEnabled=%s\n' "$FEATURES_MCP_RESOURCE_ZIP_ENABLED"
             printf 'Features__McpGradingDraftEnabled=%s\n' "$FEATURES_MCP_GRADING_DRAFT_ENABLED"
             printf 'Features__McpGradingWriteEnabled=%s\n' "$FEATURES_MCP_GRADING_WRITE_ENABLED"
+            printf 'Features__UniversalMoodleFileDownloadEnabled=%s\n' "$FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED"
             printf 'Features__DemoToolsEnabled=false\n'
             printf 'McpServerSecurity__RequireJwt=%s\n' "$MCP_REQUIRE_JWT"
             printf 'McpServerSecurity__RequireApiKey=%s\n' "$MCP_REQUIRE_API_KEY"
