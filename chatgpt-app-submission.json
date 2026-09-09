@@ -834,6 +834,20 @@
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
       }
     },
+    "moodle_download_file": {
+      "annotations": {
+        "title": "Download Moodle File",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
     "moodle_execute_read": {
       "annotations": {
         "title": "Executar Leitura Moodle",

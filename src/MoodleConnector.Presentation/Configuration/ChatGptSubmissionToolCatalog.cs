@@ -31,7 +31,8 @@ public static class ChatGptSubmissionToolCatalog
         var featureOptions = new FeatureOptions
         {
             MessagesWriteEnabled = true,
-            UniversalMoodleWriteEnabled = true
+            UniversalMoodleWriteEnabled = true,
+            UniversalMoodleFileDownloadEnabled = true
         };
         var assignmentWrites = new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true };
         var contracts = RegisteredMcpToolContainers.AlwaysOn

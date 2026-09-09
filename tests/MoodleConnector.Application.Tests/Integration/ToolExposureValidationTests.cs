@@ -131,7 +131,12 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
     {
         var productionContainers = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
+                new FeatureOptions
+                {
+                    MessagesWriteEnabled = true,
+                    UniversalMoodleWriteEnabled = true,
+                    UniversalMoodleFileDownloadEnabled = true
+                },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
 
         var publishedMetadata = productionContainers
@@ -177,7 +182,12 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         var submissionTools = LoadSubmissionTools();
         var productionContainers = RegisteredMcpToolContainers.AlwaysOn
             .Concat(RegisteredMcpToolContainers.GetEnabledContainers(
-                new FeatureOptions { MessagesWriteEnabled = true, UniversalMoodleWriteEnabled = true },
+                new FeatureOptions
+                {
+                    MessagesWriteEnabled = true,
+                    UniversalMoodleWriteEnabled = true,
+                    UniversalMoodleFileDownloadEnabled = true
+                },
                 new AssignmentWriteFeatureOptions { AssignmentGradeWriteEnabled = true }));
         var metadataRegistry = new ToolMetadataRegistry(RegisteredMcpToolContainers.All);
         var exposurePolicy = new CognitiveExposurePolicy(ToolExposureProfile.Production);
@@ -190,7 +200,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                                exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
 
-        Assert.Equal(80, contracts.Count);
+        Assert.Equal(81, contracts.Count);
         Assert.Equal(
             contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
             submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));
