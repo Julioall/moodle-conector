@@ -52,7 +52,11 @@ public sealed record CreateAssistedGradingBatchResult(
     [property: JsonPropertyName("blockedItems")] int BlockedItems,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("warnings")] IReadOnlyList<string> Warnings,
-    [property: JsonPropertyName("discoveryFailures")] IReadOnlyList<AssistedGradingBatchDiscoveryFailure>? DiscoveryFailures = null);
+    [property: JsonPropertyName("discoveryFailures")] IReadOnlyList<AssistedGradingBatchDiscoveryFailure>? DiscoveryFailures = null)
+{
+    [JsonPropertyName("existingCorrections")]
+    public IReadOnlyList<ExistingGradingCorrectionReference> ExistingCorrections { get; init; } = [];
+}
 
 public sealed record GetAssistedGradingBatchStatusQuery(
     Guid BatchJobId,
@@ -636,14 +640,32 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 seed.AttemptNumber))
             .Distinct()
             .ToArray();
+        var existingCorrections = new List<ExistingGradingCorrectionReference>();
         if (existingSubmissionIdentities.Length > 0 && !effectiveIncludeAlreadyGraded)
         {
-            var alreadyQueued = await repository.ListExistingSubmissionIdentitiesAsync(
+            var existingMatches = await repository.ListExistingSubmissionMatchesAsync(
                 existingSubmissionIdentities,
                 moodleConnectionId,
                 connectorClientId,
                 connectionAlias,
                 cancellationToken);
+            var alreadyQueued = existingMatches.Count > 0
+                ? existingMatches.Select(match => match.Identity).Distinct().ToArray()
+                : await repository.ListExistingSubmissionIdentitiesAsync(
+                existingSubmissionIdentities,
+                moodleConnectionId,
+                connectorClientId,
+                connectionAlias,
+                cancellationToken);
+            existingCorrections.AddRange(existingMatches
+                .Where(match => string.Equals(match.CreatedBySubject, currentUser.Subject, StringComparison.Ordinal))
+                .Select(FindGradingCorrectionBySubmissionQueryHandler.ToReference)
+                .DistinctBy(reference => reference.GradingItemId));
+            foreach (var correction in existingCorrections)
+            {
+                warnings.Add(
+                    $"A submissao {correction.SubmissionId} ja pertence a uma correcao anterior (batchJobId {correction.BatchJobId}, gradingRunId {correction.GradingRunId?.ToString() ?? "n/d"}). Use find_grading_correction_by_submission ou cancele esse lote antes de iniciar outro.");
+            }
             if (alreadyQueued.Count > 0)
             {
                 var alreadyQueuedSet = alreadyQueued.ToHashSet();
@@ -677,7 +699,10 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                 BlockedItems: 0,
                 Status: "AlreadyQueued",
                 Warnings: warnings,
-                DiscoveryFailures: discoveryFailures);
+                DiscoveryFailures: discoveryFailures)
+            {
+                ExistingCorrections = existingCorrections,
+            };
         }
 
         var batch = AssistedGradingBatch.Create(
@@ -776,6 +801,10 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             discoveryFailures.Count == 0 ? batch.Status.ToString() : "PartialFailure",
             warnings,
             discoveryFailures);
+        createResult = createResult with
+        {
+            ExistingCorrections = existingCorrections,
+        };
 
         await auditLogs.AddAsync(new MoodleAuditLog
         {
@@ -2267,7 +2296,8 @@ public sealed class GetAssistedGradingCoordinationReportQueryHandler(
 public sealed class CancelAssistedGradingBatchCommandHandler(
     IGradingBatchOrchestrator orchestrator,
     IGradingReviewRepository repository,
-    ICurrentUserContext currentUser)
+    ICurrentUserContext currentUser,
+    IPendingMoodleActionRepository? pendingActions = null)
     : IRequestHandler<CancelAssistedGradingBatchCommand, CancelAssistedGradingBatchResult>
 {
     public async Task<CancelAssistedGradingBatchResult> Handle(
@@ -2308,25 +2338,100 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
             item.CommitStatus == GradingCommitStatus.Succeeded);
         var executionUnknownItems = allItems.Count(item =>
             item.CommitStatus == GradingCommitStatus.ExecutionUnknown);
-        var purgeEligible = purgeRequested &&
-            scope.Run?.Status != GradingRunStatus.Completed &&
-            publishedItems == 0 &&
-            executionUnknownItems == 0;
+
+        var unknownPublicationCount = 0;
+        if (pendingActions is not null)
+        {
+            // A preview can be created with either a child batch ID or its
+            // parent gradingRunId. When the caller supplies the child handle,
+            // inspect both IDs so a run-level publication cannot survive the
+            // cancellation of the batch that led the operator here.
+            var actionLookupIds = new HashSet<Guid> { request.BatchJobId };
+            if (scope.DestinationRun is not null)
+            {
+                actionLookupIds.Add(scope.DestinationRun.Id);
+            }
+
+            var publicationActions = new List<PendingMoodleAction>();
+            foreach (var actionLookupId in actionLookupIds)
+            {
+                publicationActions.AddRange(
+                    await pendingActions.ListGradingPublicationsByBatchIdAsync(
+                        actionLookupId,
+                        cancellationToken));
+            }
+            publicationActions = publicationActions
+                .DistinctBy(action => action.Id)
+                .ToList();
+            var cancelledPublicationIds = new List<Guid>();
+            foreach (var action in publicationActions.Where(action =>
+                         scope.Batches.Any(batch =>
+                             string.Equals(batch.CreatedBySubject, action.CreatedBySubject, StringComparison.Ordinal)) ||
+                         scope.Run is not null &&
+                         string.Equals(scope.Run.CreatedBySubject, action.CreatedBySubject, StringComparison.Ordinal)))
+            {
+                if (action.Status == PendingActionStatus.ExecutionUnknown)
+                {
+                    // Never release the claim of an unknown remote write. It
+                    // remains reserved until explicit reconciliation proves
+                    // whether Moodle applied the grade.
+                    unknownPublicationCount++;
+                    continue;
+                }
+
+                var publicationId = TryReadPublicationId(action.PayloadJson);
+                action.Cancel("Publicacao cancelada junto com o lote de correcao.");
+                if (publicationId is Guid id && id != Guid.Empty)
+                {
+                    cancelledPublicationIds.Add(id);
+                }
+            }
+
+            foreach (var publicationId in cancelledPublicationIds.Distinct())
+            {
+                await repository.ReleasePublicationClaimsAsync(publicationId, cancellationToken);
+            }
+
+            if (publicationActions.Count > 0)
+            {
+                await pendingActions.SaveChangesAsync(cancellationToken);
+            }
+        }
 
         foreach (var child in scope.Batches)
         {
-            await orchestrator.CancelAsync(child.Id, cancellationToken);
+            if (child.Status == GradingBatchStatus.Completed)
+            {
+                child.CancelForRecovery();
+            }
+            else
+            {
+                await orchestrator.CancelAsync(child.Id, cancellationToken);
+            }
         }
 
         if (scope.Run is not null)
         {
-            scope.Run.Cancel();
+            if (scope.Run.Status == GradingRunStatus.Completed)
+            {
+                scope.Run.CancelForRecovery();
+            }
+            else
+            {
+                scope.Run.Cancel();
+            }
             await repository.SaveChangesAsync(cancellationToken);
         }
         else
         {
             await repository.SaveChangesAsync(cancellationToken);
         }
+
+        var purgeEligible = purgeRequested &&
+            scope.Run?.Status != GradingRunStatus.Completed &&
+            publishedItems == 0 &&
+            executionUnknownItems == 0 &&
+            unknownPublicationCount == 0;
 
         var warnings = new List<string>();
         if (publishedItems > 0)
@@ -2337,6 +2442,11 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
         if (executionUnknownItems > 0)
         {
             warnings.Add($"{executionUnknownItems} item(ns) possuem escrita Moodle de resultado desconhecido e exigem reconciliacao.");
+        }
+
+        if (unknownPublicationCount > 0)
+        {
+            warnings.Add($"{unknownPublicationCount} publicacao(oes) pendente(s) possuem resultado desconhecido e continuam reservadas para reconciliacao.");
         }
 
         GradingLocalPurgeResult? purge = null;
@@ -2373,7 +2483,7 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
         return new CancelAssistedGradingBatchResult(
             scope.RequestedId,
             status,
-            message,
+            BuildCancellationMessage(message, unknownPublicationCount),
             PurgeRequested: purgeRequested,
             Purged: purge?.Purged == true,
             DeletedItems: purge?.DeletedItems ?? 0,
@@ -2382,6 +2492,34 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
             PublishedItemsPreserved: publishedItems,
             Warnings: warnings);
     }
+
+    private static Guid? TryReadPublicationId(string payloadJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            var root = document.RootElement;
+            if ((!root.TryGetProperty("publicationId", out var value) &&
+                 !root.TryGetProperty("PublicationId", out value)) ||
+                value.ValueKind != JsonValueKind.String ||
+                !value.TryGetGuid(out var publicationId) ||
+                publicationId == Guid.Empty)
+            {
+                return null;
+            }
+
+            return publicationId;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string BuildCancellationMessage(string message, int unknownPublicationCount) =>
+        unknownPublicationCount == 0
+            ? message
+            : $"{message} {unknownPublicationCount} publicacao(oes) ficou(aram) em execucao desconhecida e nao teve a claim liberada; reconcilie antes de tentar publicar novamente.";
 }
 
 // ============================================================

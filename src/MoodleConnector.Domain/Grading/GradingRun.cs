@@ -208,6 +208,21 @@ public sealed class GradingRun
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Cancela uma execução agregada concluída quando a aplicação confirmou
+    /// que ela não contém publicação Moodle efetivada ou desconhecida.
+    /// </summary>
+    public void CancelForRecovery()
+    {
+        if (Status == GradingRunStatus.Cancelled)
+        {
+            return;
+        }
+
+        Status = GradingRunStatus.Cancelled;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     private static string? Normalize(string? value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))

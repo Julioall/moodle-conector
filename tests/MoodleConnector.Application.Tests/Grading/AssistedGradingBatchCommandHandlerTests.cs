@@ -817,6 +817,57 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CancelBatch_ConcluidoSemPublicacaoPodeSerCanceladoParaDestravarDuplicidade()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho salvo.");
+        batch.MarkCompleted();
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new CancelAssistedGradingBatchCommandHandler(
+            orchestrator,
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new CancelAssistedGradingBatchCommand(batch.Id),
+            CancellationToken.None);
+
+        Assert.Equal("Cancelled", result.Status);
+        Assert.Equal(GradingBatchStatus.Cancelled, batch.Status);
+        Assert.Null(orchestrator.LastCancelledBatchId);
+    }
+
+    [Fact]
+    public async Task CancelBatch_ComPublicacaoEfetivadaCancelaEMantemHistorico()
+    {
+        var repository = new FakeGradingReviewRepository();
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkCommitSucceeded();
+        batch.MarkCompleted();
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        var sut = new CancelAssistedGradingBatchCommandHandler(
+            orchestrator,
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new CancelAssistedGradingBatchCommand(batch.Id),
+            CancellationToken.None);
+
+        Assert.Equal(GradingBatchStatus.Cancelled, batch.Status);
+        Assert.Null(orchestrator.LastCancelledBatchId);
+        Assert.Equal(1, result.PublishedItemsPreserved);
+        Assert.Contains(result.Warnings!, warning => warning.Contains("publicado", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task CancelBatch_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
     {
         var repository = new FakeGradingReviewRepository();

@@ -556,7 +556,11 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 Launches: [],
                 ConfirmationText: string.Empty,
                 ExpiresAt: null,
-                Warnings: [.. contextWarnings, .. scaleWarnings],
+                Warnings: BuildWarnings(
+                    selected.Length,
+                    scaleWarnings,
+                    contextWarnings,
+                    selected),
                 ExpectedItems: coverage.ExpectedItems,
                 PreparedItems: coverage.PreparedItems,
                 MissingItems: coverage.MissingItems,
@@ -624,7 +628,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             throw;
         }
 
-        var warnings = BuildWarnings(blocked, scaleWarnings, contextWarnings).ToList();
+        var warnings = BuildWarnings(blocked, scaleWarnings, contextWarnings, selected).ToList();
         if (request.AllowOverwriteExisting)
         {
             warnings.Add("Esta previa autoriza sobrescrever notas ou feedbacks que ja existam no Moodle.");
@@ -771,7 +775,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
     private static IReadOnlyList<string> BuildWarnings(
         int blocked,
         IReadOnlyList<string> scaleWarnings,
-        IReadOnlyList<string> contextWarnings)
+        IReadOnlyList<string> contextWarnings,
+        IReadOnlyList<AssistedGradingItem>? selectedItems = null)
     {
         var warnings = new List<string>(contextWarnings.Count + scaleWarnings.Count);
         warnings.AddRange(contextWarnings);
@@ -780,6 +785,16 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         if (otherBlocked > 0)
         {
             warnings.Add($"{otherBlocked} item(ns) bloqueado(s) por falta de revisao, nota final ou feedback final.");
+        }
+
+        var recoverablePublicationFailures = selectedItems?.Count(item =>
+            item.ReviewStatus == GradingReviewStatus.Reviewed &&
+            item.CommitStatus == GradingCommitStatus.Failed &&
+            !string.IsNullOrWhiteSpace(item.FinalFeedback)) ?? 0;
+        if (recoverablePublicationFailures > 0)
+        {
+            warnings.Add(
+                $"{recoverablePublicationFailures} item(ns) possuem uma falha de publicacao recuperavel; use requeue_failed_grading_publication_items com os gradingItemIds antes de gerar nova previa.");
         }
 
         return warnings;
@@ -1072,7 +1087,11 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
 
             if (durableExecution)
             {
-                action.MarkFailed(capabilityFailure.Message);
+                // A temporary capability/catalog failure must not turn the
+                // publication into a terminal action. The reviewed items keep
+                // their final decision and can be explicitly requeued after
+                // the Moodle connection is healthy again.
+                action.MarkPartiallyCompleted(capabilityFailure.Message);
                 await pendingActions.SaveChangesAsync(cancellationToken);
                 if (payload.PublicationId is Guid publicationId)
                 {
@@ -1080,7 +1099,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 }
                 if (gradingRun is not null)
                 {
-                    gradingRun.MarkFailed();
+                    gradingRun.MarkPartiallyCompleted();
                     await repository.SaveChangesAsync(cancellationToken);
                 }
             }

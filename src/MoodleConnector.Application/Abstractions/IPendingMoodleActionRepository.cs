@@ -24,6 +24,16 @@ public interface IPendingMoodleActionRepository
 
     Task<PendingMoodleAction?> GetByIdAsync(Guid id, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Lista ações de publicação que apontam para um lote/execução. O
+    /// cancelamento de um lote usa isso para não deixar uma confirmação antiga
+    /// publicar depois que o operador decidiu abandonar aquele fluxo.
+    /// </summary>
+    Task<IReadOnlyList<PendingMoodleAction>> ListGradingPublicationsByBatchIdAsync(
+        Guid batchJobId,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<PendingMoodleAction>>([]);
+
     Task<PendingActionConfirmationClaimResult> TryConfirmWithAuditAsync(
         Guid id,
         string confirmedBySubject,

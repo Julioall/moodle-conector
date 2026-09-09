@@ -52,6 +52,22 @@ public sealed record GradingSubmissionIdentity(
     long SubmissionId,
     int? AttemptNumber);
 
+/// <summary>
+/// Referência interna suficiente para recuperar uma correção existente sem
+/// expor conteúdo da entrega. O subject é mantido para que a camada de
+/// aplicação filtre referências de outro usuário antes de devolvê-las.
+/// </summary>
+public sealed record GradingSubmissionMatch(
+    GradingSubmissionIdentity Identity,
+    Guid GradingItemId,
+    Guid BatchJobId,
+    Guid? GradingRunId,
+    string CreatedBySubject,
+    GradingItemStatus ItemStatus,
+    GradingCommitStatus CommitStatus,
+    GradingBatchStatus BatchStatus,
+    GradingRunStatus? RunStatus);
+
 public interface IGradingReviewRepository
 {
     Task AddGradingRunAsync(GradingRun run, CancellationToken cancellationToken) =>
@@ -132,6 +148,35 @@ public interface IGradingReviewRepository
         string? connectionAlias,
         CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<GradingSubmissionIdentity>>([]);
+
+    /// <summary>
+    /// Retorna os handles do conector para entregas já presentes em lotes não
+    /// cancelados. Implementações antigas podem continuar retornando vazio;
+    /// nesse caso o fluxo mantém a barreira de duplicidade sem inventar um ID.
+    /// </summary>
+    Task<IReadOnlyList<GradingSubmissionMatch>> ListExistingSubmissionMatchesAsync(
+        IReadOnlyCollection<GradingSubmissionIdentity> identities,
+        string? moodleConnectionId,
+        string? connectorClientId,
+        string? connectionAlias,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<GradingSubmissionMatch>>([]);
+
+    /// <summary>
+    /// Localiza uma submissão por seu ID, opcionalmente restringindo curso,
+    /// atividade, conexão e proprietário. A consulta é somente local e não
+    /// chama o Moodle.
+    /// </summary>
+    Task<IReadOnlyList<GradingSubmissionMatch>> FindSubmissionMatchesAsync(
+        long submissionId,
+        long? courseId,
+        long? assignmentId,
+        string? moodleConnectionId,
+        string? connectorClientId,
+        string? connectionAlias,
+        string? createdBySubject,
+        CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<GradingSubmissionMatch>>([]);
 
     async Task<IReadOnlyDictionary<Guid, AssistedGradingItem>> GetItemsAsync(
         IReadOnlyCollection<Guid> ids,

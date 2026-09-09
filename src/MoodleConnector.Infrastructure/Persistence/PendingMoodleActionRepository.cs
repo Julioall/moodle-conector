@@ -21,6 +21,33 @@ public sealed class PendingMoodleActionRepository(ConnectorDbContext dbContext) 
         return dbContext.PendingMoodleActions.SingleOrDefaultAsync(action => action.Id == id, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<PendingMoodleAction>> ListGradingPublicationsByBatchIdAsync(
+        Guid batchJobId,
+        CancellationToken cancellationToken)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return [];
+        }
+
+        // The JSON predicate is only a candidate filter. Verify the
+        // exact batchJobId below so a GUID that happens to occur in an item
+        // payload cannot be treated as a target batch.
+        var candidateId = batchJobId.ToString("D");
+        var candidates = await dbContext.PendingMoodleActions
+            .Where(action =>
+                (action.ToolName == "criar_previa_lancamento_lote" ||
+                 action.ToolName == "confirmar_lancamento_lote_moodle") &&
+                action.Status != PendingActionStatus.Executed &&
+                action.Status != PendingActionStatus.Cancelled &&
+                action.PayloadJson.Contains(candidateId))
+            .ToArrayAsync(cancellationToken);
+
+        return candidates
+            .Where(action => PayloadTargetsBatch(action.PayloadJson, batchJobId))
+            .ToArray();
+    }
+
     public async Task<PendingActionConfirmationClaimResult> TryConfirmWithAuditAsync(
         Guid id,
         string confirmedBySubject,
@@ -340,6 +367,28 @@ public sealed class PendingMoodleActionRepository(ConnectorDbContext dbContext) 
         if (tracked is not null)
         {
             await dbContext.Entry(tracked).ReloadAsync(cancellationToken);
+        }
+    }
+
+    private static bool PayloadTargetsBatch(string payloadJson, Guid batchJobId)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payloadJson);
+            var root = document.RootElement;
+            if (!root.TryGetProperty("batchJobId", out var value) &&
+                !root.TryGetProperty("BatchJobId", out value))
+            {
+                return false;
+            }
+
+            return value.ValueKind == JsonValueKind.String &&
+                   value.TryGetGuid(out var parsed) &&
+                   parsed == batchJobId;
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 }

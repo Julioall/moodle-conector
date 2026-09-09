@@ -127,7 +127,7 @@ public sealed class PendingMoodleAction
     /// </summary>
     public bool MarkCancelled(string? reason = null)
     {
-        if (Status is PendingActionStatus.Executed or PendingActionStatus.ExecutionUnknown)
+        if (Status is PendingActionStatus.Executed or PendingActionStatus.ExecutionUnknown or PendingActionStatus.Cancelled)
         {
             return false;
         }
@@ -137,6 +137,15 @@ public sealed class PendingMoodleAction
         ExecutionLeaseUntil = null;
         LastExecutionError = string.IsNullOrWhiteSpace(reason) ? LastExecutionError : reason.Trim();
         return true;
+    }
+
+    /// <summary>
+    /// Compatibilidade para chamadores que não precisam do resultado da
+    /// transição. O estado permanece protegido por MarkCancelled.
+    /// </summary>
+    public void Cancel(string? reason = null)
+    {
+        MarkCancelled(reason);
     }
 
     public void MarkExecutionUnknown(string? error = null)

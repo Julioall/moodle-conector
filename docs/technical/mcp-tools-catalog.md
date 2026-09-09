@@ -166,6 +166,9 @@ humana e minimização de dados.
 | `start_pending_grading_run` | Iniciar Fluxo de Correcao | `DraftOnly` | Não | Cria lote interno | Implementada; `includeAlreadyGraded=true` somente para pedido explícito de reavaliação |
 | `requeue_blocked_grading_items` | Reabrir Itens Bloqueados | `DraftOnly` | Não | Atualiza estado interno | Implementada; não reabre itens publicados |
 | `cancel_assisted_grading_batch` | Cancelar/Limpar Lote de Correção | `R3` | Não | Cancela estado interno; expurgo opcional da projeção local | Implementada; exige `CANCELAR_CORRECOES_LOCAIS` e preserva itens publicados |
+| `find_grading_correction_by_submission` | Localizar Correcao por Submissao | `ReadOnly` | Sim | Não | Implementada; retorna handles locais do proprietário sem conteúdo da entrega |
+| `requeue_failed_grading_publication_items` | Recuperar Falhas de Publicacao | `DraftOnly` | Não | Atualiza estado interno | Implementada; preserva a revisão final e recusa `ExecutionUnknown` |
+| `cancel_grading_batch` | Cancelar Lote de Correcao | `DraftOnly` | Não | Cancela processamento local | Implementada; aceita lote ou execução agregada, cancela confirmações pendentes e não libera claims `ExecutionUnknown` |
 | `prepare_ai_grading_batch` | Preparar Lote Correcao IA | `ReadOnly` | Sim | Não | Implementada |
 | `save_ai_grading_batch` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Rascunho interno | Implementada; sem confirmação |
 | `export_grading_corrections_csv` | Exportar Correcoes para CSV | `ReadOnly` | Sim | Não | Implementada; saída externa `nome;nota;feedback` |
@@ -752,6 +755,7 @@ Descricao:
 - Um worker recuperável revalida contexto, submissão, tentativa, matrícula, nota/feedback atual e fingerprint antes de cada escrita; não há retry cego.
 - Cada item é protegido por claim ativa mutuamente exclusiva `(conexão, atividade, usuário Moodle, tentativa)` e registra `commit_succeeded`, `commit_failed`, `execution_unknown` ou `commit_blocked` em `moodle_audit_logs`.
 - Repetições com o mesmo `pendingActionId` retomam somente itens ainda seguros; timeouts após envio permanecem `ExecutionUnknown` e exigem reconciliação explícita.
+- Falhas comprovadamente não aplicadas podem ser recuperadas por `requeue_failed_grading_publication_items`, mantendo a nota/feedback revisados; a recuperação exige nova prévia e confirmação.
 
 Parametros:
 

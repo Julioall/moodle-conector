@@ -128,6 +128,41 @@ public sealed class PendingMoodleActionRepositoryTests
         Assert.Equal(PendingActionStatus.Authorized, reloaded!.Status);
     }
 
+    [Fact]
+    public async Task ListGradingPublicationsByBatchId_EncontraAcoesAntigasMasNaoAcoesDeOutroTipo()
+    {
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseInMemoryDatabase($"pending-actions-by-batch-{Guid.NewGuid():N}")
+            .Options;
+        var batchId = Guid.NewGuid();
+        var target = Create(
+            "confirmar_lancamento_lote_moodle",
+            JsonSerializer.Serialize(new { batchJobId = batchId, publicationId = Guid.NewGuid() }));
+        target.Authorize("teacher-1", DateTimeOffset.UtcNow);
+        var unknown = Create(
+            "criar_previa_lancamento_lote",
+            JsonSerializer.Serialize(new { batchJobId = batchId, publicationId = Guid.NewGuid() }));
+        unknown.MarkExecutionUnknown("resposta perdida");
+        var unrelated = Create(
+            "confirmar_lancamento_lote_moodle",
+            JsonSerializer.Serialize(new { batchJobId = Guid.NewGuid() }));
+
+        await using (var seed = new ConnectorDbContext(options))
+        {
+            seed.PendingMoodleActions.AddRange(target, unknown, unrelated);
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = new ConnectorDbContext(options);
+        var repository = new PendingMoodleActionRepository(db);
+        var result = await repository.ListGradingPublicationsByBatchIdAsync(batchId, CancellationToken.None);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, action => action.Status == PendingActionStatus.Authorized);
+        Assert.Contains(result, action => action.Status == PendingActionStatus.ExecutionUnknown);
+        Assert.DoesNotContain(result, action => action.PayloadJson.Contains(unrelated.Id.ToString(), StringComparison.Ordinal));
+    }
+
     private static PendingMoodleAction Create(string toolName, string payloadJson = "{}") => new()
     {
         ToolName = toolName,

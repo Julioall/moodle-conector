@@ -328,7 +328,7 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         dbContext.GradingItems.OrderByDescending(item => item.UpdatedAt)
             .FirstOrDefaultAsync(item => item.SubmissionId == submissionId, cancellationToken);
 
-    public async Task<IReadOnlyList<GradingSubmissionIdentity>> ListExistingSubmissionIdentitiesAsync(
+    public async Task<IReadOnlyList<GradingSubmissionMatch>> ListExistingSubmissionMatchesAsync(
         IReadOnlyCollection<GradingSubmissionIdentity> identities,
         string? moodleConnectionId,
         string? connectorClientId,
@@ -344,15 +344,115 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
         var assignmentIds = identities.Select(identity => identity.AssignmentId).Distinct().ToArray();
         var submissionIds = identities.Select(identity => identity.SubmissionId).Distinct().ToArray();
 
+        var query = BuildSubmissionMatchQuery(
+            submissionIds,
+            courseIds,
+            assignmentIds,
+            moodleConnectionId,
+            connectorClientId,
+            connectionAlias,
+            createdBySubject: null);
+        var matches = await MaterializeSubmissionMatchesAsync(query, cancellationToken);
+        var expected = identities.ToHashSet();
+        return matches
+            .Where(match => expected.Contains(match.Identity))
+            .DistinctBy(match => match.GradingItemId)
+            .ToArray();
+    }
+
+    public async Task<IReadOnlyList<GradingSubmissionMatch>> FindSubmissionMatchesAsync(
+        long submissionId,
+        long? courseId,
+        long? assignmentId,
+        string? moodleConnectionId,
+        string? connectorClientId,
+        string? connectionAlias,
+        string? createdBySubject,
+        CancellationToken cancellationToken)
+    {
+        if (submissionId <= 0)
+        {
+            return [];
+        }
+
+        var query = BuildSubmissionMatchQuery(
+            [submissionId],
+            courseId is long requestedCourseId ? [requestedCourseId] : null,
+            assignmentId is long requestedAssignmentId ? [requestedAssignmentId] : null,
+            moodleConnectionId,
+            connectorClientId,
+            connectionAlias,
+            createdBySubject);
+        return await MaterializeSubmissionMatchesAsync(query, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<GradingSubmissionIdentity>> ListExistingSubmissionIdentitiesAsync(
+        IReadOnlyCollection<GradingSubmissionIdentity> identities,
+        string? moodleConnectionId,
+        string? connectorClientId,
+        string? connectionAlias,
+        CancellationToken cancellationToken)
+    {
+        var matches = await ListExistingSubmissionMatchesAsync(
+            identities,
+            moodleConnectionId,
+            connectorClientId,
+            connectionAlias,
+            cancellationToken);
+        return matches.Select(match => match.Identity).Distinct().ToArray();
+    }
+
+    private IQueryable<GradingSubmissionMatchProjection> BuildSubmissionMatchQuery(
+        IReadOnlyCollection<long> submissionIds,
+        IReadOnlyCollection<long>? courseIds,
+        IReadOnlyCollection<long>? assignmentIds,
+        string? moodleConnectionId,
+        string? connectorClientId,
+        string? connectionAlias,
+        string? createdBySubject)
+    {
         var query = from item in dbContext.GradingItems.AsNoTracking()
                     join batch in dbContext.GradingBatches.AsNoTracking()
                         on item.BatchId equals batch.Id
                     where item.SubmissionId.HasValue &&
-                          courseIds.Contains(item.CourseId) &&
-                          assignmentIds.Contains(item.AssignmentId) &&
                           submissionIds.Contains(item.SubmissionId.Value) &&
-                          batch.Status != GradingBatchStatus.Cancelled
-                    select new { item.CourseId, item.AssignmentId, item.SubmissionId, item.AttemptNumber, batch };
+                          (batch.Status != GradingBatchStatus.Cancelled ||
+                           item.Status == GradingItemStatus.Committed ||
+                           item.CommitStatus == GradingCommitStatus.Succeeded ||
+                           item.CommitStatus == GradingCommitStatus.ExecutionUnknown)
+                    select new GradingSubmissionMatchProjection
+                    {
+                        CourseId = item.CourseId,
+                        AssignmentId = item.AssignmentId,
+                        SubmissionId = item.SubmissionId!.Value,
+                        AttemptNumber = item.AttemptNumber,
+                        GradingItemId = item.Id,
+                        BatchJobId = batch.Id,
+                        GradingRunId = batch.GradingRunId,
+                        CreatedBySubject = batch.CreatedBySubject,
+                        ItemStatus = item.Status,
+                        CommitStatus = item.CommitStatus,
+                        BatchStatus = batch.Status,
+                        MoodleConnectionId = batch.MoodleConnectionId,
+                        ConnectorClientId = batch.ConnectorClientId,
+                        ConnectionAlias = batch.ConnectionAlias
+                    };
+
+        if (courseIds is not null && courseIds.Count > 0)
+        {
+            query = query.Where(row => courseIds.Contains(row.CourseId));
+        }
+
+        if (assignmentIds is not null && assignmentIds.Count > 0)
+        {
+            query = query.Where(row => assignmentIds.Contains(row.AssignmentId));
+        }
+
+        if (!string.IsNullOrWhiteSpace(createdBySubject))
+        {
+            var normalizedSubject = createdBySubject.Trim();
+            query = query.Where(row => row.CreatedBySubject == normalizedSubject);
+        }
 
         // Prefer the stable connection id. During rollout, old batches may
         // only have client/alias (or no connection metadata), so retain those
@@ -363,30 +463,79 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             var normalizedClientId = string.IsNullOrWhiteSpace(connectorClientId) ? null : connectorClientId.Trim();
             var normalizedAlias = string.IsNullOrWhiteSpace(connectionAlias) ? null : connectionAlias.Trim();
             query = query.Where(row =>
-                row.batch.MoodleConnectionId == normalizedConnectionId ||
-                (row.batch.MoodleConnectionId == null &&
-                 (normalizedClientId == null || row.batch.ConnectorClientId == normalizedClientId) &&
-                 (normalizedAlias == null || row.batch.ConnectionAlias == normalizedAlias)));
+                row.MoodleConnectionId == normalizedConnectionId ||
+                (row.MoodleConnectionId == null &&
+                 (normalizedClientId == null || row.ConnectorClientId == normalizedClientId) &&
+                 (normalizedAlias == null || row.ConnectionAlias == normalizedAlias)));
         }
         else if (!string.IsNullOrWhiteSpace(connectorClientId) || !string.IsNullOrWhiteSpace(connectionAlias))
         {
             var normalizedClientId = string.IsNullOrWhiteSpace(connectorClientId) ? null : connectorClientId.Trim();
             var normalizedAlias = string.IsNullOrWhiteSpace(connectionAlias) ? null : connectionAlias.Trim();
             query = query.Where(row =>
-                (normalizedClientId == null || row.batch.ConnectorClientId == normalizedClientId) &&
-                (normalizedAlias == null || row.batch.ConnectionAlias == normalizedAlias));
+                (normalizedClientId == null || row.ConnectorClientId == normalizedClientId) &&
+                (normalizedAlias == null || row.ConnectionAlias == normalizedAlias));
         }
 
-        var rows = await query
-            .Select(row => new GradingSubmissionIdentity(
-                row.CourseId,
-                row.AssignmentId,
-                row.SubmissionId!.Value,
-                row.AttemptNumber))
-            .ToArrayAsync(cancellationToken);
+        return query;
+    }
 
-        var expected = identities.ToHashSet();
-        return rows.Where(expected.Contains).Distinct().ToArray();
+    private async Task<IReadOnlyList<GradingSubmissionMatch>> MaterializeSubmissionMatchesAsync(
+        IQueryable<GradingSubmissionMatchProjection> query,
+        CancellationToken cancellationToken)
+    {
+        var rows = await query.ToArrayAsync(cancellationToken);
+        var runIds = rows
+            .Where(row => row.GradingRunId.HasValue)
+            .Select(row => row.GradingRunId!.Value)
+            .Distinct()
+            .ToArray();
+        var runs = runIds.Length == 0
+            ? new Dictionary<Guid, GradingRunStatus>()
+            : await dbContext.GradingRuns.AsNoTracking()
+                .Where(run => runIds.Contains(run.Id))
+                .ToDictionaryAsync(run => run.Id, run => run.Status, cancellationToken);
+
+        return rows
+            .OrderByDescending(row => row.GradingRunId.HasValue && runs.ContainsKey(row.GradingRunId.Value)
+                ? runs[row.GradingRunId.Value]
+                : GradingRunStatus.Preparing)
+            .ThenByDescending(row => row.GradingItemId)
+            .Select(row => new GradingSubmissionMatch(
+                new GradingSubmissionIdentity(
+                    row.CourseId,
+                    row.AssignmentId,
+                    row.SubmissionId,
+                    row.AttemptNumber),
+                row.GradingItemId,
+                row.BatchJobId,
+                row.GradingRunId,
+                row.CreatedBySubject,
+                row.ItemStatus,
+                row.CommitStatus,
+                row.BatchStatus,
+                row.GradingRunId is Guid runId && runs.TryGetValue(runId, out var runStatus)
+                    ? runStatus
+                    : null))
+            .ToArray();
+    }
+
+    private sealed class GradingSubmissionMatchProjection
+    {
+        public long CourseId { get; init; }
+        public long AssignmentId { get; init; }
+        public long SubmissionId { get; init; }
+        public int? AttemptNumber { get; init; }
+        public Guid GradingItemId { get; init; }
+        public Guid BatchJobId { get; init; }
+        public Guid? GradingRunId { get; init; }
+        public string CreatedBySubject { get; init; } = string.Empty;
+        public GradingItemStatus ItemStatus { get; init; }
+        public GradingCommitStatus CommitStatus { get; init; }
+        public GradingBatchStatus BatchStatus { get; init; }
+        public string? MoodleConnectionId { get; init; }
+        public string? ConnectorClientId { get; init; }
+        public string? ConnectionAlias { get; init; }
     }
 
     public async Task<IReadOnlyDictionary<Guid, AssistedGradingItem>> GetItemsAsync(
