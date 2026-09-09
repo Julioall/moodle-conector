@@ -36,6 +36,20 @@
         "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
       }
     },
+    "cancel_assisted_grading_batch": {
+      "annotations": {
+        "title": "Cancel Assisted Grading Batch",
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
+      }
+    },
     "confirm_access_reminder": {
       "annotations": {
         "title": "Confirm Access Reminder",

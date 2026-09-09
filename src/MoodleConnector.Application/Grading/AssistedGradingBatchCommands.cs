@@ -60,12 +60,22 @@ public sealed record GetAssistedGradingBatchStatusQuery(
     int PageSize) : IRequest<AssistedGradingBatchStatusResult>;
 
 public sealed record CancelAssistedGradingBatchCommand(
-    Guid BatchJobId) : IRequest<CancelAssistedGradingBatchResult>;
+    Guid BatchJobId,
+    bool PurgeLocalData = false,
+    string? ConfirmationText = null,
+    string? Reason = null) : IRequest<CancelAssistedGradingBatchResult>;
 
 public sealed record CancelAssistedGradingBatchResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
     [property: JsonPropertyName("status")] string Status,
-    [property: JsonPropertyName("message")] string Message);
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("purgeRequested")] bool PurgeRequested = false,
+    [property: JsonPropertyName("purged")] bool Purged = false,
+    [property: JsonPropertyName("deletedItems")] int DeletedItems = 0,
+    [property: JsonPropertyName("deletedBatches")] int DeletedBatches = 0,
+    [property: JsonPropertyName("deletedRuns")] int DeletedRuns = 0,
+    [property: JsonPropertyName("publishedItemsPreserved")] int PublishedItemsPreserved = 0,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string>? Warnings = null);
 
 public sealed record AssistedGradingBatchStatusResult(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -2274,6 +2284,35 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
             currentUser,
             request.BatchJobId,
             cancellationToken);
+
+        const string purgeConfirmation = "CANCELAR_CORRECOES_LOCAIS";
+        var purgeRequested = request.PurgeLocalData;
+        if (request.PurgeLocalData &&
+            !string.Equals(request.ConfirmationText?.Trim(), purgeConfirmation, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Para remover dados locais informe exatamente {purgeConfirmation} em confirmationText.");
+        }
+
+        var allItems = new List<AssistedGradingItem>();
+        foreach (var child in scope.Batches)
+        {
+            allItems.AddRange(await GradingItemProcessor.LoadAllBatchItemsAsync(
+                repository,
+                child.Id,
+                cancellationToken));
+        }
+
+        var publishedItems = allItems.Count(item =>
+            item.Status == GradingItemStatus.Committed ||
+            item.CommitStatus == GradingCommitStatus.Succeeded);
+        var executionUnknownItems = allItems.Count(item =>
+            item.CommitStatus == GradingCommitStatus.ExecutionUnknown);
+        var purgeEligible = purgeRequested &&
+            scope.Run?.Status != GradingRunStatus.Completed &&
+            publishedItems == 0 &&
+            executionUnknownItems == 0;
+
         foreach (var child in scope.Batches)
         {
             await orchestrator.CancelAsync(child.Id, cancellationToken);
@@ -2283,17 +2322,65 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
         {
             scope.Run.Cancel();
             await repository.SaveChangesAsync(cancellationToken);
-            return new CancelAssistedGradingBatchResult(
-                scope.RequestedId,
-                scope.Run.Status.ToString(),
-                $"Execucao cancelada; {scope.Batches.Count} sublote(s) foram sinalizados para cancelamento.");
+        }
+        else
+        {
+            await repository.SaveChangesAsync(cancellationToken);
         }
 
-        var batch = scope.FirstBatch!;
+        var warnings = new List<string>();
+        if (publishedItems > 0)
+        {
+            warnings.Add($"{publishedItems} item(ns) ja publicado(s) foram preservados.");
+        }
+
+        if (executionUnknownItems > 0)
+        {
+            warnings.Add($"{executionUnknownItems} item(ns) possuem escrita Moodle de resultado desconhecido e exigem reconciliacao.");
+        }
+
+        GradingLocalPurgeResult? purge = null;
+        if (purgeEligible)
+        {
+            purge = await repository.PurgeCancelledGradingDataAsync(
+                scope.Batches.Select(batch => batch.Id).ToArray(),
+                scope.Run?.Id,
+                cancellationToken);
+            if (!purge.Purged && !string.IsNullOrWhiteSpace(purge.BlockReason))
+            {
+                warnings.Add(purge.BlockReason);
+            }
+        }
+
+        var status = scope.Run?.Status.ToString() ??
+            (scope.FirstBatch?.Status.ToString() ?? GradingBatchStatus.Cancelled.ToString());
+        var message = purge?.Purged == true
+            ? $"Execucao cancelada e limpeza local concluida: {purge.DeletedItems} item(ns) e {purge.DeletedBatches} sublote(s) removidos. Nenhuma alteracao foi feita no Moodle."
+            : scope.Run is not null
+                ? $"Execucao cancelada; {scope.Batches.Count} sublote(s) foram sinalizados para cancelamento."
+                : "Lote cancelado com sucesso.";
+
+        if (purgeRequested && !purgeEligible)
+        {
+            warnings.Add("A limpeza física foi bloqueada porque a execução contém publicação concluída, escrita de resultado desconhecido ou já está concluída.");
+        }
+
+        if (purgeRequested && purge?.Purged != true)
+        {
+            message += " Os dados locais foram preservados pelos guardas de seguranca.";
+        }
+
         return new CancelAssistedGradingBatchResult(
-            batch.Id,
-            batch.Status.ToString(),
-            "Lote cancelado com sucesso.");
+            scope.RequestedId,
+            status,
+            message,
+            PurgeRequested: purgeRequested,
+            Purged: purge?.Purged == true,
+            DeletedItems: purge?.DeletedItems ?? 0,
+            DeletedBatches: purge?.DeletedBatches ?? 0,
+            DeletedRuns: purge?.DeletedRuns ?? 0,
+            PublishedItemsPreserved: publishedItems,
+            Warnings: warnings);
     }
 }
 

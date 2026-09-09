@@ -165,6 +165,7 @@ humana e minimização de dados.
 | `report_students_at_risk` | Report Students at Risk | `SensitiveRead` | Sim | Não | Implementada |
 | `start_pending_grading_run` | Iniciar Fluxo de Correcao | `DraftOnly` | Não | Cria lote interno | Implementada; `includeAlreadyGraded=true` somente para pedido explícito de reavaliação |
 | `requeue_blocked_grading_items` | Reabrir Itens Bloqueados | `DraftOnly` | Não | Atualiza estado interno | Implementada; não reabre itens publicados |
+| `cancel_assisted_grading_batch` | Cancelar/Limpar Lote de Correção | `R3` | Não | Cancela estado interno; expurgo opcional da projeção local | Implementada; exige `CANCELAR_CORRECOES_LOCAIS` e preserva itens publicados |
 | `prepare_ai_grading_batch` | Preparar Lote Correcao IA | `ReadOnly` | Sim | Não | Implementada |
 | `save_ai_grading_batch` | Salvar Correcoes IA Lote | `DraftOnly` | Não | Rascunho interno | Implementada; sem confirmação |
 | `export_grading_corrections_csv` | Exportar Correcoes para CSV | `ReadOnly` | Sim | Não | Implementada; saída externa `nome;nota;feedback` |

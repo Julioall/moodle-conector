@@ -157,6 +157,84 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
+        Name = "cancel_assisted_grading_batch",
+        Title = "Cancel Assisted Grading Batch",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CancelAssistedGradingBatchResult>))]
+    [MoodleToolMetadata(
+        Family = "grading",
+        Classification = "R3",
+        Kind = "destructive-write",
+        CanonicalOperation = "grading.cancel_local_batch",
+        RequiredPlatformPermission = "tool.assignments.grade",
+        Evidence = "Cancela uma execucao local e, somente com confirmacao literal, remove a projeção local de lotes que nunca foram publicados; nunca escreve nem apaga dados no Moodle.")]
+    [Description("Cancela uma execucao local de correcao para impedir novos workers e publicacoes pendentes. Por padrao preserva o historico. Para remover os dados locais de uma execucao que nao possui itens publicados, use purgeLocalData=true e informe confirmationText exatamente como CANCELAR_CORRECOES_LOCAIS. Itens publicados, escritas de resultado desconhecido, leases ativos e publicacoes pendentes bloqueiam o expurgo; o Moodle nunca e alterado por esta ferramenta." )]
+    public async Task<CallToolResult> CancelarLoteCorrecaoAsync(
+        [Description("Identificador do batchJobId legado ou do gradingRunId agregado retornado por start_pending_grading_run.")]
+        Guid batchJobId,
+        [Description("Quando true, remove a projecao local depois dos guardas de seguranca. O padrao e false e apenas cancela.")]
+        bool purgeLocalData = false,
+        [Description("Obrigatorio quando purgeLocalData=true: CANCELAR_CORRECOES_LOCAIS.")]
+        string? confirmationText = null,
+        [Description("Motivo operacional para a auditoria local da solicitacao.")]
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>("Informe um identificador de lote ou execucao valido.");
+        }
+
+        CancelAssistedGradingBatchResult data;
+        try
+        {
+            data = await mediator.Send(
+                new CancelAssistedGradingBatchCommand(
+                    batchJobId,
+                    purgeLocalData,
+                    confirmationText,
+                    reason),
+                cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>("Nao foi possivel cancelar a execucao local neste momento.");
+        }
+
+        var response = new ToolResponse<CancelAssistedGradingBatchResult>(
+            data.Purged ? "ok" : "cancelled",
+            data,
+            data.Warnings ?? [],
+            AuditId: null,
+            DateTimeOffset.UtcNow);
+        var text = data.Purged
+            ? $"Execucao cancelada e removida localmente: {data.DeletedItems} item(ns), {data.DeletedBatches} sublote(s) e {data.DeletedRuns} execucao(oes). Nenhuma alteracao foi feita no Moodle."
+            : data.Message;
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = text }],
+            StructuredContent = JsonSerializer.SerializeToElement(response),
+            IsError = false
+        };
+    }
+
+    [McpServerTool(
         Name = "create_batch_grade_launch_preview",
         Title = "Create Batch Grade Launch Preview",
         ReadOnly = false,

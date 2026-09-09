@@ -28,6 +28,7 @@ public sealed class McpToolMetadataTests
                 "confirm_welcome_message" or "confirm_access_reminder" or "confirm_activity_reminder" or
                 "confirm_recovery_message" or "confirm_closing_message" or "confirm_followup_message" or
                 "manage_user_memory" or "save_user_memory_document" or "remove_user_memory_document" or
+                "cancel_assisted_grading_batch" or
                 "moodle_confirm_write")
             {
                 Assert.True(attribute.Destructive, $"{toolName} deve declarar Destructive=true.");
@@ -47,7 +48,8 @@ public sealed class McpToolMetadataTests
                 Assert.False(attribute.ReadOnly, $"{toolName} remove estado interno e deve declarar ReadOnly=false.");
                 Assert.True(attribute.Idempotent, $"{toolName} deve ser retry-safe pelo documentId.");
             }
-            else if (toolName is "start_pending_grading_run" or "requeue_blocked_grading_items")
+            else if (toolName is "start_pending_grading_run" or "requeue_blocked_grading_items" or
+                     "cancel_assisted_grading_batch")
             {
                 Assert.False(attribute.ReadOnly, $"{toolName} altera estado interno e deve declarar ReadOnly=false.");
                 if (toolName == "start_pending_grading_run")

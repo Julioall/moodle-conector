@@ -577,6 +577,238 @@ public sealed class GradingReviewRepository(ConnectorDbContext dbContext) : IGra
             .ToArrayAsync(cancellationToken);
     }
 
+    public async Task<GradingLocalPurgeResult> PurgeCancelledGradingDataAsync(
+        IReadOnlyCollection<Guid> batchIds,
+        Guid? gradingRunId,
+        CancellationToken cancellationToken)
+    {
+        var normalizedBatchIds = batchIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (normalizedBatchIds.Length == 0 && gradingRunId is null)
+        {
+            return BlockedPurge("Nenhum lote local foi informado para expurgo.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var batchesQuery = dbContext.GradingBatches
+            .Where(batch => normalizedBatchIds.Contains(batch.Id));
+        var batches = await batchesQuery.ToArrayAsync(cancellationToken);
+        if (batches.Length != normalizedBatchIds.Length)
+        {
+            return BlockedPurge("Um ou mais sublotes da execucao nao foram encontrados.");
+        }
+
+        if (batches.Any(batch => batch.Status != GradingBatchStatus.Cancelled))
+        {
+            return BlockedPurge("Cancele todos os sublotes antes de remover os dados locais.");
+        }
+
+        if (gradingRunId is Guid runId && runId != Guid.Empty)
+        {
+            var lineageBatchIds = await QueryBatchesForRun(runId)
+                .Select(batch => batch.Id)
+                .ToArrayAsync(cancellationToken);
+            if (lineageBatchIds.Any(id => !normalizedBatchIds.Contains(id)))
+            {
+                return BlockedPurge("A execucao possui sublotes fora do escopo informado; a limpeza foi interrompida.");
+            }
+        }
+
+        var itemQuery = dbContext.GradingItems
+            .Where(item => normalizedBatchIds.Contains(item.BatchId));
+        var items = await itemQuery.ToArrayAsync(cancellationToken);
+        if (items.Any(item =>
+                item.Status == GradingItemStatus.Committed ||
+                item.CommitStatus == GradingCommitStatus.Succeeded))
+        {
+            return BlockedPurge("A execucao possui itens publicados; os dados historicos foram preservados.");
+        }
+
+        if (items.Any(item => item.CommitStatus == GradingCommitStatus.ExecutionUnknown))
+        {
+            return BlockedPurge("A execucao possui escrita Moodle de resultado desconhecido; reconcilie antes de remover.");
+        }
+
+        if (batches.Any(batch => batch.LeaseUntil is { } batchLease && batchLease > now) ||
+            items.Any(item => item.LeaseUntil is { } itemLease && itemLease > now))
+        {
+            return BlockedPurge("A execucao ainda possui worker ativo; aguarde o lease expirar e tente novamente.");
+        }
+
+        var itemIds = items.Select(item => item.Id).ToArray();
+        var activeClaimCount = itemIds.Length == 0
+            ? 0
+            : await dbContext.GradingPublicationClaims
+                .CountAsync(claim =>
+                    itemIds.Contains(claim.GradingItemId) &&
+                    (claim.Status == "AwaitingConfirmation" ||
+                     claim.Status == "Authorized" ||
+                     claim.Status == "Executing" ||
+                     claim.Status == "ExecutionUnknown"),
+                    cancellationToken);
+        if (activeClaimCount > 0)
+        {
+            return BlockedPurge("A execucao possui uma publicacao pendente ou em execucao; ela nao pode ser removida.");
+        }
+
+        if (gradingRunId is Guid existingRunId && existingRunId != Guid.Empty &&
+            !await dbContext.GradingRuns.AnyAsync(run => run.Id == existingRunId, cancellationToken))
+        {
+            return BlockedPurge("A execucao agregada nao foi encontrada.");
+        }
+
+        var deletedClaims = 0;
+        var deletedProposals = 0;
+        var deletedSnapshots = 0;
+        var deletedEvidence = 0;
+        var deletedArtifacts = 0;
+        var deletedItems = 0;
+        var deletedBatches = 0;
+        var deletedRuns = 0;
+
+        if (IsInMemory)
+        {
+            var claims = itemIds.Length == 0
+                ? []
+                : await dbContext.GradingPublicationClaims
+                    .Where(claim => itemIds.Contains(claim.GradingItemId))
+                    .ToArrayAsync(cancellationToken);
+            var proposals = itemIds.Length == 0
+                ? []
+                : await dbContext.AiGradingProposals
+                    .Where(proposal => itemIds.Contains(proposal.GradingItemId))
+                    .ToArrayAsync(cancellationToken);
+            var snapshots = itemIds.Length == 0
+                ? []
+                : await dbContext.GradingContextSnapshots
+                    .Where(snapshot => itemIds.Contains(snapshot.GradingItemId))
+                    .ToArrayAsync(cancellationToken);
+            var evidence = itemIds.Length == 0
+                ? []
+                : await dbContext.GradingEvidence
+                    .Where(entry => itemIds.Contains(entry.GradingItemId))
+                    .ToArrayAsync(cancellationToken);
+            var artifacts = itemIds.Length == 0
+                ? []
+                : await dbContext.GradingArtifacts
+                    .Where(artifact => itemIds.Contains(artifact.GradingItemId))
+                    .ToArrayAsync(cancellationToken);
+            var inMemoryItems = items;
+            var inMemoryBatches = batches;
+
+            dbContext.GradingPublicationClaims.RemoveRange(claims);
+            dbContext.AiGradingProposals.RemoveRange(proposals);
+            dbContext.GradingContextSnapshots.RemoveRange(snapshots);
+            dbContext.GradingEvidence.RemoveRange(evidence);
+            dbContext.GradingArtifacts.RemoveRange(artifacts);
+            dbContext.GradingItems.RemoveRange(inMemoryItems);
+            dbContext.GradingBatches.RemoveRange(inMemoryBatches);
+            if (gradingRunId is Guid inMemoryRunId && inMemoryRunId != Guid.Empty)
+            {
+                var run = await dbContext.GradingRuns
+                    .SingleOrDefaultAsync(candidate => candidate.Id == inMemoryRunId, cancellationToken);
+                if (run is not null)
+                {
+                    dbContext.GradingRuns.Remove(run);
+                    deletedRuns = 1;
+                }
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return new GradingLocalPurgeResult(
+                Purged: true,
+                deletedRuns,
+                inMemoryBatches.Length,
+                inMemoryItems.Length,
+                artifacts.Length,
+                evidence.Length,
+                snapshots.Length,
+                proposals.Length,
+                claims.Length);
+        }
+
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            // O cancelamento já foi persistido pelo handler. Limpar o tracker
+            // evita que entidades carregadas antes do expurgo sejam gravadas
+            // novamente depois dos ExecuteDelete abaixo.
+            dbContext.ChangeTracker.Clear();
+
+            if (itemIds.Length > 0)
+            {
+                deletedClaims = await dbContext.GradingPublicationClaims
+                    .Where(claim => itemIds.Contains(claim.GradingItemId))
+                    .ExecuteDeleteAsync(cancellationToken);
+                deletedProposals = await dbContext.AiGradingProposals
+                    .Where(proposal => itemIds.Contains(proposal.GradingItemId))
+                    .ExecuteDeleteAsync(cancellationToken);
+                deletedSnapshots = await dbContext.GradingContextSnapshots
+                    .Where(snapshot => itemIds.Contains(snapshot.GradingItemId))
+                    .ExecuteDeleteAsync(cancellationToken);
+                deletedEvidence = await dbContext.GradingEvidence
+                    .Where(evidence => itemIds.Contains(evidence.GradingItemId))
+                    .ExecuteDeleteAsync(cancellationToken);
+                deletedArtifacts = await dbContext.GradingArtifacts
+                    .Where(artifact => itemIds.Contains(artifact.GradingItemId))
+                    .ExecuteDeleteAsync(cancellationToken);
+                deletedItems = await dbContext.GradingItems
+                    .Where(item => normalizedBatchIds.Contains(item.BatchId))
+                    .ExecuteDeleteAsync(cancellationToken);
+            }
+
+            deletedBatches = await dbContext.GradingBatches
+                .Where(batch => normalizedBatchIds.Contains(batch.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            if (gradingRunId is Guid runToDelete && runToDelete != Guid.Empty)
+            {
+                deletedRuns = await dbContext.GradingRuns
+                    .Where(run => run.Id == runToDelete)
+                    .ExecuteDeleteAsync(cancellationToken);
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+
+            throw;
+        }
+
+        return new GradingLocalPurgeResult(
+            Purged: true,
+            deletedRuns,
+            deletedBatches,
+            deletedItems,
+            deletedArtifacts,
+            deletedEvidence,
+            deletedSnapshots,
+            deletedProposals,
+            deletedClaims);
+
+        static GradingLocalPurgeResult BlockedPurge(string reason) => new(
+            Purged: false,
+            DeletedRuns: 0,
+            DeletedBatches: 0,
+            DeletedItems: 0,
+            DeletedArtifacts: 0,
+            DeletedEvidence: 0,
+            DeletedContextSnapshots: 0,
+            DeletedProposals: 0,
+            DeletedPublicationClaims: 0,
+            BlockReason: reason);
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken)
     {
         return dbContext.SaveChangesAsync(cancellationToken);

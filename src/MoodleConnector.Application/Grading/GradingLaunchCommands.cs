@@ -1017,6 +1017,26 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             }
 
             gradingRun = await ResolvePublicationRunAsync(payload.BatchJobId, cancellationToken);
+            var directBatchForCancellation = await repository.GetBatchAsync(payload.BatchJobId, cancellationToken);
+            if (gradingRun?.Status == GradingRunStatus.Cancelled ||
+                directBatchForCancellation?.Status == GradingBatchStatus.Cancelled)
+            {
+                action.MarkCancelled("A execucao de correcao foi cancelada antes da publicacao.");
+                await pendingActions.SaveChangesAsync(cancellationToken);
+                if (payload.PublicationId is Guid cancelledPublicationId)
+                {
+                    await repository.ReleasePublicationClaimsAsync(cancelledPublicationId, cancellationToken);
+                }
+
+                return new ConfirmMoodleBatchLaunchResult(
+                    "cancelled",
+                    request.PendingActionId,
+                    SentItems: 0,
+                    FailedItems: 0,
+                    Failures: [],
+                    confirmation.AuditId);
+            }
+
             if (gradingRun is not null)
             {
                 gradingRun.MarkPublishing();

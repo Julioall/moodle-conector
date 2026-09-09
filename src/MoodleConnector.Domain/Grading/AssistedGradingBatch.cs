@@ -227,6 +227,12 @@ public sealed class AssistedGradingBatch
         }
 
         Status = GradingBatchStatus.Cancelled;
+        // Um cancelamento invalida o lease operacional. Workers que já
+        // estavam em execução ainda podem concluir a iteração atual, mas não
+        // poderão reclamar o lote novamente nem manter a fila presa.
+        LeaseOwner = null;
+        LeaseUntil = null;
+        NextAttemptAt = null;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

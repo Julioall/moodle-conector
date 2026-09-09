@@ -695,6 +695,82 @@ public sealed class GradingReviewRepositoryTests
         Assert.Equal(claimTime.AddMinutes(2), recovered.NextAttemptAt);
     }
 
+    [Fact]
+    public async Task PurgeCancelledGradingData_RemoveSomenteProjecaoLocal()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new GradingReviewRepository(dbContext);
+        var run = GradingRun.Create("teacher-1");
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1, gradingRunId: run.Id);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        var artifact = new GradingArtifact(
+            Guid.NewGuid(), item.Id, "submission_file", "answer.txt", "text/plain", "abc123", 10,
+            ExtractionStatus.Succeeded, null, null, DateTimeOffset.UtcNow);
+        var evidence = new GradingEvidence(
+            Guid.NewGuid(), item.Id, "c1", "Criterio", 10m, 8m, "Evidencia", null, false, DateTimeOffset.UtcNow);
+        dbContext.GradingRuns.Add(run);
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        dbContext.GradingArtifacts.Add(artifact);
+        dbContext.GradingEvidence.Add(evidence);
+        dbContext.GradingPublicationClaims.Add(new GradingPublicationClaimEntity
+        {
+            PublicationId = Guid.NewGuid(),
+            GradingItemId = item.Id,
+            ConnectionKey = "fieg",
+            AssignmentId = 501,
+            MoodleUserId = 101,
+            AttemptNumber = 0,
+            Status = "Released",
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1)
+        });
+        batch.Cancel();
+        await dbContext.SaveChangesAsync();
+
+        var result = await repository.PurgeCancelledGradingDataAsync(
+            [batch.Id],
+            run.Id,
+            CancellationToken.None);
+
+        Assert.True(result.Purged);
+        Assert.Equal(1, result.DeletedRuns);
+        Assert.Equal(1, result.DeletedBatches);
+        Assert.Equal(1, result.DeletedItems);
+        Assert.Equal(1, result.DeletedArtifacts);
+        Assert.Equal(1, result.DeletedEvidence);
+        Assert.Equal(1, result.DeletedPublicationClaims);
+        Assert.Empty(dbContext.GradingRuns);
+        Assert.Empty(dbContext.GradingBatches);
+        Assert.Empty(dbContext.GradingItems);
+        Assert.Empty(dbContext.GradingArtifacts);
+        Assert.Empty(dbContext.GradingEvidence);
+        Assert.Empty(dbContext.GradingPublicationClaims);
+    }
+
+    [Fact]
+    public async Task PurgeCancelledGradingData_PreservaItemPublicado()
+    {
+        await using var dbContext = CreateDbContext();
+        var repository = new GradingReviewRepository(dbContext);
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkCommitSucceeded();
+        batch.Cancel();
+        dbContext.GradingBatches.Add(batch);
+        dbContext.GradingItems.Add(item);
+        await dbContext.SaveChangesAsync();
+
+        var result = await repository.PurgeCancelledGradingDataAsync(
+            [batch.Id],
+            null,
+            CancellationToken.None);
+
+        Assert.False(result.Purged);
+        Assert.Contains("publicados", result.BlockReason, StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(await repository.GetBatchAsync(batch.Id, CancellationToken.None));
+        Assert.NotNull(await repository.GetItemAsync(item.Id, CancellationToken.None));
+    }
+
     private static ConnectorDbContext CreateDbContext()
     {
         var options = new DbContextOptionsBuilder<ConnectorDbContext>()

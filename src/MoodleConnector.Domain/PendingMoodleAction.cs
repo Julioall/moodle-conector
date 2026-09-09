@@ -119,6 +119,26 @@ public sealed class PendingMoodleAction
         LastExecutionError = string.IsNullOrWhiteSpace(error) ? null : error.Trim();
     }
 
+    /// <summary>
+    /// Cancela uma acao de publicacao que ainda nao terminou. Acoes executadas
+    /// ou com resultado remoto desconhecido nunca podem ser apagadas por um
+    /// cancelamento local; elas precisam permanecer disponiveis para auditoria
+    /// e reconciliacao.
+    /// </summary>
+    public bool MarkCancelled(string? reason = null)
+    {
+        if (Status is PendingActionStatus.Executed or PendingActionStatus.ExecutionUnknown)
+        {
+            return false;
+        }
+
+        Status = PendingActionStatus.Cancelled;
+        ExecutionOwner = null;
+        ExecutionLeaseUntil = null;
+        LastExecutionError = string.IsNullOrWhiteSpace(reason) ? LastExecutionError : reason.Trim();
+        return true;
+    }
+
     public void MarkExecutionUnknown(string? error = null)
     {
         // A confirmação é persistida com uma atualização atômica. O agregado

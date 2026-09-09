@@ -25,6 +25,23 @@ public sealed record GradingRunScope(
     GradingRunStatus Status);
 
 /// <summary>
+/// Resultado de uma limpeza local de correção. A operação nunca remove
+/// registros do Moodle; ela só elimina a projeção local depois que todos os
+/// guardas de publicação e de concorrência foram satisfeitos.
+/// </summary>
+public sealed record GradingLocalPurgeResult(
+    bool Purged,
+    int DeletedRuns,
+    int DeletedBatches,
+    int DeletedItems,
+    int DeletedArtifacts,
+    int DeletedEvidence,
+    int DeletedContextSnapshots,
+    int DeletedProposals,
+    int DeletedPublicationClaims,
+    string? BlockReason = null);
+
+/// <summary>
 /// Identidade estável de uma entrega Moodle para evitar que uma nova leitura
 /// do mesmo curso crie outro item de correção. O conteúdo da entrega nunca
 /// participa desta chave.
@@ -184,6 +201,28 @@ public interface IGradingReviewRepository
     Task<IReadOnlyList<AssistedGradingBatch>> ListBatchesByCreatorAsync(
         string createdBySubject,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Remove a projeção local de lotes previamente cancelados. Implementações
+    /// duráveis devem rejeitar a operação quando houver item publicado,
+    /// resultado de escrita desconhecido, lease ativo ou claim de publicação
+    /// ativo. O Moodle nunca é chamado por este método.
+    /// </summary>
+    Task<GradingLocalPurgeResult> PurgeCancelledGradingDataAsync(
+        IReadOnlyCollection<Guid> batchIds,
+        Guid? gradingRunId,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new GradingLocalPurgeResult(
+            Purged: false,
+            DeletedRuns: 0,
+            DeletedBatches: 0,
+            DeletedItems: 0,
+            DeletedArtifacts: 0,
+            DeletedEvidence: 0,
+            DeletedContextSnapshots: 0,
+            DeletedProposals: 0,
+            DeletedPublicationClaims: 0,
+            BlockReason: "Este repositorio nao suporta expurgo local de correcoes."));
 
     /// <summary>
     /// Reads one globally ordered page from a durable grading run. The
