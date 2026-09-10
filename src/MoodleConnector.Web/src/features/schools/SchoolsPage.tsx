@@ -114,7 +114,9 @@ export function SchoolsPage() {
   useEffect(() => {
     if (searchQuery.data?.data) onCoursesLoaded(searchQuery.data.data);
   }, [onCoursesLoaded, searchQuery.data?.data]);
-  const catalogCourses = normalizedSearch ? searchQuery.data?.data ?? [] : loadedCourses;
+  const catalogCourses = useMemo(
+    () => normalizedSearch ? searchQuery.data?.data ?? [] : loadedCourses,
+    [loadedCourses, normalizedSearch, searchQuery.data?.data]);
   const visibleCourses = useMemo(() => filterCoursesByLifecycle(normalizeCourseEndDatesBySequence(catalogCourses), selectedStatuses), [catalogCourses, selectedStatuses]);
   const courseGroups = useMemo(() => groupCoursesByCategory(visibleCourses), [visibleCourses]);
   const catalogRefreshing = query.data?.meta.complete === false || query.data?.meta.refreshQueued === true || Boolean(normalizedSearch && (searchQuery.isPending || searchQuery.data?.meta.complete === false || searchQuery.data?.meta.refreshQueued === true));
