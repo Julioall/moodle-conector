@@ -872,17 +872,39 @@ internal sealed class MoodleSnapshotSyncQueue(
 
         var nowForCourse = DateTimeOffset.UtcNow;
         var finishedCourse = courseSummary.EndDate is not null && courseSummary.EndDate < nowForCourse;
-        var frozenCheckDataset = work.Dataset == MoodleSnapshotDatasets.Gradebook
-            ? MoodleSnapshotDatasets.Gradebook
-            : MoodleSnapshotDatasets.Activities;
-        var existingSnapshot = await db.MoodleSnapshots.AsNoTracking().SingleOrDefaultAsync(
-            item => item.OwnerId == work.OwnerId &&
-                    (item.ConnectionId == work.ConnectionId ||
-                     (item.ConnectionId == string.Empty && item.ConnectionAlias == work.ConnectionAlias)) &&
-                    item.SnapshotType == frozenCheckDataset &&
-                    item.CourseId == courseSummary.CourseId,
-            cancellationToken);
-        if (finishedCourse && existingSnapshot?.IsFrozen == true && !work.Force)
+        var gradebookFrozen = courseSummary.EndDate is { } endDate &&
+            endDate.AddDays(_options.GradebookFreezeAfterCourseEndDays) <= nowForCourse;
+        var frozenCheckDataset = work.Dataset switch
+        {
+            MoodleSnapshotDatasets.Activities or
+            MoodleSnapshotDatasets.Gradebook or
+            MoodleSnapshotDatasets.Submissions => work.Dataset,
+            _ => null,
+        };
+        var snapshotShouldBeFrozen = work.Dataset switch
+        {
+            MoodleSnapshotDatasets.Activities => finishedCourse,
+            MoodleSnapshotDatasets.Gradebook or MoodleSnapshotDatasets.Submissions => gradebookFrozen,
+            _ => false,
+        };
+        var existingSnapshot = frozenCheckDataset is null
+            ? null
+            : await db.MoodleSnapshots.AsNoTracking().SingleOrDefaultAsync(
+                item => item.OwnerId == work.OwnerId &&
+                        (item.ConnectionId == work.ConnectionId ||
+                         (item.ConnectionId == string.Empty && item.ConnectionAlias == work.ConnectionAlias)) &&
+                        item.SnapshotType == frozenCheckDataset &&
+                        item.CourseId == courseSummary.CourseId,
+                cancellationToken);
+        if (snapshotShouldBeFrozen &&
+            existingSnapshot?.IsFrozen == true &&
+            // FrozenAt was introduced with the post-course freeze window. A
+            // legacy gradebook/submissions head has no proof that it passed
+            // the window, so refresh it once instead of treating it as
+            // immutable forever.
+            (work.Dataset is not (MoodleSnapshotDatasets.Gradebook or MoodleSnapshotDatasets.Submissions) ||
+                existingSnapshot.FrozenAt is not null) &&
+            !work.Force)
         {
             return new SnapshotSyncResult(existingSnapshot.RecordCount, false);
         }
@@ -992,8 +1014,8 @@ internal sealed class MoodleSnapshotSyncQueue(
                     MoodleSnapshotDatasets.Gradebook,
                     courseSummary.CourseId,
                     gradebook,
-                    finishedCourse ? "cold" : "hot",
-                    finishedCourse,
+                    gradebookFrozen ? "cold" : "hot",
+                    gradebookFrozen,
                     cancellationToken,
                     completeOverride: !students.HasMore && gradebook.Coverage.IsComplete);
                 records = CountRecords(gradebook);
@@ -1110,8 +1132,8 @@ internal sealed class MoodleSnapshotSyncQueue(
                     MoodleSnapshotDatasets.Submissions,
                     courseSummary.CourseId,
                     snapshot,
-                    finishedCourse ? "cold" : "hot",
-                    finishedCourse,
+                    gradebookFrozen ? "cold" : "hot",
+                    gradebookFrozen,
                     cancellationToken,
                     completeOverride: submissionsComplete);
                 records = CountRecords(snapshot);
@@ -1469,6 +1491,7 @@ internal sealed class MoodleSnapshotSyncQueue(
         }
         entity.Tier = tier;
         entity.IsFrozen = frozen;
+        entity.FrozenAt = frozen ? entity.FrozenAt ?? now : null;
         entity.UpdatedAt = now;
         entity.FreshUntil = now.Add(freshInterval);
         entity.StaleUntil = now.Add(freshInterval + GetStaleWindow(type, tier, frozen));

@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
+using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure;
 
 namespace MoodleConnector.Application.Tests.Infrastructure;
@@ -92,5 +94,44 @@ public sealed class MoodleSnapshotStoreTests
 
         Assert.NotNull(read);
         Assert.Equal("legacy", read!.Data["state"]);
+    }
+
+    [Fact]
+    public async Task GetAsync_NaoTrataGradebookCongeladoLegadoComoEterno()
+    {
+        var ownerId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ConnectorDbContext>()
+            .UseInMemoryDatabase($"snapshot-legacy-gradebook-{Guid.NewGuid():N}")
+            .Options;
+        await using var db = new ConnectorDbContext(options);
+        var now = DateTimeOffset.UtcNow;
+        var payload = new CourseGradebookSnapshot(
+            "course-1",
+            new Dictionary<string, CourseGradebook>(StringComparer.OrdinalIgnoreCase),
+            new GradebookSnapshotCoverage("bulk", 0, 0, true, false, [], []));
+        db.MoodleSnapshots.Add(new MoodleSnapshotEntity
+        {
+            Id = Guid.NewGuid(),
+            OwnerId = ownerId,
+            ConnectionId = string.Empty,
+            ConnectionAlias = "legado",
+            SnapshotType = MoodleSnapshotDatasets.Gradebook,
+            CourseId = "course-1",
+            PayloadJson = System.Text.Json.JsonSerializer.Serialize(payload),
+            Tier = "cold",
+            IsFrozen = true,
+            UpdatedAt = now.AddDays(-1),
+            FreshUntil = now.AddYears(10),
+            StaleUntil = now.AddYears(10),
+        });
+        await db.SaveChangesAsync();
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var metrics = new MoodleSnapshotMetrics();
+        var store = new MoodleSnapshotStore(db, cache, metrics, NullLogger<MoodleSnapshotStore>.Instance);
+
+        var read = await store.GetAsync<CourseGradebookSnapshot>(ownerId, "legado", MoodleSnapshotDatasets.Gradebook, "course-1");
+
+        Assert.Null(read);
     }
 }

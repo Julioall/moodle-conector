@@ -315,6 +315,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         moodleSnapshot.Property(x => x.PayloadJson).HasColumnType("jsonb").IsRequired();
         moodleSnapshot.Property(x => x.LastRunId);
         moodleSnapshot.Property(x => x.Tier).HasMaxLength(16).IsRequired();
+        moodleSnapshot.Property(x => x.FrozenAt);
         moodleSnapshot.Property(x => x.UpdatedAt).IsRequired();
         moodleSnapshot.Property(x => x.LastError).HasMaxLength(4000);
         moodleSnapshot.Property(x => x.PayloadHash).HasMaxLength(64);

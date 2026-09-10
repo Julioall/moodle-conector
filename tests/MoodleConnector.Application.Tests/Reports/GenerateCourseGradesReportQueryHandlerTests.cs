@@ -73,6 +73,26 @@ public sealed class GenerateCourseGradesReportQueryHandlerTests
     }
 
     [Fact]
+    public async Task Handle_PreservesZeroComoNotaValida()
+    {
+        var student = MakeStudent("zero", "Daphka Adonis");
+        var handler = CreateHandler(
+            [student],
+            new Dictionary<string, IReadOnlyList<GradebookItem>>
+            {
+                [student.UserId] = [MakeGradeItem("course-total", "Total do curso", "course", 0m)]
+            });
+
+        var result = await handler.Handle(new GenerateCourseGradesReportQuery("course-1"), CancellationToken.None);
+
+        var row = Assert.Single(result.Students);
+        Assert.Equal(0m, row.TotalGrade);
+        Assert.Equal("com_nota", row.Status);
+        Assert.Equal(1, result.StudentsWithGrade);
+        Assert.Equal(0, result.StudentsWithoutGrade);
+    }
+
+    [Fact]
     public async Task Handle_Distingue_erro_de_gradebook_de_aluno_sem_nota()
     {
         var students = new[]

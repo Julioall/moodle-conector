@@ -4,6 +4,7 @@ using MediatR;
 using ModelContextProtocol.Protocol;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Reports.Queries;
+using MoodleConnector.Domain;
 using MoodleConnector.Presentation.Tools.Reports;
 
 namespace MoodleConnector.Application.Tests.Tools.Reports;
@@ -108,6 +109,109 @@ public sealed class MoodleReportToolsTests
         Assert.Equal("live", structured.GetProperty("freshness").GetProperty("source").GetString());
     }
 
+    [Fact]
+    public async Task ExportaExcel_NaoReutilizaGradebookQuandoSnapshotEstaStale()
+    {
+        var snapshot = new CourseReadSnapshot(
+            "101",
+            Activities: null,
+            Students: new MoodleSnapshotEnvelope<CourseParticipantsPage>(
+                new CourseParticipantsPage("101", 1, 100, ParticipantStatusFilter.Active, true, false, false, []),
+                DateTimeOffset.UtcNow,
+                IsStale: false,
+                IsFrozen: false,
+                Tier: "hot"),
+            Groups: null,
+            Submissions: null,
+            Gradebook: new MoodleSnapshotEnvelope<CourseGradebookSnapshot>(
+                new CourseGradebookSnapshot(
+                    "101",
+                    new Dictionary<string, CourseGradebook>(StringComparer.OrdinalIgnoreCase),
+                    new GradebookSnapshotCoverage("bulk", 0, 0, true, false, [], [])),
+                DateTimeOffset.UtcNow.AddHours(-3),
+                IsStale: true,
+                IsFrozen: false,
+                Tier: "hot"),
+            new CourseReadSnapshotMetadata(
+                [MoodleSnapshotDatasets.Students, MoodleSnapshotDatasets.Gradebook],
+                [],
+                [MoodleSnapshotDatasets.Gradebook],
+                [],
+                DateTimeOffset.UtcNow.AddHours(-3),
+                DateTimeOffset.UtcNow,
+                10800,
+                IsComplete: false,
+                RefreshQueued: true));
+        var mediator = new FakeMediator(CreateReport());
+        var tool = new MoodleReportTools(
+            mediator,
+            new FakeSelection(),
+            new FakeUserResolver(),
+            snapshotCoordinator: new FakeSnapshotCoordinator(snapshot));
+
+        var result = await tool.ExportarRelatorioNotasExcelAsync("101");
+
+        Assert.False(result.IsError);
+        var request = Assert.IsType<GenerateCourseGradesReportQuery>(mediator.LastRequest);
+        Assert.Null(request.PrefetchedGradebook);
+    }
+
+    [Fact]
+    public async Task RelatorioDeNotas_UsaGradebookLiveMesmoComSnapshotFresco()
+    {
+        var mediator = new FakeMediator(CreateReport());
+        var tool = new MoodleReportTools(
+            mediator,
+            new FakeSelection(),
+            new FakeUserResolver(),
+            snapshotCoordinator: new FakeSnapshotCoordinator(CreateCompleteSnapshot()));
+
+        var result = await tool.GerarRelatorioNotasCursoAsync("101");
+
+        var request = Assert.IsType<GenerateCourseGradesReportQuery>(mediator.LastRequest);
+        Assert.Null(request.PrefetchedGradebook);
+        var structured = Assert.IsType<JsonElement>(result.StructuredContent);
+        Assert.Equal("live", structured.GetProperty("freshness").GetProperty("source").GetString());
+        Assert.Contains(
+            structured.GetProperty("warnings").EnumerateArray(),
+            warning => warning.GetString()!.Contains("consultados ao vivo", StringComparison.Ordinal));
+    }
+
+    private static CourseReadSnapshot CreateCompleteSnapshot()
+    {
+        var updatedAt = DateTimeOffset.UtcNow;
+        return new CourseReadSnapshot(
+            "101",
+            Activities: null,
+            Students: new MoodleSnapshotEnvelope<CourseParticipantsPage>(
+                new CourseParticipantsPage("101", 1, 100, ParticipantStatusFilter.Active, true, false, false, []),
+                updatedAt,
+                IsStale: false,
+                IsFrozen: false,
+                Tier: "hot"),
+            Groups: null,
+            Submissions: null,
+            Gradebook: new MoodleSnapshotEnvelope<CourseGradebookSnapshot>(
+                new CourseGradebookSnapshot(
+                    "101",
+                    new Dictionary<string, CourseGradebook>(StringComparer.OrdinalIgnoreCase),
+                    new GradebookSnapshotCoverage("bulk", 0, 0, true, false, [], [])),
+                updatedAt,
+                IsStale: false,
+                IsFrozen: false,
+                Tier: "hot"),
+            new CourseReadSnapshotMetadata(
+                [MoodleSnapshotDatasets.Students, MoodleSnapshotDatasets.Gradebook],
+                [],
+                [],
+                [],
+                updatedAt,
+                updatedAt,
+                0,
+                IsComplete: true,
+                RefreshQueued: false));
+    }
+
     private static MoodleReportTools CreateTool(
         GenerateCourseGradesReportResult report,
         IMoodleCourseReadSnapshotCoordinator? snapshotCoordinator = null) =>
@@ -153,10 +257,18 @@ public sealed class MoodleReportToolsTests
 
     private sealed class FakeMediator(GenerateCourseGradesReportResult report) : IMediator
     {
+        public object? LastRequest { get; private set; }
+
         public Task<TResponse> Send<TResponse>(
             IRequest<TResponse> request,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult((TResponse)(object)report);
+            SendAndRemember<TResponse>(request);
+
+        private Task<TResponse> SendAndRemember<TResponse>(object request)
+        {
+            LastRequest = request;
+            return Task.FromResult((TResponse)(object)report);
+        }
 
         public Task<object?> Send(object request, CancellationToken cancellationToken = default) =>
             Task.FromResult<object?>(report);
@@ -182,4 +294,5 @@ public sealed class MoodleReportToolsTests
             CancellationToken cancellationToken = default) =>
             AsyncEnumerable.Empty<object?>();
     }
+
 }

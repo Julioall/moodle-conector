@@ -63,7 +63,8 @@ public sealed class MoodleReportTools(
             result => $"Relatorio de notas - curso {courseId}: {result.TotalStudents} estudante(s), " +
                       $"{result.StudentsWithGrade} com nota e {result.StudentsWithoutGrade} sem nota.",
             cancellationToken,
-            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook,
+            liveCriticalGradebook: true);
 
     [McpServerTool(
         Name = "export_course_grades_excel",
@@ -88,36 +89,19 @@ public sealed class MoodleReportTools(
 
         try
         {
-            var effectiveCourseId = courseId;
-            CourseGradebookSnapshot? prefetchedGradebook = null;
-            CourseParticipantsPage? prefetchedParticipants = null;
-            var coordinator = snapshotCoordinator ?? snapshotContext as IMoodleCourseReadSnapshotCoordinator;
-            if (coordinator is not null)
-            {
-                var courseRead = await coordinator.ReadAsync(
-                    new CourseReadSnapshotRequest(
-                        courseId,
-                        moodleAlias,
-                        moodleUserId.Value.ToString(),
-                        CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook),
-                    cancellationToken);
-                if (courseRead is not null)
-                {
-                    effectiveCourseId = courseRead.CourseId;
-                    prefetchedGradebook = courseRead.Gradebook?.Data;
-                    if (courseRead.Students?.Data is { HasMore: false } participants &&
-                        courseRead.Students.IsComplete)
-                    {
-                        prefetchedParticipants = participants;
-                    }
-                }
-            }
+            var snapshotInputs = await ReadSnapshotInputsAsync(
+                courseId,
+                moodleAlias,
+                moodleUserId.Value,
+                CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook,
+                liveCriticalGradebook: true,
+                cancellationToken);
             var report = await mediator.Send(
                 new GenerateCourseGradesReportQuery(
-                    effectiveCourseId,
+                    snapshotInputs.EffectiveCourseId,
                     pageSize,
-                    PrefetchedGradebook: prefetchedGradebook,
-                    PrefetchedParticipants: prefetchedParticipants),
+                    PrefetchedGradebook: snapshotInputs.PrefetchedGradebook,
+                    PrefetchedParticipants: snapshotInputs.PrefetchedParticipants),
                 cancellationToken);
             var fileName = $"relatorio_notas_{Slugify(courseId)}_{report.GeneratedAt:yyyyMMdd-HHmmss}.xlsx";
             var workbook = ExcelGradeReportBuilder.BuildWorkbook(
@@ -135,12 +119,25 @@ public sealed class MoodleReportTools(
                 report.StudentsWithoutGrade,
                 report.AveragePercentage,
                 report.Warning);
+            var exportFreshness = snapshotInputs.Freshness;
+            if (exportFreshness is { Source: "live" })
+            {
+                exportFreshness = exportFreshness with
+                {
+                    Complete = false,
+                    DecisionSafe = false,
+                    RecordCount = report.TotalStudents,
+                };
+            }
             var response = new ToolResponse<CourseGradesExcelExportResult>(
                 "ok",
                 data,
-                report.Warning is null ? [] : [report.Warning],
+                snapshotInputs.Warnings
+                    .Concat(report.Warning is null ? [] : [report.Warning])
+                .ToArray(),
                 AuditId: null,
-                DateTimeOffset.UtcNow);
+                DateTimeOffset.UtcNow,
+                Freshness: exportFreshness);
             var resource = BlobResourceContents.FromBytes(
                 workbook,
                 $"mcp://moodle-connector/reports/{Guid.NewGuid():N}/{fileName}",
@@ -195,7 +192,8 @@ public sealed class MoodleReportTools(
                       $"{result.StudentsAtRisk} em risco, {result.StudentsWithAttention} em atenção. " +
                       $"Gerado em: {result.GeneratedAt:dd/MM/yyyy HH:mm} UTC.",
             cancellationToken,
-            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook,
+            liveCriticalGradebook: true);
 
     // â”€â”€ Relatório de conselho de classe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -227,7 +225,8 @@ public sealed class MoodleReportTools(
             result => $"Conselho de classe - curso {courseId}: {result.TotalStudents} estudante(s). " +
                       $"Regular: {result.Regular} | Atenção: {result.NeedAttention} | Recuperação: {result.NeedRecovery} | Risco: {result.AtRisk}.",
             cancellationToken,
-            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook,
+            liveCriticalGradebook: true);
 
 
     [McpServerTool(
@@ -282,7 +281,8 @@ public sealed class MoodleReportTools(
                       $"Provável conclusão: {result.LikelyComplete} | Recuperação: {result.PendingRecovery} | " +
                       $"Risco: {result.AtRisk} | Dados insuficientes: {result.Unknown}.",
             cancellationToken,
-            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook);
+            requirements: CourseReadSnapshotRequirements.Students | CourseReadSnapshotRequirements.Gradebook,
+            liveCriticalGradebook: true);
 
     
     [Description("Baixa o JSON de qualquer relatório personalizado do Moodle Report Builder acessível ao usuário do token. Retorna os registros paginados limitados ao 'pageSize'.")]
@@ -341,7 +341,8 @@ public sealed class MoodleReportTools(
         Func<string, CourseGradebookSnapshot?, CourseParticipantsPage?, Task<TResult>> execute,
         Func<TResult, string> narrate,
         CancellationToken cancellationToken,
-        CourseReadSnapshotRequirements requirements = CourseReadSnapshotRequirements.None)
+        CourseReadSnapshotRequirements requirements = CourseReadSnapshotRequirements.None,
+        bool liveCriticalGradebook = false)
     {
         if (string.IsNullOrWhiteSpace(courseId))
             return ToolResultHelper.Error<TResult>("Informe um identificador de curso válido.");
@@ -351,110 +352,24 @@ public sealed class MoodleReportTools(
         if (moodleUserId is null)
             return ToolResultHelper.Error<TResult>("Usuário não autenticado.");
 
-        CourseGradebookSnapshot? prefetchedGradebook = null;
-        CourseParticipantsPage? prefetchedParticipants = null;
-        var effectiveCourseId = courseId;
-        ToolFreshness? freshness = null;
-        var freshnessWarnings = new List<string>();
-        if (requirements != CourseReadSnapshotRequirements.None)
-        {
-            try
-            {
-                var coordinator = snapshotCoordinator ?? snapshotContext as IMoodleCourseReadSnapshotCoordinator;
-                if (coordinator is not null)
-                {
-                    var courseRead = await coordinator.ReadAsync(
-                        new CourseReadSnapshotRequest(
-                            courseId,
-                            moodleAlias,
-                            moodleUserId.Value.ToString(),
-                            requirements,
-                            AllowStale: false),
-                        cancellationToken);
-                    if (courseRead is not null)
-                    {
-                        effectiveCourseId = courseRead.CourseId;
-                        var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
-                        var staleDecisionDatasets = courseRead.Metadata.StaleDatasets
-                            .Where(dataset => requirements.HasFlag(CourseReadSnapshotRequirements.Gradebook) &&
-                                dataset == MoodleSnapshotDatasets.Gradebook ||
-                                requirements.HasFlag(CourseReadSnapshotRequirements.Students) &&
-                                dataset == MoodleSnapshotDatasets.Students)
-                            .ToArray();
-                        var gradebookSafe = !snapshotUnsafe &&
-                            !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Gradebook) &&
-                            courseRead.Gradebook is { IsStale: false, IsComplete: true } gradebook &&
-                            gradebook.Data.Coverage.IsComplete;
-                        var studentsSafe = !snapshotUnsafe &&
-                            !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Students) &&
-                            courseRead.Students is { IsStale: false, IsComplete: true, Data.HasMore: false };
-                        if (gradebookSafe)
-                        {
-                            prefetchedGradebook = courseRead.Gradebook!.Data;
-                        }
-
-                        if (studentsSafe && courseRead.Students?.Data is { HasMore: false } participants)
-                        {
-                            prefetchedParticipants = participants;
-                        }
-
-                        if (staleDecisionDatasets.Length > 0)
-                        {
-                            freshnessWarnings.Add(
-                                $"Snapshot stale ({string.Join(", ", staleDecisionDatasets)}); o relatório decisório foi revalidado por leitura ao vivo e não usará dados antigos.");
-                        }
-
-                        var hasSnapshotData = prefetchedParticipants is not null ||
-                            prefetchedGradebook is not null;
-                        if (hasSnapshotData)
-                        {
-                            var updatedAt = courseRead.Metadata.OldestUpdatedAt;
-                            var recordCount = (courseRead.Students?.RecordCount ?? 0) +
-                                (courseRead.Gradebook?.RecordCount ?? 0);
-                            freshness = new ToolFreshness(
-                                staleDecisionDatasets.Length == 0 ? "snapshot" : "live",
-                                staleDecisionDatasets.Length == 0 ? updatedAt : null,
-                                staleDecisionDatasets.Length == 0 && updatedAt.HasValue
-                                    ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
-                                    : null,
-                                false,
-                                courseRead.Metadata.RefreshQueued,
-                                staleDecisionDatasets.Length == 0 && courseRead.Metadata.IsComplete,
-                                staleDecisionDatasets.Length == 0 ? recordCount : 0,
-                                DecisionSafe: staleDecisionDatasets.Length == 0 && !snapshotUnsafe,
-                                Dataset: "course_read_snapshot",
-                                RecordType: "students_and_gradebook");
-                        }
-                        else
-                        {
-                            // A missing head triggers a live/bulk read below;
-                            // do not label that result as an empty snapshot.
-                            freshness = new ToolFreshness(
-                                "live",
-                                null,
-                                null,
-                                false,
-                                courseRead.Metadata.RefreshQueued,
-                                false,
-                                0,
-                                DecisionSafe: false,
-                                Dataset: "course_read_snapshot",
-                                RecordType: "students_and_gradebook");
-                        }
-
-                        freshnessWarnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
-                    }
-                }
-            }
-            catch
-            {
-                // Warming is best effort; the current report still uses the
-                // bulk gateway and its capability-driven fallback.
-            }
-        }
+        var snapshotInputs = await ReadSnapshotInputsAsync(
+            courseId,
+            moodleAlias,
+            moodleUserId.Value,
+            requirements,
+            liveCriticalGradebook,
+            cancellationToken);
+        var freshness = snapshotInputs.Freshness;
+        var freshnessWarnings = snapshotInputs.Warnings.ToList();
 
         TResult data;
-        try { data = await execute(effectiveCourseId, prefetchedGradebook, prefetchedParticipants); }
+        try
+        {
+            data = await execute(
+                snapshotInputs.EffectiveCourseId,
+                snapshotInputs.PrefetchedGradebook,
+                snapshotInputs.PrefetchedParticipants);
+        }
         catch (OperationCanceledException) { throw; }
         catch
         {
@@ -496,6 +411,134 @@ public sealed class MoodleReportTools(
         };
     }
 
+    private async Task<CourseReportSnapshotInputs> ReadSnapshotInputsAsync(
+        string courseId,
+        string? moodleAlias,
+        long moodleUserId,
+        CourseReadSnapshotRequirements requirements,
+        bool liveCriticalGradebook,
+        CancellationToken cancellationToken)
+    {
+        var empty = new CourseReportSnapshotInputs(courseId, null, null, null, []);
+        if (requirements == CourseReadSnapshotRequirements.None)
+        {
+            return empty;
+        }
+
+        var coordinator = snapshotCoordinator ?? snapshotContext as IMoodleCourseReadSnapshotCoordinator;
+        if (coordinator is null)
+        {
+            return empty;
+        }
+
+        try
+        {
+            var courseRead = await coordinator.ReadAsync(
+                new CourseReadSnapshotRequest(
+                    courseId,
+                    moodleAlias,
+                    moodleUserId.ToString(),
+                    requirements,
+                    AllowStale: false),
+                cancellationToken);
+            if (courseRead is null)
+            {
+                return empty;
+            }
+
+            var snapshotUnsafe = MoodleSnapshotFreshnessWarnings.IsUnsafeForSnapshotDecision(courseRead.Metadata);
+            var staleDecisionDatasets = courseRead.Metadata.StaleDatasets
+                .Where(dataset =>
+                    requirements.HasFlag(CourseReadSnapshotRequirements.Gradebook) &&
+                        dataset == MoodleSnapshotDatasets.Gradebook ||
+                    requirements.HasFlag(CourseReadSnapshotRequirements.Students) &&
+                        dataset == MoodleSnapshotDatasets.Students)
+                .ToArray();
+            var gradebookSafe = !liveCriticalGradebook &&
+                !snapshotUnsafe &&
+                !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Gradebook) &&
+                courseRead.Gradebook is { IsStale: false, IsComplete: true } gradebook &&
+                gradebook.Data.Coverage.IsComplete;
+            var studentsSafe = !snapshotUnsafe &&
+                !staleDecisionDatasets.Contains(MoodleSnapshotDatasets.Students) &&
+                courseRead.Students is { IsStale: false, IsComplete: true, Data.HasMore: false };
+            var prefetchedGradebook = gradebookSafe ? courseRead.Gradebook!.Data : null;
+            CourseParticipantsPage? prefetchedParticipants = null;
+            if (studentsSafe && courseRead.Students?.Data is { HasMore: false } participants)
+            {
+                prefetchedParticipants = participants;
+            }
+
+            var warnings = new List<string>();
+            if (staleDecisionDatasets.Length > 0)
+            {
+                warnings.Add(
+                    $"Snapshot stale ({string.Join(", ", staleDecisionDatasets)}); o relatório decisório foi revalidado por leitura ao vivo e não usará dados antigos.");
+            }
+            if (liveCriticalGradebook)
+            {
+                warnings.Add("Notas e dados de recuperação deste relatório foram consultados ao vivo no Moodle; o snapshot serve apenas para contexto e cobertura de estudantes.");
+            }
+
+            var hasSnapshotData = prefetchedParticipants is not null || prefetchedGradebook is not null;
+            var liveSource = liveCriticalGradebook || staleDecisionDatasets.Length > 0;
+            ToolFreshness freshness;
+            if (hasSnapshotData)
+            {
+                var updatedAt = courseRead.Metadata.OldestUpdatedAt;
+                var recordCount = (courseRead.Students?.RecordCount ?? 0) +
+                    (courseRead.Gradebook?.RecordCount ?? 0);
+                freshness = new ToolFreshness(
+                    liveSource ? "live" : "snapshot",
+                    liveSource ? null : updatedAt,
+                    !liveSource && updatedAt.HasValue
+                        ? Math.Max(0, (long)(DateTimeOffset.UtcNow - updatedAt.Value).TotalSeconds)
+                        : null,
+                    false,
+                    courseRead.Metadata.RefreshQueued,
+                    !liveSource && courseRead.Metadata.IsComplete,
+                    liveSource ? 0 : recordCount,
+                    DecisionSafe: !liveSource && !snapshotUnsafe,
+                    Dataset: "course_read_snapshot",
+                    RecordType: "students_and_gradebook");
+            }
+            else
+            {
+                // A missing head triggers a live/bulk read below; do not label
+                // that result as an empty snapshot.
+                freshness = new ToolFreshness(
+                    "live",
+                    null,
+                    null,
+                    false,
+                    courseRead.Metadata.RefreshQueued,
+                    false,
+                    0,
+                    DecisionSafe: false,
+                    Dataset: "course_read_snapshot",
+                    RecordType: "students_and_gradebook");
+            }
+
+            warnings.AddRange(MoodleSnapshotFreshnessWarnings.BuildWarnings(courseRead.Metadata));
+            return new CourseReportSnapshotInputs(
+                courseRead.CourseId,
+                prefetchedGradebook,
+                prefetchedParticipants,
+                freshness,
+                warnings);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Snapshot lookup is an optimization; the report still uses the
+            // live/bulk gateway and its capability-driven fallback.
+            return empty;
+        }
+    }
+
     private static int GetReportRecordCount<TResult>(TResult data) => data switch
     {
         GenerateCourseGradesReportResult report => report.Students.Count,
@@ -504,4 +547,11 @@ public sealed class MoodleReportTools(
         GeneratePostExecutionReportResult report => report.Students.Count,
         _ => 0,
     };
+
+    private sealed record CourseReportSnapshotInputs(
+        string EffectiveCourseId,
+        CourseGradebookSnapshot? PrefetchedGradebook,
+        CourseParticipantsPage? PrefetchedParticipants,
+        ToolFreshness? Freshness,
+        IReadOnlyList<string> Warnings);
 }

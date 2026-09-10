@@ -17,6 +17,10 @@ public sealed class MoodleSnapshotOptions
     public int IndividualGradebookConcurrency { get; init; } = 2;
     public int GradebookFreshMinutes { get; init; } = 15;
     public int GradebookStaleMinutes { get; init; } = 120;
+    // Course end is not a gradebook immutability signal. Keep accepting
+    // post-course recovery/grading updates for this window before allowing a
+    // gradebook snapshot to become immutable.
+    public int GradebookFreezeAfterCourseEndDays { get; init; } = 30;
     public int MaxAnalyticalSnapshotSkewMinutes { get; init; } = 15;
     public int MaxPayloadBytes { get; init; } = 10 * 1024 * 1024;
     public int CoursePageSize { get; init; } = 100;
@@ -44,6 +48,7 @@ public sealed class MoodleSnapshotOptions
         IndividualGradebookConcurrency = Math.Clamp(IndividualGradebookConcurrency, 1, 32),
         GradebookFreshMinutes = Math.Clamp(GradebookFreshMinutes, 1, 24 * 60),
         GradebookStaleMinutes = Math.Clamp(GradebookStaleMinutes, 1, 7 * 24 * 60),
+        GradebookFreezeAfterCourseEndDays = Math.Clamp(GradebookFreezeAfterCourseEndDays, 1, 3650),
         MaxAnalyticalSnapshotSkewMinutes = Math.Clamp(MaxAnalyticalSnapshotSkewMinutes, 1, 24 * 60),
         MaxPayloadBytes = Math.Clamp(MaxPayloadBytes, 64 * 1024, 100 * 1024 * 1024),
         CoursePageSize = Math.Clamp(CoursePageSize, 1, 1000),

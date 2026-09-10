@@ -12,6 +12,7 @@ public sealed class MoodleSnapshotEntity
     public Guid? LastRunId { get; set; }
     public string Tier { get; set; } = "hot";
     public bool IsFrozen { get; set; }
+    public DateTimeOffset? FrozenAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? FreshUntil { get; set; }
     public DateTimeOffset? StaleUntil { get; set; }

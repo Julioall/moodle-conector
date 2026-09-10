@@ -187,10 +187,18 @@ internal sealed class MoodleSnapshotStore(
             var data = JsonSerializer.Deserialize<T>(entity.PayloadJson, JsonOptions);
             if (data is null) return null;
             var now = DateTimeOffset.UtcNow;
-            var freshUntil = entity.FreshUntil ?? entity.UpdatedAt.Add(
-                entity.Tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? HotTtl : WarmTtl);
-            var staleUntil = entity.StaleUntil ?? freshUntil.Add(GetStaleWindow(type, entity.IsFrozen));
-            if (!entity.IsFrozen && now > staleUntil)
+            var legacyFrozenPostCourseDataset = type is MoodleSnapshotDatasets.Gradebook or MoodleSnapshotDatasets.Submissions &&
+                entity.IsFrozen &&
+                !entity.FrozenAt.HasValue;
+            var isFrozen = entity.IsFrozen && !legacyFrozenPostCourseDataset;
+            var freshUntil = legacyFrozenPostCourseDataset
+                ? entity.UpdatedAt.Add(GetFreshTtl(type, entity.Tier, frozen: false))
+                : entity.FreshUntil ?? entity.UpdatedAt.Add(
+                    entity.Tier.Equals("hot", StringComparison.OrdinalIgnoreCase) ? HotTtl : WarmTtl);
+            var staleUntil = legacyFrozenPostCourseDataset
+                ? freshUntil.Add(GetStaleWindow(type, frozen: false))
+                : entity.StaleUntil ?? freshUntil.Add(GetStaleWindow(type, isFrozen));
+            if (!isFrozen && now > staleUntil)
             {
                 metrics.RecordMiss(type);
                 return null;
@@ -198,8 +206,8 @@ internal sealed class MoodleSnapshotStore(
             var envelope = new MoodleSnapshotEnvelope<T>(
                 data,
                 entity.UpdatedAt,
-                !entity.IsFrozen && now >= freshUntil,
-                entity.IsFrozen,
+                !isFrozen && now >= freshUntil,
+                isFrozen,
                 entity.Tier,
                 freshUntil,
                 staleUntil,
@@ -253,6 +261,7 @@ internal sealed class MoodleSnapshotStore(
         }
         entity.Tier = tier;
         entity.IsFrozen = frozen;
+        entity.FrozenAt = frozen ? entity.FrozenAt ?? now : null;
         entity.UpdatedAt = now;
         entity.FreshUntil = freshUntil;
         entity.StaleUntil = staleUntil;

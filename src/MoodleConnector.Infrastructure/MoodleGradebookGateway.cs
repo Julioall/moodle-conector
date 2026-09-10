@@ -22,7 +22,6 @@ internal sealed class MoodleGradebookGateway(
     IMoodleCourseGradeMaxGateway? courseGradeMaxGateway = null) : IMoodleGradebookGateway
 {
     private const string MoodleFunction = "gradereport_user_get_grade_items";
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(24);
     private readonly MoodleApiOptions _options = options.Value;
     private readonly MoodleSnapshotOptions _snapshotOptions =
         (snapshotOptions?.Value ?? new MoodleSnapshotOptions()).Normalize();
@@ -51,7 +50,7 @@ internal sealed class MoodleGradebookGateway(
 
         var gradebook = ParseGradebook(payload.GetRawText(), courseId, studentId, studentIdNumber);
         gradebook = await EnrichCourseGradeMaxAsync(gradebook, cancellationToken);
-        memoryCache?.Set(cacheKey, gradebook, CacheDuration);
+        memoryCache?.Set(cacheKey, gradebook, TimeSpan.FromMinutes(_snapshotOptions.GradebookFreshMinutes));
         metrics?.RecordGradebookRead("individual");
         return gradebook;
     }
@@ -235,7 +234,7 @@ internal sealed class MoodleGradebookGateway(
                 }, cancellationToken);
                 var gradebook = ParseGradebook(payload.GetRawText(), courseId, studentId, studentIdNumber);
                 gradebook = await EnrichCourseGradeMaxAsync(gradebook, cancellationToken);
-                memoryCache?.Set(cacheKey, gradebook, CacheDuration);
+                memoryCache?.Set(cacheKey, gradebook, TimeSpan.FromMinutes(_snapshotOptions.GradebookFreshMinutes));
                 lock (gradebooks) gradebooks[studentId] = gradebook;
                 metrics?.RecordGradebookRead("individual_fallback");
             }
