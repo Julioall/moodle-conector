@@ -1,7 +1,9 @@
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -12,7 +14,9 @@ internal sealed class MoodleFunctionExecutor(
     IMoodleRestClient restClient,
     IMoodleConnectorCredentialsProvider credentialsProvider,
     IMoodleAuditLogRepository? auditLogs = null,
-    ICurrentUserContext? currentUser = null) : IMoodleFunctionExecutor
+    ICurrentUserContext? currentUser = null,
+    IMoodleFunctionContractRegistry? contractRegistry = null,
+    IOptions<MoodleFunctionContractOptions>? contractOptions = null) : IMoodleFunctionExecutor
 {
     public async Task<MoodleFunctionResult> ExecuteReadAsync(
         string functionName,
@@ -40,13 +44,6 @@ internal sealed class MoodleFunctionExecutor(
                 throw new MoodleApiException("function_not_available", "A funcao solicitada nao esta habilitada para a conexao Moodle selecionada.");
             }
 
-            if (descriptor.Risk != MoodleFunctionRisk.Read)
-            {
-                throw new MoodleApiException(
-                    descriptor.Risk == MoodleFunctionRisk.Destructive ? "destructive_function_blocked" : "function_not_read_safe",
-                    "A funcao solicitada nao esta classificada explicitamente como leitura segura.");
-            }
-
             if (string.Equals(descriptor.Name, "core_enrol_get_users_courses", StringComparison.OrdinalIgnoreCase)
                 && !executionParameters.ContainsKey("userid")
                 && profile.MoodleUserId is { } profileUserId)
@@ -54,12 +51,79 @@ internal sealed class MoodleFunctionExecutor(
                 executionParameters["userid"] = profileUserId.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
 
+            var contractResolution = contractRegistry?.Resolve(
+                normalizedName,
+                profile.Release,
+                descriptor.ExternalFunctionVersion);
+            if (contractResolution is null && contractOptions?.Value.RequireVerifiedContracts == true)
+            {
+                throw new MoodleApiException(
+                    MoodleErrorContract.SchemaUnavailable,
+                    $"A leitura de '{normalizedName}' foi bloqueada: o registro de contratos verificados não está disponível.",
+                    functionName: normalizedName);
+            }
+
+            if (contractResolution is not null && !contractResolution.IsVerified)
+            {
+                if (contractOptions?.Value.RequireVerifiedContracts == true)
+                {
+                    throw new MoodleApiException(
+                        contractResolution.Status == MoodleContractResolutionStatus.Stale
+                            ? MoodleErrorContract.SchemaVersionMismatch
+                            : contractResolution.Status == MoodleContractResolutionStatus.Conflicting
+                                ? MoodleErrorContract.ContractConflict
+                                : MoodleErrorContract.SchemaUnavailable,
+                        $"A leitura de '{normalizedName}' foi bloqueada: {string.Join(", ", contractResolution.Reasons)}",
+                        functionName: normalizedName);
+                }
+            }
+
+            if (contractResolution is { IsVerified: true })
+            {
+                EnsureContractAuthorization(normalizedName, contractResolution.Contract!);
+                if (contractResolution.Contract!.Effect != MoodleEffect.Read)
+                {
+                    throw new MoodleApiException(
+                        MoodleErrorContract.FunctionNotAllowed,
+                        $"A funcao '{normalizedName}' possui efeito '{contractResolution.Contract.Effect}' e nao pode usar o caminho de leitura.",
+                        functionName: normalizedName);
+                }
+
+                var inputErrors = MoodleFunctionContractSchemaValidator.ValidateInput(
+                    contractResolution.Contract,
+                    executionParameters);
+                if (inputErrors.Count > 0)
+                {
+                    throw new MoodleApiException(
+                        MoodleErrorContract.SchemaValidationFailed,
+                        $"Os parametros de '{normalizedName}' nao correspondem ao contrato verificado: {string.Join("; ", inputErrors)}",
+                        functionName: normalizedName);
+                }
+            }
+            else if (descriptor.Risk != MoodleFunctionRisk.Read)
+            {
+                throw new MoodleApiException(
+                    descriptor.Risk == MoodleFunctionRisk.Destructive ? "destructive_function_blocked" : "function_not_read_safe",
+                    "A funcao solicitada nao esta classificada explicitamente como leitura segura.");
+            }
+
             var payload = await restClient.CallAsync(
                 connection,
                 descriptor.Name,
                 executionParameters,
-                allowServiceToken: true,
+                allowServiceToken: false,
                 cancellationToken);
+
+            if (contractResolution is { IsVerified: true } &&
+                MoodleFunctionContractSchemaValidator.ValidateOutput(contractResolution.Contract!, payload) is { Count: > 0 } outputErrors)
+            {
+                throw new MoodleApiException(
+                    MoodleErrorContract.SchemaValidationFailed,
+                    $"A resposta de '{normalizedName}' nao corresponde ao contrato verificado: {string.Join("; ", outputErrors)}",
+                    functionName: normalizedName,
+                    stage: MoodleIntegrationStage.ResponseParsing);
+            }
+
             await RecordAuditAsync(
                 connection,
                 descriptor.Name,
@@ -163,5 +227,40 @@ internal sealed class MoodleFunctionExecutor(
             ErrorCode = errorCode
         }, cancellationToken);
         await auditLogs.SaveChangesAsync(cancellationToken);
+    }
+
+    private void EnsureContractAuthorization(string functionName, MoodleFunctionContract contract)
+    {
+        if (contract.AdministrativeOnly &&
+            (string.IsNullOrWhiteSpace(contract.PlatformPermission) ||
+             currentUser is null ||
+             !currentUser.HasPlatformPermission(contract.PlatformPermission)))
+        {
+            throw new MoodleApiException(
+                MoodleErrorContract.PermissionDenied,
+                $"A funcao '{functionName}' e administrativa e esta bloqueada para o usuario atual.",
+                functionName: functionName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(contract.PlatformPermission) &&
+            (currentUser is null || !currentUser.HasPlatformPermission(contract.PlatformPermission)))
+        {
+            throw new MoodleApiException(
+                MoodleErrorContract.PermissionDenied,
+                $"A funcao '{functionName}' exige a permissao de plataforma '{contract.PlatformPermission}'.",
+                functionName: functionName);
+        }
+
+        foreach (var scope in contract.RequiredScopes ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(scope) &&
+                (currentUser is null || !currentUser.HasScope(scope.Trim())))
+            {
+                throw new MoodleApiException(
+                    MoodleErrorContract.PermissionDenied,
+                    $"A funcao '{functionName}' exige o escopo '{scope.Trim()}'.",
+                    functionName: functionName);
+            }
+        }
     }
 }

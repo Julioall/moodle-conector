@@ -1,9 +1,9 @@
 {
   "OperationName": "mod_assign_get_submissions",
-  "ConnectionId": "4df4ae61-7926-45bd-b3fb-80df1cbc3d17",
+  "ConnectionId": "17a30109-c1fb-4baa-90a4-99e17e22386e",
   "AliasAtValidation": "fieg",
   "NormalizationProfile": "assignment-submissions",
   "MoodleVersion": "5.1.2 (Build: 20260209)",
   "SemanticParityPercent": 100,
-  "ValidatedAt": "2026-08-20T23:40:46.8026941+00:00"
+  "ValidatedAt": "2026-09-10T11:49:07.4484981+00:00"
 }

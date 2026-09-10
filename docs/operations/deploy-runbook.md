@@ -36,15 +36,21 @@ O alvo é uma VPS com Docker Compose, PostgreSQL, aplicação e Caddy opcional p
 | `FEATURES_MESSAGES_WRITE_ENABLED` | `true` |
 | `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED` | `true` |
 | `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED` | `true` |
+| `FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED` | `true` |
+| `FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED` | `true` |
+| `FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED` | `false` |
+| `MOODLE_API_CONTRACT_MANIFEST_PATH` | `/app/contracts/production.json` |
+| `MOODLE_API_REQUIRE_VERIFIED_CONTRACTS` | `true` |
 | `OAUTH_CLIENT_ID` | `moodle` |
 | `OAUTH_SCOPE_NAME` | `moodle-mcp-audience` |
 | `OAUTH_REQUIRE_HTTPS_METADATA` | `true` |
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` |
 | `RATE_LIMIT_MCP_PERMIT_LIMIT` | `120` |
 
-As tres flags de escrita acima sao repassadas pelo Compose como variaveis
-`Features__*` da aplicacao. Defina uma delas como `false` nas variaveis do
-ambiente GitHub para desabilitar especificamente essa capacidade em um deploy.
+As flags de escrita e arquivo acima são repassadas pelo Compose como variáveis
+`Features__*` da aplicação. A escrita universal exige manifesto estrito de contratos
+verificados em Production. Defina qualquer flag como `false` nas variáveis do ambiente
+GitHub para desabilitar especificamente essa capacidade em um deploy.
 
 ## Secrets Obrigatórios
 

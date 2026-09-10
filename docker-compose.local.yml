@@ -15,6 +15,13 @@
       MOODLE_CONNECTOR_DEPLOYED_AT: "${MOODLE_CONNECTOR_DEPLOYED_AT:-}"
       MOODLE_CONNECTOR_SOURCE_REF: "${MOODLE_CONNECTOR_SOURCE_REF:-working-tree}"
       Features__AppV2Enabled: "true"
+      McpServerSecurity__AllowUnlinkedApiKey: "${McpServerSecurity__AllowUnlinkedApiKey:-false}"
+      Features__UniversalMoodleWriteEnabled: "${Features__UniversalMoodleWriteEnabled:-true}"
+      Features__UniversalMoodleFileDownloadEnabled: "${Features__UniversalMoodleFileDownloadEnabled:-true}"
+      Features__UniversalMoodleFileUploadEnabled: "${Features__UniversalMoodleFileUploadEnabled:-true}"
+      MoodleApi__ContractManifestPath: "${MoodleApi__ContractManifestPath:-}"
+      MoodleApi__RequireVerifiedContracts: "${MoodleApi__RequireVerifiedContracts:-false}"
+      MoodleApi__MaxManifestBytes: "${MoodleApi__MaxManifestBytes:-5242880}"
       DataProtection__KeyStoragePath: /app/data/keys
       # O perfil local continua previsível para testes. Defina ambas como false
       # apenas para validar uma conexão Moodle real no mesmo portal local.
@@ -30,6 +37,7 @@
       - "${APP_HTTP_PORT:-8787}:8080"
     volumes:
       - app-local-app-data:/app/data
+      - ${MOODLE_CONTRACTS_DIR:-./contracts}:/app/contracts:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -45,6 +45,10 @@ public static class DependencyInjection
             .Bind(configuration.GetSection(MoodleApiOptions.SectionName));
 
         services
+            .AddOptions<MoodleFunctionContractOptions>()
+            .Bind(configuration.GetSection(MoodleFunctionContractOptions.SectionName));
+
+        services
             .AddOptions<MoodleSnapshotOptions>()
             .Bind(configuration.GetSection(MoodleSnapshotOptions.SectionName));
 
@@ -63,6 +67,24 @@ public static class DependencyInjection
         var moodleApiOptions = configuration
             .GetSection(MoodleApiOptions.SectionName)
             .Get<MoodleApiOptions>() ?? new MoodleApiOptions();
+
+        var contractOptions = configuration
+            .GetSection(MoodleFunctionContractOptions.SectionName)
+            .Get<MoodleFunctionContractOptions>() ?? new MoodleFunctionContractOptions();
+
+        if (contractOptions.RequireVerifiedContracts &&
+            string.IsNullOrWhiteSpace(contractOptions.ContractManifestPath))
+        {
+            throw new InvalidOperationException(
+                "MoodleApi:RequireVerifiedContracts=true exige MoodleApi:ContractManifestPath.");
+        }
+
+        var contractManifest = MoodleFunctionContractManifestLoader.Load(
+            contractOptions.ContractManifestPath,
+            contractOptions.MaxManifestBytes,
+            contractOptions.RequireVerifiedContracts);
+        services.AddSingleton<IMoodleFunctionContractRegistry>(
+            new MoodleFunctionContractRegistry(contractManifest));
 
         var moodleProxyOptions = configuration
             .GetSection(MoodleProxyOptions.SectionName)
@@ -128,6 +150,7 @@ public static class DependencyInjection
         services.AddScoped<IMoodleScormReader, Scorm.MoodleScormReader>();
         services.AddScoped<IMoodleFunctionExecutor, MoodleFunctionExecutor>();
         services.AddScoped<IMoodleUniversalWriteService, MoodleUniversalWriteService>();
+        services.AddScoped<IMoodleUniversalUploadService, MoodleUniversalUploadService>();
         services.AddScoped<IMoodleWriteReconciliationService, MoodleWriteReconciliationService>();
         services.AddSingleton<IMoodleResourceResolver, MoodleResourceResolver>();
         if (moodleApiOptions.UseStubData)
@@ -177,6 +200,10 @@ public static class DependencyInjection
 
         services
             .AddHttpClient<IMoodleSubmissionFileGateway, MoodleSubmissionFileGateway>(ConfigureMoodleApiClient)
+            .AddMoodleResilience(moodleApiResilience);
+
+        services
+            .AddHttpClient<IMoodleDraftUploadGateway, MoodleDraftUploadGateway>(ConfigureMoodleApiClient)
             .AddMoodleResilience(moodleApiResilience);
 
         services.AddScoped<IMoodleAssignmentSettingsGateway, MoodleAssignmentSettingsGateway>();

@@ -28,13 +28,26 @@ public sealed class MoodleHttpClientResilienceTests
         Assert.Equal(new Uri("https://proxy.tests/"), proxyClient.BaseAddress);
     }
 
-    private static IConfiguration BuildConfiguration()
+    [Fact]
+    public void AddInfrastructure_RejeitaModoEstritoSemManifesto()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            services.AddInfrastructure(BuildConfiguration(requireVerifiedContracts: true)));
+
+        Assert.Contains("ContractManifestPath", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IConfiguration BuildConfiguration(bool requireVerifiedContracts = false)
     {
         return new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Postgres:ConnectionString"] = "Host=localhost;Port=5432;Database=moodle_connector_tests;Username=postgres;Password=postgres",
                 ["MoodleApi:BaseUrl"] = "https://moodle.tests",
+                ["MoodleApi:RequireVerifiedContracts"] = requireVerifiedContracts.ToString(),
                 ["MoodleApi:HttpTimeoutSeconds"] = "7",
                 ["MoodleApi:HttpRetryCount"] = "1",
                 ["MoodleApi:CircuitBreakerHandledEventsAllowedBeforeBreaking"] = "2",

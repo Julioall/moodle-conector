@@ -32,6 +32,7 @@ internal static class ToolAuthorizationMapping
         if (family == "follow-up") return "tool.followup.view";
         if (family == "forums") return IsWriteTool(normalized, metadata) ? "tool.forums.write" : "tool.forums.view";
         if (family == "reports") return "tool.reports.view";
+        if (family == "files") return IsWriteTool(normalized, metadata) ? "tool.files.write" : "tool.files.view";
         if (family == "messaging") return IsWriteTool(normalized, metadata) ? "tool.messages.send" : "tool.messages.view";
         if (family is "memory" or "memory-document") return "tool.memory.manage";
         if (family == "pedagogy") return "tool.pedagogy.view";
@@ -89,6 +90,8 @@ internal static class ToolAuthorizationMapping
                 return [MoodleScopePolicies.ReadAccess, MoodleScopePolicies.ReadStudents];
             return [MoodleScopePolicies.ReadAccess, MoodleScopePolicies.ReadStudents, MoodleScopePolicies.ReadAssignments, MoodleScopePolicies.ReadSubmissions];
         }
+        if (family == "files")
+            return IsWriteTool(normalized, metadata) ? [MoodleScopePolicies.WriteAny] : [MoodleScopePolicies.ReadResources];
         if (family == "classroom-audit")
         {
             if (normalized.Contains("audit_virtual_classroom_checklist", StringComparison.Ordinal))
@@ -142,6 +145,11 @@ internal static class ToolAuthorizationMapping
                 case "tool.followup.view": scopes.UnionWith([MoodleScopePolicies.ReadAccess, MoodleScopePolicies.ReadStudents, MoodleScopePolicies.ReadForums]); break;
                 case "tool.reports.view": scopes.UnionWith([MoodleScopePolicies.ReadAccess, MoodleScopePolicies.ReadStudents, MoodleScopePolicies.ReadAssignments, MoodleScopePolicies.ReadSubmissions]); break;
                 case "tool.connections.manage": scopes.Add(MoodleScopePolicies.ReadAny); break;
+                case "tool.files.view": scopes.Add(MoodleScopePolicies.ReadResources); break;
+                case "tool.files.write":
+                    scopes.Add(MoodleScopePolicies.WriteAny);
+                    canDelegateMoodleWrite = true;
+                    break;
             }
         }
 

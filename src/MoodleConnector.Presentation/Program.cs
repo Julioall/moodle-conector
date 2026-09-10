@@ -129,6 +129,21 @@ builder.Services
     .AddOptions<MoodleUniversalApiFeatureOptions>()
     .Bind(builder.Configuration.GetSection(MoodleUniversalApiFeatureOptions.SectionName));
 
+// Universal writes are only safe when every callable function is backed by a
+// version-compatible, verified contract. Keep this invariant in the process
+// itself as well as in the deployment workflow so a manually started
+// production container cannot bypass the release gate.
+var configuredUniversalFeatures = builder.Configuration
+    .GetSection(MoodleUniversalApiFeatureOptions.SectionName)
+    .Get<MoodleUniversalApiFeatureOptions>() ?? new MoodleUniversalApiFeatureOptions();
+var configuredContractOptions = builder.Configuration
+    .GetSection(MoodleFunctionContractOptions.SectionName)
+    .Get<MoodleFunctionContractOptions>() ?? new MoodleFunctionContractOptions();
+MoodleProductionConfigurationGuard.Validate(
+    builder.Environment.IsProduction(),
+    configuredUniversalFeatures,
+    configuredContractOptions);
+
 builder.Services
     .AddOptions<GradingLimitsOptions>()
     .Bind(builder.Configuration.GetSection(GradingLimitsOptions.SectionName));
@@ -148,6 +163,7 @@ builder.Services.AddTransient<PortalApiAuthorizationMiddleware>();
 builder.Services.AddTransient<AdminApiKeyAuthorizationMiddleware>();
 builder.Services.AddTransient<PlatformRequestMetricsMiddleware>();
 builder.Services.AddTransient<McpRequestSecurityMiddleware>();
+builder.Services.AddSingleton<MoodleContinuationTokenService>();
 
 // Register exposure policy via factory so configuration set by test hosts (WithWebHostBuilder)
 // is respected when the DI container is built.
@@ -386,6 +402,18 @@ var mcpServerBuilder = builder.Services
                 }
 
                 if (httpContext is not null &&
+                    !PortalEndpointAuthorization.HasPlatformToolPermission(
+                        httpContext.User,
+                        metadata.RequiredPlatformPermission))
+                {
+                    errorCode = "platform_permission_denied";
+                    outcome = "denied";
+                    return ToolResultHelper.Error<object>(
+                        $"O usuário não possui a permissão de plataforma '{metadata.RequiredPlatformPermission}' para esta tool.",
+                        errorCode: errorCode);
+                }
+
+                if (httpContext is not null &&
                     HasBearerToken(httpContext) &&
                     !HasRequiredOAuthScopes(httpContext.User, toolName, metadata))
                 {
@@ -512,6 +540,26 @@ var mcpServerBuilder = builder.Services
                     }
 
                     if (!HasRequiredOAuthScopes(httpContext.User, tool.Name ?? string.Empty, metadata))
+                    {
+                        result.Tools.RemoveAt(i);
+                    }
+                }
+            }
+
+            // Platform permissions are product authorization, not merely
+            // descriptive metadata. Keep tools/list consistent with the
+            // call-tool filter and fail closed for an authenticated user.
+            if (httpContext?.User.Identity?.IsAuthenticated == true)
+            {
+                for (var i = result.Tools.Count - 1; i >= 0; i--)
+                {
+                    var tool = result.Tools[i];
+                    if (tool is null || registry is null ||
+                        !registry.TryGet(tool.Name ?? string.Empty, out var metadata) ||
+                        metadata is null ||
+                        !PortalEndpointAuthorization.HasPlatformToolPermission(
+                            httpContext.User,
+                            metadata.RequiredPlatformPermission))
                     {
                         result.Tools.RemoveAt(i);
                     }

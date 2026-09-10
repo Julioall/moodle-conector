@@ -9,6 +9,8 @@ on:
       - tests/**
       - plugins/**
       - scripts/**
+      - contracts/**
+      - tools/**
       - public/**
       - docs/**
       - Dockerfile
@@ -29,6 +31,8 @@ on:
       - tests/**
       - plugins/**
       - scripts/**
+      - contracts/**
+      - tools/**
       - public/**
       - docs/**
       - Dockerfile
@@ -106,6 +110,30 @@ jobs:
       - name: Validate generated submission tools
         shell: pwsh
         run: ./scripts/generate-chatgpt-app-submission.ps1 -Check
+
+      - name: Validate Moodle contract tooling
+        shell: bash
+        run: |
+          php -l tools/moodle-export-contract-source.php
+          pwsh -NoProfile -File ./scripts/merge-moodle-contract-sources.ps1 \
+            -InputPath ./contracts/moodle-contract-source.example.json \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-merged.json"
+          pwsh -NoProfile -File ./scripts/prepare-moodle-contract-manifest.ps1 \
+            -InputPath "$RUNNER_TEMP/moodle-contract-merged.json" \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-example.json"
+          pwsh -NoProfile -File ./scripts/validate-moodle-contract-manifest-matrix.ps1 \
+            -ManifestPath "$RUNNER_TEMP/moodle-contract-example.json" \
+            -InventoryPath ./contracts/moodle-contract-inventory.example.json
+          pwsh -NoProfile -File ./scripts/merge-moodle-contract-sources.ps1 \
+            -InputPath ./contracts/moodle-contract-source.fixture-complete.json \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-complete-source.json"
+          pwsh -NoProfile -File ./scripts/prepare-moodle-contract-manifest.ps1 \
+            -InputPath "$RUNNER_TEMP/moodle-contract-complete-source.json" \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-complete.json"
+          pwsh -NoProfile -File ./scripts/validate-moodle-contract-manifest-matrix.ps1 \
+            -ManifestPath "$RUNNER_TEMP/moodle-contract-complete.json" \
+            -InventoryPath ./contracts/moodle-contract-inventory.example.json \
+            -RequireComplete
 
       - name: Validate packaged skills
         run: python plugins/moodle-connector/skills/moodle-core/scripts/check_skill_catalog.py --repo-root .

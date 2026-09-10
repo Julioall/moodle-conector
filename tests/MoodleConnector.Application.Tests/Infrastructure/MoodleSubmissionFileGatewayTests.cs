@@ -1,6 +1,8 @@
 using System.Net;
+using System.Text;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Infrastructure;
 
 namespace MoodleConnector.Application.Tests.Infrastructure;
@@ -24,6 +26,27 @@ public sealed class MoodleSubmissionFileGatewayTests
         Assert.DoesNotContain("token=old", handler.Uri!.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("token=new-token", handler.Uri.Query, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("x=1", handler.Uri.Query);
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_CodificaTokenAntesDeAnexaLoNaQuery()
+    {
+        var handler = new Handler();
+        var sut = new MoodleSubmissionFileGateway(
+            new HttpClient(handler),
+            Options.Create(new MoodleApiOptions()),
+            new TokenProvider("token-with&injected=parameter"),
+            new CredentialsProvider());
+
+        await sut.DownloadFileAsync(
+            "1",
+            "https://moodle.example/pluginfile.php/1/a.pdf",
+            "a.pdf",
+            1000,
+            CancellationToken.None);
+
+        Assert.Contains("token=token-with%26injected%3Dparameter", handler.Uri!.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("&injected=parameter", handler.Uri.Query, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -70,6 +93,53 @@ public sealed class MoodleSubmissionFileGatewayTests
     }
 
     [Fact]
+    public async Task DownloadFileAsync_RejeitaEnvelopeDeErroMoodleEmHttp200EInvalidaToken()
+    {
+        var handler = new Handler(
+            contentType: "application/json",
+            body: "{\"error\":\"Token inválido\",\"errorcode\":\"invalidtoken\"}");
+        var tokens = new TokenProvider();
+        var sut = new MoodleSubmissionFileGateway(
+            new HttpClient(handler),
+            Options.Create(new MoodleApiOptions()),
+            tokens,
+            new CredentialsProvider());
+
+        var exception = await Assert.ThrowsAsync<MoodleApiException>(() => sut.DownloadFileAsync(
+            "1",
+            "https://moodle.example/webservice/pluginfile.php/1/a.json",
+            "a.json",
+            1000,
+            CancellationToken.None));
+
+        Assert.Equal("invalidtoken", exception.ErrorCode);
+        Assert.Equal(1, tokens.Invalidations);
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_PreservaArquivoJsonLegitimo()
+    {
+        const string json = "{\"answer\":42}";
+        var handler = new Handler(contentType: "application/json", body: json);
+        var sut = new MoodleSubmissionFileGateway(
+            new HttpClient(handler),
+            Options.Create(new MoodleApiOptions()),
+            new TokenProvider(),
+            new CredentialsProvider());
+
+        var result = await sut.DownloadFileAsync(
+            "1",
+            "https://moodle.example/pluginfile.php/1/resultado.json",
+            "resultado.json",
+            1000,
+            CancellationToken.None);
+
+        Assert.Equal("application/json", result.MimeType);
+        Assert.Equal(Encoding.UTF8.GetByteCount(json), result.SizeBytes);
+        Assert.Equal(Encoding.UTF8.GetBytes(json), result.Content);
+    }
+
+    [Fact]
     public async Task DownloadFileAsync_ComMimeGenericoPreservaDeteccaoPorExtensaoRtf()
     {
         var handler = new Handler(contentType: "application/octet-stream");
@@ -90,7 +160,50 @@ public sealed class MoodleSubmissionFileGatewayTests
         Assert.Equal(3, result.SizeBytes);
     }
 
-    private sealed class Handler(HttpStatusCode statusCode = HttpStatusCode.OK, string? contentType = null) : HttpMessageHandler
+    [Fact]
+    public async Task DownloadFileAsync_RecusaPluginfileForaDoSubdiretorioDaConexao()
+    {
+        var handler = new Handler();
+        var sut = new MoodleSubmissionFileGateway(
+            new HttpClient(handler),
+            Options.Create(new MoodleApiOptions()),
+            new TokenProvider(),
+            new CredentialsProvider("https://moodle.example/moodle"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => sut.DownloadFileAsync(
+            "1",
+            "https://moodle.example/outro/pluginfile.php/1/a.pdf",
+            "a.pdf",
+            1000,
+            CancellationToken.None));
+
+        Assert.Null(handler.Uri);
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_AceitaPluginfileNoSubdiretorioDaConexao()
+    {
+        var handler = new Handler();
+        var sut = new MoodleSubmissionFileGateway(
+            new HttpClient(handler),
+            Options.Create(new MoodleApiOptions()),
+            new TokenProvider(),
+            new CredentialsProvider("https://moodle.example/moodle"));
+
+        await sut.DownloadFileAsync(
+            "1",
+            "https://moodle.example/moodle/pluginfile.php/1/a.pdf",
+            "a.pdf",
+            1000,
+            CancellationToken.None);
+
+        Assert.Equal("/moodle/pluginfile.php/1/a.pdf", handler.Uri!.AbsolutePath);
+    }
+
+    private sealed class Handler(
+        HttpStatusCode statusCode = HttpStatusCode.OK,
+        string? contentType = null,
+        string? body = null) : HttpMessageHandler
     {
         public Uri? Uri { get; private set; }
         public string? AuthorizationScheme { get; private set; }
@@ -100,7 +213,7 @@ public sealed class MoodleSubmissionFileGatewayTests
             Uri = request.RequestUri;
             AuthorizationScheme = request.Headers.Authorization?.Scheme;
             AuthorizationParameter = request.Headers.Authorization?.Parameter;
-            var content = new ByteArrayContent([1, 2, 3]);
+            var content = new ByteArrayContent(body is null ? [1, 2, 3] : Encoding.UTF8.GetBytes(body));
             if (contentType is not null)
             {
                 content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
@@ -109,13 +222,13 @@ public sealed class MoodleSubmissionFileGatewayTests
         }
     }
 
-    private sealed class TokenProvider : IMoodleAccessTokenProvider
+    private sealed class TokenProvider(string token = "new-token") : IMoodleAccessTokenProvider
     {
         public int Invalidations { get; private set; }
 
         public Task<string> GetAccessTokenAsync(
             MoodleConnectorCredentials connection,
-            CancellationToken cancellationToken) => Task.FromResult("new-token");
+            CancellationToken cancellationToken) => Task.FromResult(token);
 
         public void Invalidate(MoodleConnectorCredentials connection)
         {
@@ -123,9 +236,9 @@ public sealed class MoodleSubmissionFileGatewayTests
         }
     }
 
-    private sealed class CredentialsProvider : IMoodleConnectorCredentialsProvider
+    private sealed class CredentialsProvider(string baseUrl = "https://moodle.example") : IMoodleConnectorCredentialsProvider
     {
         public Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken) => Task.FromResult(
-            new MoodleConnectorCredentials("c", "id", "goias", "https://moodle.example", "u", "p", "goias", false));
+            new MoodleConnectorCredentials("c", "id", "goias", baseUrl, "u", "p", "goias", false));
     }
 }

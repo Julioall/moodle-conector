@@ -19,6 +19,7 @@ public static class DependencyInjection
         services.AddOptions<AssignmentWriteFeatureOptions>();
         services.AddOptions<MessageWriteFeatureOptions>();
         services.AddOptions<MoodleUniversalApiFeatureOptions>();
+        services.AddOptions<MoodleFunctionContractOptions>();
         services.AddSingleton<IMoodleBusinessFlowRegistry, MoodleBusinessFlowRegistry>();
         services.AddSingleton<IOperationRegistry, OperationRegistry>();
         services.AddScoped<IConnectionRegistry, ConnectionRegistry>();

@@ -65,6 +65,23 @@ public sealed class SchemaScriptTests
     }
 
     [Fact]
+    public async Task GenericMoodleOperationResultsScript_DevePersistirResultadoSanitizado()
+    {
+        var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)
+            ?? throw new InvalidOperationException("Diretorio de infraestrutura nao encontrado.");
+        var scriptPath = Path.Combine(assemblyDirectory, "Database", "Scripts", "066_generic_moodle_operation_results.sql");
+
+        Assert.True(File.Exists(scriptPath), $"Script de resultados genericos nao encontrado em {scriptPath}.");
+
+        var sql = await File.ReadAllTextAsync(scriptPath);
+
+        Assert.Contains("ResultJson", sql, StringComparison.Ordinal);
+        Assert.Contains("ResultUpdatedAtUtc", sql, StringComparison.Ordinal);
+        Assert.Contains("VALUES (66, 'durable generic Moodle operation results'", sql, StringComparison.Ordinal);
+        Assert.Contains("ON CONFLICT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task MoodleResourceReuseScript_DeveConterIndicePorProprietario()
     {
         var assemblyDirectory = Path.GetDirectoryName(typeof(ConnectorDbContext).Assembly.Location)

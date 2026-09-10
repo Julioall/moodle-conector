@@ -29,6 +29,11 @@ RUN dotnet publish src/MoodleConnector.Presentation/MoodleConnector.Presentation
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
+# Production mounts the verified Moodle contract manifest under this path.
+# Create the mount point in the image so file and directory bind mounts behave
+# consistently across Docker Engine versions.
+RUN mkdir -p /app/contracts
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        curl ca-certificates \

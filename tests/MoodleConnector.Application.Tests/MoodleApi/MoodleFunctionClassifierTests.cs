@@ -19,6 +19,7 @@ public sealed class MoodleFunctionClassifierTests
     [Theory]
     [InlineData("core_course_delete_courses")]
     [InlineData("local_plugin_unknown_function")]
+    [InlineData("mod_book_view_book")]
     public void Classify_RoutesNonQueriesThroughConfirmedWrite(string functionName)
     {
         Assert.Equal(MoodleFunctionRisk.ControlledWrite, MoodleFunctionClassifier.Classify(functionName));

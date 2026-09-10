@@ -54,8 +54,10 @@ public sealed class CapabilityRegistry : ICapabilityRegistry
 
         var payload = await _restClient.CallAsync(credentials, "core_webservice_get_site_info", new Dictionary<string, object?>(), true, cancellationToken);
         var node = JsonNode.Parse(payload.GetRawText());
+        var moodleRelease = node?["release"]?.ToString();
 
         var functions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var functionVersions = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         
         if (node?["functions"] is JsonArray functionsArray)
         {
@@ -65,6 +67,8 @@ public sealed class CapabilityRegistry : ICapabilityRegistry
                 if (!string.IsNullOrEmpty(funcName))
                 {
                     functions.Add(funcName);
+                    var version = functionNode?["version"]?.ToString();
+                    functionVersions[funcName] = string.IsNullOrWhiteSpace(version) ? null : version;
                 }
             }
         }
@@ -73,7 +77,9 @@ public sealed class CapabilityRegistry : ICapabilityRegistry
             connectionInfo.ConnectionId,
             credentialFingerprint,
             functions,
-            DateTimeOffset.UtcNow
+            DateTimeOffset.UtcNow,
+            moodleRelease,
+            functionVersions
         );
 
         _cache.Set(

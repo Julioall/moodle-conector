@@ -12,7 +12,11 @@ public static class MoodleFunctionClassifier
 {
     private static readonly string[] ReadVerbs =
     [
-        "get", "list", "search", "find", "fetch", "view", "check", "can", "count", "export"
+        // "view" is intentionally absent. Moodle functions such as
+        // mod_book_view_book are declared as write-capable because viewing can
+        // update completion/activity state. A verified contract may still
+        // override this conservative fallback explicitly.
+        "get", "list", "search", "find", "fetch", "check", "can", "count", "export"
     ];
 
     private static readonly string[] MutationVerbs =

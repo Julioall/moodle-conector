@@ -192,9 +192,10 @@ SPEC-0020. A prévia será preparada a partir do snapshot e da versão do rascun
   reconciliação.
 - `mod_assign_save_grades` poderá ser habilitado em chunks somente após testes de erro parcial,
   idempotência e reconciliação. Até lá, o executor específico individual permanece válido.
-- O executor universal existente continua desabilitado por padrão. Quando habilitado, usa
-  allowlist, schemas tipados por função, feature flag, conexão `CanWrite`, escopo, preview,
-  confirmação literal e pending action. Ele não é fallback automático da correção assistida.
+- O executor universal existente fica habilitado por padrão no perfil atual. Ele usa
+  contratos verificados em Production, schemas tipados por função, feature flag, conexão
+  `CanWrite`, escopo, preview, confirmação literal e pending action. Ele não é fallback
+  automático da correção assistida.
 
 ### 8. Observabilidade por fase
 
@@ -365,7 +366,8 @@ Flags propostas:
 
 O rollout começa em shadow mode, comparando DTOs e métricas sem alterar a resposta. Depois,
 habilita-se o read model para usuários internos, seguido do caminho direto e dos downloads
-paralelos. As primitives genéricas permanecem desabilitadas até certificação de segurança.
+paralelos. Upload universal permanece desabilitado até certificação própria; escrita universal
+continua protegida por contratos, confirmação e auditoria.
 
 Em rollback, desabilitar as flags de novos caminhos, preservar jobs, snapshots, artifacts,
 pending actions e auditoria. Nunca reexecutar uma escrita durante rollback. Migrações serão

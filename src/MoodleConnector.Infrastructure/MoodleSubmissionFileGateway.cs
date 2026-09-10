@@ -1,8 +1,10 @@
 using System.Net.Mime;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 
 namespace MoodleConnector.Infrastructure;
 
@@ -37,7 +39,8 @@ internal sealed class MoodleSubmissionFileGateway(
         
         var uriBuilder = new UriBuilder(fileUri);
         var query = uriBuilder.Query.TrimStart('?');
-        uriBuilder.Query = string.IsNullOrEmpty(query) ? $"token={token}" : $"{query}&token={token}";
+        var encodedToken = Uri.EscapeDataString(token);
+        uriBuilder.Query = string.IsNullOrEmpty(query) ? $"token={encodedToken}" : $"{query}&token={encodedToken}";
         var downloadUri = uriBuilder.Uri;
 
         using var request = new HttpRequestMessage(HttpMethod.Get, downloadUri);
@@ -49,6 +52,7 @@ internal sealed class MoodleSubmissionFileGateway(
         }
 
         response.EnsureSuccessStatusCode();
+        await ThrowIfMoodleFileErrorResponseAsync(response, credentials, tokenProvider, cancellationToken);
 
         var mimeType = DetectMimeType(response, filename);
         var declared = response.Content.Headers.ContentLength;
@@ -99,7 +103,8 @@ internal sealed class MoodleSubmissionFileGateway(
             !IsAllowedFileEndpoint(fileUri, moodleUri) ||
             !string.IsNullOrEmpty(fileUri.UserInfo) ||
             !string.Equals(fileUri.Host, moodleUri.Host, StringComparison.OrdinalIgnoreCase) ||
-            fileUri.Port != moodleUri.Port)
+            fileUri.Port != moodleUri.Port ||
+            !IsWithinMoodlePath(fileUri.AbsolutePath, moodleUri.AbsolutePath))
         {
             throw new InvalidOperationException("A URL do arquivo deve pertencer ao Moodle HTTPS selecionado.");
         }
@@ -149,6 +154,19 @@ internal sealed class MoodleSubmissionFileGateway(
         }
 
         return false;
+    }
+
+    private static bool IsWithinMoodlePath(string filePath, string basePath)
+    {
+        var normalizedBase = string.IsNullOrWhiteSpace(basePath) ? "/" : basePath.TrimEnd('/');
+        if (normalizedBase.Length == 0)
+        {
+            normalizedBase = "/";
+        }
+
+        return normalizedBase == "/" ||
+               string.Equals(filePath, normalizedBase, StringComparison.OrdinalIgnoreCase) ||
+               filePath.StartsWith(normalizedBase + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string DetectMimeType(HttpResponseMessage response, string filename)
@@ -203,5 +221,63 @@ internal sealed class MoodleSubmissionFileGateway(
             sha256,
             bytes,
             Truncated: false);
+    }
+
+    private static async Task ThrowIfMoodleFileErrorResponseAsync(
+        HttpResponseMessage response,
+        MoodleConnectorCredentials credentials,
+        IMoodleAccessTokenProvider tokenProvider,
+        CancellationToken cancellationToken)
+    {
+        var contentType = response.Content.Headers.ContentType?.MediaType;
+        if (!string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(contentType, "text/json", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("error", out var errorElement) ||
+                errorElement.ValueKind != JsonValueKind.String ||
+                !document.RootElement.TryGetProperty("errorcode", out var errorCodeElement) ||
+                errorCodeElement.ValueKind != JsonValueKind.String)
+            {
+                return;
+            }
+
+            var errorCode = errorCodeElement.GetString();
+            var message = errorElement.GetString();
+            if (string.IsNullOrWhiteSpace(errorCode) || string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (string.Equals(errorCode, "invalidtoken", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(errorCode, "invalid_token", StringComparison.OrdinalIgnoreCase))
+            {
+                tokenProvider.Invalidate(credentials);
+            }
+
+            throw new MoodleApiException(
+                errorCode,
+                "O endpoint de arquivos do Moodle retornou um erro.",
+                (int)response.StatusCode,
+                remoteErrorCode: errorCode,
+                stage: MoodleIntegrationStage.MoodleRequest);
+        }
+        catch (JsonException)
+        {
+            // A valid JSON file is still a file. Only Moodle's structured
+            // error envelope is rejected above.
+        }
     }
 }

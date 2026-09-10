@@ -21,16 +21,9 @@ public sealed class MoodleDownloadFileTools(
     IOptions<MoodleUniversalApiFeatureOptions> features,
     IOptions<GradingLimitsOptions> limits,
     IMoodleAuditLogRepository auditLogs,
-    IMoodleConnectorCredentialsProvider? credentialsProvider = null)
+    IMoodleConnectorCredentialsProvider? credentialsProvider = null,
+    IMoodleConnectionSelection? connectionSelection = null)
 {
-    private static readonly HashSet<string> AllowedMimeTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/msword",
-        "text/plain"
-    };
-
     [MoodleToolMetadata(
         Family = "assignments",
         Classification = "R3",
@@ -53,6 +46,7 @@ public sealed class MoodleDownloadFileTools(
     public async Task<CallToolResult> DownloadAsync(
         [Description("URL de arquivo emitida por uma resposta da conexão Moodle ativa.")] string fileUrl,
         [Description("Nome original do arquivo.")] string filename = "arquivo",
+        [Description("Alias opcional da conexão Moodle que emitiu a referência.")] string? moodleAlias = null,
         CancellationToken cancellationToken = default)
     {
         var startedAt = DateTimeOffset.UtcNow;
@@ -65,15 +59,22 @@ public sealed class MoodleDownloadFileTools(
                 throw new InvalidOperationException("O download universal de arquivos Moodle está desabilitado.");
             }
 
+            if (connectionSelection is not null)
+            {
+                connectionSelection.Alias = moodleAlias;
+            }
+
             if (!Uri.TryCreate(fileUrl, UriKind.Absolute, out var uri) || !string.IsNullOrEmpty(uri.UserInfo))
             {
                 throw new MoodleApiException("invalid_file_url", "A URL do arquivo deve ser absoluta e não pode conter credenciais.");
             }
 
+            string? connectionAlias = null;
             if (credentialsProvider is not null)
             {
                 var credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
                 ValidateToolUri(uri, credentials.BaseUrl);
+                connectionAlias = credentials.Alias;
             }
 
             var maxBytes = Math.Clamp(limits.Value.MaxFileSizeMb, 1, 100) * 1024L * 1024L;
@@ -91,9 +92,9 @@ public sealed class MoodleDownloadFileTools(
                 throw new MoodleApiException("file_too_large", "O arquivo excede o limite configurado.");
             }
 
-            if (!AllowedMimeTypes.Contains(download.MimeType))
+            if (!IsAllowedMimeType(download.MimeType, features.Value.UniversalMoodleAllowedFileMimeTypes))
             {
-                throw new MoodleApiException("mime_not_allowed", "O tipo MIME do arquivo não é permitido para extração controlada.");
+                throw new MoodleApiException("mime_not_allowed", "O tipo MIME do arquivo não é permitido pela política de entrega binária.");
             }
 
             var result = new MoodleDownloadFileResult(
@@ -101,7 +102,8 @@ public sealed class MoodleDownloadFileTools(
                 download.MimeType,
                 download.SizeBytes,
                 download.Sha256Hex,
-                SanitizeHost(uri));
+                SanitizeHost(uri),
+                connectionAlias);
             await AuditAsync(uri, result, "success", null, startedAt, stopwatch.ElapsedMilliseconds, cancellationToken);
             var resource = BlobResourceContents.FromBytes(
                 download.Content,
@@ -155,12 +157,25 @@ public sealed class MoodleDownloadFileTools(
     private static Uri? TryParse(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) ? uri : null;
     private static string? SanitizeHost(Uri uri) => uri.Host;
 
+    private static bool IsAllowedMimeType(string mimeType, IReadOnlyCollection<string> allowedMimeTypes)
+    {
+        var normalized = mimeType.Split(';', 2)[0].Trim();
+        return allowedMimeTypes.Any(allowed =>
+        {
+            var candidate = allowed.Trim();
+            return candidate == "*" ||
+                   candidate.EndsWith("/*", StringComparison.Ordinal) && normalized.StartsWith(candidate[..^1], StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(candidate, normalized, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
     private static void ValidateToolUri(Uri fileUri, string baseUrl)
     {
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var moodleUri) ||
             !string.Equals(fileUri.Host, moodleUri.Host, StringComparison.OrdinalIgnoreCase) ||
             fileUri.Port != moodleUri.Port ||
-            !IsAllowedScheme(fileUri, moodleUri))
+            !IsAllowedScheme(fileUri, moodleUri) ||
+            !IsWithinMoodlePath(fileUri.AbsolutePath, moodleUri.AbsolutePath))
         {
             throw new MoodleApiException("invalid_file_url", "A URL deve pertencer à conexão Moodle ativa e usar HTTPS em produção.");
         }
@@ -190,6 +205,19 @@ public sealed class MoodleDownloadFileTools(
                 System.Net.IPAddress.TryParse(fileUri.Host, out var address) && System.Net.IPAddress.IsLoopback(address));
     }
 
+    private static bool IsWithinMoodlePath(string filePath, string basePath)
+    {
+        var normalizedBase = string.IsNullOrWhiteSpace(basePath) ? "/" : basePath.TrimEnd('/');
+        if (normalizedBase.Length == 0)
+        {
+            normalizedBase = "/";
+        }
+
+        return normalizedBase == "/" ||
+               string.Equals(filePath, normalizedBase, StringComparison.OrdinalIgnoreCase) ||
+               filePath.StartsWith(normalizedBase + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static CallToolResult Result(
         MoodleDownloadFileResult result,
         EmbeddedResourceBlock resource,
@@ -211,4 +239,5 @@ public sealed record MoodleDownloadFileResult(
     [property: JsonPropertyName("mimeType")] string MimeType,
     [property: JsonPropertyName("sizeBytes")] long SizeBytes,
     [property: JsonPropertyName("sha256")] string Sha256Hex,
-    [property: JsonPropertyName("sourceHost")] string? SourceHost);
+    [property: JsonPropertyName("sourceHost")] string? SourceHost,
+    [property: JsonPropertyName("connectionAlias")] string? ConnectionAlias = null);

@@ -1,0 +1,2 @@
+# Contract manifests are administrator-provided deployment artifacts.
+# Keep this directory so Docker can mount it read-only in every environment.

@@ -103,7 +103,7 @@ internal static class PortalEndpointAuthorization
                       (platformPermission is not null && string.Equals(x.Value, platformPermission, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permission)
+    internal static bool HasPlatformToolPermission(ClaimsPrincipal? principal, string permission)
     {
         if (principal is null)
         {

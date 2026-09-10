@@ -10,9 +10,18 @@ namespace MoodleConnector.Application.Registry;
 /// executor; this registry intentionally does not duplicate a static Moodle
 /// function inventory.
 /// </summary>
-public sealed class OperationRegistry : IOperationRegistry
+public sealed class OperationRegistry(IMoodleFunctionContractRegistry? contractRegistry = null) : IOperationRegistry
 {
     public MoodleOperation? GetOperation(string operationName)
+        => GetOperation(operationName, null);
+
+    public MoodleOperation? GetOperation(string operationName, string? moodleRelease)
+        => GetOperation(operationName, moodleRelease, null);
+
+    public MoodleOperation? GetOperation(
+        string operationName,
+        string? moodleRelease,
+        string? externalFunctionVersion)
     {
         if (string.IsNullOrWhiteSpace(operationName))
         {
@@ -20,7 +29,15 @@ public sealed class OperationRegistry : IOperationRegistry
         }
 
         var functionName = operationName.Trim();
-        var risk = MoodleFunctionClassifier.Classify(functionName);
+        var contract = contractRegistry?.Resolve(functionName, moodleRelease, externalFunctionVersion);
+        var risk = contract is { IsVerified: true }
+            ? contract.Contract!.Effect switch
+            {
+                MoodleEffect.Read => MoodleFunctionRisk.Read,
+                MoodleEffect.Write => MoodleFunctionRisk.ControlledWrite,
+                _ => MoodleFunctionRisk.Unknown
+            }
+            : MoodleFunctionClassifier.Classify(functionName);
         return risk switch
         {
             MoodleFunctionRisk.Read => new MoodleOperation(

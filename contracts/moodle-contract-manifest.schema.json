@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moodle-connector.invalid/schemas/moodle-contract-manifest.schema.json",
+  "title": "Moodle Connector External Function Contract Manifest",
+  "type": "object",
+  "required": ["schemaVersion", "contracts"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "source": { "type": "string", "minLength": 1 },
+    "moodleVersion": { "type": "string", "minLength": 1 },
+    "moodleVersions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "generatedAtUtc": { "type": "string", "format": "date-time" },
+    "contracts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/contract" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "contract": {
+      "type": "object",
+      "required": [
+        "functionName",
+        "effect",
+        "inputSchema",
+        "outputSchema",
+        "status",
+        "contractHash"
+      ],
+      "properties": {
+        "functionName": { "type": "string", "minLength": 1 },
+        "effect": { "enum": ["read", "write", "unknown"] },
+        "inputSchema": { "type": "object" },
+        "outputSchema": { "type": "object" },
+        "moodleVersion": { "type": "string" },
+        "externalFunctionVersion": { "type": "string" },
+        "component": { "type": "string" },
+        "pluginVersion": { "type": "string" },
+        "status": { "enum": ["verified", "missing", "stale", "conflicting", "invalid"] },
+        "contractHash": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "source": { "type": "string" },
+        "requiredScopes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "platformPermission": { "type": "string" },
+        "administrativeOnly": { "type": "boolean" },
+        "moodleCapabilities": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "pagination": { "type": "object" },
+        "fileHandling": { "type": "object" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

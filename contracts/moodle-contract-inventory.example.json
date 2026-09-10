@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "alias": "example",
+  "release": "5.1.2 (Build: 20260209)",
+  "generatedAtUtc": "2026-09-10T00:00:00Z",
+  "functions": [
+    {
+      "name": "core_course_get_courses_by_field",
+      "version": "2025010100"
+    },
+    {
+      "name": "core_admin_get_site_info",
+      "version": null
+    }
+  ]
+}

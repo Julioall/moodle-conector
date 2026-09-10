@@ -404,7 +404,7 @@ Contrato de ação pendente:
 }
 ```
 
-O projeto possui escritas reais confirmadas para fórum, mensagens individuais e nota/feedback. A conexão `CanWrite`, o escopo aplicável, a capability Moodle, a prévia, a confirmação e a auditoria continuam obrigatórios. As flags são verificadas pelos handlers antes de preparar ou confirmar uma escrita; o `appsettings.json` versionado as habilita, enquanto `.env.example` as desabilita para um rollout manual seguro. O workflow de deploy grava valores explícitos de variáveis `FEATURES_*` para que a política do ambiente não dependa desse padrão versionado.
+O projeto possui escritas reais confirmadas para fórum, mensagens individuais e nota/feedback. A conexão `CanWrite`, o escopo aplicável, a capability Moodle, a prévia, a confirmação e a auditoria continuam obrigatórios. As flags são verificadas pelos handlers antes de preparar ou confirmar uma escrita; o `appsettings.json`, `.env.example` e o workflow de deploy habilitam a escrita universal por padrão. Em Production, o manifesto estrito de contratos verificados continua obrigatório; o workflow grava valores explícitos de variáveis `FEATURES_*` para que a política do ambiente possa desligá-la quando necessário.
 
 ## Tools Existentes
 

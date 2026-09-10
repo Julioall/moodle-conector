@@ -194,7 +194,8 @@ mesma conexão/gateway, devolve blob/resource MCP e metadados sanitizados. Ela f
 3. Na confirmação, não consultar curso, participantes, enunciado ou escala.
 4. Preservar write sem retry, idempotency key e `ExecutionUnknown`.
 5. Certificar `moodle_prepare_write`/`moodle_confirm_write` já existentes com allowlist e
-   schemas por função; manter `UniversalMoodleWriteEnabled=false` por padrão.
+   schemas por função; manter contratos estritos e confirmação humana como guardas de
+   produção, mesmo com `UniversalMoodleWriteEnabled=true` por padrão.
 6. Avaliar `mod_assign_save_grades` em sandbox; habilitar chunks somente se erro parcial e
    reconciliação forem determinísticos.
 

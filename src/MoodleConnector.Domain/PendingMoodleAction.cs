@@ -41,6 +41,14 @@ public sealed class PendingMoodleAction
 
     public string? LastExecutionError { get; private set; }
 
+    /// <summary>
+    /// Sanitized result envelope returned by a generic Moodle operation.
+    /// Raw credentials and request payloads must never be stored here.
+    /// </summary>
+    public string? ResultJson { get; private set; }
+
+    public DateTimeOffset? ResultUpdatedAtUtc { get; private set; }
+
     public string IdempotencyKey { get; init; } = string.Empty;
 
     public string CorrelationId { get; init; } = string.Empty;
@@ -103,6 +111,17 @@ public sealed class PendingMoodleAction
         Status = PendingActionStatus.Executed;
         ExecutionLeaseUntil = null;
         LastExecutionError = null;
+    }
+
+    public void RecordResult(string sanitizedResultJson, DateTimeOffset? recordedAtUtc = null)
+    {
+        if (string.IsNullOrWhiteSpace(sanitizedResultJson))
+        {
+            throw new ArgumentException("O resultado persistido nao pode ser vazio.", nameof(sanitizedResultJson));
+        }
+
+        ResultJson = sanitizedResultJson.Trim();
+        ResultUpdatedAtUtc = recordedAtUtc ?? DateTimeOffset.UtcNow;
     }
 
     public void MarkFailed(string? error = null)

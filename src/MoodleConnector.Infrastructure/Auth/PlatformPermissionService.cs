@@ -254,18 +254,18 @@ public static class PlatformPermissionCatalog
     [
         "tool.assignments.view", "tool.messages.view", "tool.reports.view", "tool.courses.view",
         "tool.students.view", "tool.classroom.view", "tool.followup.view", "tool.forums.view",
-        "tool.connections.manage", "tool.memory.manage", "tool.pedagogy.view"
+        "tool.connections.manage", "tool.files.view", "tool.memory.manage", "tool.pedagogy.view"
     ];
 
     public static readonly string[] AllWrite =
-    ["tool.assignments.grade", "tool.messages.send", "tool.forums.write"];
+    ["tool.assignments.grade", "tool.files.write", "tool.messages.send", "tool.forums.write"];
 
     public static readonly string[] All =
     [
         "tool.assignments.view", "tool.assignments.grade", "tool.messages.view",
         "tool.messages.send", "tool.reports.view", "tool.courses.view", "tool.students.view",
         "tool.classroom.view", "tool.followup.view", "tool.forums.view", "tool.forums.write", "tool.connections.manage",
-        "tool.memory.manage", "tool.pedagogy.view", PermissionGroupsManage, PendingActionsManage, TeamsManage,
+        "tool.files.view", "tool.files.write", "tool.memory.manage", "tool.pedagogy.view", PermissionGroupsManage, PendingActionsManage, TeamsManage,
         ..PortalPermissions
     ];
 

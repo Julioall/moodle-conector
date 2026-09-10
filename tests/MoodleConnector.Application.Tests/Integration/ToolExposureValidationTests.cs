@@ -95,7 +95,8 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.Contains("moodle_confirm_write", tools, StringComparer.OrdinalIgnoreCase);
         Assert.Contains("moodle_list_available_flows", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("moodle_diagnose_connection", tools, StringComparer.OrdinalIgnoreCase);
-        Assert.DoesNotContain("moodle_list_functions", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("moodle_list_functions", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains("moodle_describe_function", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("moodle_check_function", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("discover_grading_functions", tools, StringComparer.OrdinalIgnoreCase);
         Assert.DoesNotContain("execute_grading_discovery", tools, StringComparer.OrdinalIgnoreCase);
@@ -200,7 +201,7 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
                                exposurePolicy.ShouldExpose(contract.Name!, metadata))
             .ToDictionary(contract => contract.Name!, StringComparer.Ordinal);
 
-        Assert.Equal(85, contracts.Count);
+        Assert.Equal(89, contracts.Count);
         Assert.Equal(
             contracts.Keys.OrderBy(name => name, StringComparer.Ordinal),
             submissionTools.Select(entry => entry.Key).OrderBy(name => name, StringComparer.Ordinal));

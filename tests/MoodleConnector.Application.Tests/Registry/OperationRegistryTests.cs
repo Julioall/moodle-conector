@@ -1,4 +1,6 @@
 using MoodleConnector.Application.Registry;
+using MoodleConnector.Application.MoodleApi;
+using System.Text.Json;
 using MoodleConnector.Domain.Registry;
 
 namespace MoodleConnector.Application.Tests.Registry;
@@ -42,5 +44,29 @@ public sealed class OperationRegistryTests
         Assert.NotNull(operation);
         Assert.Equal(OperationType.Read, operation!.Type);
         Assert.Equal("forum", operation.Category);
+    }
+
+    [Fact]
+    public void VerifiedContractTakesPrecedenceOverFunctionNameHeuristic()
+    {
+        using var input = JsonDocument.Parse("{\"type\":\"object\"}");
+        using var output = JsonDocument.Parse("{\"type\":\"object\"}");
+        var contract = new MoodleFunctionContract
+        {
+            FunctionName = "mod_example_view_item",
+            Effect = MoodleEffect.Read,
+            InputSchema = input.RootElement.Clone(),
+            OutputSchema = output.RootElement.Clone(),
+            Status = MoodleContractStatus.Verified,
+            ContractHash = string.Empty
+        };
+        contract = contract with { ContractHash = MoodleFunctionContractRegistry.ComputeContractHash(contract) };
+
+        var registry = new OperationRegistry(new MoodleFunctionContractRegistry([contract]));
+
+        var operation = registry.GetOperation(contract.FunctionName);
+
+        Assert.NotNull(operation);
+        Assert.Equal(OperationType.Read, operation!.Type);
     }
 }

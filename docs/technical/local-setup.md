@@ -132,6 +132,8 @@ https://<APP_DOMAIN>/mcp
 | `RateLimiting` | `AdminApiPermitLimit` | Chamadas permitidas por janela nos endpoints administrativos. Padrão: `30`. |
 | `RateLimiting` | `McpPermitLimit` | Chamadas MCP permitidas por janela por usuário/conector. Padrão: `120`. |
 | `MoodleApi` | `AllowServiceTokenForReadOnlyQueries` | Quando `true`, permite token global de leitura (`ServiceToken`) em consultas read-only. |
+| `MoodleApi` | `ContractManifestPath` | Caminho do manifesto JSON de contratos verificados; em produção, o padrão é `/app/contracts/production.json`. |
+| `MoodleApi` | `RequireVerifiedContracts` | Quando `true`, bloqueia funções sem contrato compatível e falha no boot se o manifesto não estiver configurado. |
 | `Postgres` | `ConnectionString` | Conexão EF Core com PostgreSQL. |
 | `ConnectorSecrets` | `EncryptionKeyBase64` | Chave para proteger credenciais Moodle. |
 | `MoodleApi` | `LoginService` | Serviço Moodle usado para obter token. Padrão: `moodle_mobile_app`. |
@@ -150,6 +152,7 @@ https://<APP_DOMAIN>/mcp
 - O schema inicial é aplicado pelo script versionado `src/MoodleConnector.Infrastructure/Database/Scripts/001_initial_schema.sql`.
 - O portal local usa cookie HttpOnly e senha mínima de 12 caracteres; em produção o cookie passa a ser `Secure` quando `OAuth__RequireHttpsMetadata=true`.
 - Não grave tokens, senhas, API keys ou secrets reais em arquivos versionados.
+- O diretório `contracts/` é montado somente para leitura no container; habilite o modo estrito apenas depois de validar o manifesto contra o inventário real de cada release Moodle.
 
 ## LiveShadow tests (executando contra um Moodle real)
 

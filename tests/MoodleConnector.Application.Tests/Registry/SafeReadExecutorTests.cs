@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Registry;
 using MoodleConnector.Domain;
 using MoodleConnector.Domain.Registry;
@@ -35,6 +38,7 @@ public sealed class SafeReadExecutorTests
         Assert.NotNull(result);
         Assert.Equal("true", result!["normalized"]!.ToString());
         Assert.True(restClient.WasCalled);
+        Assert.False(restClient.LastAllowServiceToken);
     }
 
     [Fact]
@@ -99,6 +103,205 @@ public sealed class SafeReadExecutorTests
         Assert.False(restClient.WasCalled);
     }
 
+    [Fact]
+    public async Task ExecuteAsync_UsesVerifiedContractEffectAndVersionBeforeCallingMoodle()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ConnectionInfo(connectionId, "test-alias", "https://test.moodle");
+        var contract = CreateContract("mod_example_view_item", MoodleEffect.Read, "4.5");
+        var contractRegistry = new MoodleFunctionContractRegistry([contract]);
+        var restClient = new FakeRestClient(JsonDocument.Parse("{\"ok\":true}").RootElement);
+        var executor = new SafeReadExecutor(
+            new FakeConnectionRegistry(connection),
+            new OperationRegistry(contractRegistry),
+            new FakeCapabilityRegistry(new CapabilitySnapshot(
+                connectionId,
+                "user1",
+                new HashSet<string> { contract.FunctionName },
+                DateTimeOffset.UtcNow,
+                "4.5")),
+            new FakePolicyEngine(new PolicyEvaluationResult(PolicyDecision.Allow, "OK")),
+            new FakeResponseNormalizer(JsonNode.Parse("{\"normalized\":true}")),
+            new FakeCredentialsProvider(new MoodleConnectorCredentials(
+                "client", connectionId.ToString(), "test-alias", "https://test.moodle", "user1", "pass", "target", false)),
+            restClient,
+            contractRegistry,
+            Options.Create(new MoodleFunctionContractOptions { RequireVerifiedContracts = true }));
+
+        var result = await executor.ExecuteAsync(
+            contract.FunctionName,
+            new Dictionary<string, object?>(),
+            cancellationToken: CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.True(restClient.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StrictModeBlocksMissingContractBeforeRemoteCall()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ConnectionInfo(connectionId, "test-alias", "https://test.moodle");
+        var restClient = new FakeRestClient(JsonDocument.Parse("{}").RootElement);
+        var executor = new SafeReadExecutor(
+            new FakeConnectionRegistry(connection),
+            new OperationRegistry(),
+            new FakeCapabilityRegistry(new CapabilitySnapshot(
+                connectionId,
+                "user1",
+                new HashSet<string> { "core_course_get_courses" },
+                DateTimeOffset.UtcNow,
+                "4.5")),
+            new FakePolicyEngine(new PolicyEvaluationResult(PolicyDecision.Allow, "OK")),
+            new FakeResponseNormalizer(JsonNode.Parse("{}")),
+            new FakeCredentialsProvider(new MoodleConnectorCredentials(
+                "client", connectionId.ToString(), "test-alias", "https://test.moodle", "user1", "pass", "target", false)),
+            restClient,
+            new MoodleFunctionContractRegistry([]),
+            Options.Create(new MoodleFunctionContractOptions { RequireVerifiedContracts = true }));
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => executor.ExecuteAsync(
+            "core_course_get_courses",
+            new Dictionary<string, object?>(),
+            cancellationToken: CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.SchemaUnavailable, error.ErrorCode);
+        Assert.False(restClient.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_StrictModeBlocksWhenContractRegistryIsUnavailable()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ConnectionInfo(connectionId, "test-alias", "https://test.moodle");
+        var restClient = new FakeRestClient(JsonDocument.Parse("{}").RootElement);
+        var executor = new SafeReadExecutor(
+            new FakeConnectionRegistry(connection),
+            new FakeOperationRegistry(new MoodleOperation(
+                "core_course_get_courses",
+                "course",
+                OperationType.Read,
+                ToolRiskLevel.ReadOnly,
+                OperationPolicy.Direct,
+                "course-list")),
+            new FakeCapabilityRegistry(new CapabilitySnapshot(
+                connectionId,
+                "user1",
+                new HashSet<string> { "core_course_get_courses" },
+                DateTimeOffset.UtcNow,
+                "4.5")),
+            new FakePolicyEngine(new PolicyEvaluationResult(PolicyDecision.Allow, "OK")),
+            new FakeResponseNormalizer(JsonNode.Parse("{}")),
+            new FakeCredentialsProvider(new MoodleConnectorCredentials(
+                "client", connectionId.ToString(), "test-alias", "https://test.moodle", "user1", "pass", "target", false)),
+            restClient,
+            contractRegistry: null,
+            contractOptions: Options.Create(new MoodleFunctionContractOptions { RequireVerifiedContracts = true }));
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => executor.ExecuteAsync(
+            "core_course_get_courses",
+            new Dictionary<string, object?>(),
+            cancellationToken: CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.SchemaUnavailable, error.ErrorCode);
+        Assert.False(restClient.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_BlocksVerifiedContractWhenDeclaredScopeIsMissing()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ConnectionInfo(connectionId, "test-alias", "https://test.moodle");
+        var contract = CreateContract("core_course_get_courses", MoodleEffect.Read, "4.5") with
+        {
+            RequiredScopes = ["moodle.read.courses"]
+        };
+        contract = contract with { ContractHash = MoodleFunctionContractRegistry.ComputeContractHash(contract) };
+        var restClient = new FakeRestClient(JsonDocument.Parse("{}").RootElement);
+        var executor = new SafeReadExecutor(
+            new FakeConnectionRegistry(connection),
+            new OperationRegistry(new MoodleFunctionContractRegistry([contract])),
+            new FakeCapabilityRegistry(new CapabilitySnapshot(
+                connectionId,
+                "user1",
+                new HashSet<string> { contract.FunctionName },
+                DateTimeOffset.UtcNow,
+                "4.5")),
+            new FakePolicyEngine(new PolicyEvaluationResult(PolicyDecision.Allow, "OK")),
+            new FakeResponseNormalizer(JsonNode.Parse("{}")),
+            new FakeCredentialsProvider(new MoodleConnectorCredentials(
+                "client", connectionId.ToString(), "test-alias", "https://test.moodle", "user1", "pass", "target", false)),
+            restClient,
+            new MoodleFunctionContractRegistry([contract]),
+            Options.Create(new MoodleFunctionContractOptions { RequireVerifiedContracts = true }),
+            new FakeCurrentUserContext());
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => executor.ExecuteAsync(
+            contract.FunctionName,
+            new Dictionary<string, object?>(),
+            cancellationToken: CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.PermissionDenied, error.ErrorCode);
+        Assert.False(restClient.WasCalled);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_BlocksAdministrativeContractWithoutAdministrativePermission()
+    {
+        var connectionId = Guid.NewGuid();
+        var connection = new ConnectionInfo(connectionId, "test-alias", "https://test.moodle");
+        var contract = CreateContract("core_admin_get_environment", MoodleEffect.Read, "4.5") with
+        {
+            AdministrativeOnly = true,
+            PlatformPermission = "tool.moodle.admin.functions"
+        };
+        contract = contract with { ContractHash = MoodleFunctionContractRegistry.ComputeContractHash(contract) };
+        var registry = new MoodleFunctionContractRegistry([contract]);
+        var restClient = new FakeRestClient(JsonDocument.Parse("{}").RootElement);
+        var executor = new SafeReadExecutor(
+            new FakeConnectionRegistry(connection),
+            new OperationRegistry(registry),
+            new FakeCapabilityRegistry(new CapabilitySnapshot(
+                connectionId,
+                "user1",
+                new HashSet<string> { contract.FunctionName },
+                DateTimeOffset.UtcNow,
+                "4.5")),
+            new FakePolicyEngine(new PolicyEvaluationResult(PolicyDecision.Allow, "OK")),
+            new FakeResponseNormalizer(JsonNode.Parse("{}")),
+            new FakeCredentialsProvider(new MoodleConnectorCredentials(
+                "client", connectionId.ToString(), "test-alias", "https://test.moodle", "user1", "pass", "target", false)),
+            restClient,
+            registry,
+            Options.Create(new MoodleFunctionContractOptions { RequireVerifiedContracts = true }),
+            new FakeCurrentUserContext());
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => executor.ExecuteAsync(
+            contract.FunctionName,
+            new Dictionary<string, object?>(),
+            cancellationToken: CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.PermissionDenied, error.ErrorCode);
+        Assert.False(restClient.WasCalled);
+    }
+
+    private static MoodleFunctionContract CreateContract(string functionName, MoodleEffect effect, string moodleVersion)
+    {
+        using var input = JsonDocument.Parse("{\"type\":\"object\"}");
+        using var output = JsonDocument.Parse("{\"type\":\"object\"}");
+        var contract = new MoodleFunctionContract
+        {
+            FunctionName = functionName,
+            Effect = effect,
+            InputSchema = input.RootElement.Clone(),
+            OutputSchema = output.RootElement.Clone(),
+            MoodleVersion = moodleVersion,
+            Status = MoodleContractStatus.Verified,
+            ContractHash = string.Empty
+        };
+        return contract with { ContractHash = MoodleFunctionContractRegistry.ComputeContractHash(contract) };
+    }
+
     private sealed class FakeConnectionRegistry(ConnectionInfo info) : IConnectionRegistry
     {
         public Task<ConnectionInfo?> ResolveConnectionAsync(string? alias, CancellationToken cancellationToken = default) => Task.FromResult<ConnectionInfo?>(info);
@@ -143,6 +346,7 @@ public sealed class SafeReadExecutorTests
     private sealed class FakeRestClient(JsonElement result) : IMoodleRestClient
     {
         public bool WasCalled { get; private set; }
+        public bool LastAllowServiceToken { get; private set; } = true;
 
         public Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName, IReadOnlyDictionary<string, object?> parameters, CancellationToken cancellationToken)
         {
@@ -152,7 +356,22 @@ public sealed class SafeReadExecutorTests
         public Task<JsonElement> CallAsync(MoodleConnectorCredentials credentials, string functionName, IReadOnlyDictionary<string, object?> parameters, bool allowServiceToken, CancellationToken cancellationToken)
         {
             WasCalled = true;
+            LastAllowServiceToken = allowServiceToken;
             return Task.FromResult(result);
         }
+    }
+
+    private sealed class FakeCurrentUserContext(
+        IReadOnlyCollection<string>? scopes = null,
+        IReadOnlyCollection<string>? permissions = null) : ICurrentUserContext
+    {
+        public string Subject => "test-user";
+        public string? Email => "test@example.com";
+        public IReadOnlyCollection<string> Scopes { get; } = scopes ?? [];
+
+        public bool HasScope(string scope) => Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase);
+
+        public bool HasPlatformPermission(string permission) =>
+            (permissions ?? []).Contains(permission, StringComparer.OrdinalIgnoreCase);
     }
 }

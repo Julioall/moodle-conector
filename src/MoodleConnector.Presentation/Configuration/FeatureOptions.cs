@@ -11,6 +11,7 @@ public sealed class FeatureOptions
     public bool CourseContentWriteEnabled { get; init; }
     public bool UniversalMoodleWriteEnabled { get; init; }
     public bool UniversalMoodleFileDownloadEnabled { get; init; }
+    public bool UniversalMoodleFileUploadEnabled { get; init; }
     public bool McpResourceSubmissionDeliveryEnabled { get; init; }
     // Compatibility-only setting; assisted grading has no extraction fallback.
     public bool LegacySubmissionExtractionEnabled { get; init; }

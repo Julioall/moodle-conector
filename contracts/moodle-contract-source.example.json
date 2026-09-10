@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "source": "controlled-export://example-not-production",
+  "moodleVersion": "5.1.2",
+  "contracts": [
+    {
+      "functionName": "core_course_get_courses_by_field",
+      "effect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "field": { "type": ["string", "null"] },
+          "value": { "type": ["string", "null"] }
+        },
+        "required": ["field", "value"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "courses": { "type": "array", "items": { "type": "object" } }
+        },
+        "required": ["courses"]
+      },
+      "externalFunctionVersion": "2025010100",
+      "component": "core_course",
+      "source": "controlled-export://example-not-production",
+      "requiredScopes": ["moodle/course:view"],
+      "pagination": {
+        "mode": "none"
+      },
+      "status": "missing"
+    },
+    {
+      "functionName": "core_admin_get_site_info",
+      "effect": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "component": "core",
+      "administrativeOnly": true,
+      "platformPermission": "moodle.admin.read",
+      "moodleCapabilities": [
+        "moodle/site:config"
+      ],
+      "status": "missing"
+    }
+  ]
+}

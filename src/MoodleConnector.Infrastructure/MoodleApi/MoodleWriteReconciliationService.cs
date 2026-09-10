@@ -62,12 +62,19 @@ internal sealed class MoodleWriteReconciliationService(
         {
             functionName = "mod_assign_save_grade";
         }
+        if (string.IsNullOrWhiteSpace(functionName) &&
+            string.Equals(action.ToolName, "moodle_prepare_upload", StringComparison.Ordinal))
+        {
+            functionName = "moodle_upload_draft";
+        }
         if (string.IsNullOrWhiteSpace(functionName))
         {
             throw new InvalidOperationException("A ação não contém a função Moodle necessária para reconciliação.");
         }
 
-        var scope = MoodleWriteScopePolicy.ForFunction(functionName);
+        var scope = string.Equals(action.ToolName, "moodle_prepare_upload", StringComparison.Ordinal)
+            ? "moodle.write"
+            : MoodleWriteScopePolicy.ForFunction(functionName);
         if (!currentUser.HasScope(scope))
         {
             throw new InvalidOperationException($"Escopo obrigatório ausente: {scope}.");

@@ -53,7 +53,8 @@ public static class RegisteredMcpToolContainers
     [
         new(typeof(MoodleTutorMessageTools), "MessagesWriteEnabled"),
         new(typeof(MoodleUniversalWriteTools), "UniversalMoodleWriteEnabled"),
-        new(typeof(MoodleDownloadFileTools), "UniversalMoodleFileDownloadEnabled")
+        new(typeof(MoodleDownloadFileTools), "UniversalMoodleFileDownloadEnabled"),
+        new(typeof(MoodleUniversalUploadTools), "UniversalMoodleFileUploadEnabled")
     ];
 
     public static IReadOnlyList<Type> All { get; } =
@@ -98,6 +99,7 @@ public sealed record ConditionalMcpToolContainer(Type ContainerType, string Feat
             "MessagesWriteEnabled" => featureOptions.MessagesWriteEnabled,
             "UniversalMoodleWriteEnabled" => featureOptions.UniversalMoodleWriteEnabled,
             "UniversalMoodleFileDownloadEnabled" => featureOptions.UniversalMoodleFileDownloadEnabled,
+            "UniversalMoodleFileUploadEnabled" => featureOptions.UniversalMoodleFileUploadEnabled,
             _ => false
         };
 }

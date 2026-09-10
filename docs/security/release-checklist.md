@@ -31,15 +31,18 @@ Use este checklist antes de publicar uma release em VPS ou habilitar novas tools
 - [ ] `MoodleApi__BaseUrl` e `MoodleProxy__BaseUrl`, quando usados, apontam para ambientes esperados.
 - [ ] Tokens globais de Moodle não são usados como fallback silencioso, salvo decisão explícita.
 - [ ] `MoodleApi__AllowServiceTokenForReadOnlyQueries=false`, salvo exceção aprovada.
+- [ ] `MoodleApi__RequireVerifiedContracts=true` em Production, com manifesto verificado montado em `/app/contracts`.
+- [ ] `MoodleApi__ContractManifestPath` aponta para um arquivo existente sob `/app/contracts` e o gate de cobertura passou para cada release/alias alvo.
 - [ ] Credenciais Moodle de teste não estão em arquivos versionados.
 
 ## Escritas E Feature Flags
 
-- [ ] As flags `FEATURES_*_WRITE_ENABLED` refletem a política aprovada para o ambiente, estão registradas no release e são gravadas explicitamente pelo workflow de deploy; não dependem silenciosamente do padrão de `appsettings.json`.
+- [ ] As flags `FEATURES_*_WRITE_ENABLED` e `FEATURES_UNIVERSAL_MOODLE_FILE_*_ENABLED` refletem a política aprovada para o ambiente, estão registradas no release e são gravadas explicitamente pelo workflow de deploy; não dependem silenciosamente do padrão de `appsettings.json`.
 - [ ] Para cada escrita habilitada, `CanWrite`, escopo exigido, prévia, confirmação literal, expiração, reivindicação atômica e auditoria foram verificados.
 - [ ] Qualquer escrita nova usa fluxo `prepare_*` e `confirm_*`.
 - [ ] Confirmação exige usuário correto, escopo requerido, expiração e texto exato.
 - [ ] Idempotência de confirmação está coberta por teste.
+- [ ] Download foi exercitado com URL `pluginfile.php` emitida pelo Moodle; upload só está habilitado se rascunho, MIME, limite, retenção e escrita posterior tiverem sido homologados.
 
 ## Resiliência E Abuso
 

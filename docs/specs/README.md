@@ -42,6 +42,7 @@ evidências.
 | [SPEC-0023](spec-0023-professional-tasks.md) | Implementing | SPEC-0017, SPEC-0018 | Tasks profissionais para acompanhamento operacional |
 | [SPEC-0024](spec-0024-assisted-grading-fast-path.md) | Draft | SPEC-0011, SPEC-0012, SPEC-0014, SPEC-0015, SPEC-0019–0022 | Caminho direto e read model local da correção assistida |
 | [SPEC-0025](spec-0025-set-based-moodle-reads.md) | Implementing | SPEC-0013, SPEC-0015, SPEC-0017 | Leituras amplas e snapshots analíticos por curso sem fan-out silencioso |
+| [SPEC-0027](spec-0027-generic-moodle-webservice-coverage.md) | Implementing | SPEC-0011–0014, SPEC-0017, SPEC-0022, SPEC-0024–0026 | Descoberta de contratos e execução genérica REST, arquivos e resultados com cobertura verificável |
 
 ## Regra de rastreabilidade
 

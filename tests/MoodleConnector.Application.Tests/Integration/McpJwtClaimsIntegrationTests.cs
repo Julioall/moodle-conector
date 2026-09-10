@@ -313,6 +313,26 @@ public class McpJwtClaimsIntegrationTests : IClassFixture<McpTestWebApplicationF
     }
 
     [Fact]
+    public async Task Deve_ocultar_tools_governadas_para_api_key_sem_conta_vinculada()
+    {
+        var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, configurationBuilder) =>
+            {
+                configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["McpServerSecurity:AllowUnlinkedApiKey"] = "false"
+                });
+            });
+        });
+
+        var tools = await GetToolsListAsync(factory, "Production");
+
+        Assert.DoesNotContain("list_my_courses", tools, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("moodle_execute_read", tools, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Deve_usar_a_conexao_e_os_scopes_do_token_sem_exigir_grupo_de_acesso()
     {
         var factory = BuildJwtFactory(requireApiKey: false);
@@ -1439,6 +1459,7 @@ public sealed class McpTestWebApplicationFactory : WebApplicationFactory<Program
             {
                 ["McpServerSecurity:RequireJwt"] = "false",
                 ["McpServerSecurity:RequireApiKey"] = "true",
+                ["McpServerSecurity:AllowUnlinkedApiKey"] = "true",
                 ["UserClaims:UserIdClaim"] = "sub",
                 ["UserClaims:MoodleUserIdClaim"] = "moodle_user_id",
                 ["UserClaims:WritePermissionClaim"] = "scope",

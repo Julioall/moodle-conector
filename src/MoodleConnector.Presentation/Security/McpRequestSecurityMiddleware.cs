@@ -270,7 +270,7 @@ internal sealed class McpRequestSecurityMiddleware(
                         claims.Add(new Claim("platform_permission", permission));
                     }
                 }
-                else
+                else if (security.AllowUnlinkedApiKey)
                 {
                     foreach (var permission in PlatformPermissionCatalog.AllRead)
                     {
@@ -284,6 +284,14 @@ internal sealed class McpRequestSecurityMiddleware(
                             claims.Add(new Claim("platform_permission", permission));
                         }
                     }
+                }
+                else
+                {
+                    // A valid technical key without a local account remains
+                    // authenticated for protocol diagnostics, but receives
+                    // no product permissions. It must be linked to a
+                    // UserAccount before any governed Moodle tool is exposed.
+                    claims.Add(new Claim("connector_identity_status", "unlinked"));
                 }
 
                 context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "connector-api-key"));

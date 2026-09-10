@@ -47,8 +47,27 @@ $connectionString = "Host=$databaseName;Port=5432;Database=moodle_connector;User
 $networkCreated = $false
 $databaseCreated = $false
 $applicationCreated = $false
+$manifestPath = $null
+$manifestCreated = $false
 
 try {
+    $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $manifestSourcePath = Join-Path $repositoryRoot 'contracts/moodle-contract-source.fixture-complete.json'
+    $manifestPreparationScript = Join-Path $repositoryRoot 'scripts/prepare-moodle-contract-manifest.ps1'
+    if (-not (Test-Path -LiteralPath $manifestSourcePath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $manifestPreparationScript -PathType Leaf)) {
+        throw 'Os artefatos de fixture do manifesto de contratos não foram encontrados.'
+    }
+
+    $manifestPath = Join-Path ([System.IO.Path]::GetTempPath()) "moodle-production-validation-$suffix.json"
+    & pwsh -NoProfile -File $manifestPreparationScript `
+        -InputPath $manifestSourcePath `
+        -OutputPath $manifestPath | Out-Null
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw 'Não foi possível preparar o manifesto de contratos da validação Production.'
+    }
+    $manifestCreated = $true
+
     & docker network create $networkName *> $null
     if ($LASTEXITCODE -ne 0) {
         throw 'Não foi possível criar a rede temporária de certificação.'
@@ -82,7 +101,10 @@ try {
 
     & docker run --detach --rm --name $applicationName --network $networkName `
         --publish "127.0.0.1:${HostPort}:8080" `
+        --volume "${manifestPath}:/app/contracts/production-validation.json:ro" `
         --env ASPNETCORE_ENVIRONMENT=Production `
+        --env 'MoodleApi__ContractManifestPath=/app/contracts/production-validation.json' `
+        --env 'MoodleApi__RequireVerifiedContracts=true' `
         --env "Postgres__ConnectionString=$connectionString" `
         --env 'ConnectorSecrets__EncryptionKeyBase64=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=' `
         --env 'AdminApi__ApiKey=production-validation-admin-key' `
@@ -146,5 +168,9 @@ finally {
 
     if ($networkCreated) {
         & docker network rm $networkName *> $null
+    }
+
+    if ($manifestCreated -and $null -ne $manifestPath) {
+        Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
     }
 }

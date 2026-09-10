@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain;
 using MoodleConnector.Infrastructure.MoodleApi;
@@ -59,6 +61,24 @@ public sealed class MoodleFunctionExecutorTests
         using var response = JsonDocument.Parse(audit.ResponseSummaryJson);
         Assert.True(response.RootElement.TryGetProperty("durationMs", out var duration));
         Assert.True(duration.GetInt64() >= 0);
+    }
+
+    [Fact]
+    public async Task ExecuteReadAsync_ModoEstritoFalhaFechadoSemRegistroDeContratos()
+    {
+        var profile = Profile(new MoodleFunctionDescriptor("local_plugin_get_data", MoodleFunctionRisk.Read, true));
+        var restClient = new FakeRestClient();
+        var sut = new MoodleFunctionExecutor(
+            new FakeCatalog(profile),
+            restClient,
+            new FakeCredentialsProvider(),
+            contractOptions: Options.Create(new MoodleFunctionContractOptions { RequireVerifiedContracts = true }));
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.ExecuteReadAsync(
+            "local_plugin_get_data", new Dictionary<string, object?>(), CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.SchemaUnavailable, error.ErrorCode);
+        Assert.Equal(0, restClient.Calls);
     }
 
     private static MoodleFunctionProfile Profile(MoodleFunctionDescriptor descriptor) => new(

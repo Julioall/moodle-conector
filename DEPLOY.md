@@ -114,10 +114,13 @@ Variables opcionais:
 - `CADDYFILE` - padrão `./Caddyfile`
 - `MCP_REQUIRE_JWT` - padrão `true`
 - `MCP_REQUIRE_API_KEY` - padrão `false`
-- `FEATURES_MESSAGES_WRITE_ENABLED`, `FEATURES_SCHEDULED_MESSAGES_ENABLED`, `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED`, `FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED` e `FEATURES_COURSE_CONTENT_WRITE_ENABLED` - padrão `true`; defina explicitamente a política de escrita aprovada para o ambiente
+- `FEATURES_MESSAGES_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED`, `FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED` e `FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED` - padrão `true`; `FEATURES_SCHEDULED_MESSAGES_ENABLED` e `FEATURES_COURSE_CONTENT_WRITE_ENABLED` - padrão `false`. A escrita universal continua condicionada a `MoodleApi:RequireVerifiedContracts=true`, `CanWrite`, escopo e confirmação humana
 - `FEATURES_MCP_RESOURCE_SUBMISSION_DELIVERY_ENABLED` - padrão `true` no deploy; habilita a entrega de submissões por MCP Resources
 - `FEATURES_LEGACY_SUBMISSION_EXTRACTION_ENABLED` - padrão `true`; mantém o fallback legado disponível
 - `FEATURES_MCP_RESOURCE_ZIP_ENABLED`, `FEATURES_MCP_GRADING_DRAFT_ENABLED` e `FEATURES_MCP_GRADING_WRITE_ENABLED` - padrão `false`; habilite somente após validação da coorte correspondente
+- `FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED` - padrão `false`; habilite somente após homologar upload e retenção de rascunhos
+- `MOODLE_API_CONTRACT_MANIFEST_PATH` - caminho interno, sob `/app/contracts`, do manifesto verificado; padrão do deploy: `/app/contracts/production.json`
+- `MOODLE_API_REQUIRE_VERIFIED_CONTRACTS` - padrão `true` no deploy; Production recusa o modo transicional e exige manifesto verificado
 - `OAUTH_CLIENT_ID` - padrão `moodle`
 - `OAUTH_SCOPE_NAME` - padrão `moodle-mcp-audience`
 - `OAUTH_REQUIRE_HTTPS_METADATA` - padrão `true`
@@ -158,6 +161,28 @@ Antes do deploy, o workflow valida:
 - `CONNECTOR_SECRETS_ENCRYPTION_KEY_BASE64` decodificando para exatamente 32 bytes;
 - presença de `MEDIATR_LICENSE_KEY`;
 - ausência de quebras de linha em secrets e variáveis que são gravadas no `.env.production`.
+
+## Manifesto de contratos Moodle
+
+O manifesto da cobertura genérica é um artefato administrativo por ambiente.
+Coloque-o em `contracts/moodle-contracts.json` no host antes de ativar o modo
+estrito. O container monta `./contracts` em `/app/contracts` somente para
+leitura. Configure, no environment `moodle-connector` do GitHub:
+
+```text
+MOODLE_API_CONTRACT_MANIFEST_PATH=/app/contracts/production.json
+MOODLE_API_REQUIRE_VERIFIED_CONTRACTS=true
+```
+
+O workflow preserva `contracts/*.json` durante o `rsync`, verifica no host remoto
+que o manifesto estrito existe e não está vazio, e falha se o modo transicional
+for solicitado em Production. Gere e valide o arquivo
+por release/alias com `scripts/verify-moodle-generic-coverage.ps1` antes do
+deploy; ele deve declarar `schemaVersion=1` e conter contratos verificados para
+as funções anunciadas ao token Moodle. O processo encerra o startup em
+`Production` quando `MoodleApi:RequireVerifiedContracts=false`, mesmo que as
+flags universais de escrita estejam desligadas; o modo transicional fica
+restrito a desenvolvimento/homologação.
 
 Quando habilitado somente para desenvolvimento, `RESET_DATABASE_ON_DEPLOY=true` limpa o volume
 do PostgreSQL no deploy. Isso apaga usuários, conexões, memórias, auditorias, tarefas e demais

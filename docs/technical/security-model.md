@@ -170,9 +170,9 @@ Os gateways `MoodleApi` e `MoodleProxy` aplicam timeout, retry de falhas transit
 ## Estado Atual Das Escritas
 
 Escritas reais controladas estão implementadas para fórum, mensagens, nota/feedback, conteúdo e
-o executor universal classificado. A configuração versionada atual habilita as flags de escrita,
-mas a promoção à VPS grava cada uma explicitamente a partir de variáveis `FEATURES_*`; o exemplo
-de ambiente mantém todas desabilitadas para rollout manual seguro.
+o executor universal classificado. A configuração versionada atual habilita a escrita universal,
+mas a promoção à VPS grava cada capacidade explicitamente a partir de variáveis `FEATURES_*`;
+Production exige manifesto estrito de contratos verificados, e upload permanece opt-in.
 
 Toda escrita exige `CanWrite`, permissão/escopo aplicável, capability Moodle, prévia, confirmação
 literal, expiração, execução única/idempotente e auditoria. O fluxo de pending actions é obrigatório

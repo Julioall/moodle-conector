@@ -7,6 +7,8 @@ on:
     paths:
       - src/**
       - tests/**
+      - contracts/**
+      - tools/**
       - public/**
       - Dockerfile
       - docker-compose.yml
@@ -39,7 +41,8 @@ env:
   FEATURES_SCHEDULED_MESSAGES_ENABLED: ${{ vars.FEATURES_SCHEDULED_MESSAGES_ENABLED || 'false' }}
   FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED: ${{ vars.FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED || 'true' }}
   FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED: ${{ vars.FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED || 'true' }}
-  FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED: ${{ vars.FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED || 'false' }}
+  FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED: ${{ vars.FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED || 'true' }}
+  FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED: ${{ vars.FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED || 'true' }}
   FEATURES_COURSE_CONTENT_WRITE_ENABLED: ${{ vars.FEATURES_COURSE_CONTENT_WRITE_ENABLED || 'false' }}
   FEATURES_MCP_RESOURCE_SUBMISSION_DELIVERY_ENABLED: ${{ vars.FEATURES_MCP_RESOURCE_SUBMISSION_DELIVERY_ENABLED || 'true' }}
   FEATURES_LEGACY_SUBMISSION_EXTRACTION_ENABLED: ${{ vars.FEATURES_LEGACY_SUBMISSION_EXTRACTION_ENABLED || 'false' }}
@@ -48,6 +51,8 @@ env:
   FEATURES_MCP_GRADING_WRITE_ENABLED: ${{ vars.FEATURES_MCP_GRADING_WRITE_ENABLED || 'true' }}
   FEATURES_MCP_GRADING_SECURITY_WARNINGS_ONLY: ${{ vars.FEATURES_MCP_GRADING_SECURITY_WARNINGS_ONLY || 'true' }}
   FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED: ${{ vars.FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED || 'true' }}
+  MOODLE_API_CONTRACT_MANIFEST_PATH: ${{ vars.MOODLE_API_CONTRACT_MANIFEST_PATH || '/app/contracts/production.json' }}
+  MOODLE_API_REQUIRE_VERIFIED_CONTRACTS: ${{ vars.MOODLE_API_REQUIRE_VERIFIED_CONTRACTS || 'true' }}
   OAUTH_CLIENT_ID: ${{ vars.OAUTH_CLIENT_ID || 'moodle' }}
   OAUTH_SCOPE_NAME: ${{ vars.OAUTH_SCOPE_NAME || 'moodle-mcp-audience' }}
   OAUTH_REQUIRE_HTTPS_METADATA: ${{ vars.OAUTH_REQUIRE_HTTPS_METADATA || 'true' }}
@@ -167,6 +172,7 @@ jobs:
           require_bool FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED "$FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED"
           require_bool FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED "$FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED"
           require_bool FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED "$FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED"
+          require_bool FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED "$FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED"
           require_bool FEATURES_COURSE_CONTENT_WRITE_ENABLED "$FEATURES_COURSE_CONTENT_WRITE_ENABLED"
           require_bool FEATURES_MCP_RESOURCE_SUBMISSION_DELIVERY_ENABLED "$FEATURES_MCP_RESOURCE_SUBMISSION_DELIVERY_ENABLED"
           require_bool FEATURES_LEGACY_SUBMISSION_EXTRACTION_ENABLED "$FEATURES_LEGACY_SUBMISSION_EXTRACTION_ENABLED"
@@ -175,6 +181,17 @@ jobs:
           require_bool FEATURES_MCP_GRADING_WRITE_ENABLED "$FEATURES_MCP_GRADING_WRITE_ENABLED"
           require_bool FEATURES_MCP_GRADING_SECURITY_WARNINGS_ONLY "$FEATURES_MCP_GRADING_SECURITY_WARNINGS_ONLY"
           require_bool FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED "$FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED"
+          require_bool MOODLE_API_REQUIRE_VERIFIED_CONTRACTS "$MOODLE_API_REQUIRE_VERIFIED_CONTRACTS"
+          if { [ "$FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED" = "true" ] || [ "$FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED" = "true" ]; } && [ "$MOODLE_API_REQUIRE_VERIFIED_CONTRACTS" != "true" ]; then
+            echo "::error::Universal Moodle writes/uploads require MOODLE_API_REQUIRE_VERIFIED_CONTRACTS=true."
+            exit 1
+          fi
+          if [ "$MOODLE_API_REQUIRE_VERIFIED_CONTRACTS" = "true" ]; then
+            case "$MOODLE_API_CONTRACT_MANIFEST_PATH" in
+              /app/contracts/*) ;;
+              *) echo "::error::MOODLE_API_CONTRACT_MANIFEST_PATH must point under /app/contracts when strict contracts are enabled." && exit 1 ;;
+            esac
+          fi
           require_bool RESET_DATABASE_ON_DEPLOY "$RESET_DATABASE_ON_DEPLOY"
           require_bool OAUTH_REQUIRE_HTTPS_METADATA "$OAUTH_REQUIRE_HTTPS_METADATA"
           require_int_range APP_PORT "$APP_PORT" 1 65535
@@ -288,6 +305,30 @@ jobs:
         run: |
           ./scripts/validate-plugin.ps1
           ./scripts/generate-chatgpt-app-submission.ps1 -Check
+
+      - name: Validate Moodle contract tooling
+        shell: bash
+        run: |
+          php -l tools/moodle-export-contract-source.php
+          pwsh -NoProfile -File ./scripts/merge-moodle-contract-sources.ps1 \
+            -InputPath ./contracts/moodle-contract-source.example.json \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-merged.json"
+          pwsh -NoProfile -File ./scripts/prepare-moodle-contract-manifest.ps1 \
+            -InputPath "$RUNNER_TEMP/moodle-contract-merged.json" \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-example.json"
+          pwsh -NoProfile -File ./scripts/validate-moodle-contract-manifest-matrix.ps1 \
+            -ManifestPath "$RUNNER_TEMP/moodle-contract-example.json" \
+            -InventoryPath ./contracts/moodle-contract-inventory.example.json
+          pwsh -NoProfile -File ./scripts/merge-moodle-contract-sources.ps1 \
+            -InputPath ./contracts/moodle-contract-source.fixture-complete.json \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-complete-source.json"
+          pwsh -NoProfile -File ./scripts/prepare-moodle-contract-manifest.ps1 \
+            -InputPath "$RUNNER_TEMP/moodle-contract-complete-source.json" \
+            -OutputPath "$RUNNER_TEMP/moodle-contract-complete.json"
+          pwsh -NoProfile -File ./scripts/validate-moodle-contract-manifest-matrix.ps1 \
+            -ManifestPath "$RUNNER_TEMP/moodle-contract-complete.json" \
+            -InventoryPath ./contracts/moodle-contract-inventory.example.json \
+            -RequireComplete
 
       - name: Validate packaged skills
         run: python plugins/moodle-connector/skills/moodle-core/scripts/check_skill_catalog.py --repo-root .
@@ -450,6 +491,7 @@ jobs:
             --exclude "TestResults/"
             --exclude ".env"
             --exclude ".env.*"
+            --exclude "contracts/*.json"
           )
 
           if [ "$VPS_AUTH_MODE" = "key" ]; then
@@ -459,6 +501,62 @@ jobs:
             sshpass -p "$VPS_AUTH_SECRET" rsync -az --delete -e "ssh -p $VPS_SSH_PORT" \
               "${RSYNC_EXCLUDES[@]}" ./ "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$VPS_APP_DIR/"
           fi
+
+      - name: Verify remote contract manifest
+        if: env.MOODLE_API_REQUIRE_VERIFIED_CONTRACTS == 'true'
+        run: |
+          MANIFEST_RELATIVE="${MOODLE_API_CONTRACT_MANIFEST_PATH#/app/contracts/}"
+          case "$MANIFEST_RELATIVE" in
+            ""|*[!A-Za-z0-9._-]*)
+              echo "::error::Strict contract mode requires a manifest filename directly under /app/contracts."
+              exit 1
+              ;;
+          esac
+          REMOTE_MANIFEST_CHECK="set -eu
+            test -s '$VPS_APP_DIR/contracts/$MANIFEST_RELATIVE' || {
+              echo 'Required Moodle contract manifest is missing or empty on the VPS.' >&2
+              exit 1
+            }"
+          if [ "$VPS_AUTH_MODE" = "key" ]; then
+            ssh -i ~/.ssh/deploy_key -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_MANIFEST_CHECK"
+          else
+            sshpass -p "$VPS_AUTH_SECRET" ssh -p "$VPS_SSH_PORT" "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" "$REMOTE_MANIFEST_CHECK"
+          fi
+
+          REMOTE_MANIFEST_LOCAL="$RUNNER_TEMP/moodle-production-manifest.json"
+          if [ "$VPS_AUTH_MODE" = "key" ]; then
+            scp -q -i ~/.ssh/deploy_key -P "$VPS_SSH_PORT" \
+              "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$VPS_APP_DIR/contracts/$MANIFEST_RELATIVE" \
+              "$REMOTE_MANIFEST_LOCAL"
+          else
+            sshpass -p "$VPS_AUTH_SECRET" scp -q -P "$VPS_SSH_PORT" \
+              "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:$VPS_APP_DIR/contracts/$MANIFEST_RELATIVE" \
+              "$REMOTE_MANIFEST_LOCAL"
+          fi
+          test -s "$REMOTE_MANIFEST_LOCAL" || {
+            echo 'The remote Moodle contract manifest could not be copied for validation.' >&2
+            exit 1
+          }
+
+      - name: Verify remote contracts against live Moodle
+        if: env.MOODLE_API_REQUIRE_VERIFIED_CONTRACTS == 'true'
+        env:
+          LIVE_PRODUCTION_URL: ${{ secrets.MOODLE_API_BASE_URL }}
+          LIVE_PRODUCTION_TOKEN: ${{ secrets.MOODLE_API_SERVICE_TOKEN }}
+        shell: pwsh
+        run: |
+          $manifestPath = Join-Path $env:RUNNER_TEMP 'moodle-production-manifest.json'
+          $inventoryPath = Join-Path $env:RUNNER_TEMP 'moodle-production-inventory.json'
+          if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+            throw 'The remote Moodle contract manifest was not downloaded for live validation.'
+          }
+
+          ./scripts/verify-moodle-generic-coverage.ps1 `
+            -Alias production `
+            -BaseUrl $env:LIVE_PRODUCTION_URL `
+            -ManifestPath $manifestPath `
+            -InventoryPath $inventoryPath `
+            -RequireCompleteManifest
 
       - name: Write production env
         env:
@@ -515,6 +613,7 @@ jobs:
             printf 'FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED=%s\n' "$FEATURES_ASSIGNMENT_FEEDBACK_WRITE_ENABLED"
             printf 'FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED=%s\n' "$FEATURES_ASSIGNMENT_GRADE_WRITE_ENABLED"
             printf 'Features__UniversalMoodleWriteEnabled=%s\n' "$FEATURES_UNIVERSAL_MOODLE_WRITE_ENABLED"
+            printf 'Features__UniversalMoodleFileUploadEnabled=%s\n' "$FEATURES_UNIVERSAL_MOODLE_FILE_UPLOAD_ENABLED"
             printf 'Features__CourseContentWriteEnabled=%s\n' "$FEATURES_COURSE_CONTENT_WRITE_ENABLED"
             printf 'Features__McpResourceSubmissionDeliveryEnabled=%s\n' "$FEATURES_MCP_RESOURCE_SUBMISSION_DELIVERY_ENABLED"
             printf 'Features__LegacySubmissionExtractionEnabled=%s\n' "$FEATURES_LEGACY_SUBMISSION_EXTRACTION_ENABLED"
@@ -523,9 +622,12 @@ jobs:
             printf 'Features__McpGradingWriteEnabled=%s\n' "$FEATURES_MCP_GRADING_WRITE_ENABLED"
             printf 'Features__McpGradingSecurityWarningsOnly=%s\n' "$FEATURES_MCP_GRADING_SECURITY_WARNINGS_ONLY"
             printf 'Features__UniversalMoodleFileDownloadEnabled=%s\n' "$FEATURES_UNIVERSAL_MOODLE_FILE_DOWNLOAD_ENABLED"
+            printf 'MoodleApi__ContractManifestPath=%s\n' "$MOODLE_API_CONTRACT_MANIFEST_PATH"
+            printf 'MoodleApi__RequireVerifiedContracts=%s\n' "$MOODLE_API_REQUIRE_VERIFIED_CONTRACTS"
             printf 'Features__DemoToolsEnabled=false\n'
             printf 'McpServerSecurity__RequireJwt=%s\n' "$MCP_REQUIRE_JWT"
             printf 'McpServerSecurity__RequireApiKey=%s\n' "$MCP_REQUIRE_API_KEY"
+            printf 'McpServerSecurity__AllowUnlinkedApiKey=false\n'
             printf 'OAuth__Issuer=%s\n' "$OAUTH_ISSUER_EFFECTIVE"
             printf 'OAuth__Audience=%s\n' "$OAUTH_AUDIENCE_EFFECTIVE"
             printf 'OAuth__ChatGptClientId=%s\n' "$OAUTH_CLIENT_ID"

@@ -21,9 +21,11 @@ internal sealed class MoodleUniversalWriteService(
     IActionConfirmationService confirmations,
     IPendingMoodleActionRepository pendingActionRepository,
     IMoodleAuditLogRepository auditLogs,
-    IOptions<MoodleUniversalApiFeatureOptions> features,
-    ICurrentUserContext currentUser,
-    IMoodleAssignmentGradeReadGateway? gradeReadGateway = null) : IMoodleUniversalWriteService
+        IOptions<MoodleUniversalApiFeatureOptions> features,
+        ICurrentUserContext currentUser,
+        IMoodleAssignmentGradeReadGateway? gradeReadGateway = null,
+        IMoodleFunctionContractRegistry? contractRegistry = null,
+        IOptions<MoodleFunctionContractOptions>? contractOptions = null) : IMoodleUniversalWriteService
 {
     private static readonly TimeSpan PendingActionExpiration = TimeSpan.FromMinutes(15);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -44,9 +46,14 @@ internal sealed class MoodleUniversalWriteService(
         try
         {
             EnsureEnabled();
-            var descriptor = await ResolveControlledWriteAsync(functionName, cancellationToken);
+            var resolvedWrite = await ResolveControlledWriteAsync(functionName, cancellationToken);
+            var descriptor = resolvedWrite.Descriptor;
+            var contract = resolvedWrite.Contract;
             EnsureWriteScope(descriptor.Name);
+            EnsureContractPlatformPermission(descriptor.Name, contract);
+            EnsureContractScopes(contract);
             EnsureNoSensitiveParameters(parameters);
+            EnsureContractInput(descriptor.Name, parameters, contract);
             if (!connection.CanWrite)
             {
                 throw new MoodleApiException("write_not_allowed", "A conexao Moodle selecionada nao permite escrita.");
@@ -72,6 +79,8 @@ internal sealed class MoodleUniversalWriteService(
                 affectedResources = semanticPreview.AffectedResources,
                 estimatedAffectedRecords = semanticPreview.EstimatedAffectedRecords,
                 warnings = semanticPreview.Warnings,
+                contractHash = contract?.ContractHash,
+                contractStatus = contract?.Status.ToString().ToLowerInvariant() ?? MoodleContractStatus.Missing.ToString().ToLowerInvariant(),
                 execution = "Nenhuma chamada foi enviada ao Moodle; confirme explicitamente para executar uma unica vez."
             };
             var payload = new UniversalMoodleWritePayload(
@@ -80,7 +89,8 @@ internal sealed class MoodleUniversalWriteService(
                 connection.Alias,
                 parameters.ToDictionary(pair => pair.Key, pair => JsonSerializer.SerializeToElement(pair.Value, JsonOptions), StringComparer.Ordinal),
                 parameterHash,
-                parameterNames);
+                parameterNames,
+                contract?.ContractHash);
             var pending = await pendingActions.CreatePendingActionAsync(
                 "moodle_prepare_write",
                 ToolRiskLevel.CriticalHumanConfirmedWrite,
@@ -131,7 +141,9 @@ internal sealed class MoodleUniversalWriteService(
                 semanticPreview.Changes,
                 semanticPreview.AffectedResources,
                 semanticPreview.EstimatedAffectedRecords,
-                semanticPreview.Warnings);
+                semanticPreview.Warnings,
+                contract?.ContractHash,
+                contract is null ? MoodleContractStatus.Missing : MoodleContractStatus.Verified);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -167,12 +179,23 @@ internal sealed class MoodleUniversalWriteService(
             throw new MoodleApiException("wrong_moodle_alias", "A confirmacao deve usar a mesma conexao Moodle utilizada na previa.");
         }
 
-        await ResolveControlledWriteAsync(payload.Function, cancellationToken);
+        var resolvedWrite = await ResolveControlledWriteAsync(payload.Function, cancellationToken);
+        var contract = resolvedWrite.Contract;
+        if (!string.Equals(payload.ContractHash, contract?.ContractHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new MoodleApiException(
+                "contract_changed",
+                "O contrato da funcao Moodle mudou desde a previa; prepare uma nova acao.",
+                functionName: payload.Function);
+        }
         var requiredScope = MoodleWriteScopePolicy.ForFunction(payload.Function);
+        EnsureContractPlatformPermission(payload.Function, contract);
+        EnsureContractScopes(contract);
         var values = payload.Parameters.ToDictionary(
             pair => pair.Key,
             pair => (object?)pair.Value.Clone(),
             StringComparer.Ordinal);
+        EnsureContractInput(payload.Function, values, contract);
         if (!string.Equals(payload.ParameterHash, CreateParameterHash(values), StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Os parametros da acao pendente foram alterados e a confirmacao foi invalidada.");
@@ -199,9 +222,31 @@ internal sealed class MoodleUniversalWriteService(
                 values,
                 cancellationToken);
             var responseSize = Encoding.UTF8.GetByteCount(response.GetRawText());
+            var responseWarnings = contract is null
+                ? []
+                : MoodleFunctionContractSchemaValidator.ValidateOutput(contract, response)
+                    .Select(error => $"response_schema_invalid: {error}")
+                    .ToArray();
+            action.RecordResult(AuditPayloadSanitizer.SerializeSanitized(new
+            {
+                operation = "moodle_call",
+                function = payload.Function,
+                status = "executed",
+                contractHash = contract?.ContractHash,
+                payload = response,
+                warnings = responseWarnings
+            }));
             await RecordExecutionAsync(action, payload, "write_executed", responseSize, startedAt, DateTimeOffset.UtcNow, stopwatch.ElapsedMilliseconds, null, cancellationToken);
             await auditLogs.SaveChangesAsync(cancellationToken);
-            return new MoodleWriteResult("executed", action.Id, payload.Function, confirmation.AuditId, responseSize);
+            return new MoodleWriteResult(
+                "executed",
+                action.Id,
+                payload.Function,
+                confirmation.AuditId,
+                responseSize,
+                AuditPayloadSanitizer.ToSanitizedElement(response),
+                contract?.ContractHash,
+                responseWarnings);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -237,11 +282,19 @@ internal sealed class MoodleUniversalWriteService(
         }
     }
 
-    private async Task<MoodleFunctionDescriptor> ResolveControlledWriteAsync(string functionName, CancellationToken cancellationToken)
+    private async Task<ControlledWriteResolution> ResolveControlledWriteAsync(string functionName, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(functionName))
         {
             throw new ArgumentException("A funcao Moodle e obrigatoria.", nameof(functionName));
+        }
+
+        if (contractOptions?.Value.RequireVerifiedContracts == true && contractRegistry is null)
+        {
+            throw new MoodleApiException(
+                MoodleErrorContract.SchemaUnavailable,
+                $"A escrita de '{functionName.Trim()}' foi bloqueada: o registro de contratos verificados não está disponível.",
+                functionName: functionName.Trim());
         }
 
         var profile = await catalog.GetCurrentAsync(false, cancellationToken);
@@ -251,12 +304,105 @@ internal sealed class MoodleUniversalWriteService(
         {
             throw new MoodleApiException("function_not_available", "A funcao solicitada nao esta habilitada para a conexao Moodle selecionada.");
         }
-        if (descriptor.Risk is not (MoodleFunctionRisk.ControlledWrite or MoodleFunctionRisk.Destructive))
+        var contract = contractRegistry?.Resolve(
+            descriptor.Name,
+            profile.Release,
+            descriptor.ExternalFunctionVersion);
+        var effectiveRisk = contract is { IsVerified: true }
+            ? contract.Contract!.Effect == MoodleEffect.Write
+                ? MoodleFunctionRisk.ControlledWrite
+                : MoodleFunctionRisk.Read
+            : descriptor.Risk;
+        if (effectiveRisk is not (MoodleFunctionRisk.ControlledWrite or MoodleFunctionRisk.Destructive))
         {
             throw new MoodleApiException("function_not_write_allowed", "A funcao solicitada nao requer o fluxo de escrita confirmado.");
         }
 
-        return descriptor;
+        if (contract is not null && !contract.IsVerified && contractOptions?.Value.RequireVerifiedContracts == true)
+        {
+            throw new MoodleApiException(
+                contract.Status switch
+                {
+                    MoodleContractResolutionStatus.Stale => MoodleErrorContract.SchemaVersionMismatch,
+                    MoodleContractResolutionStatus.Conflicting => MoodleErrorContract.ContractConflict,
+                    _ => MoodleErrorContract.SchemaUnavailable
+                },
+                $"A escrita de '{descriptor.Name}' foi bloqueada: {string.Join(", ", contract.Reasons)}",
+                functionName: descriptor.Name);
+        }
+
+        if (contract is { IsVerified: true } && contract.Contract!.Effect != MoodleEffect.Write)
+        {
+            throw new MoodleApiException(
+                MoodleErrorContract.FunctionNotAllowed,
+                $"A funcao '{descriptor.Name}' nao possui efeito de escrita no contrato verificado.",
+                functionName: descriptor.Name);
+        }
+
+        return new ControlledWriteResolution(descriptor, contract?.IsVerified == true ? contract.Contract : null);
+    }
+
+    private static void EnsureContractInput(
+        string functionName,
+        IReadOnlyDictionary<string, object?> parameters,
+        MoodleFunctionContract? contract)
+    {
+        if (contract is null)
+        {
+            return;
+        }
+
+        var errors = MoodleFunctionContractSchemaValidator.ValidateInput(contract, parameters);
+        if (errors.Count > 0)
+        {
+            throw new MoodleApiException(
+                MoodleErrorContract.SchemaValidationFailed,
+                $"Os parametros de '{functionName}' nao correspondem ao contrato verificado: {string.Join("; ", errors)}",
+                functionName: functionName);
+        }
+    }
+
+    private void EnsureContractScopes(MoodleFunctionContract? contract)
+    {
+        if (contract?.RequiredScopes is null)
+        {
+            return;
+        }
+
+        foreach (var scope in contract.RequiredScopes
+                     .Where(scope => !string.IsNullOrWhiteSpace(scope))
+                     .Select(scope => scope.Trim())
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!currentUser.HasScope(scope))
+            {
+                throw new MoodleApiException(
+                    "moodle_write_scope_required",
+                    $"O escopo '{scope}' declarado pelo contrato e obrigatorio para esta funcao.");
+            }
+        }
+    }
+
+    private void EnsureContractPlatformPermission(string functionName, MoodleFunctionContract? contract)
+    {
+        if (contract?.AdministrativeOnly == true &&
+            (string.IsNullOrWhiteSpace(contract.PlatformPermission) ||
+             !currentUser.HasPlatformPermission(contract.PlatformPermission)))
+        {
+            throw new MoodleApiException(
+                MoodleErrorContract.PermissionDenied,
+                $"A funcao '{functionName}' e administrativa e esta bloqueada para o usuario atual.",
+                functionName: functionName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(contract?.PlatformPermission) &&
+            !currentUser.HasPlatformPermission(contract.PlatformPermission))
+        {
+            throw new MoodleApiException(
+                MoodleErrorContract.PermissionDenied,
+                $"A funcao '{functionName}' exige a permissao de plataforma '{contract.PlatformPermission}'.",
+                functionName: functionName);
+        }
     }
 
     private void EnsureWriteScope(string functionName)
@@ -303,7 +449,7 @@ internal sealed class MoodleUniversalWriteService(
                 payload.ParameterNames,
                 payload.ParameterHash
             }),
-            ResponseSummaryJson = JsonSerializer.Serialize(new { responseSize, durationMs }, JsonOptions),
+            ResponseSummaryJson = JsonSerializer.Serialize(new { responseSize, durationMs, contractHash = payload.ContractHash }, JsonOptions),
             Status = status,
             ErrorCode = errorCode,
             // A mensagem remota pode refletir valores de parâmetros; o código normalizado é suficiente para auditoria.
@@ -693,5 +839,10 @@ internal sealed class MoodleUniversalWriteService(
         string ConnectionAlias,
         IReadOnlyDictionary<string, JsonElement> Parameters,
         string ParameterHash,
-        IReadOnlyList<string> ParameterNames);
+        IReadOnlyList<string> ParameterNames,
+        string? ContractHash = null);
+
+    private sealed record ControlledWriteResolution(
+        MoodleFunctionDescriptor Descriptor,
+        MoodleFunctionContract? Contract);
 }

@@ -44,6 +44,13 @@ public static class MoodleErrorContract
     public const string InvalidPage = "invalid_page";
     public const string UnknownMoodleFunction = "unknown_moodle_function";
     public const string SnapshotUnavailable = "snapshot_unavailable";
+    public const string SchemaUnavailable = "schema_unavailable";
+    public const string SchemaVersionMismatch = "schema_version_mismatch";
+    public const string SchemaValidationFailed = "schema_validation_failed";
+    public const string ContractConflict = "contract_conflict";
+    public const string ContractChanged = "contract_changed";
+    public const string InvalidContinuationToken = "invalid_continuation_token";
+    public const string InvalidContinuationParameters = "invalid_continuation_parameters";
     public const string Unexpected = "unexpected_connector_error";
 
     public static MoodleErrorDescriptor Describe(Exception exception)
@@ -94,6 +101,13 @@ public static class MoodleErrorContract
             InvalidPage or "invalid_page" => InvalidPage,
             UnknownMoodleFunction or "unknown_function" => UnknownMoodleFunction,
             SnapshotUnavailable => SnapshotUnavailable,
+            SchemaUnavailable or "contract_not_found" => SchemaUnavailable,
+            SchemaVersionMismatch => SchemaVersionMismatch,
+            SchemaValidationFailed => SchemaValidationFailed,
+            ContractConflict or "multiple_verified_contract_hashes" => ContractConflict,
+            ContractChanged => ContractChanged,
+            InvalidContinuationToken => InvalidContinuationToken,
+            InvalidContinuationParameters => InvalidContinuationParameters,
             ApiError or "moodle_error" or "invalidparameter" or "invalid_parameter" => ApiError,
             ScormNotFound => ScormNotFound,
             ScormSelectionRequired => ScormSelectionRequired,
@@ -134,6 +148,13 @@ public static class MoodleErrorContract
         InvalidPage => "A pagina informada nao e valida.",
         UnknownMoodleFunction => "A funcao Moodle informada nao pertence ao catalogo conhecido do Connector.",
         SnapshotUnavailable => "O snapshot solicitado ainda nao esta disponivel ou esta incompleto.",
+        SchemaUnavailable => "A funcao Moodle nao possui um contrato verificado para validar a operacao.",
+        SchemaVersionMismatch => "O contrato da funcao Moodle nao e compativel com a versao da conexao.",
+        SchemaValidationFailed => "Os dados da funcao Moodle nao correspondem ao contrato verificado.",
+        ContractConflict => "Existem contratos conflitantes para a funcao Moodle.",
+        ContractChanged => "O contrato da funcao Moodle mudou; inicie uma nova operacao.",
+        InvalidContinuationToken => "O token de continuacao e invalido, expirou ou pertence a outro contexto.",
+        InvalidContinuationParameters => "Os parametros fornecidos nao correspondem a uma continuacao valida.",
         ApiError => "O Moodle recusou ou nao conseguiu concluir a chamada solicitada.",
         ScormNotFound => "Nenhum pacote SCORM correspondente foi encontrado no curso.",
         ScormSelectionRequired => "O curso possui mais de um pacote SCORM; informe o identificador do pacote.",

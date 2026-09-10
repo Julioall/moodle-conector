@@ -143,6 +143,10 @@ public sealed class MoodleUniversalWriteServiceTests
         using var auditResponse = JsonDocument.Parse(audit.ResponseSummaryJson);
         Assert.True(auditResponse.RootElement.TryGetProperty("durationMs", out var duration));
         Assert.True(duration.GetInt64() >= 0);
+        Assert.NotNull(pendingActions.Action!.ResultJson);
+        using var persistedResult = JsonDocument.Parse(pendingActions.Action.ResultJson!);
+        Assert.Equal("executed", persistedResult.RootElement.GetProperty("status").GetString());
+        Assert.Equal("ok", persistedResult.RootElement.GetProperty("payload").GetProperty("result").GetString());
     }
 
     [Fact]
@@ -352,6 +356,101 @@ public sealed class MoodleUniversalWriteServiceTests
         Assert.Equal("mod_assign_save_grade", preview.Function);
     }
 
+    [Fact]
+    public async Task PrepareAsync_ValidaParametrosDoContratoVerificado()
+    {
+        using var input = JsonDocument.Parse("""
+            { "type": "object", "required": ["assignmentid"], "properties": { "assignmentid": { "type": "integer" } } }
+            """);
+        using var output = JsonDocument.Parse("{\"type\":\"object\"}");
+        var contract = new MoodleFunctionContract
+        {
+            FunctionName = "mod_assign_save_grade",
+            Effect = MoodleEffect.Write,
+            InputSchema = input.RootElement.Clone(),
+            OutputSchema = output.RootElement.Clone(),
+            Status = MoodleContractStatus.Verified,
+            ContractHash = string.Empty
+        };
+        contract = contract with { ContractHash = MoodleFunctionContractRegistry.ComputeContractHash(contract) };
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            contractRegistry: new MoodleFunctionContractRegistry([contract]));
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+            contract.FunctionName,
+            new Dictionary<string, object?> { ["assignmentid"] = "not-an-integer" },
+            CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.SchemaValidationFailed, error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_ModoEstritoBloqueiaFuncaoSemContrato()
+    {
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            contractRegistry: new MoodleFunctionContractRegistry([]),
+            requireVerifiedContracts: true);
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+            "mod_assign_save_grade",
+            new Dictionary<string, object?>(),
+            CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.SchemaUnavailable, error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_ModoEstritoFalhaFechadoSemRegistroDeContratos()
+    {
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            requireVerifiedContracts: true);
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() => sut.PrepareAsync(
+            "mod_assign_save_grade",
+            new Dictionary<string, object?>(),
+            CancellationToken.None));
+
+        Assert.Equal(MoodleErrorContract.SchemaUnavailable, error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task PrepareAsync_ContratoPodeDeclararEscritaMesmoComNomeGet()
+    {
+        using var input = JsonDocument.Parse("{\"type\":\"object\"}");
+        using var output = JsonDocument.Parse("{\"type\":\"object\"}");
+        var contract = new MoodleFunctionContract
+        {
+            FunctionName = "local_example_get_course",
+            Effect = MoodleEffect.Write,
+            InputSchema = input.RootElement.Clone(),
+            OutputSchema = output.RootElement.Clone(),
+            Status = MoodleContractStatus.Verified,
+            ContractHash = string.Empty
+        };
+        contract = contract with { ContractHash = MoodleFunctionContractRegistry.ComputeContractHash(contract) };
+        var sut = CreateService(
+            new FakeRestClient(),
+            new FakePendingActions(),
+            enabled: true,
+            profile: Profile(new MoodleFunctionDescriptor(contract.FunctionName, MoodleFunctionRisk.Read, true)),
+            contractRegistry: new MoodleFunctionContractRegistry([contract]),
+            currentUser: new FakeCurrentUser("moodle.write"));
+
+        var preview = await sut.PrepareAsync(contract.FunctionName, new Dictionary<string, object?>(), CancellationToken.None);
+
+        Assert.Equal(contract.FunctionName, preview.Function);
+        Assert.Equal(contract.ContractHash, preview.ContractHash);
+    }
+
     private static MoodleUniversalWriteService CreateService(
         FakeRestClient rest,
         FakePendingActions pendingActions,
@@ -359,7 +458,9 @@ public sealed class MoodleUniversalWriteServiceTests
         MoodleFunctionProfile? profile = null,
         FakeAuditLogs? auditLogs = null,
         FakeConfirmation? confirmation = null,
-        ICurrentUserContext? currentUser = null) => new(
+        ICurrentUserContext? currentUser = null,
+        IMoodleFunctionContractRegistry? contractRegistry = null,
+        bool requireVerifiedContracts = false) => new(
             new FakeCatalog(profile ?? Profile(new MoodleFunctionDescriptor("mod_assign_save_grade", MoodleFunctionRisk.ControlledWrite, true))),
             rest,
             new FakeCredentialsProvider(),
@@ -368,7 +469,13 @@ public sealed class MoodleUniversalWriteServiceTests
             pendingActions,
             auditLogs ?? new FakeAuditLogs(),
             Options.Create(new MoodleUniversalApiFeatureOptions { UniversalMoodleWriteEnabled = enabled }),
-            currentUser ?? new FakeCurrentUser("moodle.write.assignments.grade"));
+            currentUser ?? new FakeCurrentUser("moodle.write.assignments.grade"),
+            null,
+            contractRegistry,
+            Options.Create(new MoodleConnector.Application.Configuration.MoodleFunctionContractOptions
+            {
+                RequireVerifiedContracts = requireVerifiedContracts
+            }));
 
     private static MoodleFunctionProfile Profile(MoodleFunctionDescriptor descriptor) => new(
         "connection", "goias", "Moodle", "4.5", 7, [descriptor], DateTimeOffset.UtcNow);

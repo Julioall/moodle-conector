@@ -401,6 +401,7 @@ public sealed class ConnectorDbContext(DbContextOptions<ConnectorDbContext> opti
         pendingAction.Property(x => x.CorrelationId).HasMaxLength(64).IsRequired();
         pendingAction.Property(x => x.ExecutionOwner).HasMaxLength(200);
         pendingAction.Property(x => x.LastExecutionError).HasMaxLength(4000);
+        pendingAction.Property(x => x.ResultJson).HasColumnType("jsonb");
         pendingAction.HasIndex(x => new { x.Status, x.ExecutionLeaseUntil });
 
         var publicationClaim = modelBuilder.Entity<GradingPublicationClaimEntity>();

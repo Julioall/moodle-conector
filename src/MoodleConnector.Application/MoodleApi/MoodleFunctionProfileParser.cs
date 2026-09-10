@@ -25,15 +25,23 @@ public static class MoodleFunctionProfileParser
                         functionsElement.ValueKind == JsonValueKind.Array
             ? functionsElement.EnumerateArray()
                 .Where(item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("name", out _))
-                .Select(item => item.GetProperty("name").GetString())
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
-                .Select(name => new MoodleFunctionDescriptor(
-                    name,
-                    MoodleFunctionClassifier.Classify(name),
-                    true))
+                .Select(item => new
+                {
+                    Name = item.GetProperty("name").GetString(),
+                    Version = item.TryGetProperty("version", out var version) &&
+                              version.ValueKind == JsonValueKind.String
+                        ? version.GetString()
+                        : null
+                })
+                .Where(item => !string.IsNullOrWhiteSpace(item.Name))
+                .GroupBy(item => item.Name!, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(item => new MoodleFunctionDescriptor(
+                    item.Name!,
+                    MoodleFunctionClassifier.Classify(item.Name),
+                    true,
+                    ExternalFunctionVersion: item.Version))
                 .ToArray()
             : [];
 
