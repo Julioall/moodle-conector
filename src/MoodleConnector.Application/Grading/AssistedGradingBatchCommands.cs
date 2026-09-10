@@ -753,7 +753,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
                         item.CourseId,
                         item.AssignmentId,
                         submissionId,
-                        item.AttemptNumber));
+                        item.AttemptNumber,
+                        request.GradingRunId));
             }
 
             await repository.AddItemAsync(item, cancellationToken);
@@ -1212,7 +1213,8 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
         long courseId,
         long assignmentId,
         long submissionId,
-        int? attemptNumber)
+        int? attemptNumber,
+        Guid? gradingRunId = null)
     {
         var source = string.Join('|',
             connectorClientId?.Trim() ?? "_",
@@ -1221,6 +1223,16 @@ public sealed class CreateAssistedGradingBatchCommandHandler(
             assignmentId.ToString(CultureInfo.InvariantCulture),
             submissionId.ToString(CultureInfo.InvariantCulture),
             attemptNumber?.ToString(CultureInfo.InvariantCulture) ?? "-");
+
+        // Cancelled historical items remain stored for audit and still carry
+        // the legacy identity key. A new grading run must be able to create a
+        // fresh item after cancellation without colliding with that unique
+        // key, while retries within the same run remain idempotent.
+        if (gradingRunId is Guid runId && runId != Guid.Empty)
+        {
+            source = $"run:{runId:N}|{source}";
+        }
+
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source))).ToLowerInvariant();
     }
 
