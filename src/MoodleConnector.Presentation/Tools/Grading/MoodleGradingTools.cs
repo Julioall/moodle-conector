@@ -412,7 +412,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<CreateGradingLaunchPreviewResult>))]
-    [Description("Prepara uma unica previa revisavel para publicar as correcoes salvas no Moodle. Aceita tanto rascunhos de IA quanto correcoes ja revisadas, sem escrever no Moodle. A resposta lista aluno, nota, feedback e avisos; so confirm_batch_grade_launch pode efetivar o envio.")]
+    [Description("Prepara uma unica previa revisavel para publicar as correcoes salvas no Moodle. Aceita tanto rascunhos de IA quanto correcoes ja revisadas, sem escrever no Moodle. A resposta lista obrigatoriamente, por item, nome do aluno, atividade, nota proposta, nota maxima, feedbackText integral, reviewStatus, situation e avisos; nao resuma a previa para apenas aluno e nota. So confirm_batch_grade_launch pode efetivar o envio.")]
     public Task<CallToolResult> CriarPreviaLancamentoLoteAsync(
         [Description("Identificador do lote de correcao assistida ou do gradingRunId agregado retornado por start_pending_grading_run.")]
         Guid batchJobId,
@@ -444,7 +444,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<ConfirmMoodleBatchLaunchResult>))]
-    [Description("Confirma uma previa pendente e autoriza a publicacao duravel usando o texto literal de confirmacao. A chamada nao espera os writes: um worker recuperavel revalida versao do rascunho, submissao, notas existentes e tentativa antes de cada escrita; itens inseguros nao sao sobrescritos.")]
+    [Description("Confirma uma previa pendente e autoriza a publicacao duravel usando o texto literal de confirmacao. A chamada publica de forma assincrona e nao deve ser descrita como concluida: um worker recuperavel revalida versao do rascunho, submissao, notas existentes e tentativa antes de cada escrita. Depois consulte get_assisted_grading_batch_status e so considere efetivo o item com commitStatus=Succeeded; itens inseguros nao sao sobrescritos.")]
     public Task<CallToolResult> ConfirmarLancamentoLoteMoodleAsync(
         [Description("Identificador da acao pendente retornada por criar_previa_lancamento_lote.")]
         Guid pendingActionId,
@@ -453,6 +453,66 @@ public sealed class MoodleGradingTools(
         CancellationToken cancellationToken = default)
     {
         return ConfirmLaunchCoreAsync(pendingActionId, confirmationText, cancellationToken);
+    }
+
+    [McpServerTool(
+        Name = "get_assisted_grading_batch_status",
+        Title = "Get Assisted Grading Batch Status",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<AssistedGradingBatchStatusResult>))]
+    [Description("Consulta o ledger local de uma correcao assistida depois da confirmacao. Use o batchJobId retornado pela previa ou pela confirmacao; so considere uma escrita efetivamente publicada quando commitStatus for Succeeded. Retorna por item nome do estudante, nota, feedback e estado operacional. Nao escreve no Moodle.")]
+    public async Task<CallToolResult> ConsultarStatusLoteCorrecaoAsync(
+        [Description("batchJobId ou gradingRunId retornado por start_pending_grading_run ou create_batch_grade_launch_preview.")]
+        Guid batchJobId,
+        [Description("Pagina iniciando em 1.")]
+        int page = 1,
+        [Description("Itens por pagina, de 1 a 100.")]
+        int pageSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobId == Guid.Empty)
+        {
+            return ToolResultHelper.Error<AssistedGradingBatchStatusResult>("Informe um identificador de lote valido.");
+        }
+
+        try
+        {
+            var data = await mediator.Send(
+                new GetAssistedGradingBatchStatusQuery(batchJobId, page, pageSize),
+                cancellationToken);
+            var response = new ToolResponse<AssistedGradingBatchStatusResult>(
+                "ok",
+                data,
+                [],
+                AuditId: null,
+                DateTimeOffset.UtcNow);
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = BuildAssistedGradingBatchStatusNarration(data) }],
+                StructuredContent = JsonSerializer.SerializeToElement(response),
+                IsError = false
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolResultHelper.Error<AssistedGradingBatchStatusResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ToolResultHelper.Error<AssistedGradingBatchStatusResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<AssistedGradingBatchStatusResult>("Nao foi possivel consultar o status da correcao neste momento.");
+        }
     }
 
     // ============================================================
@@ -946,14 +1006,27 @@ public sealed class MoodleGradingTools(
         }
 
         var builder = new StringBuilder();
-        builder.AppendLine($"Previa de lancamento criada com {response.ReadyItems} item(ns).");
+        var existingValues = response.Launches.Count(item =>
+            item.ExistingGrade is not null || item.HasExistingFeedback);
+        builder.AppendLine("PREVIA DE PUBLICACAO");
+        builder.AppendLine();
+        builder.AppendLine($"{response.ReadyItems} correcao(oes) prontas. {response.BlockedItems} bloqueada(s).");
+        builder.AppendLine($"{existingValues} item(ns) ja possuem nota ou feedback informado no Moodle.");
+        builder.AppendLine("Os nomes, notas e textos abaixo correspondem ao conteudo que sera enviado apos CONFIRMAR_PUBLICACAO.");
         builder.AppendLine();
         foreach (var item in response.Launches)
         {
             builder.AppendLine($"- Aluno: {item.StudentName ?? item.StudentId}");
-            builder.AppendLine($"  Nota: {(item.Grade?.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR")) ?? "sem nota")}");
-            builder.AppendLine($"  Feedback: {item.FeedbackText}");
+            builder.AppendLine($"  Atividade: {item.AssignmentName ?? item.AssignmentId}");
+            builder.AppendLine($"  Nota proposta: {(item.Grade?.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR")) ?? "sem nota")}" +
+                               (item.MaxGrade is not null
+                                   ? $"/{item.MaxGrade.Value.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR"))}"
+                                   : string.Empty));
+            builder.AppendLine("  Feedback integral:");
+            builder.AppendLine(item.FeedbackText);
+            builder.AppendLine($"  Revisao: {item.ReviewStatus}");
             builder.AppendLine($"  Situacao: {item.Situation}");
+            builder.AppendLine("----------------------------------");
         }
 
         if (response.Warnings.Count > 0)
@@ -971,11 +1044,37 @@ public sealed class MoodleGradingTools(
         return builder.ToString();
     }
 
+    private static string BuildAssistedGradingBatchStatusNarration(AssistedGradingBatchStatusResult response)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"Status da correcao {response.BatchJobId}: {response.Status}.");
+        builder.AppendLine($"Itens processados: {response.ProcessedItems}/{response.TotalItems}. Pagina {response.Page}.");
+        builder.AppendLine();
+        foreach (var item in response.Items)
+        {
+            builder.AppendLine($"- Aluno: {item.StudentName ?? item.StudentId}");
+            builder.AppendLine($"  Nota: {(item.Grade?.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR")) ?? "sem nota")}");
+            builder.AppendLine($"  Feedback: {item.FeedbackText ?? "sem feedback"}");
+            builder.AppendLine($"  commitStatus: {item.CommitStatus}");
+        }
+
+        if (response.HasMore)
+        {
+            builder.AppendLine();
+            builder.Append($"Use page={response.Page + 1} para consultar a proxima pagina.");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
     private static string BuildConfirmLaunchNarration(ConfirmMoodleBatchLaunchResult response)
     {
         if (response.Status == "authorized")
         {
-            return "Publicacao autorizada e colocada na fila duravel. Nenhuma alteracao foi feita no Moodle nesta chamada; o status sera atualizado conforme cada item for processado.";
+            var batchHint = response.BatchJobId is Guid batchJobId
+                ? $" Consulte get_assisted_grading_batch_status com batchJobId {batchJobId}."
+                : string.Empty;
+            return "Publicacao autorizada e colocada na fila duravel. Nenhuma alteracao foi feita no Moodle nesta chamada; o status sera atualizado conforme cada item for processado." + batchHint;
         }
 
         var outcome = response.FailedItems == 0
@@ -998,7 +1097,7 @@ public sealed class MoodleGradingTools(
 
         if (reasons.Length == 0 && warnings.Length == 0)
         {
-            return summary;
+            return AppendPublicationItems(summary, response.Items);
         }
 
         var parts = new List<string>();
@@ -1015,7 +1114,28 @@ public sealed class MoodleGradingTools(
         var suffix = reasons.Length > 2 || warnings.Length > 2
             ? " Ha outros detalhes no resultado estruturado."
             : string.Empty;
-        return $"{summary} {string.Join(". ", parts)}.{suffix}";
+        return AppendPublicationItems($"{summary} {string.Join(". ", parts)}.{suffix}", response.Items);
+    }
+
+    private static string AppendPublicationItems(
+        string summary,
+        IReadOnlyList<GradingLaunchPublicationItem>? items)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return summary;
+        }
+
+        var builder = new StringBuilder(summary);
+        builder.AppendLine();
+        builder.AppendLine();
+        builder.AppendLine("Resultado por aluno:");
+        foreach (var item in items)
+        {
+            builder.AppendLine($"- {item.StudentName ?? item.StudentId}: {item.Status}, nota {(item.PublishedGrade?.ToString("0.##", CultureInfo.GetCultureInfo("pt-BR")) ?? "n/d")}, feedback {(item.PublishedFeedback is null ? "n/d" : "aplicado")}.");
+        }
+
+        return builder.ToString().TrimEnd();
     }
 
 

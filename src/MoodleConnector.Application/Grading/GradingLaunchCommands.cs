@@ -52,7 +52,10 @@ public sealed record GradingLaunchPreviewItem(
     [property: JsonPropertyName("situation")] string Situation = "pronta_para_publicacao",
     [property: JsonPropertyName("preflightHash")] string? PreflightHash = null,
     [property: JsonPropertyName("existingGrade")] decimal? ExistingGrade = null,
-    [property: JsonPropertyName("hasExistingFeedback")] bool HasExistingFeedback = false);
+    [property: JsonPropertyName("hasExistingFeedback")] bool HasExistingFeedback = false,
+    [property: JsonPropertyName("assignmentName")] string? AssignmentName = null,
+    [property: JsonPropertyName("maxGrade")] decimal? MaxGrade = null,
+    [property: JsonPropertyName("reviewStatus")] string ReviewStatus = "NotReviewed");
 
 public sealed record ConfirmMoodleBatchLaunchCommand(
     Guid PendingActionId,
@@ -69,11 +72,25 @@ public sealed record ConfirmMoodleBatchLaunchResult(
     [property: JsonPropertyName("failedItems")] int FailedItems,
     [property: JsonPropertyName("failures")] IReadOnlyList<GradingLaunchFailure> Failures,
     [property: JsonPropertyName("auditId")] string? AuditId,
-    [property: JsonPropertyName("warnings")] IReadOnlyList<string>? Warnings = null);
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string>? Warnings = null,
+    [property: JsonPropertyName("batchJobId")] Guid? BatchJobId = null,
+    [property: JsonPropertyName("items")] IReadOnlyList<GradingLaunchPublicationItem>? Items = null);
 
 public sealed record GradingLaunchFailure(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
     [property: JsonPropertyName("message")] string Message);
+
+public sealed record GradingLaunchPublicationItem(
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("assignmentId")] string AssignmentId,
+    [property: JsonPropertyName("assignmentName")] string? AssignmentName,
+    [property: JsonPropertyName("studentId")] string StudentId,
+    [property: JsonPropertyName("studentName")] string? StudentName,
+    [property: JsonPropertyName("publishedGrade")] decimal? PublishedGrade,
+    [property: JsonPropertyName("publishedFeedback")] string? PublishedFeedback,
+    [property: JsonPropertyName("commitStatus")] string CommitStatus,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("failureReason")] string? FailureReason = null);
 
 public sealed record GradingLaunchPayload(
     [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
@@ -93,7 +110,10 @@ public sealed record GradingLaunchPayloadItem(
     [property: JsonPropertyName("draftVersionHash")] string DraftVersionHash,
     [property: JsonPropertyName("contextHash")] string? ContextHash = null,
     [property: JsonPropertyName("submissionContentHash")] string? SubmissionContentHash = null,
-    [property: JsonPropertyName("preflightHash")] string? PreflightHash = null);
+    [property: JsonPropertyName("preflightHash")] string? PreflightHash = null,
+    [property: JsonPropertyName("studentName")] string? StudentName = null,
+    [property: JsonPropertyName("assignmentName")] string? AssignmentName = null,
+    [property: JsonPropertyName("maxGrade")] decimal? MaxGrade = null);
 
 public sealed record AssignmentExistingGrade(
     string AssignmentId,
@@ -225,7 +245,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         // implementation cached by (course, student), which still paged the
         // same Moodle participant list once for every student in a 10k run.
         // A course-level set turns that into one paginated read per course.
-        var courseEnrollmentCache = new Dictionary<string, (IReadOnlySet<string>? StudentIds, string? Error)>(StringComparer.OrdinalIgnoreCase);
+        var courseEnrollmentCache = new Dictionary<string, (IReadOnlySet<string>? StudentIds, IReadOnlyDictionary<string, string>? StudentNames, string? Error)>(StringComparer.OrdinalIgnoreCase);
         var existingGradesByTarget = new Dictionary<(long AssignmentId, long StudentId), AssignmentExistingGrade?>();
         var gradeReadFailuresByAssignment = new Dictionary<long, string>();
         if (gradeReadGateway is not null && launchable.Length > 0)
@@ -323,14 +343,28 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     $"Item {item.Id}: aviso tecnico de seguranca — a integridade da submissao nao foi selada; a correcao segue para confirmacao porque o contexto e o alvo continuam vinculados ao item.");
             }
 
+            // Resolve assignment metadata for every preview item, including
+            // feedback-only items. The preview is the human decision
+            // contract and must not depend on the client inferring names or
+            // maximum grades from another response.
+            var maxGrade = await GetKnownMaxGradeAsync(
+                batch,
+                item,
+                settingsCache,
+                evidenceByItem,
+                cancellationToken);
+            var assignmentName = settingsCache
+                .GetValueOrDefault((item.CourseId, item.AssignmentId))?
+                .Name;
+            preparedCandidate = preparedCandidate with
+            {
+                StudentName = item.StudentDisplayName,
+                AssignmentName = assignmentName,
+                MaxGrade = maxGrade
+            };
+
             if (candidate.Grade is not null)
             {
-                var maxGrade = await GetKnownMaxGradeAsync(
-                    batch,
-                    item,
-                    settingsCache,
-                    evidenceByItem,
-                    cancellationToken);
                 if (maxGrade is null)
                 {
                     scaleWarnings.Add(
@@ -369,7 +403,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     continue;
                 }
 
-                preparedCandidate = candidate with
+                preparedCandidate = preparedCandidate with
                 {
                     ExistingGrade = existingGrade,
                     PreflightHash = ComputePreflightHash(batch, item, existingGrade)
@@ -464,6 +498,12 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     contextWarnings.Add($"Item {item.Id}: o estudante nao esta matriculado no curso atual do Moodle; a publicacao foi bloqueada.");
                     continue;
                 }
+
+                var studentId = item.MoodleUserId.ToString(CultureInfo.InvariantCulture);
+                preparedCandidate = preparedCandidate with
+                {
+                    StudentName = enrollment.StudentNames?.GetValueOrDefault(studentId) ?? preparedCandidate.StudentName
+                };
             }
 
             ready.Add(preparedCandidate);
@@ -721,7 +761,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         return maxPoints.Length == 0 ? null : maxPoints.Sum();
     }
 
-    private static async Task<(IReadOnlySet<string>? StudentIds, string? Error)> ResolveCourseEnrollmentPreflightAsync(
+    private static async Task<(IReadOnlySet<string>? StudentIds, IReadOnlyDictionary<string, string>? StudentNames, string? Error)> ResolveCourseEnrollmentPreflightAsync(
         IMoodleParticipantsGateway gateway,
         string userExternalId,
         string courseId,
@@ -730,6 +770,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         try
         {
             var studentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var studentNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var pageNumber = 1;
             while (true)
             {
@@ -751,12 +792,16 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     if (!string.IsNullOrWhiteSpace(participant.UserId))
                     {
                         studentIds.Add(participant.UserId);
+                        if (!string.IsNullOrWhiteSpace(participant.FullName))
+                        {
+                            studentNames[participant.UserId] = participant.FullName.Trim();
+                        }
                     }
                 }
 
                 if (!page.HasMore)
                 {
-                    return (studentIds, null);
+                    return (studentIds, studentNames, null);
                 }
 
                 pageNumber++;
@@ -764,7 +809,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return (null, exception.GetType().Name);
+            return (null, null, exception.GetType().Name);
         }
     }
 
@@ -837,7 +882,10 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             GradingDraftVersionHash.Compute(item),
             item.ContextHash,
             item.SubmissionContentHash,
-            candidate.PreflightHash);
+            candidate.PreflightHash,
+            candidate.StudentName,
+            candidate.AssignmentName,
+            candidate.MaxGrade);
     }
 
     private static GradingLaunchPreviewItem ToPreviewItem(GradingLaunchCandidate candidate)
@@ -851,13 +899,16 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             candidate.FeedbackText,
             item.ContextHash,
             item.SubmissionContentHash,
-            item.StudentDisplayName,
+            candidate.StudentName ?? item.StudentDisplayName,
             candidate.Item.ReviewStatus == GradingReviewStatus.Reviewed
                 ? "revisada"
                 : "rascunho_aguardando_confirmacao",
             candidate.PreflightHash,
             candidate.ExistingGrade?.Grade,
-            !string.IsNullOrWhiteSpace(candidate.ExistingGrade?.Feedback));
+            !string.IsNullOrWhiteSpace(candidate.ExistingGrade?.Feedback),
+            candidate.AssignmentName,
+            candidate.MaxGrade,
+            candidate.Item.ReviewStatus.ToString());
     }
 
     private static string ResolvePublicationConnectionKey(AssistedGradingBatch batch) =>
@@ -871,7 +922,10 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         decimal? Grade,
         string FeedbackText,
         AssignmentExistingGrade? ExistingGrade = null,
-        string? PreflightHash = null);
+        string? PreflightHash = null,
+        string? StudentName = null,
+        string? AssignmentName = null,
+        decimal? MaxGrade = null);
 
     private static string ComputePreflightHash(
         AssistedGradingBatch batch,
@@ -959,7 +1013,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 SentItems: 0,
                 FailedItems: 0,
                 Failures: [],
-                confirmation.AuditId);
+                confirmation.AuditId,
+                BatchJobId: payload.BatchJobId);
         }
 
         var durableExecution = confirmation.Status == "authorized";
@@ -981,7 +1036,9 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 SentItems: 0,
                 FailedItems: 0,
                 Failures: [],
-                confirmation.AuditId);
+                confirmation.AuditId,
+                BatchJobId: payload.BatchJobId,
+                Items: BuildPublicationItems(payload, forcedStatus: "authorized"));
         }
         GradingRun? gradingRun = null;
         var publicationClaimConflicts = new HashSet<Guid>();
@@ -1038,7 +1095,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                         SentItems: 0,
                         FailedItems: 0,
                         Failures: [],
-                        confirmation.AuditId);
+                        confirmation.AuditId,
+                        BatchJobId: payload.BatchJobId);
                 }
 
                 return new ConfirmMoodleBatchLaunchResult(
@@ -1047,7 +1105,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     SentItems: 0,
                     FailedItems: 0,
                     Failures: [],
-                    confirmation.AuditId);
+                    confirmation.AuditId,
+                    BatchJobId: payload.BatchJobId);
             }
 
             gradingRun = await ResolvePublicationRunAsync(payload.BatchJobId, cancellationToken);
@@ -1068,7 +1127,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     SentItems: 0,
                     FailedItems: 0,
                     Failures: [],
-                    confirmation.AuditId);
+                    confirmation.AuditId,
+                    BatchJobId: payload.BatchJobId);
             }
 
             if (gradingRun is not null)
@@ -1793,7 +1853,9 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 sent,
                 failures.Count,
                 failures,
-                confirmation.AuditId);
+                confirmation.AuditId,
+                BatchJobId: payload.BatchJobId,
+                Items: BuildPublicationItems(payload, itemsById, failures));
         }
 
         var directBatch = await repository.GetBatchAsync(payload.BatchJobId, cancellationToken);
@@ -1892,7 +1954,50 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             failures.Count,
             failures,
             confirmation.AuditId,
-            warnings.Count == 0 ? [] : warnings.Distinct(StringComparer.Ordinal).ToArray());
+            warnings.Count == 0 ? [] : warnings.Distinct(StringComparer.Ordinal).ToArray(),
+            BatchJobId: payload.BatchJobId,
+            Items: BuildPublicationItems(payload, itemsById, failures));
+    }
+
+    private static IReadOnlyList<GradingLaunchPublicationItem> BuildPublicationItems(
+        GradingLaunchPayload payload,
+        IReadOnlyDictionary<Guid, AssistedGradingItem>? itemsById = null,
+        IReadOnlyList<GradingLaunchFailure>? failures = null,
+        string? forcedStatus = null)
+    {
+        var failureByItem = (failures ?? [])
+            .GroupBy(failure => failure.GradingItemId)
+            .ToDictionary(group => group.Key, group => group.Last().Message);
+
+        return payload.Items.Select(payloadItem =>
+        {
+            AssistedGradingItem? item = null;
+            if (itemsById is not null)
+            {
+                itemsById.TryGetValue(payloadItem.GradingItemId, out item);
+            }
+            var commitStatus = item?.CommitStatus.ToString() ?? "Pending";
+            var status = forcedStatus ?? commitStatus switch
+            {
+                nameof(GradingCommitStatus.Succeeded) => "publicado",
+                nameof(GradingCommitStatus.ExecutionUnknown) => "resultado_desconhecido",
+                nameof(GradingCommitStatus.Failed) => "falhou",
+                _ => "pendente"
+            };
+            var isPublished = string.Equals(status, "publicado", StringComparison.Ordinal);
+
+            return new GradingLaunchPublicationItem(
+                payloadItem.GradingItemId,
+                payloadItem.AssignmentId,
+                payloadItem.AssignmentName,
+                payloadItem.StudentId,
+                item?.StudentDisplayName ?? payloadItem.StudentName,
+                isPublished ? item?.FinalGrade ?? payloadItem.Grade : null,
+                isPublished ? item?.FinalFeedback ?? payloadItem.FeedbackText : null,
+                commitStatus,
+                status,
+                failureByItem.GetValueOrDefault(payloadItem.GradingItemId) ?? item?.CommitError);
+        }).ToArray();
     }
 
     private static async Task EnsurePreviewConnectionAsync(

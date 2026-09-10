@@ -20,9 +20,10 @@ Separe leitura, preparacao, previa e confirmacao. A decisao pedagogica permanece
 2. Use `prepare_ai_grading_batch` para obter o contexto e gerar nota/feedback no chat, inclusive quando o lote tiver somente um aluno.
 3. Use `save_ai_grading_batch` para persistir as correcoes internas; nao escreva no Moodle nessa etapa.
 4. Quando o usuario pedir CSV, use `export_grading_corrections_csv`. O CSV e uma saida final externa no formato `nome;nota;feedback`; nunca e etapa para publicar no Moodle.
-5. Quando o usuario pedir correcao normal ou publicacao, use `create_batch_grade_launch_preview`. Mostre todos os alunos, notas, feedbacks, situacoes e avisos retornados, sem abrir ou exigir UI de revisao.
-6. So chame `confirm_batch_grade_launch` depois que o usuario responder exatamente `CONFIRMAR_PUBLICACAO`. A confirmacao revalida rascunho, submissao e dados atuais do Moodle antes de cada escrita.
-7. Para um aluno ou muitas atividades, use o mesmo lote e o mesmo par de previa/confirmacao. Nao use ferramentas de UI ou CSV como rota de publicacao.
+5. Quando o usuario pedir correcao normal ou publicacao, use `create_batch_grade_launch_preview`. Mostre integralmente todos os itens retornados: nome do aluno, atividade, nota proposta/maxima, `feedbackText` completo, `reviewStatus`, `situation`, notas/feedbacks existentes e avisos. Nunca reduza a previa a uma tabela somente com aluno e nota, nem omita ou resuma o feedback antes da confirmacao.
+6. So chame `confirm_batch_grade_launch` depois que o usuario responder exatamente `CONFIRMAR_PUBLICACAO`. A confirmacao revalida rascunho, submissao e dados atuais do Moodle antes de cada escrita e retorna `authorized` enquanto o worker ainda nao concluiu.
+7. Depois de uma confirmacao `authorized`, use `get_assisted_grading_batch_status` com o `batchJobId` da previa/confirmacao. Informe por aluno o nome, nota, feedback e `commitStatus`; somente `Succeeded` significa que o Moodle/ledger confirmou a publicacao efetiva.
+8. Para um aluno ou muitas atividades, use o mesmo lote e o mesmo par de previa/confirmacao. Nao use ferramentas de UI ou CSV como rota de publicacao.
 
 Quando o usuario pedir explicitamente uma reavaliacao de correcoes ja publicadas, inicie
 `start_pending_grading_run` com `includeAlreadyGraded=true`, restringindo por `courseId` e

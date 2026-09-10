@@ -112,7 +112,10 @@ public sealed record AssistedGradingBatchStatusItem(
     [property: JsonPropertyName("studentId")] string StudentId,
     [property: JsonPropertyName("status")] string Status,
     [property: JsonPropertyName("reviewStatus")] string ReviewStatus,
-    [property: JsonPropertyName("commitStatus")] string CommitStatus);
+    [property: JsonPropertyName("commitStatus")] string CommitStatus,
+    [property: JsonPropertyName("studentName")] string? StudentName = null,
+    [property: JsonPropertyName("grade")] decimal? Grade = null,
+    [property: JsonPropertyName("feedbackText")] string? FeedbackText = null);
 
 public sealed record GetAssistedGradingCoordinationReportQuery(
     Guid BatchJobId) : IRequest<AssistedGradingCoordinationReportResult>;
@@ -1739,7 +1742,10 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
             item.Status.ToString(),
             item.ReviewStatus.ToString(),
-            item.CommitStatus.ToString());
+            item.CommitStatus.ToString(),
+            item.StudentDisplayName,
+            item.FinalGrade ?? item.SuggestedGrade,
+            item.FinalFeedback ?? item.DraftFeedback);
     }
 
     private static GradingBatchProcessingMetrics BuildMetrics(

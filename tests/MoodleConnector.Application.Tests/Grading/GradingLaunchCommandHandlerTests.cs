@@ -224,6 +224,32 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreview_EnriqueceContratoComNomeAtividadeEscalaENomeDoAluno()
+    {
+        var fixture = new Fixture();
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway,
+            participantsGateway: fixture.EnrollmentGateway);
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: true),
+            CancellationToken.None);
+
+        var preview = Assert.Single(result.Launches);
+        Assert.Equal("Student 101", preview.StudentName);
+        Assert.Equal("Atividade", preview.AssignmentName);
+        Assert.Equal(10m, preview.MaxGrade);
+        Assert.Equal("Reviewed", preview.ReviewStatus);
+        Assert.Equal("Student 101", fixture.PendingActions.LastPayload!.Items[0].StudentName);
+        Assert.Equal("Atividade", fixture.PendingActions.LastPayload.Items[0].AssignmentName);
+        Assert.Equal(10m, fixture.PendingActions.LastPayload.Items[0].MaxGrade);
+    }
+
+    [Fact]
     public async Task CreatePreview_ExplicaQuandoContextoAtualBloqueadoNaoFoiSelado()
     {
         var fixture = new Fixture();
@@ -503,6 +529,10 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal("501", fixture.Mediator.SavedGrades[0].AssignmentId);
         Assert.Equal("101", fixture.Mediator.SavedGrades[0].StudentId);
         Assert.Equal(GradingCommitStatus.Succeeded, item.CommitStatus);
+        var publicationItem = Assert.Single(result.Items!);
+        Assert.Equal("publicado", publicationItem.Status);
+        Assert.Equal(8.5m, publicationItem.PublishedGrade);
+        Assert.Equal("Feedback final revisado.", publicationItem.PublishedFeedback);
         Assert.Equal("moodle.write.assignments.grade", fixture.Confirmations.LastRequiredScope);
         var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_succeeded");
         Assert.Equal("confirmar_lancamento_lote_moodle", auditLog.ToolName);
@@ -533,6 +563,10 @@ public sealed class GradingLaunchCommandHandlerTests
         Assert.Equal(0, result.SentItems);
         Assert.Empty(fixture.Mediator.SavedGrades);
         Assert.Equal(GradingCommitStatus.Pending, item.CommitStatus);
+        var publicationItem = Assert.Single(result.Items!);
+        Assert.Equal("authorized", publicationItem.Status);
+        Assert.Null(publicationItem.PublishedGrade);
+        Assert.Equal(batch.Id, result.BatchJobId);
     }
 
     [Fact]
