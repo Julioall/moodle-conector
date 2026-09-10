@@ -237,6 +237,22 @@ public sealed class AssistedGradingBatch
     }
 
     /// <summary>
+    /// Retira do índice de duplicidade um lote de análise concluído que não
+    /// publicou nenhuma entrega. A aplicação só chama este caminho depois de
+    /// verificar todos os itens e preservar qualquer publicação existente.
+    /// </summary>
+    public void CancelForRecovery()
+    {
+        if (Status == GradingBatchStatus.Cancelled)
+        {
+            return;
+        }
+
+        Status = GradingBatchStatus.Cancelled;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
     /// Tenta adquirir ou reassumir o lease em memória. A implementação PostgreSQL
     /// usa os mesmos predicados de forma atômica no repositório durável.
     /// </summary>

@@ -50,6 +50,20 @@
         "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
       }
     },
+    "cancel_grading_batch": {
+      "annotations": {
+        "title": "Cancel Grading Batch",
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "May delete, overwrite, cancel, or send an action that cannot be undone; the server still enforces authorization and confirmation where required."
+      }
+    },
     "confirm_access_reminder": {
       "annotations": {
         "title": "Confirm Access Reminder",
@@ -221,6 +235,20 @@
     "fetch": {
       "annotations": {
         "title": "Fetch Moodle course",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Retrieves authorized Moodle or connector data without creating, updating, sending, or deleting records.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "find_grading_correction_by_submission": {
+      "annotations": {
+        "title": "Find Grading Correction By Submission",
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
@@ -1075,6 +1103,20 @@
     "requeue_blocked_grading_items": {
       "annotations": {
         "title": "Requeue Blocked Grading Items",
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates, updates, queues, sends, or otherwise changes state in the authenticated Moodle or connector context.",
+        "open_world_justification": "Operates only within the authenticated Moodle or connector context and does not publish to the public internet.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, cancel state, or send an irreversible action."
+      }
+    },
+    "requeue_failed_grading_publication_items": {
+      "annotations": {
+        "title": "Requeue Failed Grading Publication Items",
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,

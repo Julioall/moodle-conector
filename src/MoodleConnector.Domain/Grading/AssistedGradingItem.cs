@@ -344,6 +344,32 @@ public sealed class AssistedGradingItem
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Reabre uma publicação que foi comprovadamente bloqueada ou não
+    /// aplicada. A decisão do professor permanece intacta; somente o estado
+    /// operacional volta a permitir uma nova prévia e confirmação.
+    /// Execuções desconhecidas nunca podem seguir por este caminho, pois
+    /// precisam ser reconciliadas antes de qualquer nova escrita.
+    /// </summary>
+    public void RequeueCommitForRetry()
+    {
+        if (ReviewStatus != GradingReviewStatus.Reviewed ||
+            string.IsNullOrWhiteSpace(FinalFeedback))
+        {
+            throw new InvalidOperationException("Somente itens revisados com feedback final podem voltar para publicação.");
+        }
+
+        if (CommitStatus != GradingCommitStatus.Failed)
+        {
+            throw new InvalidOperationException($"O item não está em uma falha de publicação recuperável: {CommitStatus}.");
+        }
+
+        Status = GradingItemStatus.ReadyToCommit;
+        CommitStatus = GradingCommitStatus.Pending;
+        CommitError = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void MarkCommitExecutionUnknown(string error)
     {
         Status = GradingItemStatus.Failed;

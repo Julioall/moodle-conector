@@ -76,6 +76,98 @@ public sealed class GradingReviewRepositoryTests
     }
 
     [Fact]
+    public async Task SubmissionMatch_RecuperaHandlesDaCorrecaoEFiltraPeloProprietario()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var run = GradingRun.Create("teacher-1", 321, "connection-1", "client-1", "alias-1", "10");
+        var ownedBatch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, 1, gradingRunId: run.Id,
+            moodleConnectionId: "connection-1", connectorClientId: "client-1", connectionAlias: "alias-1");
+        var ownedItem = AssistedGradingItem.Create(ownedBatch.Id, 10, 501, 9001, 101, 0);
+        var otherBatch = AssistedGradingBatch.Create(10, [501], "teacher-2", 322, 1,
+            moodleConnectionId: "connection-1", connectorClientId: "client-1", connectionAlias: "alias-1");
+        var otherItem = AssistedGradingItem.Create(otherBatch.Id, 10, 501, 9001, 101, 0);
+
+        dbContext.GradingRuns.Add(run);
+        dbContext.GradingBatches.AddRange(ownedBatch, otherBatch);
+        dbContext.GradingItems.AddRange(ownedItem, otherItem);
+        await dbContext.SaveChangesAsync();
+
+        var matches = await store.FindSubmissionMatchesAsync(
+            9001,
+            10,
+            501,
+            "connection-1",
+            "client-1",
+            "alias-1",
+            "teacher-1",
+            CancellationToken.None);
+
+        var match = Assert.Single(matches);
+        Assert.Equal(ownedItem.Id, match.GradingItemId);
+        Assert.Equal(ownedBatch.Id, match.BatchJobId);
+        Assert.Equal(run.Id, match.GradingRunId);
+        Assert.Equal("teacher-1", match.CreatedBySubject);
+        Assert.Equal(GradingRunStatus.Preparing, match.RunStatus);
+    }
+
+    [Fact]
+    public async Task SubmissionMatch_MantemBarreiraParaPublicacaoEmLoteCancelado()
+    {
+        await using var dbContext = CreateDbContext();
+        var store = new GradingReviewRepository(dbContext);
+        var publishedBatch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            1,
+            moodleConnectionId: "connection-1");
+        var publishedItem = AssistedGradingItem.Create(publishedBatch.Id, 10, 501, 9001, 101, 0);
+        publishedItem.ApplyTeacherReview(9m, "Publicado.", "teacher-1", 321);
+        publishedItem.MarkCommitSucceeded();
+        publishedBatch.Cancel();
+
+        var unknownBatch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            1,
+            moodleConnectionId: "connection-1");
+        var unknownItem = AssistedGradingItem.Create(unknownBatch.Id, 10, 501, 9002, 102, 0);
+        unknownItem.ApplyTeacherReview(8m, "A reconciliar.", "teacher-1", 321);
+        unknownItem.MarkCommitExecutionUnknown("timeout");
+        unknownBatch.Cancel();
+
+        dbContext.GradingBatches.AddRange(publishedBatch, unknownBatch);
+        dbContext.GradingItems.AddRange(publishedItem, unknownItem);
+        await dbContext.SaveChangesAsync();
+
+        var matches = await store.FindSubmissionMatchesAsync(
+            9001,
+            10,
+            501,
+            "connection-1",
+            null,
+            null,
+            "teacher-1",
+            CancellationToken.None);
+        var unknownMatches = await store.FindSubmissionMatchesAsync(
+            9002,
+            10,
+            501,
+            "connection-1",
+            null,
+            null,
+            "teacher-1",
+            CancellationToken.None);
+
+        Assert.Equal(publishedItem.Id, Assert.Single(matches).GradingItemId);
+        Assert.Equal(unknownItem.Id, Assert.Single(unknownMatches).GradingItemId);
+    }
+
+    [Fact]
     public async Task PublicationClaims_MantemAlvosNaoConflitantesQuandoParteDoLoteEstaOcupada()
     {
         await using var dbContext = CreateDbContext();

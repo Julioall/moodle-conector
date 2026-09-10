@@ -34,7 +34,8 @@ public sealed class MoodleGradingTools(
     IMoodleConnectionSelection moodleSelection,
     IMoodleUserResolver moodleUserResolver,
     MoodleSnapshotToolContext? snapshotContext = null,
-    IOptions<GradingLimitsOptions>? gradingLimits = null)
+    IOptions<GradingLimitsOptions>? gradingLimits = null,
+    IMoodleConnectorCredentialsProvider? credentialsProvider = null)
 {
     private readonly GradingLimitsOptions _gradingLimits = gradingLimits?.Value ?? new GradingLimitsOptions();
 
@@ -97,7 +98,7 @@ public sealed class MoodleGradingTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<RequeueBlockedGradingItemsResult>))]
-    [Description("Reabre somente os itens de correcao informados que estao bloqueados ou falharam, devolvendo-os para analise pela IA. Nao altera o Moodle, nao reabre itens publicados e exige os gradingItemIds explicitamente. Depois use prepare_ai_grading_batch no mesmo lote.")]
+    [Description("Reabre somente os itens de analise informados que estao bloqueados ou falharam, devolvendo-os para a IA. Nao altera o Moodle, nao reabre itens publicados nem itens com revisao final; exige os gradingItemIds explicitamente. Para falha de publicacao de uma revisao final, use requeue_failed_grading_publication_items.")]
     public async Task<CallToolResult> ReenfileirarItensBloqueadosAsync(
         [Description("Identificador do lote original ou gradingRunId agregado.")]
         Guid batchJobId,
@@ -157,6 +158,156 @@ public sealed class MoodleGradingTools(
     }
 
     [McpServerTool(
+        Name = "find_grading_correction_by_submission",
+        Title = "Find Grading Correction By Submission",
+        ReadOnly = true,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<FindGradingCorrectionBySubmissionResult>))]
+    [Description("Localiza somente no ledger local do conector uma correcao anterior pela submissao Moodle. Retorna gradingItemId, batchJobId e gradingRunId quando o lote pertence ao usuario atual; nao consulta nem altera o Moodle. Use esta ferramenta quando uma nova tentativa for barrada por duplicidade e o identificador antigo nao estiver disponivel.")]
+    public async Task<CallToolResult> LocalizarCorrecaoPorSubmissaoAsync(
+        [Description("submissionId numerico informado pelo Moodle.")]
+        string submissionId,
+        [Description("courseId opcional para desempatar resultados.")]
+        string? courseId = null,
+        [Description("assignmentId ou instanceId opcional para desempatar resultados.")]
+        string? assignmentId = null,
+        [Description("Alias do Moodle onde a submissao foi processada.")]
+        string? moodleAlias = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!long.TryParse(submissionId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedSubmissionId) ||
+            parsedSubmissionId <= 0)
+        {
+            return ToolResultHelper.Error<FindGradingCorrectionBySubmissionResult>("Informe um submissionId numerico positivo.");
+        }
+
+        var courseIsValid = TryParseOptionalPositiveId(courseId, "courseId", out var parsedCourseId, out var courseError);
+        var assignmentIsValid = TryParseOptionalPositiveId(assignmentId, "assignmentId", out var parsedAssignmentId, out var assignmentError);
+        if (!courseIsValid || !assignmentIsValid)
+        {
+            return ToolResultHelper.Error<FindGradingCorrectionBySubmissionResult>(courseError ?? assignmentError!);
+        }
+
+        moodleSelection.Alias = moodleAlias;
+        MoodleConnectorCredentials? credentials = null;
+        if (credentialsProvider is not null)
+        {
+            try
+            {
+                credentials = await credentialsProvider.GetCurrentCredentialsAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // A local lookup remains useful even when the current
+                // connection cannot be resolved; the handler still scopes by
+                // the authenticated connector subject.
+            }
+        }
+
+        try
+        {
+            var data = await mediator.Send(
+                new FindGradingCorrectionBySubmissionQuery(
+                    parsedSubmissionId,
+                    parsedCourseId,
+                    parsedAssignmentId,
+                    credentials?.ConnectionId,
+                    credentials?.ClientId,
+                    credentials?.Alias),
+                cancellationToken);
+            var response = new ToolResponse<FindGradingCorrectionBySubmissionResult>(
+                data.Found ? "ok" : "not_found",
+                data,
+                [],
+                AuditId: null,
+                DateTimeOffset.UtcNow);
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = data.Message }],
+                StructuredContent = JsonSerializer.SerializeToElement(response),
+                IsError = false
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolResultHelper.Error<FindGradingCorrectionBySubmissionResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<FindGradingCorrectionBySubmissionResult>("Nao foi possivel consultar o ledger de correcoes neste momento.");
+        }
+    }
+
+    [McpServerTool(
+        Name = "requeue_failed_grading_publication_items",
+        Title = "Requeue Failed Grading Publication Items",
+        ReadOnly = false,
+        Destructive = false,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<RequeueFailedGradingPublicationItemsResult>))]
+    [Description("Recupera itens revisados cuja publicacao no Moodle falhou de forma comprovada. Mantem nota e feedback finais, recusa execucao desconhecida e nao escreve no Moodle; depois gere uma nova previa e confirme novamente. Use find_grading_correction_by_submission quando voce so tiver o submissionId.")]
+    public async Task<CallToolResult> ReenfileirarFalhasDePublicacaoAsync(
+        [Description("batchJobId ou gradingRunId que contem os itens.")]
+        Guid batchJobId,
+        [Description("IDs dos itens cuja publicacao falhou; informe-os explicitamente.")]
+        Guid[] gradingItemIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (batchJobId == Guid.Empty || gradingItemIds.Length == 0)
+        {
+            return ToolResultHelper.Error<RequeueFailedGradingPublicationItemsResult>("Informe um lote valido e pelo menos um gradingItemId.");
+        }
+
+        try
+        {
+            var data = await mediator.Send(
+                new RequeueFailedGradingPublicationItemsCommand(batchJobId, gradingItemIds),
+                cancellationToken);
+            var response = new ToolResponse<RequeueFailedGradingPublicationItemsResult>(
+                data.RequeuedItems > 0 || data.AlreadyQueuedItems > 0 ? "ok" : "partial_failure",
+                data,
+                data.Failures.Select(failure => failure.Message).ToArray(),
+                AuditId: null,
+                DateTimeOffset.UtcNow);
+            return new CallToolResult
+            {
+                Content = [new TextContentBlock { Text = data.NextStep }],
+                StructuredContent = JsonSerializer.SerializeToElement(response),
+                IsError = false
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ToolResultHelper.Error<RequeueFailedGradingPublicationItemsResult>(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return ToolResultHelper.Error<RequeueFailedGradingPublicationItemsResult>(ex.Message);
+        }
+        catch
+        {
+            return ToolResultHelper.Error<RequeueFailedGradingPublicationItemsResult>("Nao foi possivel recuperar as falhas de publicacao neste momento.");
+        }
+    }
+
+    [McpServerTool(
         Name = "cancel_assisted_grading_batch",
         Title = "Cancel Assisted Grading Batch",
         ReadOnly = false,
@@ -193,11 +344,7 @@ public sealed class MoodleGradingTools(
         try
         {
             data = await mediator.Send(
-                new CancelAssistedGradingBatchCommand(
-                    batchJobId,
-                    purgeLocalData,
-                    confirmationText,
-                    reason),
+                new CancelAssistedGradingBatchCommand(batchJobId, purgeLocalData, confirmationText, reason),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -236,6 +383,24 @@ public sealed class MoodleGradingTools(
             StructuredContent = JsonSerializer.SerializeToElement(response),
             IsError = false
         };
+    }
+
+    [McpServerTool(
+        Name = "cancel_grading_batch",
+        Title = "Cancel Grading Batch",
+        ReadOnly = false,
+        Destructive = true,
+        Idempotent = true,
+        OpenWorld = false,
+        UseStructuredContent = true,
+        OutputSchemaType = typeof(ToolResponse<CancelAssistedGradingBatchResult>))]
+    [Description("Alias de compatibilidade para cancel_assisted_grading_batch. Aceita batchJobId ou gradingRunId, cancela o processamento local e preserva os guardas contra publicacoes duplicadas.")]
+    public Task<CallToolResult> CancelarLoteCorrecaoCompatAsync(
+        [Description("batchJobId ou gradingRunId retornado pelo conector.")]
+        Guid batchJobId,
+        CancellationToken cancellationToken = default)
+    {
+        return CancelarLoteCorrecaoAsync(batchJobId, false, null, null, cancellationToken);
     }
 
     [McpServerTool(
@@ -751,7 +916,9 @@ public sealed class MoodleGradingTools(
     {
         if (response.Batches.Count == 0)
         {
-            return $"Nenhuma entrega pendente elegivel foi encontrada em {response.CoursesScanned} curso(s).";
+            return response.ExistingCorrections.Count > 0
+                ? $"Nenhum sublote novo foi criado em {response.CoursesScanned} curso(s): a submissao ja possui correcao local. Consulte existingCorrections para usar o batchJobId/gradingRunId anterior."
+                : $"Nenhuma entrega pendente elegivel foi encontrada em {response.CoursesScanned} curso(s).";
         }
 
         return $"Fluxo de correcoes pendentes iniciado (gradingRunId: {response.GradingRunId}): {response.TotalItems} entrega(s) em {response.CoursesScanned} curso(s), " +
@@ -922,6 +1089,29 @@ public sealed class MoodleGradingTools(
 
     private static string CsvField(string? value) =>
         $"\"{(value ?? string.Empty).Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+
+    private static bool TryParseOptionalPositiveId(
+        string? value,
+        string name,
+        out long? parsed,
+        out string? error)
+    {
+        parsed = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return true;
+        }
+
+        if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number) && number > 0)
+        {
+            parsed = number;
+            return true;
+        }
+
+        error = $"O {name} deve ser numerico e positivo.";
+        return false;
+    }
 
 
 

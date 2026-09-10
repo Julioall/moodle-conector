@@ -51,6 +51,30 @@ public sealed record RequeueBlockedGradingItemFailure(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
     [property: JsonPropertyName("message")] string Message);
 
+public sealed record ExistingGradingCorrectionReference(
+    [property: JsonPropertyName("submissionId")] long SubmissionId,
+    [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("gradingRunId")] Guid? GradingRunId,
+    [property: JsonPropertyName("itemStatus")] string ItemStatus,
+    [property: JsonPropertyName("commitStatus")] string CommitStatus,
+    [property: JsonPropertyName("batchStatus")] string BatchStatus,
+    [property: JsonPropertyName("runStatus")] string? RunStatus);
+
+public sealed record FindGradingCorrectionBySubmissionQuery(
+    long SubmissionId,
+    long? CourseId = null,
+    long? AssignmentId = null,
+    string? MoodleConnectionId = null,
+    string? ConnectorClientId = null,
+    string? ConnectionAlias = null) : IRequest<FindGradingCorrectionBySubmissionResult>;
+
+public sealed record FindGradingCorrectionBySubmissionResult(
+    [property: JsonPropertyName("submissionId")] long SubmissionId,
+    [property: JsonPropertyName("found")] bool Found,
+    [property: JsonPropertyName("matches")] IReadOnlyList<ExistingGradingCorrectionReference> Matches,
+    [property: JsonPropertyName("message")] string Message);
+
 public sealed record StartPendingGradingRunResult(
     [property: JsonPropertyName("coursesDiscovered")] int CoursesDiscovered,
     [property: JsonPropertyName("coursesScanned")] int CoursesScanned,
@@ -64,6 +88,9 @@ public sealed record StartPendingGradingRunResult(
 {
     [JsonPropertyName("assignmentResolution")]
     public IReadOnlyList<AssignmentResolution> AssignmentResolution { get; init; } = [];
+
+    [JsonPropertyName("existingCorrections")]
+    public IReadOnlyList<ExistingGradingCorrectionReference> ExistingCorrections { get; init; } = [];
 }
 
 public sealed record AssignmentResolution(
@@ -174,6 +201,7 @@ public sealed class StartPendingGradingRunCommandHandler(
         var courseResults = new List<PendingGradingRunCourse>();
         var warnings = new List<string>();
         var assignmentResolutions = new List<AssignmentResolution>();
+        var existingCorrections = new List<ExistingGradingCorrectionReference>();
         if (includeAlreadyGraded)
         {
             warnings.Add(
@@ -423,6 +451,7 @@ public sealed class StartPendingGradingRunCommandHandler(
                     // pendências", escondendo que as entregas já estavam em
                     // outro lote.
                     warnings.AddRange(batch.Warnings.Select(warning => $"Curso {course.CourseId}: {warning}"));
+                    existingCorrections.AddRange(batch.ExistingCorrections);
                     if (batch.BatchJobId == Guid.Empty || batch.AcceptedItems == 0)
                     {
                         continue;
@@ -469,15 +498,28 @@ public sealed class StartPendingGradingRunCommandHandler(
                         firstChild.ConnectorClientId,
                         firstChild.ConnectionAlias);
                 }
-                // Freeze the discovery contract before exposing the run. A
-                // later aggregate read must be able to prove it still covers
-                // every declared child/item instead of treating a missing
-                // lineage row as a smaller, apparently valid execution.
-                run.SetExpectedCoverage(
-                    batches.Sum(batch => batch.TotalItems),
-                    batches.Count);
-                run.MarkReady();
-                await gradingRepository.SaveChangesAsync(cancellationToken);
+                if (childBatches.Count == 0)
+                {
+                    // A deduplicated/failed discovery must not leave a new
+                    // usable empty run behind. The handle remains auditable,
+                    // but is immediately cancelled; existingCorrections
+                    // carries the prior batch/run handles when applicable.
+                    run.Cancel();
+                    warnings.Add("Nenhum sublote novo foi criado; a execucao vazia foi encerrada automaticamente. Consulte existingCorrections para recuperar a correcao anterior.");
+                    await gradingRepository.SaveChangesAsync(cancellationToken);
+                }
+                else
+                {
+                    // Freeze the discovery contract before exposing the run. A
+                    // later aggregate read must be able to prove it still covers
+                    // every declared child/item instead of treating a missing
+                    // lineage row as a smaller, apparently valid execution.
+                    run.SetExpectedCoverage(
+                        batches.Sum(batch => batch.TotalItems),
+                        batches.Count);
+                    run.MarkReady();
+                    await gradingRepository.SaveChangesAsync(cancellationToken);
+                }
             }
         }
 
@@ -495,6 +537,9 @@ public sealed class StartPendingGradingRunCommandHandler(
             GradingRunId: gradingRunId)
         {
             AssignmentResolution = assignmentResolutions,
+            ExistingCorrections = existingCorrections
+                .DistinctBy(reference => reference.GradingItemId)
+                .ToArray(),
         };
     }
 
@@ -1032,6 +1077,170 @@ public sealed class RequeueBlockedGradingItemsCommandHandler(
                 ? "Use prepare_ai_grading_batch no mesmo lote para gerar novos rascunhos; depois salve e gere uma nova previa."
                 : "Nenhum item foi reaberto; verifique as falhas retornadas.");
     }
+}
+
+/// <summary>
+/// Recupera falhas de publicação sem refazer a análise nem apagar a decisão
+/// do professor. A prévia seguinte executará novamente todas as proteções de
+/// contexto, tentativa, nota existente e feedback antes de pedir confirmação.
+/// </summary>
+public sealed record RequeueFailedGradingPublicationItemsCommand(
+    Guid BatchJobId,
+    IReadOnlyList<Guid> GradingItemIds) : IRequest<RequeueFailedGradingPublicationItemsResult>;
+
+public sealed record RequeueFailedGradingPublicationItemsResult(
+    [property: JsonPropertyName("batchJobId")] Guid BatchJobId,
+    [property: JsonPropertyName("requestedItems")] int RequestedItems,
+    [property: JsonPropertyName("requeuedItems")] int RequeuedItems,
+    [property: JsonPropertyName("alreadyQueuedItems")] int AlreadyQueuedItems,
+    [property: JsonPropertyName("failedItems")] int FailedItems,
+    [property: JsonPropertyName("failures")] IReadOnlyList<RequeueBlockedGradingItemFailure> Failures,
+    [property: JsonPropertyName("nextStep")] string NextStep);
+
+public sealed class RequeueFailedGradingPublicationItemsCommandHandler(
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser)
+    : IRequestHandler<RequeueFailedGradingPublicationItemsCommand, RequeueFailedGradingPublicationItemsResult>
+{
+    public async Task<RequeueFailedGradingPublicationItemsResult> Handle(
+        RequeueFailedGradingPublicationItemsCommand request,
+        CancellationToken cancellationToken)
+    {
+        if (request.BatchJobId == Guid.Empty)
+        {
+            throw new ArgumentException("O lote e obrigatorio.", nameof(request.BatchJobId));
+        }
+
+        var requestedIds = request.GradingItemIds
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (requestedIds.Length == 0)
+        {
+            throw new ArgumentException("Informe pelo menos um item para recuperar.", nameof(request.GradingItemIds));
+        }
+
+        var scope = await GradingBatchScopeResolver.ResolveAsync(
+            repository,
+            currentUser,
+            request.BatchJobId,
+            cancellationToken);
+        var scopeBatchIds = scope.Batches.Select(batch => batch.Id).ToHashSet();
+        var items = await repository.GetItemsAsync(requestedIds, cancellationToken);
+        var failures = new List<RequeueBlockedGradingItemFailure>();
+        var requeuedItems = 0;
+        var alreadyQueuedItems = 0;
+
+        foreach (var gradingItemId in requestedIds)
+        {
+            if (!items.TryGetValue(gradingItemId, out var item))
+            {
+                failures.Add(new(gradingItemId, "Item de correcao nao encontrado."));
+                continue;
+            }
+
+            if (!scopeBatchIds.Contains(item.BatchId))
+            {
+                failures.Add(new(gradingItemId, "Item nao pertence ao lote ou execucao informada."));
+                continue;
+            }
+
+            if (item.CommitStatus == GradingCommitStatus.Succeeded ||
+                item.Status == GradingItemStatus.Committed)
+            {
+                failures.Add(new(gradingItemId, "Item ja publicado; a recuperacao foi recusada."));
+                continue;
+            }
+
+            if (item.CommitStatus == GradingCommitStatus.ExecutionUnknown)
+            {
+                failures.Add(new(gradingItemId, "A execucao Moodle e desconhecida; reconcilie o item antes de tentar novamente."));
+                continue;
+            }
+
+            if (item.Status == GradingItemStatus.ReadyToCommit &&
+                item.CommitStatus == GradingCommitStatus.Pending)
+            {
+                alreadyQueuedItems++;
+                continue;
+            }
+
+            try
+            {
+                item.RequeueCommitForRetry();
+                requeuedItems++;
+            }
+            catch (InvalidOperationException ex)
+            {
+                failures.Add(new(gradingItemId, ex.Message));
+            }
+        }
+
+        if (requeuedItems > 0)
+        {
+            await repository.SaveChangesAsync(cancellationToken);
+        }
+
+        return new RequeueFailedGradingPublicationItemsResult(
+            request.BatchJobId,
+            requestedIds.Length,
+            requeuedItems,
+            alreadyQueuedItems,
+            failures.Count,
+            failures,
+            requeuedItems > 0 || alreadyQueuedItems > 0
+                ? "Gere uma nova previa com create_batch_grade_launch_preview e confirme somente apos revisar os avisos."
+                : "Nenhum item foi reaberto; verifique as falhas retornadas.");
+    }
+}
+
+public sealed class FindGradingCorrectionBySubmissionQueryHandler(
+    IGradingReviewRepository repository,
+    ICurrentUserContext currentUser)
+    : IRequestHandler<FindGradingCorrectionBySubmissionQuery, FindGradingCorrectionBySubmissionResult>
+{
+    public async Task<FindGradingCorrectionBySubmissionResult> Handle(
+        FindGradingCorrectionBySubmissionQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (request.SubmissionId <= 0)
+        {
+            throw new ArgumentException("O submissionId deve ser positivo.", nameof(request.SubmissionId));
+        }
+
+        var matches = await repository.FindSubmissionMatchesAsync(
+            request.SubmissionId,
+            request.CourseId,
+            request.AssignmentId,
+            request.MoodleConnectionId,
+            request.ConnectorClientId,
+            request.ConnectionAlias,
+            currentUser.Subject,
+            cancellationToken);
+        var references = matches
+            .Select(ToReference)
+            .DistinctBy(reference => reference.GradingItemId)
+            .ToArray();
+
+        return new FindGradingCorrectionBySubmissionResult(
+            request.SubmissionId,
+            references.Length > 0,
+            references,
+            references.Length > 0
+                ? "Correcao anterior encontrada; use o batchJobId ou gradingRunId retornado para consultar ou cancelar o lote."
+                : "Nenhuma correcao ativa do conector foi encontrada para esta submissao.");
+    }
+
+    internal static ExistingGradingCorrectionReference ToReference(GradingSubmissionMatch match) =>
+        new(
+            match.Identity.SubmissionId,
+            match.GradingItemId,
+            match.BatchJobId,
+            match.GradingRunId,
+            match.ItemStatus.ToString(),
+            match.CommitStatus.ToString(),
+            match.BatchStatus.ToString(),
+            match.RunStatus?.ToString());
 }
 
 public sealed record GetPendingGradingRunReportQuery(

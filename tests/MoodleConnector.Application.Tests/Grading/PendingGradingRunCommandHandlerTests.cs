@@ -37,6 +37,85 @@ public sealed class PendingGradingRunCommandHandlerTests
     }
 
     [Fact]
+    public async Task RequeueFailedPublication_PreservaDecisaoFinalEReabreSomenteFalhaComprovada()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho coerente.");
+        item.ApplyTeacherReview(8m, "Feedback final revisado.", "teacher-1", 321);
+        item.MarkCommitFailed("A capacidade de escrita estava indisponivel.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+
+        var sut = new RequeueFailedGradingPublicationItemsCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new RequeueFailedGradingPublicationItemsCommand(batch.Id, [item.Id]),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.RequeuedItems);
+        Assert.Equal(GradingItemStatus.ReadyToCommit, item.Status);
+        Assert.Equal(GradingCommitStatus.Pending, item.CommitStatus);
+        Assert.Equal(8m, item.FinalGrade);
+        Assert.Equal("Feedback final revisado.", item.FinalFeedback);
+    }
+
+    [Fact]
+    public async Task RequeueFailedPublication_NaoRepeteEscritaDeExecucaoDesconhecida()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho coerente.");
+        item.ApplyTeacherReview(8m, "Feedback final revisado.", "teacher-1", 321);
+        item.MarkCommitExecutionUnknown("Resposta perdida.");
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+
+        var sut = new RequeueFailedGradingPublicationItemsCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new RequeueFailedGradingPublicationItemsCommand(batch.Id, [item.Id]),
+            CancellationToken.None);
+
+        Assert.Equal(0, result.RequeuedItems);
+        Assert.Contains(result.Failures, failure => failure.Message.Contains("desconhecida", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(GradingCommitStatus.ExecutionUnknown, item.CommitStatus);
+    }
+
+    [Fact]
+    public async Task FindCorrectionBySubmission_RetornaHandlesSemExporOutroProprietario()
+    {
+        var repository = new RunRepository();
+        var ownedBatch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var ownedItem = AssistedGradingItem.Create(ownedBatch.Id, 10, 501, 9001, 101, 0);
+        var otherBatch = AssistedGradingBatch.Create(10, [501], "teacher-2", 322, totalItems: 1);
+        var otherItem = AssistedGradingItem.Create(otherBatch.Id, 10, 501, 9001, 101, 0);
+        await repository.AddBatchAsync(ownedBatch, CancellationToken.None);
+        await repository.AddBatchAsync(otherBatch, CancellationToken.None);
+        await repository.AddItemAsync(ownedItem, CancellationToken.None);
+        await repository.AddItemAsync(otherItem, CancellationToken.None);
+
+        var sut = new FindGradingCorrectionBySubmissionQueryHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new FindGradingCorrectionBySubmissionQuery(9001, 10, 501),
+            CancellationToken.None);
+
+        var match = Assert.Single(result.Matches);
+        Assert.True(result.Found);
+        Assert.Equal(ownedItem.Id, match.GradingItemId);
+        Assert.Equal(ownedBatch.Id, match.BatchJobId);
+    }
+
+    [Fact]
     public async Task StartRun_ContinuaNosDemaisCursosQuandoUmCursoFalha()
     {
         var mediator = new RunMediator();
@@ -1323,6 +1402,42 @@ public sealed class PendingGradingRunCommandHandlerTests
         public Task AddEvidenceAsync(GradingEvidence evidence, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<AssistedGradingItem?> GetItemAsync(Guid id, CancellationToken cancellationToken) =>
             Task.FromResult(_items.SingleOrDefault(item => item.Id == id));
+
+        public Task<IReadOnlyList<GradingSubmissionMatch>> FindSubmissionMatchesAsync(
+            long submissionId,
+            long? courseId,
+            long? assignmentId,
+            string? moodleConnectionId,
+            string? connectorClientId,
+            string? connectionAlias,
+            string? createdBySubject,
+            CancellationToken cancellationToken)
+        {
+            var batchById = _batches.ToDictionary(batch => batch.Id);
+            var matches = _items
+                .Where(item => item.SubmissionId == submissionId &&
+                               (!courseId.HasValue || item.CourseId == courseId) &&
+                               (!assignmentId.HasValue || item.AssignmentId == assignmentId) &&
+                               batchById.TryGetValue(item.BatchId, out var batch) &&
+                               batch.Status != GradingBatchStatus.Cancelled &&
+                               (string.IsNullOrWhiteSpace(createdBySubject) || batch.CreatedBySubject == createdBySubject))
+                .Select(item =>
+                {
+                    var batch = batchById[item.BatchId];
+                    return new GradingSubmissionMatch(
+                        new GradingSubmissionIdentity(item.CourseId, item.AssignmentId, item.SubmissionId!.Value, item.AttemptNumber),
+                        item.Id,
+                        batch.Id,
+                        batch.GradingRunId,
+                        batch.CreatedBySubject,
+                        item.Status,
+                        item.CommitStatus,
+                        batch.Status,
+                        null);
+                })
+                .ToArray();
+            return Task.FromResult<IReadOnlyList<GradingSubmissionMatch>>(matches);
+        }
 
         public Task<IReadOnlyList<AssistedGradingItem>> ListItemsByBatchAsync(
             Guid batchId,
