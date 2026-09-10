@@ -95,6 +95,16 @@ public static class AiGradingProposalFactory
                 return new AiGradingEvidenceReference(value.ArtifactId, value.Reference, value.QuoteHash, value.ResourceUri);
             })
             .ToArray();
+        var resourceUris = (input.ResourceUris ?? [])
+            .Where(uri => !string.IsNullOrWhiteSpace(uri))
+            .Select(uri =>
+            {
+                if (!MoodleResourceUri.TryParse(uri, out _))
+                    throw new InvalidOperationException("A proposta aponta para uma URI de resource invalida.");
+                return uri.Trim();
+            })
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         var confidence = AiGradingConfidenceCalculator.Calculate(
             input.ModelConfidence,
@@ -127,6 +137,7 @@ public static class AiGradingProposalFactory
             confidence,
             reviewRequired: true,
             status: string.IsNullOrWhiteSpace(input.Status) ? "ready_for_review" : input.Status!,
-            submissionContentHash: submissionContentHash);
+            submissionContentHash: submissionContentHash,
+            resourceUris: resourceUris);
     }
 }

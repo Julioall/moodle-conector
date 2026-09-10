@@ -6,6 +6,7 @@
 - Executar build e a suíte determinística de testes.
 - Executar, em modo somente leitura, a coorte de regressão FIEG e SENAI para atividade numérica e somente-feedback.
 - Confirmar que logs e auditoria não contêm token, cookie, URL com query string nem conteúdo binário.
+- O cancelamento local de uma execução não depende da leitura completa dos itens; o expurgo físico continua condicionado à verificação de publicações, escritas incertas, leases e claims ativos.
 
 ## Ordem de ativação
 
@@ -13,6 +14,7 @@
 2. Validar PDF, DOCX, XLSX, PPTX, PNG/JPG, múltiplos anexos, arquivo inválido e ZIP; `McpResourceZipEnabled` permanece `false` por padrão.
 3. Depois de uma leitura bem-sucedida de resources e revisão humana, ativar `McpGradingDraftEnabled` para a mesma coorte.
 4. Ativar `McpGradingWriteEnabled` somente depois de confirmar preview, hash, confirmação humana e readback no ambiente de teste.
+5. Manter `McpGradingSecurityWarningsOnly=true` no rollout operacional. Falhas auxiliares de capability, cobertura ou selagem de integridade ficam registradas como avisos e não interrompem uma correção já preparada; identidade do alvo, duplicidade, sobrescrita, escala, tentativa, autorização e falhas efetivas de escrita continuam impeditivas.
 
 O fluxo direto por MCP Resource é o único caminho de correção. `LegacySubmissionExtractionEnabled` deve permanecer `false`; a flag é mantida somente para compatibilidade de configuração.
 
@@ -40,8 +42,9 @@ O rollback é somente de configuração:
 
 1. Definir `McpGradingWriteEnabled=false` para interromper novos writes MCP.
 2. Definir `McpGradingDraftEnabled=false` para interromper novos drafts.
-3. Definir `McpResourceSubmissionDeliveryEnabled=false`; novas correções devem permanecer bloqueadas até a restauração do MCP Resource.
-4. Preservar auditoria, drafts e resources até a expiração/retencão; não apagar evidências durante investigação.
+3. Definir `McpGradingSecurityWarningsOnly=false` temporariamente caso seja necessário voltar ao diagnóstico estrito das validações técnicas.
+4. Definir `McpResourceSubmissionDeliveryEnabled=false`; novas correções devem permanecer bloqueadas até a restauração do MCP Resource.
+5. Preservar auditoria, drafts e resources até a expiração/retencão; não apagar evidências durante investigação.
 
 ## Critérios de expansão
 

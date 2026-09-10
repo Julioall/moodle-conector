@@ -88,6 +88,49 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreviewDoRun_ComAvisoTecnicoDeCoberturaMantemItensPreparados()
+    {
+        var fixture = new Fixture();
+        var run = GradingRun.Create("teacher-1");
+        run.SetExpectedCoverage(expectedItemCount: 2, expectedBatchCount: 2);
+        var batch = AssistedGradingBatch.Create(
+            10,
+            [501],
+            "teacher-1",
+            321,
+            totalItems: 1,
+            gradingRunId: run.Id);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        item.ApplyTeacherReview(8.5m, "Feedback final revisado.", "teacher-1", 321, "approved", "ok");
+        AttachVersionedContext(item, batch);
+        fixture.GradingRepository.Runs.Add(run);
+        fixture.GradingRepository.Batches.Add(batch);
+        fixture.GradingRepository.Items.Add(item);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpGradingSecurityWarningsOnly = true
+            }));
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(run.Id, [], OnlyReviewed: true),
+            CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result.PendingActionId);
+        Assert.Equal(1, result.ReadyItems);
+        Assert.Equal(1, result.PreparedItems);
+        Assert.Equal(1, result.MissingItems);
+        Assert.False(result.DecisionSafe);
+        Assert.Contains(result.Warnings, warning => warning.Contains("Aviso tecnico de cobertura", StringComparison.Ordinal));
+        Assert.Single(fixture.PendingActions.LastPayload!.Items);
+    }
+
+    [Fact]
     public async Task CreatePreview_BloqueiaFeedbackReutilizadoNaMesmaAtividade()
     {
         var fixture = new Fixture();
@@ -491,7 +534,11 @@ public sealed class GradingLaunchCommandHandlerTests
             fixture.PendingRepository, fixture.GradingRepository, fixture.Confirmations, fixture.Capabilities,
             fixture.ExistingGrades, fixture.SubmissionStatuses, fixture.EnrollmentGateway, fixture.AuditLogs,
             fixture.Mediator, resources, resolver,
-            Options.Create(new MoodleUniversalApiFeatureOptions { McpGradingWriteEnabled = true }));
+             Options.Create(new MoodleUniversalApiFeatureOptions
+             {
+                 McpGradingWriteEnabled = true,
+                 McpGradingSecurityWarningsOnly = true
+             }));
 
         var result = await sut.Handle(
             new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
@@ -1018,6 +1065,44 @@ public sealed class GradingLaunchCommandHandlerTests
         var auditLog = Assert.Single(fixture.AuditLogs.Logs, log => log.Status == "commit_blocked");
         Assert.Equal("moodle_function_unavailable", auditLog.ErrorCode);
         Assert.Equal("mod_assign_save_grade", auditLog.MoodleFunction);
+    }
+
+    [Fact]
+    public async Task ConfirmLaunch_ComAvisoTecnicoDeCapabilityContinuaQuandoAEscritaERealizada()
+    {
+        var fixture = new Fixture();
+        fixture.Capabilities.Functions.Clear();
+        fixture.Capabilities.Functions.Add("mod_assign_get_submissions");
+        var batch = fixture.CreateBatchWithReviewedItem();
+        var item = fixture.GradingRepository.Items.Single();
+        var pendingAction = fixture.CreatePendingLaunchAction(batch.Id, item.Id);
+        fixture.PendingRepository.Actions.Add(pendingAction);
+        var sut = new ConfirmMoodleBatchLaunchCommandHandler(
+            fixture.PendingRepository,
+            fixture.GradingRepository,
+            fixture.Confirmations,
+            fixture.Capabilities,
+            fixture.ExistingGrades,
+            fixture.SubmissionStatuses,
+            fixture.EnrollmentGateway,
+            fixture.AuditLogs,
+            fixture.Mediator,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpGradingSecurityWarningsOnly = true
+            }));
+
+        var result = await sut.Handle(
+            new ConfirmMoodleBatchLaunchCommand(pendingAction.Id, "CONFIRMAR LANCAMENTO 1 ITEM"),
+            CancellationToken.None);
+
+        Assert.Equal("confirmed", result.Status);
+        Assert.Equal(1, result.SentItems);
+        Assert.Equal(0, result.FailedItems);
+        Assert.Single(fixture.Mediator.SavedGrades);
+        Assert.Contains(result.Warnings!, warning => warning.Contains("moodle_function_unavailable", StringComparison.Ordinal));
+        Assert.Equal(GradingCommitStatus.Succeeded, item.CommitStatus);
+        Assert.Contains(fixture.AuditLogs.Logs, log => log.Status == "commit_succeeded");
     }
 
     [Fact]

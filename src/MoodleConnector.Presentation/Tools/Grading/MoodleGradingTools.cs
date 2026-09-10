@@ -212,6 +212,10 @@ public sealed class MoodleGradingTools(
         {
             return ToolResultHelper.Error<CancelAssistedGradingBatchResult>(ex.Message);
         }
+        catch (ArgumentException ex)
+        {
+            return ToolResultHelper.Error<CancelAssistedGradingBatchResult>(ex.Message);
+        }
         catch
         {
             return ToolResultHelper.Error<CancelAssistedGradingBatchResult>("Nao foi possivel cancelar a execucao local neste momento.");
@@ -724,7 +728,10 @@ public sealed class MoodleGradingTools(
                 ? "authorized"
                 : data.FailedItems == 0 ? "ok" : "partial_failure",
             data,
-            data.Failures.Select(failure => failure.Message).ToArray(),
+            data.Failures
+                .Select(failure => failure.Message)
+                .Concat(data.Warnings ?? [])
+                .ToArray(),
             data.AuditId,
             DateTimeOffset.UtcNow);
 
@@ -816,14 +823,32 @@ public sealed class MoodleGradingTools(
             .Select(message => message.Trim().TrimEnd('.'))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+        var warnings = (response.Warnings ?? [])
+            .Where(message => !string.IsNullOrWhiteSpace(message))
+            .Select(message => message.Trim().TrimEnd('.'))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
-        if (reasons.Length == 0)
+        if (reasons.Length == 0 && warnings.Length == 0)
         {
             return summary;
         }
 
-        var suffix = reasons.Length > 2 ? " Ha outros motivos no resultado estruturado." : string.Empty;
-        return $"{summary} Motivo(s): {string.Join("; ", reasons.Take(2))}.{suffix}";
+        var parts = new List<string>();
+        if (reasons.Length > 0)
+        {
+            parts.Add($"Motivo(s): {string.Join("; ", reasons.Take(2))}");
+        }
+
+        if (warnings.Length > 0)
+        {
+            parts.Add($"Aviso(s): {string.Join("; ", warnings.Take(2))}");
+        }
+
+        var suffix = reasons.Length > 2 || warnings.Length > 2
+            ? " Ha outros detalhes no resultado estruturado."
+            : string.Empty;
+        return $"{summary} {string.Join(". ", parts)}.{suffix}";
     }
 
 

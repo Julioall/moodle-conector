@@ -68,7 +68,8 @@ public sealed record ConfirmMoodleBatchLaunchResult(
     [property: JsonPropertyName("sentItems")] int SentItems,
     [property: JsonPropertyName("failedItems")] int FailedItems,
     [property: JsonPropertyName("failures")] IReadOnlyList<GradingLaunchFailure> Failures,
-    [property: JsonPropertyName("auditId")] string? AuditId);
+    [property: JsonPropertyName("auditId")] string? AuditId,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<string>? Warnings = null);
 
 public sealed record GradingLaunchFailure(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -120,7 +121,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
     IMoodleAssignmentSubmissionStatusGateway? submissionStatusGateway = null,
     IMoodleParticipantsGateway? participantsGateway = null,
     IMoodleAssignmentSubmissionsGateway? submissionsGateway = null,
-    IOptions<GradingLimitsOptions>? gradingLimits = null)
+    IOptions<GradingLimitsOptions>? gradingLimits = null,
+    IOptions<MoodleUniversalApiFeatureOptions>? resourceFeatures = null)
     : IRequestHandler<CreateGradingLaunchPreviewCommand, CreateGradingLaunchPreviewResult>
 {
     private const string ToolName = "criar_previa_lancamento_lote";
@@ -167,7 +169,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         var selected = selectedIds.Count == 0
             ? allItems.ToArray()
             : allItems.Where(item => selectedIds.Contains(item.Id)).ToArray();
-        if (scope.IsRun && selectedIds.Count == 0 && !coverage.DecisionSafe && !request.AllowPartial)
+        var securityWarningsOnly = resourceFeatures?.Value.McpGradingSecurityWarningsOnly == true;
+        if (scope.IsRun && selectedIds.Count == 0 && !coverage.DecisionSafe && !request.AllowPartial && !securityWarningsOnly)
         {
             return new CreateGradingLaunchPreviewResult(
                 Guid.Empty,
@@ -210,6 +213,11 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         {
             contextWarnings.Add(
                 $"Publicacao parcial explicitamente autorizada: esperados {coverage.ExpectedItems}, preparados {coverage.PreparedItems}, ausentes {coverage.MissingItems} em {coverage.MissingBatchCount} sublote(s).");
+        }
+        else if (scope.IsRun && !coverage.DecisionSafe && securityWarningsOnly)
+        {
+            contextWarnings.Add(
+                $"Aviso tecnico de cobertura: esperados {coverage.ExpectedItems}, preparados {coverage.PreparedItems}, ausentes {coverage.MissingItems} em {coverage.MissingBatchCount} sublote(s). A previa segue com os itens preparados; os ausentes permanecem pendentes.");
         }
         var ready = new List<GradingLaunchCandidate>();
         var settingsCache = new Dictionary<(long CourseId, long AssignmentId), AssignmentSettingsSummary?>();
@@ -304,6 +312,14 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 contextWarnings.Add(
                     $"Item {item.Id}: contexto versionado, mas o rascunho nao foi selado com todos os anexos originais da submissao. Gere um novo pacote e salve a proposta incluindo as resourceUris de tipo submission.");
                 continue;
+            }
+
+            if (securityWarningsOnly &&
+                item.SubmissionId is not null &&
+                string.IsNullOrWhiteSpace(item.SubmissionContentHash))
+            {
+                contextWarnings.Add(
+                    $"Item {item.Id}: aviso tecnico de seguranca — a integridade da submissao nao foi selada; a correcao segue para confirmacao porque o contexto e o alvo continuam vinculados ao item.");
             }
 
             if (candidate.Grade is not null)
@@ -931,6 +947,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         }
 
         var durableExecution = confirmation.Status == "authorized";
+        var securityWarningsOnly = resourceFeatures?.Value.McpGradingSecurityWarningsOnly == true;
+        var warnings = new List<string>();
         // Preserve the connection binding even though the public confirmation
         // request does not execute writes itself. This rejects a confirmation
         // sent through a different Moodle connection/alias than the preview.
@@ -1060,38 +1078,46 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             cancellationToken);
         if (capabilityFailure is not null)
         {
-            await MarkPendingItemsFailedAsync(
-                action,
-                payload.BatchJobId,
-                payload.Items,
-                capabilityFailure.Message,
-                "commit_blocked",
-                capabilityFailure.ErrorCode,
-                failures,
-                cancellationToken);
-
-            if (durableExecution)
+            if (!securityWarningsOnly)
             {
-                action.MarkFailed(capabilityFailure.Message);
-                await pendingActions.SaveChangesAsync(cancellationToken);
-                if (payload.PublicationId is Guid publicationId)
+                await MarkPendingItemsFailedAsync(
+                    action,
+                    payload.BatchJobId,
+                    payload.Items,
+                    capabilityFailure.Message,
+                    "commit_blocked",
+                    capabilityFailure.ErrorCode,
+                    failures,
+                    cancellationToken);
+
+                if (durableExecution)
                 {
-                    await repository.ReleasePublicationClaimsAsync(publicationId, cancellationToken);
+                    action.MarkFailed(capabilityFailure.Message);
+                    await pendingActions.SaveChangesAsync(cancellationToken);
+                    if (payload.PublicationId is Guid publicationId)
+                    {
+                        await repository.ReleasePublicationClaimsAsync(publicationId, cancellationToken);
+                    }
+                    if (gradingRun is not null)
+                    {
+                        gradingRun.MarkFailed();
+                        await repository.SaveChangesAsync(cancellationToken);
+                    }
                 }
-                if (gradingRun is not null)
-                {
-                    gradingRun.MarkFailed();
-                    await repository.SaveChangesAsync(cancellationToken);
-                }
+
+                return new ConfirmMoodleBatchLaunchResult(
+                    durableExecution ? "partial_failure" : confirmation.Status,
+                    request.PendingActionId,
+                    SentItems: 0,
+                    failures.Count,
+                    failures,
+                    confirmation.AuditId);
             }
 
-            return new ConfirmMoodleBatchLaunchResult(
-                durableExecution ? "partial_failure" : confirmation.Status,
-                request.PendingActionId,
-                SentItems: 0,
-                failures.Count,
-                failures,
-                confirmation.AuditId);
+            var capabilityWarning =
+                $"Aviso tecnico de seguranca: nao foi possivel confirmar previamente a capacidade de escrita ({capabilityFailure.ErrorCode}). " +
+                "A tentativa real de correcao continuara e somente uma falha efetiva sera registrada como falha.";
+            warnings.Add(capabilityWarning);
         }
 
         // Revalidate the whole publication's current grades in one bulk read
@@ -1320,18 +1346,34 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 cancellationToken);
             if (integrityFailure is not null)
             {
-                item.MarkCommitFailed(integrityFailure.Message);
-                failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, integrityFailure.Message));
+                if (!securityWarningsOnly || !IsAdvisorySecurityFailure(integrityFailure.ErrorCode))
+                {
+                    item.MarkCommitFailed(integrityFailure.Message);
+                    failures.Add(new GradingLaunchFailure(payloadItem.GradingItemId, integrityFailure.Message));
+                    await RecordCommitAuditAsync(
+                        action,
+                        payload.BatchJobId,
+                        payloadItem,
+                        "commit_blocked",
+                        responseSummary: new { item.CommitStatus, item.SubmissionContentHash },
+                        errorCode: integrityFailure.ErrorCode,
+                        errorMessage: integrityFailure.Message,
+                        cancellationToken);
+                    continue;
+                }
+
+                var integrityWarning =
+                    $"Item {payloadItem.GradingItemId}: aviso tecnico de seguranca — {integrityFailure.Message} A escrita foi mantida porque a falha ocorreu na validacao auxiliar, nao na identificacao do alvo.";
+                warnings.Add(integrityWarning);
                 await RecordCommitAuditAsync(
                     action,
                     payload.BatchJobId,
                     payloadItem,
-                    "commit_blocked",
+                    "commit_warning",
                     responseSummary: new { item.CommitStatus, item.SubmissionContentHash },
                     errorCode: integrityFailure.ErrorCode,
                     errorMessage: integrityFailure.Message,
                     cancellationToken);
-                continue;
             }
 
             if (payloadItem.Grade is not null || payloadItem.PreflightHash is not null)
@@ -1824,7 +1866,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             sent,
             failures.Count,
             failures,
-            confirmation.AuditId);
+            confirmation.AuditId,
+            warnings.Count == 0 ? [] : warnings.Distinct(StringComparer.Ordinal).ToArray());
     }
 
     private static async Task EnsurePreviewConnectionAsync(
@@ -1884,6 +1927,12 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
     private static bool HasSealedSubmissionForBlockedContext(AssistedGradingItem item) =>
         !string.Equals(item.ContextStatus, "blocked", StringComparison.OrdinalIgnoreCase) ||
         !string.IsNullOrWhiteSpace(item.SubmissionContentHash);
+
+    private static bool IsAdvisorySecurityFailure(string errorCode) =>
+        errorCode is "mcp_grading_write_disabled"
+            or "submission_integrity_validation_unavailable"
+            or "submission_integrity_hash_unavailable"
+            or "submission_integrity_validation_failed";
 
     private static string ComputePreflightHash(
         string connectionKey,
@@ -1986,12 +2035,20 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             {
                 resourcesById.TryGetValue(resourceId, out var resource);
                 if (resource is null || resource.IsExpired(DateTimeOffset.UtcNow) ||
-                    resource.SubmissionId != submissionId || string.IsNullOrWhiteSpace(resource.Sha256))
+                    resource.SubmissionId != submissionId)
                 {
                     return new CapabilityValidationFailure(
                         "Um resource usado na revisao expirou ou nao pode ser validado. Gere um novo draft antes de lancar.",
                         "submission_integrity_resource_unavailable");
                 }
+
+                if (string.IsNullOrWhiteSpace(resource.Sha256))
+                {
+                    return new CapabilityValidationFailure(
+                        "Um resource usado na revisao ainda nao possui hash validado. A selagem tecnica pode ser concluida em uma nova leitura.",
+                        "submission_integrity_hash_unavailable");
+                }
+
                 hashes.Add(resource.Sha256);
             }
 

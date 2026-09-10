@@ -21,4 +21,11 @@ public sealed class MoodleUniversalApiFeatureOptions
     public bool McpGradingDraftEnabled { get; init; }
 
     public bool McpGradingWriteEnabled { get; init; }
+
+    /// <summary>
+    /// Reclassifica falhas técnicas de validação como avisos auditáveis durante
+    /// a correção assistida. Salvaguardas de identidade, autorização,
+    /// duplicidade, sobrescrita, escala e tentativa continuam impeditivas.
+    /// </summary>
+    public bool McpGradingSecurityWarningsOnly { get; init; }
 }

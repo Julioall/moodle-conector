@@ -17,6 +17,7 @@ public sealed class FeatureOptions
     public bool McpResourceZipEnabled { get; init; }
     public bool McpGradingDraftEnabled { get; init; }
     public bool McpGradingWriteEnabled { get; init; }
+    public bool McpGradingSecurityWarningsOnly { get; init; }
     public bool AppV2Enabled { get; init; }
     /// <summary>Controls rollout of the professional agenda routes and MCP surface.</summary>
     public bool ProfessionalAgendaEnabled { get; init; }

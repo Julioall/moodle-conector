@@ -104,7 +104,8 @@ public sealed class AiGradingProposal
         IReadOnlyList<string> uncertaintyReasons,
         bool reviewRequired,
         string status,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        IReadOnlyList<string> resourceUris)
     {
         ItemId = itemId;
         BatchId = batchId;
@@ -115,6 +116,7 @@ public sealed class AiGradingProposal
         Feedback = feedback;
         Criteria = criteria;
         Evidence = evidence;
+        ResourceUris = resourceUris;
         Gaps = gaps;
         GradingScale = gradingScale;
         Extraction = extraction;
@@ -147,6 +149,13 @@ public sealed class AiGradingProposal
     public IReadOnlyList<AiGradingCriterionProposal> Criteria { get; }
 
     public IReadOnlyList<AiGradingEvidenceReference> Evidence { get; }
+
+    /// <summary>
+    /// URIs opacas de todos os anexos originais usados na correção. Elas são
+    /// mantidas no payload do draft mesmo quando a selagem de integridade
+    /// técnica não pôde ser concluída.
+    /// </summary>
+    public IReadOnlyList<string> ResourceUris { get; }
 
     public IReadOnlyList<string> Gaps { get; }
 
@@ -185,7 +194,8 @@ public sealed class AiGradingProposal
         bool reviewRequired,
         string status = "ready_for_review",
         DateTimeOffset? createdAt = null,
-        string? submissionContentHash = null)
+        string? submissionContentHash = null,
+        IReadOnlyList<string>? resourceUris = null)
     {
         ArgumentNullException.ThrowIfNull(extraction);
         ArgumentNullException.ThrowIfNull(coverage);
@@ -272,7 +282,8 @@ public sealed class AiGradingProposal
             normalizedReasons,
             reviewRequired || confidence.ReviewRequired,
             normalizedStatus,
-            createdAt ?? DateTimeOffset.UtcNow);
+            createdAt ?? DateTimeOffset.UtcNow,
+            CopyResourceUris(resourceUris));
     }
 
     public static AiGradingProposal FromLegacy(
@@ -321,7 +332,8 @@ public sealed class AiGradingProposal
             confidence.UncertaintyReasons,
             reviewRequired: true,
             status: "legacy_review_required",
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            []);
     }
 
     public static string ComputeHash(AiGradingProposal proposal)
@@ -346,6 +358,7 @@ public sealed class AiGradingProposal
                 proposal.Feedback,
                 proposal.Criteria,
                 proposal.Evidence,
+                proposal.ResourceUris,
                 proposal.Gaps,
                 proposal.GradingScale,
                 proposal.Extraction,
@@ -434,6 +447,13 @@ public sealed class AiGradingProposal
             })
             .ToArray());
 
+    private static IReadOnlyList<string> CopyResourceUris(IReadOnlyList<string>? values) =>
+        Array.AsReadOnly((values ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToArray());
+
     private static IReadOnlyList<Guid> CopyGuids(IReadOnlyList<Guid>? values) =>
         Array.AsReadOnly((values ?? []).Where(value => value != Guid.Empty).Distinct().ToArray());
 
@@ -481,6 +501,7 @@ public sealed class AiGradingProposal
         string? Feedback,
         IReadOnlyList<AiGradingCriterionProposal> Criteria,
         IReadOnlyList<AiGradingEvidenceReference> Evidence,
+        IReadOnlyList<string> ResourceUris,
         IReadOnlyList<string> Gaps,
         GradingScaleSnapshot? GradingScale,
         GradingExtractionSummary Extraction,

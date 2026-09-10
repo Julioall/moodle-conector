@@ -817,6 +817,54 @@ public sealed class AssistedGradingBatchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CancelBatch_SemExpurgoNaoDependeDaLeituraDosItens()
+    {
+        var repository = new FakeGradingReviewRepository { FailListItemsByBatch = true };
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        orchestrator.BatchLookup = id => repository.Batches.SingleOrDefault(candidate => candidate.Id == id);
+        var sut = new CancelAssistedGradingBatchCommandHandler(
+            orchestrator,
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new CancelAssistedGradingBatchCommand(batch.Id),
+            CancellationToken.None);
+
+        Assert.Equal("Cancelled", result.Status);
+        Assert.Equal(GradingBatchStatus.Cancelled, batch.Status);
+        Assert.Empty(result.Warnings ?? []);
+    }
+
+    [Fact]
+    public async Task CancelBatch_ComFalhaNaLeituraPreservaExpurgoMasCancelaExecucao()
+    {
+        var repository = new FakeGradingReviewRepository { FailListItemsByBatch = true };
+        var orchestrator = new FakeGradingBatchOrchestrator();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        orchestrator.BatchLookup = id => repository.Batches.SingleOrDefault(candidate => candidate.Id == id);
+        var sut = new CancelAssistedGradingBatchCommandHandler(
+            orchestrator,
+            repository,
+            new FakeCurrentUserContext("teacher-1"));
+
+        var result = await sut.Handle(
+            new CancelAssistedGradingBatchCommand(
+                batch.Id,
+                PurgeLocalData: true,
+                ConfirmationText: "CANCELAR_CORRECOES_LOCAIS"),
+            CancellationToken.None);
+
+        Assert.Equal("Cancelled", result.Status);
+        Assert.False(result.Purged);
+        Assert.Equal(GradingBatchStatus.Cancelled, batch.Status);
+        Assert.Contains(result.Warnings ?? [], warning => warning.Contains("leitura do resumo", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task CancelBatch_DeOutroCriadorSemEscopoAdmin_DeveFalhar()
     {
         var repository = new FakeGradingReviewRepository();
@@ -1328,6 +1376,8 @@ public sealed class AssistedGradingBatchCommandHandlerTests
         public List<GradingEvidence> Evidence { get; } = [];
         public List<GradingContextSnapshotDocument> Snapshots { get; } = [];
 
+        public bool FailListItemsByBatch { get; init; }
+
         public int SaveChangesCount { get; private set; }
 
         public Task AddBatchAsync(AssistedGradingBatch batch, CancellationToken cancellationToken)
@@ -1414,6 +1464,11 @@ public sealed class AssistedGradingBatchCommandHandlerTests
             int pageSize,
             CancellationToken cancellationToken)
         {
+            if (FailListItemsByBatch)
+            {
+                throw new InvalidOperationException("falha de leitura simulada");
+            }
+
             var items = Items
                 .Where(item => item.BatchId == batchId)
                 .Skip((page - 1) * pageSize)

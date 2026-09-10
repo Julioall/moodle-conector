@@ -515,12 +515,14 @@ public sealed class PendingGradingRunCommandHandlerTests
                 ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
             }
         ]);
+        var proposalStore = new CapturingProposalStore();
         var sut = new SaveAiGradingBatchCommandHandler(
             repository,
             new RunCurrentUserContext("teacher-1"),
             new RunMoodleUserResolver(),
             new RunAuditLogRepository(),
             new RunAssignmentSettingsGateway(maxGrade: 10m),
+            proposalStore,
             resourceRepository: resources,
             submissionContentHashResolver: new RunSubmissionContentHashResolver(new string('c', 64)),
             resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
@@ -553,6 +555,81 @@ public sealed class PendingGradingRunCommandHandlerTests
         Assert.Equal(1, result.SavedItems);
         Assert.Equal(new string('c', 64), item.SubmissionContentHash);
         Assert.Equal([submissionResourceId], item.GetSubmissionResourceIds());
+        Assert.Equal([$"moodle://resource/{submissionResourceId}"], Assert.Single(proposalStore.Proposals).ResourceUris);
+    }
+
+    [Fact]
+    public async Task SaveAiBatch_ComAvisoTecnicoMantemDraftEAsResourceUrisOriginais()
+    {
+        var repository = new RunRepository();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.MarkAwaitingAiAnalysis("Pre-validacao concluida.");
+        var context = GradingContext.Build(
+            item.Id, batch.Id, "10", "501", "9001", "101", "Enunciado", "Criterio", null,
+            10m, null, "Texto", [], null, null);
+        var snapshot = GradingContextSnapshotFactory.Create(item, context, new GradingContextOptions());
+        item.RecordContextSnapshot(snapshot);
+        await repository.AddBatchAsync(batch, CancellationToken.None);
+        await repository.AddItemAsync(item, CancellationToken.None);
+        repository.AddSnapshot(snapshot);
+
+        const string resourceId = "0123456789abcdef0123456789abcdef";
+        var resourceUri = $"moodle://resource/{resourceId}";
+        var resources = new RunMoodleResourceRepository([
+            new MoodleResource
+            {
+                ResourceId = resourceId,
+                ResourceType = "submission_attachment",
+                SubmissionId = 9001,
+                Sha256 = null,
+                ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
+            }
+        ]);
+        var proposalStore = new CapturingProposalStore();
+        var sut = new SaveAiGradingBatchCommandHandler(
+            repository,
+            new RunCurrentUserContext("teacher-1"),
+            new RunMoodleUserResolver(),
+            new RunAuditLogRepository(),
+            new RunAssignmentSettingsGateway(maxGrade: 10m),
+            proposalStore,
+            resourceRepository: resources,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpGradingDraftEnabled = true,
+                McpGradingSecurityWarningsOnly = true
+            }));
+
+        var result = await sut.Handle(
+            new SaveAiGradingBatchCommand(
+                batch.Id,
+                [new AiGradingItemInput(
+                    item.Id,
+                    null,
+                    null,
+                    "Feedback estruturado",
+                    new AiGradingProposalInput(
+                        1,
+                        item.ContextHash,
+                        8m,
+                        "Feedback estruturado",
+                        [],
+                        [new AiGradingEvidenceInput(Guid.NewGuid(), "Arquivo enviado", null, resourceUri)],
+                        [resourceUri],
+                        [],
+                        .9m,
+                        new GradingExtractionSummary("succeeded", 1, false, 5, 5, null),
+                        new GradingEvidenceCoverage(1, 1, 1, 1, 5, 5, false)))]),
+            CancellationToken.None);
+
+        Assert.Equal(1, result.SavedItems);
+        Assert.Equal(0, result.SkippedItems);
+        Assert.Contains(result.Warnings, warning => warning.Contains("nao possuem hash", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(GradingItemStatus.DraftReady, item.Status);
+        Assert.Null(item.SubmissionContentHash);
+        Assert.Equal([resourceUri], Assert.Single(proposalStore.Proposals).ResourceUris);
+        Assert.Contains("Avisos tecnicos nao bloqueantes", item.PrivateNotesToTeacher, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

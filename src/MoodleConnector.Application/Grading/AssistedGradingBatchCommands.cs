@@ -2294,21 +2294,52 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
                 $"Para remover dados locais informe exatamente {purgeConfirmation} em confirmationText.");
         }
 
-        var allItems = new List<AssistedGradingItem>();
-        foreach (var child in scope.Batches)
+        // Cancelamento é uma operação de controle local e não precisa
+        // carregar cada item, artefato ou resource para impedir novos workers.
+        // A leitura completa continua sendo feita somente quando o chamador
+        // pediu expurgo, pois nesse caso precisamos contar publicações e
+        // escritas de resultado desconhecido antes de remover qualquer dado.
+        var warnings = new List<string>();
+        var publishedItems = 0;
+        var executionUnknownItems = 0;
+        var cleanupSummaryAvailable = !purgeRequested;
+        if (purgeRequested)
         {
-            allItems.AddRange(await GradingItemProcessor.LoadAllBatchItemsAsync(
-                repository,
-                child.Id,
-                cancellationToken));
+            try
+            {
+                var allItems = new List<AssistedGradingItem>();
+                foreach (var child in scope.Batches)
+                {
+                    allItems.AddRange(await GradingItemProcessor.LoadAllBatchItemsAsync(
+                        repository,
+                        child.Id,
+                        cancellationToken));
+                }
+
+                publishedItems = allItems.Count(item =>
+                    item.Status == GradingItemStatus.Committed ||
+                    item.CommitStatus == GradingCommitStatus.Succeeded);
+                executionUnknownItems = allItems.Count(item =>
+                    item.CommitStatus == GradingCommitStatus.ExecutionUnknown);
+                cleanupSummaryAvailable = true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                // Falha técnica na leitura não deve deixar workers presos,
+                // mas torna o expurgo inseguro. O cancelamento prossegue e a
+                // limpeza fica disponível para uma nova tentativa.
+                warnings.Add(
+                    $"A leitura do resumo de segurança para o expurgo falhou ({exception.GetType().Name}); " +
+                    "a execução será cancelada, mas os dados locais serão preservados.");
+            }
         }
 
-        var publishedItems = allItems.Count(item =>
-            item.Status == GradingItemStatus.Committed ||
-            item.CommitStatus == GradingCommitStatus.Succeeded);
-        var executionUnknownItems = allItems.Count(item =>
-            item.CommitStatus == GradingCommitStatus.ExecutionUnknown);
         var purgeEligible = purgeRequested &&
+            cleanupSummaryAvailable &&
             scope.Run?.Status != GradingRunStatus.Completed &&
             publishedItems == 0 &&
             executionUnknownItems == 0;
@@ -2328,7 +2359,6 @@ public sealed class CancelAssistedGradingBatchCommandHandler(
             await repository.SaveChangesAsync(cancellationToken);
         }
 
-        var warnings = new List<string>();
         if (publishedItems > 0)
         {
             warnings.Add($"{publishedItems} item(ns) ja publicado(s) foram preservados.");
@@ -3362,6 +3392,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
         var failedCount = 0;
         var proposalsToPublish = new List<AiGradingProposal>();
         var updatedItems = new List<SaveAiGradingBatchItemResult>();
+        var securityWarningsOnly = resourceFeatures?.Value.McpGradingSecurityWarningsOnly == true;
         var snapshotsByItem = await repository.ListLatestContextSnapshotsByItemsAsync(
             request.Items.Select(input => input.GradingItemId).Where(id => id != Guid.Empty).Distinct().ToArray(),
             cancellationToken);
@@ -3599,6 +3630,7 @@ public sealed class SaveAiGradingBatchCommandHandler(
                 }
 
                 AiGradingProposal? proposal = null;
+                var itemSecurityWarnings = new List<string>();
                 if (input.Proposal is not null)
                 {
                     if (input.Proposal.Version <= 0)
@@ -3621,10 +3653,8 @@ public sealed class SaveAiGradingBatchCommandHandler(
                     string? submissionContentHash = null;
                     if (resourceFeatures?.Value.McpGradingDraftEnabled == true)
                     {
-                        if (resourceRepository is null || submissionContentHashResolver is null)
-                            throw new InvalidOperationException("A integridade de draft MCP nao esta configurada.");
-                        if (item.SubmissionId is not long submissionId || moodleUserId is null)
-                            throw new InvalidOperationException("A submissao Moodle nao esta identificada para selar o draft.");
+                        if (resourceRepository is null)
+                            throw new InvalidOperationException("A validacao dos resources do draft MCP nao esta configurada.");
 
                         var resourceUris = (input.Proposal.ResourceUris ?? [])
                             .Where(uri => !string.IsNullOrWhiteSpace(uri))
@@ -3654,23 +3684,78 @@ public sealed class SaveAiGradingBatchCommandHandler(
                             }
                             if (!string.Equals(resource.ResourceType, "submission_attachment", StringComparison.OrdinalIgnoreCase))
                                 throw new InvalidOperationException("proposal.resourceUris deve conter somente os anexos originais da submissao.");
-                            if (resource.IsExpired(DateTimeOffset.UtcNow) || string.IsNullOrWhiteSpace(resource.Sha256))
-                                throw new InvalidOperationException("Todos os resources da proposta devem ser lidos e validados antes de salvar o draft.");
                             resources[resource.ResourceId] = resource;
                         }
 
-                        var integrity = await submissionContentHashResolver.ResolveAsync(
-                            moodleUserId.Value.ToString(CultureInfo.InvariantCulture),
-                            item.AssignmentId.ToString(CultureInfo.InvariantCulture),
-                            item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
-                            submissionId,
-                            resources.Values.Select(resource => resource.Sha256!).ToArray(),
-                            cancellationToken);
-                        if (resources.Count != integrity.FileCount)
-                            throw new InvalidOperationException("O draft MCP deve vincular todos os anexos originais da submissao.");
+                        var unverifiedResources = resources.Values
+                            .Where(resource => string.IsNullOrWhiteSpace(resource.Sha256))
+                            .ToArray();
+                        if (unverifiedResources.Length > 0)
+                        {
+                            var message =
+                                $"Item {input.GradingItemId}: aviso tecnico de seguranca — {unverifiedResources.Length} resource(s) ainda nao possuem hash validado. " +
+                                "O rascunho foi salvo com as resourceUris originais; a selagem de integridade ficou pendente.";
+                            if (!securityWarningsOnly)
+                                throw new InvalidOperationException("Todos os resources da proposta devem ser lidos e validados antes de salvar o draft.");
 
-                        submissionContentHash = integrity.Hash;
-                        item.RecordSubmissionIntegrity(submissionContentHash, resources.Keys.ToArray());
+                            warnings.Add(message);
+                            itemSecurityWarnings.Add(message);
+                        }
+                        else if (item.SubmissionId is not long submissionId || moodleUserId is null)
+                        {
+                            var message =
+                                $"Item {input.GradingItemId}: aviso tecnico de seguranca — a submissao nao pode ser selada porque sua identidade Moodle nao foi resolvida. " +
+                                "O rascunho foi salvo para revisao.";
+                            if (!securityWarningsOnly)
+                                throw new InvalidOperationException("A submissao Moodle nao esta identificada para selar o draft.");
+
+                            warnings.Add(message);
+                            itemSecurityWarnings.Add(message);
+                        }
+                        else if (submissionContentHashResolver is null)
+                        {
+                            var message =
+                                $"Item {input.GradingItemId}: aviso tecnico de seguranca — o resolvedor de integridade nao esta disponivel. " +
+                                "O rascunho foi salvo para revisao.";
+                            if (!securityWarningsOnly)
+                                throw new InvalidOperationException("A integridade de draft MCP nao esta configurada.");
+
+                            warnings.Add(message);
+                            itemSecurityWarnings.Add(message);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                var integrity = await submissionContentHashResolver.ResolveAsync(
+                                    moodleUserId.Value.ToString(CultureInfo.InvariantCulture),
+                                    item.AssignmentId.ToString(CultureInfo.InvariantCulture),
+                                    item.MoodleUserId.ToString(CultureInfo.InvariantCulture),
+                                    submissionId,
+                                    resources.Values.Select(resource => resource.Sha256!).ToArray(),
+                                    cancellationToken);
+                                if (resources.Count != integrity.FileCount)
+                                    throw new InvalidOperationException("O draft MCP deve vincular todos os anexos originais da submissao.");
+
+                                submissionContentHash = integrity.Hash;
+                                item.RecordSubmissionIntegrity(submissionContentHash, resources.Keys.ToArray());
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                throw;
+                            }
+                            catch (Exception exception)
+                            {
+                                var message =
+                                    $"Item {input.GradingItemId}: aviso tecnico de seguranca — a selagem da submissao nao foi concluida ({exception.GetType().Name}). " +
+                                    "O rascunho foi salvo com as resourceUris originais para revisao.";
+                                if (!securityWarningsOnly)
+                                    throw;
+
+                                warnings.Add(message);
+                                itemSecurityWarnings.Add(message);
+                            }
+                        }
                     }
 
                             if (resourceRepository is not null)
@@ -3712,17 +3797,23 @@ public sealed class SaveAiGradingBatchCommandHandler(
                         input.Feedback));
                 }
 
-                item.SetDraft(
-                    suggestedGrade: proposal?.SuggestedGrade ?? input.Nota,
-                    confidence: proposal?.Confidence ?? LegacyAiProposalConfidence,
-                    draftFeedback: proposal?.Feedback ?? input.Feedback,
-                    privateNotesToTeacher: proposal is null && input.Nota is null
+                var privateNotes = proposal is null && input.Nota is null
                         ? "Proposta IA legada sem evidencias ou confianca calculada; escala numerica nao confirmada. Revise a escala no CSV antes de qualquer uso posterior."
                         : proposal is null
                             ? "Proposta IA legada sem evidencias ou confianca calculada. Revise o resultado no CSV antes de qualquer uso posterior."
                             : proposal.ReviewRequired
                                 ? $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao manual no CSV: {string.Join(", ", proposal.UncertaintyReasons)}."
-                                : $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao manual no CSV antes de qualquer uso posterior.",
+                                : $"Proposta IA versionada ({proposal.ProposalHash[..12]}) requer revisao manual no CSV antes de qualquer uso posterior.";
+                if (itemSecurityWarnings.Count > 0)
+                {
+                    privateNotes = $"{privateNotes} Avisos tecnicos nao bloqueantes: {string.Join(" ", itemSecurityWarnings)}";
+                }
+
+                item.SetDraft(
+                    suggestedGrade: proposal?.SuggestedGrade ?? input.Nota,
+                    confidence: proposal?.Confidence ?? LegacyAiProposalConfidence,
+                    draftFeedback: proposal?.Feedback ?? input.Feedback,
+                    privateNotesToTeacher: privateNotes,
                     maxGrade: maxGrade);
 
                 // Só persiste a proposta versionada depois que o item local
