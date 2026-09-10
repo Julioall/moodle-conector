@@ -30,17 +30,18 @@ public sealed class PendingMoodleActionRepository(ConnectorDbContext dbContext) 
             return [];
         }
 
-        // The JSON predicate is only a candidate filter. Verify the
-        // exact batchJobId below so a GUID that happens to occur in an item
-        // payload cannot be treated as a target batch.
-        var candidateId = batchJobId.ToString("D");
+        // PayloadJson is stored as PostgreSQL jsonb. Do not translate a
+        // string.Contains predicate against that column: depending on the
+        // Npgsql/provider version it can produce an invalid text operator and
+        // make local batch cancellation fail before the batch is cancelled.
+        // The result set is restricted to the two grading-publication tools
+        // and the exact batch id is verified below in memory.
         var candidates = await dbContext.PendingMoodleActions
             .Where(action =>
                 (action.ToolName == "criar_previa_lancamento_lote" ||
                  action.ToolName == "confirmar_lancamento_lote_moodle") &&
                 action.Status != PendingActionStatus.Executed &&
-                action.Status != PendingActionStatus.Cancelled &&
-                action.PayloadJson.Contains(candidateId))
+                action.Status != PendingActionStatus.Cancelled)
             .ToArrayAsync(cancellationToken);
 
         return candidates
