@@ -250,6 +250,37 @@ public sealed class GradingLaunchCommandHandlerTests
     }
 
     [Fact]
+    public async Task CreatePreview_ComAvisoTecnicoDeIntegridadeMantemItemPreparado()
+    {
+        var fixture = new Fixture();
+        var batch = AssistedGradingBatch.Create(10, [501], "teacher-1", 321, totalItems: 1);
+        var item = AssistedGradingItem.Create(batch.Id, 10, 501, 9001, 101, 0);
+        item.SetDraft(8m, 0.8m, "Rascunho.");
+        AttachBlockedVersionedContext(item, batch);
+        await fixture.GradingRepository.AddBatchAsync(batch, CancellationToken.None);
+        await fixture.GradingRepository.AddItemAsync(item, CancellationToken.None);
+        var sut = new CreateGradingLaunchPreviewCommandHandler(
+            fixture.GradingRepository,
+            fixture.PendingActions,
+            fixture.CurrentUser,
+            fixture.SettingsGateway,
+            resourceFeatures: Options.Create(new MoodleUniversalApiFeatureOptions
+            {
+                McpGradingSecurityWarningsOnly = true
+            }));
+
+        var result = await sut.Handle(
+            new CreateGradingLaunchPreviewCommand(batch.Id, [], OnlyReviewed: false),
+            CancellationToken.None);
+
+        Assert.NotEqual(Guid.Empty, result.PendingActionId);
+        Assert.Equal(1, result.ReadyItems);
+        Assert.Equal(0, result.BlockedItems);
+        Assert.Contains(result.Warnings, warning => warning.Contains("aviso tecnico de seguranca", StringComparison.OrdinalIgnoreCase));
+        Assert.Single(fixture.PendingActions.LastPayload!.Items);
+    }
+
+    [Fact]
     public async Task CreatePreview_AceitaContextoAtualBloqueadoQuandoRascunhoFoiSelado()
     {
         var fixture = new Fixture();

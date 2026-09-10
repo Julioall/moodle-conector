@@ -310,8 +310,9 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             if (!HasSealedSubmissionForBlockedContext(item))
             {
                 contextWarnings.Add(
-                    $"Item {item.Id}: contexto versionado, mas o rascunho nao foi selado com todos os anexos originais da submissao. Gere um novo pacote e salve a proposta incluindo as resourceUris de tipo submission.");
-                continue;
+                    $"Item {item.Id}: aviso tecnico de seguranca — o rascunho nao foi selado com todos os anexos originais da submissao; as resourceUris originais permanecem vinculadas ao item.");
+                if (!securityWarningsOnly)
+                    continue;
             }
 
             if (securityWarningsOnly &&
@@ -1290,7 +1291,8 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                 continue;
             }
 
-            if (!HasVersionedContextIdentity(item) || !HasSealedSubmissionForBlockedContext(item))
+            if (!HasVersionedContextIdentity(item) ||
+                (!HasSealedSubmissionForBlockedContext(item) && !securityWarningsOnly))
             {
                 var message = HasVersionedContextIdentity(item)
                     ? "O rascunho nao foi selado com os anexos originais da submissao. Gere um novo pacote e uma nova previa antes de lancar no Moodle."
@@ -1307,6 +1309,12 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
                     errorMessage: message,
                     cancellationToken);
                 continue;
+            }
+
+            if (!HasSealedSubmissionForBlockedContext(item))
+            {
+                warnings.Add(
+                    $"Item {payloadItem.GradingItemId}: aviso tecnico de seguranca — o rascunho nao foi selado com todos os anexos originais da submissao; a publicacao segue porque o contexto e o alvo continuam vinculados ao item.");
             }
 
             if (string.IsNullOrWhiteSpace(payloadItem.ContextHash) ||
