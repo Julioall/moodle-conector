@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json.Serialization;
 using MediatR;
 using MoodleConnector.Application.Abstractions;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Domain.Grading;
 
 namespace MoodleConnector.Application.Grading;
@@ -49,7 +50,8 @@ public sealed class GetGradingCorrectionsCsvQueryHandler(
                 "csv",
                 cancellationToken))
         {
-            throw new InvalidOperationException(
+            throw new MoodleApiException(
+                MoodleErrorContract.DestinationLocked,
                 "Esta execucao ja foi direcionada para publicacao no Moodle; gere um novo gradingRunId para exportar CSV.");
         }
         var items = new List<AssistedGradingItem>();

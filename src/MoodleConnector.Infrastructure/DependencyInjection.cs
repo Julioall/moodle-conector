@@ -141,6 +141,7 @@ public static class DependencyInjection
         services.AddScoped<IMcpConnectorClientResolver, DatabaseConnectorClientResolver>();
         services.AddScoped<IConnectorClientRegistrationService, DatabaseConnectorClientRegistrationService>();
         services.AddScoped<IMoodleConnectorCredentialsProvider, HttpContextMoodleConnectorCredentialsProvider>();
+        services.AddScoped<IMoodleConnectionCatalog, HttpContextMoodleConnectorCredentialsProvider>();
         services.AddScoped<IGradingTechnicalDiscoveryEnvironment, GradingTechnicalDiscoveryEnvironment>();
         services.AddScoped<IMoodleConnectionSelection, MoodleConnectionSelection>();
         services.AddScoped<IMoodleReportBuilderGateway, MoodleReportBuilderGateway>();

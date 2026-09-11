@@ -10,6 +10,7 @@ using ModelContextProtocol.Server;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Configuration;
 using MoodleConnector.Application.Grading;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Presentation.Tools;
 using MoodleConnector.Presentation.Configuration;
@@ -687,6 +688,10 @@ public sealed class MoodleGradingTools(
         {
             throw;
         }
+        catch (MoodleApiException ex)
+        {
+            return ToolResultHelper.Error<GradingCorrectionsCsvExportResult>(ex);
+        }
         catch (InvalidOperationException ex)
         {
             return ToolResultHelper.Error<GradingCorrectionsCsvExportResult>(ex.Message);
@@ -888,6 +893,10 @@ public sealed class MoodleGradingTools(
         {
             throw;
         }
+        catch (MoodleApiException ex)
+        {
+            return ToolResultHelper.Error<CreateGradingLaunchPreviewResult>(ex);
+        }
         catch
         {
             return ToolResultHelper.Error<CreateGradingLaunchPreviewResult>("Nao foi possivel criar a previa de lancamento neste momento.");
@@ -938,6 +947,10 @@ public sealed class MoodleGradingTools(
         catch (OperationCanceledException)
         {
             throw;
+        }
+        catch (MoodleApiException ex)
+        {
+            return ToolResultHelper.Error<ConfirmMoodleBatchLaunchResult>(ex);
         }
         catch (InvalidOperationException ex)
         {

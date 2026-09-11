@@ -43,3 +43,9 @@ public interface IMoodleConnectionSelection
 {
     string? Alias { get; set; }
 }
+
+/// <summary>Active connections owned by the authenticated connector client; no credentials.</summary>
+public interface IMoodleConnectionCatalog
+{
+    Task<IReadOnlyList<string>> GetActiveAliasesAsync(CancellationToken cancellationToken);
+}

@@ -1693,7 +1693,7 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
         GradingAccessControl.EnsureCanAccessBatch(batch, currentUser);
         var page = Math.Max(1, request.Page);
         var pageSize = Math.Clamp(request.PageSize, 1, 100);
-        var items = await repository.ListItemsByBatchAsync(batch.Id, page, pageSize + 1, cancellationToken);
+        var items = await repository.ListItemsByBatchAsync(batch.Id, page, pageSize, cancellationToken);
         var totalItems = await repository.CountItemsByBatchAsync(batch.Id, cancellationToken);
 
         var nextReady = items
@@ -1702,32 +1702,32 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             .Select(ToStatusItem)
             .ToArray();
 
-        var errorsByCategory = new Dictionary<string, int>();
-        foreach (var item in items.Where(item => item.Status == GradingItemStatus.Failed || item.Status == GradingItemStatus.Blocked))
-        {
-            var category = item.Status == GradingItemStatus.Blocked ? "blocked" : "failed";
-            errorsByCategory.TryGetValue(category, out var current);
-            errorsByCategory[category] = current + 1;
-        }
-
         var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(
             repository,
             batch.Id,
             cancellationToken);
-        var metrics = BuildMetrics(batch, allItems);
+        var counters = CountItemStates(allItems);
+        var errorsByCategory = BuildErrorCategories(allItems);
+        var metrics = BuildMetrics(
+            batch,
+            allItems,
+            processedOverride: counters.Processed,
+            readyOverride: counters.Ready,
+            blockedOverride: counters.Blocked,
+            failedOverride: counters.Failed);
 
         return new AssistedGradingBatchStatusResult(
             batch.Id,
             batch.Status.ToString(),
             batch.TotalItems,
-            batch.ProcessedItems,
-            batch.ReadyItems,
-            batch.BlockedItems,
-            batch.FailedItems,
+            counters.Processed,
+            counters.Ready,
+            counters.Blocked,
+            counters.Failed,
             page,
             pageSize,
-            HasMore: items.Count > pageSize || page * pageSize < totalItems,
-            items.Take(pageSize).Select(ToStatusItem).ToArray(),
+            HasMore: page * pageSize < totalItems,
+            items.Select(ToStatusItem).ToArray(),
             NextReadyItems: nextReady,
             ErrorsByCategory: errorsByCategory,
             ProcessingMetrics: metrics);
@@ -1751,16 +1751,24 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
     private static GradingBatchProcessingMetrics BuildMetrics(
         AssistedGradingBatch batch,
         IReadOnlyList<AssistedGradingItem> items,
-        bool? canLaunchOverride = null)
+        bool? canLaunchOverride = null,
+        int? processedOverride = null,
+        int? readyOverride = null,
+        int? blockedOverride = null,
+        int? failedOverride = null)
     {
         var total = batch.TotalItems > 0 ? batch.TotalItems : 1;
-        var progressPercent = (int)Math.Round((double)batch.ProcessedItems / total * 100);
-        var readyPercent = (int)Math.Round((double)batch.ReadyItems / total * 100);
-        var blockedPercent = (int)Math.Round((double)batch.BlockedItems / total * 100);
-        var failedPercent = (int)Math.Round((double)batch.FailedItems / total * 100);
+        var processedItems = processedOverride ?? batch.ProcessedItems;
+        var readyItems = readyOverride ?? batch.ReadyItems;
+        var blockedItems = blockedOverride ?? batch.BlockedItems;
+        var failedItems = failedOverride ?? batch.FailedItems;
+        var progressPercent = (int)Math.Round((double)processedItems / total * 100);
+        var readyPercent = (int)Math.Round((double)readyItems / total * 100);
+        var blockedPercent = (int)Math.Round((double)blockedItems / total * 100);
+        var failedPercent = (int)Math.Round((double)failedItems / total * 100);
         // ProcessedItems já é a união dos estados terminais; subtrair
         // bloqueados/falhos novamente produzia uma contagem pendente inflada.
-        var pendingItems = Math.Max(0, batch.TotalItems - batch.ProcessedItems);
+        var pendingItems = Math.Max(0, batch.TotalItems - processedItems);
         var canLaunch = (canLaunchOverride ?? items.Any(item =>
                 item.Status == GradingItemStatus.ReadyToCommit &&
                 item.CommitStatus == GradingCommitStatus.Pending &&
@@ -1774,6 +1782,48 @@ public sealed class GetAssistedGradingBatchStatusQueryHandler(
             failedPercent,
             pendingItems,
             canLaunch);
+    }
+
+    private static (int Processed, int Ready, int Blocked, int Failed) CountItemStates(
+        IEnumerable<AssistedGradingItem> items)
+    {
+        var materialized = items.ToArray();
+        return (
+            materialized.Count(item => item.Status is
+                GradingItemStatus.ReadyToCommit or
+                GradingItemStatus.Committed or
+                GradingItemStatus.Blocked or
+                GradingItemStatus.Failed),
+            materialized.Count(item => item.Status is
+                GradingItemStatus.DraftReady or
+                GradingItemStatus.ReadyToCommit or
+                GradingItemStatus.Committed),
+            materialized.Count(item => item.Status == GradingItemStatus.Blocked),
+            materialized.Count(item => item.Status == GradingItemStatus.Failed));
+    }
+
+    private static IReadOnlyDictionary<string, int> BuildErrorCategories(
+        IEnumerable<AssistedGradingItem> items)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            var category = item.Status switch
+            {
+                GradingItemStatus.Blocked => "blocked",
+                GradingItemStatus.Failed => "failed",
+                _ => null
+            };
+            if (category is null)
+            {
+                continue;
+            }
+
+            counts.TryGetValue(category, out var current);
+            counts[category] = current + 1;
+        }
+
+        return counts;
     }
 
     private async Task<AssistedGradingBatchStatusResult> BuildRunStatusAsync(

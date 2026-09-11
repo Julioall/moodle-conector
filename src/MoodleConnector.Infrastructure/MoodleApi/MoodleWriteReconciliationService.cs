@@ -21,7 +21,7 @@ internal sealed class MoodleWriteReconciliationService(
         CancellationToken cancellationToken)
     {
         var action = await pendingActions.GetByIdAsync(pendingActionId, cancellationToken)
-            ?? throw new InvalidOperationException("Ação pendente não encontrada.");
+            ?? throw new MoodleApiException(MoodleErrorContract.PendingActionNotFound, "Ação pendente não encontrada.");
 
         if (!string.Equals(action.CreatedBySubject, currentUser.Subject, StringComparison.Ordinal) &&
             !currentUser.HasPlatformPermission("tool.pending_actions.manage"))
@@ -45,13 +45,16 @@ internal sealed class MoodleWriteReconciliationService(
                     cancellationToken);
             }
 
-            throw new InvalidOperationException(
+            throw new MoodleApiException(
+                MoodleErrorContract.InvalidPendingAction,
                 $"A ação só pode ser reconciliada no estado ExecutionUnknown; estado atual: {action.Status}.");
         }
 
         if (action.Status != PendingActionStatus.ExecutionUnknown)
         {
-            throw new InvalidOperationException($"A ação só pode ser reconciliada no estado ExecutionUnknown; estado atual: {action.Status}.");
+            throw new MoodleApiException(
+                MoodleErrorContract.InvalidPendingAction,
+                $"A ação só pode ser reconciliada no estado ExecutionUnknown; estado atual: {action.Status}.");
         }
 
         using var payloadDocument = JsonDocument.Parse(action.PayloadJson);

@@ -17,7 +17,7 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
     IConnectorExecutionContext executionContext,
     IMoodleEndpointValidator endpointValidator,
     IOptions<MoodleApiOptions> moodleApiOptions,
-    ILogger<HttpContextMoodleConnectorCredentialsProvider> logger) : IMoodleConnectorCredentialsProvider
+    ILogger<HttpContextMoodleConnectorCredentialsProvider> logger) : IMoodleConnectorCredentialsProvider, IMoodleConnectionCatalog
 {
     internal HttpContextMoodleConnectorCredentialsProvider(
         IHttpContextAccessor httpContextAccessor,
@@ -40,6 +40,25 @@ internal sealed class HttpContextMoodleConnectorCredentialsProvider(
 
     private static readonly object ResolvedClientIdItemKey = new();
     private static readonly object CredentialsCacheItemKey = new();
+
+    public async Task<IReadOnlyList<string>> GetActiveAliasesAsync(CancellationToken cancellationToken)
+    {
+        var clientId = executionContext.ClientId ??
+            await ResolveClientIdAsync(httpContextAccessor.HttpContext?.User, cancellationToken);
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            throw LogFailure(MoodleErrorContract.ConnectionNotFound,
+                "Authenticated connector client context was not found.",
+                stage: MoodleIntegrationStage.ConnectionLookup);
+        }
+
+        return await dbContext.ConnectorClients.AsNoTracking()
+            .Where(connection => connection.ClientId == clientId && connection.IsActive)
+            .Select(connection => connection.MoodleAlias)
+            .Distinct()
+            .OrderBy(alias => alias)
+            .ToArrayAsync(cancellationToken);
+    }
 
     public async Task<MoodleConnectorCredentials> GetCurrentCredentialsAsync(CancellationToken cancellationToken)
     {

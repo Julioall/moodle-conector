@@ -169,6 +169,7 @@ var toolMetadataRegistry = new ToolMetadataRegistry(RegisteredMcpToolContainers.
 
 builder.Services.AddSingleton(toolMetadataRegistry);
 builder.Services.AddSingleton<ToolSurfaceInventory>();
+builder.Services.AddScoped<McpCapabilityDiscovery>();
 
 
 var mcpSecurityOptions = builder.Configuration
@@ -518,47 +519,31 @@ var mcpServerBuilder = builder.Services
                 }
             }
 
-            // A tool can be authorized by OAuth and still be unusable by the
-            // selected Moodle connection. Resolve the cached remote function
-            // profile once per tools/list request and fail closed only for
-            // tools that declare concrete Moodle capabilities.
+            // tools/list has no selected alias: consider all owned active
+            // connections. Unknown discovery must not erase read tools.
             var usingStubMoodle = string.Equals(
                 request.Services.GetService<IConfiguration>()?["MoodleApi:UseStubData"],
                 "true",
                 StringComparison.OrdinalIgnoreCase);
             if (HasLinkedMoodleConnection(httpContext?.User) && !usingStubMoodle)
             {
-                var functionCatalog = request.Services.GetService<IMoodleFunctionCatalog>();
-                MoodleFunctionProfile? profile = null;
-                if (functionCatalog is not null)
-                {
-                    try
-                    {
-                        profile = await functionCatalog.GetCurrentAsync(false, cancellationToken);
-                    }
-                    catch (Exception exception) when (exception is not OperationCanceledException)
-                    {
-                        request.Services.GetService<ILoggerFactory>()?
-                            .CreateLogger("MoodleConnector.McpToolExposure")
-                            .LogWarning(exception, "Não foi possível descobrir capabilities Moodle para tools/list; tools dependentes serão ocultadas.");
-                    }
-                }
-
-                var availableCapabilities = profile?.Functions
-                    .Where(function => function.IsAvailable)
-                    .Select(function => function.Name)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var snapshot = await request.Services.GetRequiredService<McpCapabilityDiscovery>()
+                    .DiscoverAsync(cancellationToken);
+                var exposureLogger = request.Services.GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("MoodleConnector.McpToolExposure");
                 for (var i = result.Tools.Count - 1; i >= 0; i--)
                 {
                     var tool = result.Tools[i];
                     if (tool is null || registry is null || !registry.TryGet(tool.Name ?? string.Empty, out var metadata) || metadata is null)
                         continue;
 
-                    var requiredCapabilities = metadata.RequiredMoodleCapabilities
-                        .Split([' ', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (requiredCapabilities.Length > 0 &&
-                        (availableCapabilities is null || !requiredCapabilities.All(availableCapabilities.Contains)))
+                    var hiddenReason = snapshot.GetHiddenReason(
+                        metadata.RequiredMoodleCapabilities,
+                        tool.Annotations?.ReadOnlyHint == true);
+                    if (hiddenReason is not null)
                     {
+                        exposureLogger.LogInformation("MCP tool hidden. Tool={Tool} Reason={Reason}",
+                            tool.Name, hiddenReason);
                         result.Tools.RemoveAt(i);
                     }
                 }

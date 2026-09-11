@@ -12,6 +12,23 @@ namespace MoodleConnector.Application.Tests.Infrastructure;
 public sealed class HttpContextMoodleConnectorCredentialsProviderTests
 {
     [Fact]
+    public async Task Active_alias_catalog_is_owned_active_and_does_not_require_default_or_decryption()
+    {
+        await using var db = CreateDb();
+        db.ConnectorClients.AddRange(
+            Connection(alias: "first", id: "first", isDefault: false),
+            Connection(alias: "second", id: "second", isDefault: false),
+            Connection(alias: "disabled", id: "disabled", active: false),
+            Connection(alias: "other", id: "other", clientId: "other-client"));
+        await db.SaveChangesAsync();
+
+        var aliases = await CreateSut(db, null, protector: new ThrowingProtector())
+            .GetActiveAliasesAsync(CancellationToken.None);
+
+        Assert.Equal(new[] { "first", "second" }, aliases);
+    }
+
+    [Fact]
     public async Task GetCurrentCredentialsAsync_ResolveAliasLegadoComAcento()
     {
         await using var db = CreateDb();

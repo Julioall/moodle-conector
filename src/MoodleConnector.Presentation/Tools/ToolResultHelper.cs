@@ -16,7 +16,8 @@ internal static class ToolResultHelper
         string? errorCode = null,
         string? auditId = null)
     {
-        var normalizedCode = MoodleErrorContract.NormalizeCode(errorCode ?? MoodleErrorContract.Unexpected);
+        var normalizedCode = MoodleErrorContract.NormalizeCode(
+            errorCode ?? MoodleErrorContract.InferCodeFromMessage(message));
         var correlationId = string.IsNullOrWhiteSpace(auditId)
             ? Guid.NewGuid().ToString("N")
             : auditId;

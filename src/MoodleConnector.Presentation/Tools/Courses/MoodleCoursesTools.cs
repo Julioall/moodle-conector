@@ -224,13 +224,12 @@ public sealed class MoodleCoursesTools(
                 : await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
             if (snapshot is not null)
             {
-                courses = snapshot.Data
+                var snapshotMatches = snapshot.Data
                     .Where(course => MatchesCourse(course, query))
                     .Take(10)
                     .ToArray();
-                if (snapshot.IsStale && scope is not null)
-                {
-                    _ = await snapshotContext!.QueueAsync(
+                var refreshQueued = snapshot.IsStale && scope is not null &&
+                    await snapshotContext!.QueueAsync(
                         scope,
                         moodleUserId.Value.ToString(),
                         MoodleSnapshotDatasets.Courses,
@@ -238,6 +237,24 @@ public sealed class MoodleCoursesTools(
                         priority: 20,
                         force: true,
                         cancellationToken: cancellationToken);
+
+                // A course snapshot is an optimization, not an authoritative
+                // negative answer. It can be empty, incomplete, or not yet
+                // contain a course that was recently created or enrolled.
+                // Fall back to Moodle so search does not silently report no
+                // results for an accessible course.
+                if (snapshotMatches.Length == 0 || snapshot.IsStale || !snapshot.IsComplete)
+                {
+                    var liveCourses = await mediator.Send(
+                        new SearchCoursesQuery(moodleUserId.Value.ToString(), query, 10),
+                        cancellationToken);
+                    courses = liveCourses.Count > 0
+                        ? liveCourses.Take(10).ToArray()
+                        : snapshotMatches;
+                }
+                else
+                {
+                    courses = snapshotMatches;
                 }
             }
             else
@@ -425,7 +442,7 @@ public sealed class MoodleCoursesTools(
                 : await snapshotContext!.GetCoursesAsync(scope, cancellationToken);
             if (snapshot is not null)
             {
-                courses = snapshot.Data
+                var snapshotMatches = snapshot.Data
                     .Where(course => MatchesCourse(course, query))
                     .Take(Math.Max(1, limit))
                     .ToArray();
@@ -438,14 +455,34 @@ public sealed class MoodleCoursesTools(
                         priority: 20,
                         force: true,
                         cancellationToken: cancellationToken);
-                freshness = new ToolFreshness(
-                    "snapshot",
-                    snapshot.UpdatedAt,
-                    Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
-                    snapshot.IsStale,
-                    refreshQueued,
-                    snapshot.IsComplete,
-                    snapshot.RecordCount > 0 ? snapshot.RecordCount : snapshot.Data.Count);
+                if (snapshotMatches.Length == 0 || snapshot.IsStale || !snapshot.IsComplete)
+                {
+                    var liveCourses = await mediator.Send(
+                        new SearchCoursesQuery(moodleUserId.Value.ToString(), query, Math.Max(1, limit)),
+                        cancellationToken);
+                    if (liveCourses.Count > 0)
+                    {
+                        courses = liveCourses.Take(Math.Max(1, limit)).ToArray();
+                        freshness = new ToolFreshness(
+                            "live",
+                            null,
+                            null,
+                            false,
+                            refreshQueued,
+                            true,
+                            courses.Count);
+                    }
+                    else
+                    {
+                        courses = snapshotMatches;
+                        freshness = BuildCourseSnapshotFreshness(snapshot, refreshQueued);
+                    }
+                }
+                else
+                {
+                    courses = snapshotMatches;
+                    freshness = BuildCourseSnapshotFreshness(snapshot, refreshQueued);
+                }
             }
             else
             {
@@ -498,6 +535,18 @@ public sealed class MoodleCoursesTools(
             IsError = false
         };
     }
+
+    private static ToolFreshness BuildCourseSnapshotFreshness(
+        MoodleSnapshotEnvelope<IReadOnlyList<CourseSummary>> snapshot,
+        bool refreshQueued) =>
+        new(
+            "snapshot",
+            snapshot.UpdatedAt,
+            Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.UpdatedAt).TotalSeconds),
+            snapshot.IsStale,
+            refreshQueued,
+            snapshot.IsComplete,
+            snapshot.RecordCount > 0 ? snapshot.RecordCount : snapshot.Data.Count);
 
     private async Task<CallToolResult> GetCourseCoreAsync(
         string courseId,

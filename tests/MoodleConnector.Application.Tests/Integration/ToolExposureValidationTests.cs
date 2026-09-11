@@ -5,10 +5,13 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using ModelContextProtocol.Server;
 using MoodleConnector.Application.Configuration;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Presentation.Configuration;
 using MoodleConnector.Presentation.Security;
 using Xunit;
@@ -344,15 +347,64 @@ public class ToolExposureValidationTests : IClassFixture<McpTestWebApplicationFa
         Assert.DoesNotContain("unexpected_connector_error", body, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<IReadOnlyList<string>> GetToolsListAsync(WebApplicationFactory<Program> factory, string exposureProfile)
+    [Theory]
+    [InlineData("failed", true, false)]
+    [InlineData("empty", false, false)]
+    [InlineData("available", true, true)]
+    public async Task Live_discovery_distinguishes_unknown_from_verified_capabilities(
+        string discovery, bool exposesContents, bool exposesForumWrite)
+    {
+        var catalog = new ExposureFunctionCatalog(discovery);
+        var tools = await GetToolsListAsync(_factory, "Production", catalog);
+
+        Assert.True(catalog.Calls > 0, "The live capability filter must run, not the stub bypass.");
+        Assert.Equal(exposesContents, tools.Contains("list_course_contents"));
+        Assert.Equal(exposesForumWrite, tools.Contains("confirm_forum_post"));
+        Assert.Contains("search", tools);
+        Assert.DoesNotContain("moodle_diagnose_connection", tools);
+        Assert.DoesNotContain("moodle_download_file", tools); // Its flag is still disabled.
+        if (discovery == "failed")
+        {
+            Assert.Contains("get_course", tools);
+            Assert.Contains("list_assignment_submissions", tools);
+            Assert.Contains("list_course_participants", tools);
+            Assert.Contains("get_student_gradebook", tools);
+        }
+    }
+
+    private sealed class ExposureFunctionCatalog(string discovery) : IMoodleFunctionCatalog
+    {
+        public int Calls { get; private set; }
+
+        public Task<MoodleFunctionProfile> GetCurrentAsync(bool forceRefresh, CancellationToken cancellationToken)
+        {
+            Calls++;
+            if (discovery == "failed")
+                throw new MoodleApiException(MoodleErrorContract.NetworkError, "Discovery unavailable.");
+            string[] names = discovery == "available"
+                ? ["core_course_get_contents", "mod_forum_add_discussion"] : [];
+            return Task.FromResult(new MoodleFunctionProfile("connection", "default", null, null, null,
+                names.Select(name => new MoodleFunctionDescriptor(name, MoodleFunctionRisk.Read, true)).ToArray(),
+                DateTimeOffset.UtcNow));
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> GetToolsListAsync(WebApplicationFactory<Program> factory, string exposureProfile,
+        IMoodleFunctionCatalog? functionCatalog = null)
     {
         var customFactory = factory.WithWebHostBuilder(builder =>
         {
+            if (functionCatalog is not null)
+            {
+                builder.ConfigureTestServices(services =>
+                    services.Replace(ServiceDescriptor.Singleton<IMoodleFunctionCatalog>(functionCatalog)));
+            }
             builder.ConfigureAppConfiguration((_, configurationBuilder) =>
             {
                 configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["MCP_EXPOSURE_PROFILE"] = exposureProfile,
+                    ["MoodleApi:UseStubData"] = functionCatalog is null ? "true" : "false",
                     ["McpServerSecurity:RequireApiKey"] = "true",
                     ["McpServerSecurity:RequireJwt"] = "false",
                     // Explicitly opt into the complete write surface for this

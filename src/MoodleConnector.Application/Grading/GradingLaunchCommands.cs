@@ -38,7 +38,8 @@ public sealed record CreateGradingLaunchPreviewResult(
     [property: JsonPropertyName("preparedItems")] int PreparedItems = 0,
     [property: JsonPropertyName("missingItems")] int MissingItems = 0,
     [property: JsonPropertyName("missingBatchCount")] int MissingBatchCount = 0,
-    [property: JsonPropertyName("decisionSafe")] bool DecisionSafe = true);
+    [property: JsonPropertyName("decisionSafe")] bool DecisionSafe = true,
+    [property: JsonPropertyName("blockedReasons")] IReadOnlyDictionary<string, int>? BlockedReasons = null);
 
 public sealed record GradingLaunchPreviewItem(
     [property: JsonPropertyName("gradingItemId")] Guid GradingItemId,
@@ -163,7 +164,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         var destinationRun = scope.DestinationRun;
         if (destinationRun is not null && string.Equals(destinationRun.Destination, "csv", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException(
+            throw new MoodleApiException(
+                MoodleErrorContract.DestinationLocked,
                 "Esta execucao ja foi direcionada para CSV; gere um novo gradingRunId para publicar no Moodle.");
         }
         var connectionKeys = scope.Batches
@@ -189,9 +191,32 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         var selected = selectedIds.Count == 0
             ? allItems.ToArray()
             : allItems.Where(item => selectedIds.Contains(item.Id)).ToArray();
+        var blockedReasonByItem = new Dictionary<Guid, string>();
+        var blockedReasonCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        void MarkBlocked(Guid itemId, string reason)
+        {
+            if (blockedReasonByItem.ContainsKey(itemId))
+            {
+                return;
+            }
+
+            blockedReasonByItem[itemId] = reason;
+            blockedReasonCounts.TryGetValue(reason, out var current);
+            blockedReasonCounts[reason] = current + 1;
+        }
+
+        foreach (var item in selected)
+        {
+            if (ToLaunchCandidate(item, request.OnlyReviewed) is null)
+            {
+                MarkBlocked(item.Id, ClassifyLaunchBlockReason(item, request.OnlyReviewed));
+            }
+        }
         var securityWarningsOnly = resourceFeatures?.Value.McpGradingSecurityWarningsOnly == true;
         if (scope.IsRun && selectedIds.Count == 0 && !coverage.DecisionSafe && !request.AllowPartial && !securityWarningsOnly)
         {
+            blockedReasonCounts.Clear();
+            blockedReasonCounts["coverage_incomplete"] = selected.Length;
             return new CreateGradingLaunchPreviewResult(
                 Guid.Empty,
                 request.BatchJobId,
@@ -210,7 +235,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 PreparedItems: coverage.PreparedItems,
                 MissingItems: coverage.MissingItems,
                 MissingBatchCount: coverage.MissingBatchCount,
-                DecisionSafe: coverage.DecisionSafe);
+                DecisionSafe: coverage.DecisionSafe,
+                BlockedReasons: blockedReasonCounts);
         }
         var launchable = selected
             .Select(item => ToLaunchCandidate(item, request.OnlyReviewed))
@@ -322,6 +348,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
 
             if (!HasVersionedContextIdentity(item))
             {
+                MarkBlocked(item.Id, "missing_context_snapshot");
                 contextWarnings.Add(
                     $"Item {item.Id}: contexto de correcao ausente ou legado; gere uma nova previa antes do lancamento.");
                 continue;
@@ -332,7 +359,10 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 contextWarnings.Add(
                     $"Item {item.Id}: aviso tecnico de seguranca — o rascunho nao foi selado com todos os anexos originais da submissao; as resourceUris originais permanecem vinculadas ao item.");
                 if (!securityWarningsOnly)
+                {
+                    MarkBlocked(item.Id, "missing_submission_integrity");
                     continue;
+                }
             }
 
             if (securityWarningsOnly &&
@@ -367,6 +397,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             {
                 if (maxGrade is null)
                 {
+                    MarkBlocked(item.Id, "missing_grade_scale");
                     scaleWarnings.Add(
                         $"Item {item.Id}: nota maxima da atividade nao foi confirmada; lancamento numerico bloqueado.");
                     continue;
@@ -374,6 +405,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
 
                 if (candidate.Grade > maxGrade)
                 {
+                    MarkBlocked(item.Id, "grade_exceeds_max");
                     scaleWarnings.Add(
                         $"Item {item.Id}: nota {FormatGrade(candidate.Grade!.Value)} excede nota maxima {FormatGrade(maxGrade.Value)} identificada pelos criterios.");
                     continue;
@@ -384,6 +416,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             {
                 if (gradeReadFailuresByAssignment.TryGetValue(item.AssignmentId, out var gradeReadFailure))
                 {
+                    MarkBlocked(item.Id, "grade_read_failed");
                     contextWarnings.Add($"Item {item.Id}: nao foi possivel consultar a nota/feedback atual no Moodle ({gradeReadFailure}); a publicacao foi bloqueada.");
                     continue;
                 }
@@ -392,6 +425,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
 
                 if (existingGrade?.HasGrade == true && !request.AllowOverwriteExisting)
                 {
+                    MarkBlocked(item.Id, "existing_grade");
                     contextWarnings.Add($"Item {item.Id}: ja existe nota no Moodle; a publicacao foi bloqueada nesta previa.");
                     continue;
                 }
@@ -399,6 +433,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 if (!string.IsNullOrWhiteSpace(existingGrade?.Feedback) && !request.AllowOverwriteExisting &&
                     !string.IsNullOrWhiteSpace(candidate.FeedbackText))
                 {
+                    MarkBlocked(item.Id, "existing_feedback");
                     contextWarnings.Add($"Item {item.Id}: ja existe feedback no Moodle; a publicacao foi bloqueada nesta previa.");
                     continue;
                 }
@@ -420,6 +455,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 AssignmentSubmissionAttemptStatus? currentStatus;
                 if (bulkSubmissionStatuses.FailedAssignments.Contains(item.AssignmentId.ToString(CultureInfo.InvariantCulture)))
                 {
+                    MarkBlocked(item.Id, "submission_status_unavailable");
                     contextWarnings.Add($"Item {item.Id}: nao foi possivel validar a tentativa atual no Moodle (falha na consulta em lote); a publicacao foi bloqueada.");
                     continue;
                 }
@@ -427,6 +463,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 {
                     if (submissionStatusGateway is null || launchable.Length > GradingBulkSubmissionStatusReader.PerItemFallbackLimit)
                     {
+                        MarkBlocked(item.Id, "submission_not_found");
                         contextWarnings.Add($"Item {item.Id}: a submissao atual nao foi encontrada na consulta em lote do Moodle; a publicacao foi bloqueada.");
                         continue;
                     }
@@ -444,6 +481,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     }
                     catch (Exception exception) when (exception is not OperationCanceledException)
                     {
+                        MarkBlocked(item.Id, "submission_status_unavailable");
                         contextWarnings.Add($"Item {item.Id}: nao foi possivel validar a tentativa atual no Moodle ({exception.GetType().Name}); a publicacao foi bloqueada.");
                         continue;
                     }
@@ -452,6 +490,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 if (currentStatus?.AttemptNumber is not null &&
                     currentStatus.AttemptNumber != item.AttemptNumber)
                 {
+                    MarkBlocked(item.Id, "attempt_changed");
                     contextWarnings.Add($"Item {item.Id}: a tentativa da submissao mudou no Moodle; gere uma nova previa antes do lancamento.");
                     continue;
                 }
@@ -459,6 +498,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 if (!string.IsNullOrWhiteSpace(currentStatus?.SubmissionStatus) &&
                     !string.Equals(currentStatus.SubmissionStatus, "submitted", StringComparison.OrdinalIgnoreCase))
                 {
+                    MarkBlocked(item.Id, "submission_not_submitted");
                     contextWarnings.Add($"Item {item.Id}: a submissao atual nao esta entregue no Moodle; a publicacao foi bloqueada.");
                     continue;
                 }
@@ -468,6 +508,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     !string.IsNullOrWhiteSpace(candidate.FeedbackText) &&
                     gradeReadGateway is null)
                 {
+                    MarkBlocked(item.Id, "existing_feedback");
                     contextWarnings.Add($"Item {item.Id}: ja existe feedback no Moodle; a publicacao foi bloqueada nesta previa.");
                     continue;
                 }
@@ -488,6 +529,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
 
                 if (enrollment.Error is not null)
                 {
+                    MarkBlocked(item.Id, "enrollment_check_failed");
                     contextWarnings.Add($"Item {item.Id}: nao foi possivel validar a matricula atual no Moodle ({enrollment.Error}); a publicacao foi bloqueada.");
                     continue;
                 }
@@ -495,6 +537,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 if (enrollment.StudentIds?.Contains(
                         item.MoodleUserId.ToString(CultureInfo.InvariantCulture)) != true)
                 {
+                    MarkBlocked(item.Id, "student_not_enrolled");
                     contextWarnings.Add($"Item {item.Id}: o estudante nao esta matriculado no curso atual do Moodle; a publicacao foi bloqueada.");
                     continue;
                 }
@@ -534,7 +577,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 PreparedItems: coverage.PreparedItems,
                 MissingItems: coverage.MissingItems,
                 MissingBatchCount: coverage.MissingBatchCount,
-                DecisionSafe: coverage.DecisionSafe);
+                DecisionSafe: coverage.DecisionSafe,
+                BlockedReasons: blockedReasonCounts);
         }
 
         var publicationId = Guid.NewGuid();
@@ -551,6 +595,10 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             .ToHashSet();
         if (duplicateTargetItemIds.Count > 0)
         {
+            foreach (var itemId in duplicateTargetItemIds)
+            {
+                MarkBlocked(itemId, "duplicate_target");
+            }
             contextWarnings.Add($"{duplicateTargetItemIds.Count} item(ns) duplicado(s) para a mesma atividade/aluno/tentativa foram bloqueado(s) nesta previa.");
             ready = ready.Where(candidate => !duplicateTargetItemIds.Contains(candidate.Item.Id)).ToList();
         }
@@ -569,6 +617,10 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             .ToHashSet();
         if (repeatedFeedbackItemIds.Count > 0)
         {
+            foreach (var itemId in repeatedFeedbackItemIds)
+            {
+                MarkBlocked(itemId, "reused_feedback");
+            }
             var repeatedGroups = ready
                 .Where(candidate => repeatedFeedbackItemIds.Contains(candidate.Item.Id))
                 .GroupBy(candidate => candidate.Item.AssignmentId)
@@ -596,6 +648,10 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             .ToHashSet();
         if (busyItemIds.Count > 0)
         {
+            foreach (var itemId in busyItemIds)
+            {
+                MarkBlocked(itemId, "active_publication_exists");
+            }
             contextWarnings.Add($"{busyItemIds.Count} item(ns) ja possuem outra publicacao ativa para a mesma entrega/tentativa; foram bloqueado(s) nesta previa.");
             ready = ready.Where(candidate => !busyItemIds.Contains(candidate.Item.Id)).ToList();
         }
@@ -609,20 +665,22 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                 request.BatchJobId,
                 selected.Length,
                 ReadyItems: 0,
-                BlockedItems: selected.Length,
+                BlockedItems: blocked,
                 Launches: [],
                 ConfirmationText: string.Empty,
                 ExpiresAt: null,
                 Warnings: BuildWarnings(
-                    selected.Length,
+                    blocked,
                     scaleWarnings,
                     contextWarnings,
-                    selected),
+                    selected,
+                    blockedReasonCounts),
                 ExpectedItems: coverage.ExpectedItems,
                 PreparedItems: coverage.PreparedItems,
                 MissingItems: coverage.MissingItems,
                 MissingBatchCount: coverage.MissingBatchCount,
-                DecisionSafe: coverage.DecisionSafe);
+                DecisionSafe: coverage.DecisionSafe,
+                BlockedReasons: blockedReasonCounts);
         }
 
         if (destinationRun is not null)
@@ -635,7 +693,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
                     cancellationToken))
             {
                 await repository.ReleasePublicationClaimsAsync(publicationId, CancellationToken.None);
-                throw new InvalidOperationException(
+                throw new MoodleApiException(
+                    MoodleErrorContract.DestinationLocked,
                     "Esta execucao foi direcionada para CSV por outra solicitacao; gere um novo gradingRunId para publicar no Moodle.");
             }
         }
@@ -685,7 +744,7 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             throw;
         }
 
-        var warnings = BuildWarnings(blocked, scaleWarnings, contextWarnings, selected).ToList();
+        var warnings = BuildWarnings(blocked, scaleWarnings, contextWarnings, selected, blockedReasonCounts).ToList();
         if (request.AllowOverwriteExisting)
         {
             warnings.Add("Esta previa autoriza sobrescrever notas ou feedbacks que ja existam no Moodle.");
@@ -705,7 +764,8 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
             PreparedItems: coverage.PreparedItems,
             MissingItems: coverage.MissingItems,
             MissingBatchCount: coverage.MissingBatchCount,
-            DecisionSafe: coverage.DecisionSafe);
+            DecisionSafe: coverage.DecisionSafe,
+            BlockedReasons: blockedReasonCounts);
     }
 
     private async Task<IReadOnlyList<AssistedGradingItem>> LoadBatchItemsAsync(
@@ -838,15 +898,26 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         int blocked,
         IReadOnlyList<string> scaleWarnings,
         IReadOnlyList<string> contextWarnings,
-        IReadOnlyList<AssistedGradingItem>? selectedItems = null)
+        IReadOnlyList<AssistedGradingItem>? selectedItems = null,
+        IReadOnlyDictionary<string, int>? blockedReasons = null)
     {
         var warnings = new List<string>(contextWarnings.Count + scaleWarnings.Count);
         warnings.AddRange(contextWarnings);
         warnings.AddRange(scaleWarnings);
-        var otherBlocked = blocked - scaleWarnings.Count - contextWarnings.Count;
-        if (otherBlocked > 0)
+        var classifiedBlocked = blockedReasons?.Values.Sum() ?? 0;
+        var unclassifiedBlocked = blocked - classifiedBlocked;
+        if (unclassifiedBlocked > 0)
         {
-            warnings.Add($"{otherBlocked} item(ns) bloqueado(s) por falta de revisao, nota final ou feedback final.");
+            warnings.Add($"{unclassifiedBlocked} item(ns) bloqueado(s) sem motivo detalhado disponivel.");
+        }
+
+        if (blockedReasons is { Count: > 0 })
+        {
+            warnings.Add(
+                "Motivos dos bloqueios: " +
+                string.Join(", ", blockedReasons
+                    .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(entry => $"{entry.Key}={entry.Value}")) + ".");
         }
 
         var recoverablePublicationFailures = selectedItems?.Count(item =>
@@ -860,6 +931,39 @@ public sealed class CreateGradingLaunchPreviewCommandHandler(
         }
 
         return warnings;
+    }
+
+    private static string ClassifyLaunchBlockReason(
+        AssistedGradingItem item,
+        bool onlyReviewed)
+    {
+        if (item.Status == GradingItemStatus.Committed ||
+            item.CommitStatus == GradingCommitStatus.Succeeded)
+        {
+            return "already_committed";
+        }
+
+        if (onlyReviewed && item.ReviewStatus != GradingReviewStatus.Reviewed)
+        {
+            return "not_reviewed";
+        }
+
+        if (item.Status == GradingItemStatus.ReadyToCommit &&
+            item.CommitStatus == GradingCommitStatus.Pending &&
+            string.IsNullOrWhiteSpace(item.FinalFeedback))
+        {
+            return "missing_feedback";
+        }
+
+        if (!onlyReviewed &&
+            item.Status == GradingItemStatus.DraftReady &&
+            item.CommitStatus == GradingCommitStatus.NotReady &&
+            string.IsNullOrWhiteSpace(item.DraftFeedback))
+        {
+            return "missing_feedback";
+        }
+
+        return "invalid_item_state";
     }
 
     private static string FormatGrade(decimal grade)
@@ -997,7 +1101,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
         CancellationToken cancellationToken)
     {
         var action = await pendingActions.GetByIdAsync(request.PendingActionId, cancellationToken)
-            ?? throw new InvalidOperationException("Acao pendente nao encontrada.");
+            ?? throw new MoodleApiException(MoodleErrorContract.PendingActionNotFound, "Acao pendente nao encontrada.");
         var confirmation = await confirmations.ConfirmAsync(
             request.PendingActionId,
             request.ConfirmationText,
@@ -1141,7 +1245,7 @@ public sealed class ConfirmMoodleBatchLaunchCommandHandler(
             // claim. Reloading here also makes InMemory and PostgreSQL paths
             // observe the same durable execution state.
             action = await pendingActions.GetByIdAsync(request.PendingActionId, cancellationToken)
-                ?? throw new InvalidOperationException("Acao pendente desapareceu durante a execucao.");
+                ?? throw new MoodleApiException(MoodleErrorContract.PendingActionNotFound, "Acao pendente desapareceu durante a execucao.");
         }
         var sent = 0;
         var executionUnknown = false;

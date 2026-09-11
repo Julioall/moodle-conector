@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MoodleConnector.Application.Abstractions;
 using MoodleConnector.Application.Auditing;
+using MoodleConnector.Application.MoodleApi;
 using MoodleConnector.Application.Tools;
 using MoodleConnector.Domain;
 
@@ -21,7 +22,7 @@ public sealed class ActionConfirmationService(
         CancellationToken cancellationToken)
     {
         var action = await pendingActions.GetByIdAsync(pendingActionId, cancellationToken)
-            ?? throw new InvalidOperationException("Acao pendente nao encontrada.");
+            ?? throw new MoodleApiException(MoodleErrorContract.PendingActionNotFound, "Acao pendente nao encontrada.");
 
         if (!string.Equals(action.CreatedBySubject, currentUser.Subject, StringComparison.Ordinal) &&
             !currentUser.HasPlatformPermission("tool.pending_actions.manage"))

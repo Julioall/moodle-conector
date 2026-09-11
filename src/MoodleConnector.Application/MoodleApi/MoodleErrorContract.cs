@@ -24,6 +24,12 @@ public static class MoodleErrorContract
     public const string NetworkError = "moodle_network_error";
     public const string InvalidResponse = "moodle_invalid_response";
     public const string ApiError = "moodle_api_error";
+    public const string ValidationError = "validation_error";
+    public const string PolicyRedirect = "policy_redirect";
+    public const string PendingActionNotFound = "pending_action_not_found";
+    public const string DestinationLocked = "destination_locked";
+    public const string InvalidPendingAction = "invalid_pending_action";
+    public const string BusinessRuleViolation = "business_rule_violation";
     public const string ScormNotFound = "scorm_not_found";
     public const string ScormSelectionRequired = "scorm_selection_required";
     public const string ScormPackageUnavailable = "scorm_package_unavailable";
@@ -60,6 +66,9 @@ public static class MoodleErrorContract
             HttpRequestException => NetworkError,
             CryptographicException or FormatException => TokenDecryptionFailed,
             JsonException => InvalidResponse,
+            ArgumentException => ValidationError,
+            UnauthorizedAccessException => PermissionDenied,
+            InvalidOperationException invalidOperation => ClassifyInvalidOperation(invalidOperation.Message),
             _ => Unexpected
         };
 
@@ -95,6 +104,12 @@ public static class MoodleErrorContract
             UnknownMoodleFunction or "unknown_function" => UnknownMoodleFunction,
             SnapshotUnavailable => SnapshotUnavailable,
             ApiError or "moodle_error" or "invalidparameter" or "invalid_parameter" => ApiError,
+            ValidationError => ValidationError,
+            PolicyRedirect => PolicyRedirect,
+            PendingActionNotFound => PendingActionNotFound,
+            DestinationLocked => DestinationLocked,
+            InvalidPendingAction => InvalidPendingAction,
+            BusinessRuleViolation => BusinessRuleViolation,
             ScormNotFound => ScormNotFound,
             ScormSelectionRequired => ScormSelectionRequired,
             ScormPackageUnavailable => ScormPackageUnavailable,
@@ -110,6 +125,19 @@ public static class MoodleErrorContract
             Unexpected => Unexpected,
             _ => ApiError
         };
+    }
+
+    public static string InferCodeFromMessage(string? message)
+    {
+        var normalized = message?.Trim() ?? string.Empty;
+        if (normalized.StartsWith("Informe ", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("Provide ", StringComparison.OrdinalIgnoreCase) ||
+            normalized.StartsWith("Os parametros devem", StringComparison.OrdinalIgnoreCase))
+        {
+            return ValidationError;
+        }
+
+        return Unexpected;
     }
 
     public static string SafeMessage(string errorCode) => NormalizeCode(errorCode) switch
@@ -135,6 +163,12 @@ public static class MoodleErrorContract
         UnknownMoodleFunction => "A funcao Moodle informada nao pertence ao catalogo conhecido do Connector.",
         SnapshotUnavailable => "O snapshot solicitado ainda nao esta disponivel ou esta incompleto.",
         ApiError => "O Moodle recusou ou nao conseguiu concluir a chamada solicitada.",
+        ValidationError => "Os dados informados nao sao validos.",
+        PolicyRedirect => "A operacao exige o fluxo controlado apropriado.",
+        PendingActionNotFound => "A acao pendente nao foi encontrada.",
+        DestinationLocked => "O destino desta execucao ja foi definido e nao pode ser alterado.",
+        InvalidPendingAction => "A acao pendente nao esta em um estado valido para esta operacao.",
+        BusinessRuleViolation => "A operacao nao pode ser concluida no estado atual.",
         ScormNotFound => "Nenhum pacote SCORM correspondente foi encontrado no curso.",
         ScormSelectionRequired => "O curso possui mais de um pacote SCORM; informe o identificador do pacote.",
         ScormPackageUnavailable => "O Moodle nao forneceu um pacote SCORM baixavel para esta atividade.",
@@ -149,4 +183,34 @@ public static class MoodleErrorContract
         InvalidScormResponse => "O Moodle retornou uma resposta de SCORM invalida.",
         _ => "O conector encontrou um erro inesperado ao consultar o Moodle."
     };
+
+    private static string ClassifyInvalidOperation(string? message)
+    {
+        var normalized = message?.Trim() ?? string.Empty;
+        if (normalized.Contains("Policy Redirect", StringComparison.OrdinalIgnoreCase))
+        {
+            return PolicyRedirect;
+        }
+
+        if (normalized.Contains("acao pendente nao encontrada", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("ação pendente não encontrada", StringComparison.OrdinalIgnoreCase))
+        {
+            return PendingActionNotFound;
+        }
+
+        if (normalized.Contains("ja foi direcionada", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("já foi direcionada", StringComparison.OrdinalIgnoreCase))
+        {
+            return DestinationLocked;
+        }
+
+        if (normalized.Contains("so pode ser reconciliada", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("só pode ser reconciliada", StringComparison.OrdinalIgnoreCase) ||
+            normalized.Contains("estado atual", StringComparison.OrdinalIgnoreCase))
+        {
+            return InvalidPendingAction;
+        }
+
+        return Unexpected;
+    }
 }

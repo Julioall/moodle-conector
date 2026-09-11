@@ -10,21 +10,25 @@ public static class MoodleFunctionProfileParser
         JsonElement payload,
         DateTimeOffset? discoveredAt = null)
     {
-        if (payload.ValueKind != JsonValueKind.Object)
+        if (payload.ValueKind != JsonValueKind.Object ||
+            !payload.TryGetProperty("functions", out var functionsElement) ||
+            functionsElement.ValueKind != JsonValueKind.Array ||
+            functionsElement.EnumerateArray().Any(item =>
+                item.ValueKind != JsonValueKind.Object ||
+                !item.TryGetProperty("name", out var name) ||
+                name.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(name.GetString())))
         {
             throw new MoodleApiException(
                 MoodleErrorContract.InvalidResponse,
-                "Moodle returned an invalid site profile.",
+                "Moodle returned an invalid or incomplete function profile.",
                 connectionId: connection.ConnectionId,
                 connectionAlias: connection.Alias,
                 functionName: "core_webservice_get_site_info",
                 stage: MoodleIntegrationStage.ResponseParsing);
         }
 
-        var functions = payload.TryGetProperty("functions", out var functionsElement) &&
-                        functionsElement.ValueKind == JsonValueKind.Array
-            ? functionsElement.EnumerateArray()
-                .Where(item => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("name", out _))
+        var functions = functionsElement.EnumerateArray()
                 .Select(item => item.GetProperty("name").GetString())
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Select(name => name!)
@@ -34,8 +38,7 @@ public static class MoodleFunctionProfileParser
                     name,
                     MoodleFunctionClassifier.Classify(name),
                     true))
-                .ToArray()
-            : [];
+                .ToArray();
 
         return new MoodleFunctionProfile(
             connection.ConnectionId,

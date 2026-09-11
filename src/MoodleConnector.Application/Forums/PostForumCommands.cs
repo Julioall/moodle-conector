@@ -371,7 +371,7 @@ public sealed class ConfirmForumPostCommandHandler(
         CancellationToken cancellationToken)
     {
         var action = await pendingActions.GetByIdAsync(request.PendingActionId, cancellationToken)
-            ?? throw new InvalidOperationException("Acao pendente nao encontrada.");
+            ?? throw new MoodleApiException(MoodleErrorContract.PendingActionNotFound, "Acao pendente nao encontrada.");
         var payload = JsonSerializer.Deserialize<ForumPostPendingPayload>(action.PayloadJson, JsonOptions)
             ?? throw new InvalidOperationException("Payload de publicacao em forum invalido.");
         var confirmation = await confirmations.ConfirmAsync(

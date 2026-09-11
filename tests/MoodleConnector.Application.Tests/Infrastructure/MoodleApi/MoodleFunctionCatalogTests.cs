@@ -8,6 +8,57 @@ namespace MoodleConnector.Application.Tests.Infrastructure.MoodleApi;
 
 public sealed class MoodleFunctionCatalogTests
 {
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"functions\":null}")]
+    [InlineData("{\"functions\":{}}")]
+    [InlineData("{\"functions\":[{}]}")]
+    [InlineData("{\"functions\":[{\"name\":12}]}")]
+    [InlineData("{\"functions\":[{\"name\":\" \"}]}")]
+    public async Task Invalid_function_profiles_are_not_cached_as_empty_capabilities(string invalidPayload)
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var rest = new RecoveringRestClient(invalidPayload);
+        var catalog = new MoodleFunctionCatalog(cache, rest, new SwitchingCredentialsProvider());
+
+        var error = await Assert.ThrowsAsync<MoodleApiException>(() =>
+            catalog.GetCurrentAsync(false, CancellationToken.None));
+        Assert.Equal(MoodleErrorContract.InvalidResponse, error.ErrorCode);
+        Assert.Equal(MoodleIntegrationStage.ResponseParsing, error.Stage);
+
+        var recovered = await catalog.GetCurrentAsync(false, CancellationToken.None);
+        Assert.Single(recovered.Functions);
+        Assert.False(recovered.IsCached);
+        Assert.True((await catalog.GetCurrentAsync(false, CancellationToken.None)).IsCached);
+        Assert.Equal(2, rest.Calls);
+    }
+
+    [Fact]
+    public void Explicit_empty_functions_is_a_valid_profile()
+    {
+        using var payload = JsonDocument.Parse("{\"functions\":[]}");
+        var connection = new MoodleConnectorCredentials("client", "id", "alias", "https://moodle.example",
+            "user", "password", "alias", false);
+        Assert.Empty(MoodleFunctionProfileParser.Parse(connection, payload.RootElement).Functions);
+    }
+
+    private sealed class RecoveringRestClient(string firstPayload) : IMoodleRestClient
+    {
+        public int Calls { get; private set; }
+        public Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName,
+            IReadOnlyDictionary<string, object?> parameters, CancellationToken cancellationToken) =>
+            CallAsync(connection, functionName, parameters, false, cancellationToken);
+
+        public Task<JsonElement> CallAsync(MoodleConnectorCredentials connection, string functionName,
+            IReadOnlyDictionary<string, object?> parameters, bool allowServiceToken, CancellationToken cancellationToken)
+        {
+            Calls++;
+            using var payload = JsonDocument.Parse(Calls == 1 ? firstPayload :
+                "{\"functions\":[{\"name\":\"core_course_get_contents\"}]}");
+            return Task.FromResult(payload.RootElement.Clone());
+        }
+    }
+
     [Fact]
     public async Task GetCurrentAsync_MantemPerfisIndependentesPorConexao()
     {

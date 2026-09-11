@@ -1062,6 +1062,14 @@ public sealed class RequeueBlockedGradingItemsCommandHandler(
 
         if (requeuedItems > 0)
         {
+            foreach (var scopeBatch in scope.Batches)
+            {
+                var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(
+                    repository,
+                    scopeBatch.Id,
+                    cancellationToken);
+                GradingItemProcessor.UpdateBatchCounters(scopeBatch, allItems);
+            }
             await repository.SaveChangesAsync(cancellationToken);
         }
 
@@ -1178,6 +1186,14 @@ public sealed class RequeueFailedGradingPublicationItemsCommandHandler(
 
         if (requeuedItems > 0)
         {
+            foreach (var scopeBatch in scope.Batches)
+            {
+                var allItems = await GradingItemProcessor.LoadAllBatchItemsAsync(
+                    repository,
+                    scopeBatch.Id,
+                    cancellationToken);
+                GradingItemProcessor.UpdateBatchCounters(scopeBatch, allItems);
+            }
             await repository.SaveChangesAsync(cancellationToken);
         }
 

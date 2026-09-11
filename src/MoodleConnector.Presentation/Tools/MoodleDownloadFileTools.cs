@@ -23,14 +23,6 @@ public sealed class MoodleDownloadFileTools(
     IMoodleAuditLogRepository auditLogs,
     IMoodleConnectorCredentialsProvider? credentialsProvider = null)
 {
-    private static readonly HashSet<string> AllowedMimeTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/msword",
-        "text/plain"
-    };
-
     [MoodleToolMetadata(
         Family = "assignments",
         Classification = "R3",
@@ -38,7 +30,7 @@ public sealed class MoodleDownloadFileTools(
         CanonicalOperation = "moodle_download_file",
         ExposureStatus = "Keep",
         ExposureReason = "Direct file download wrapper for submission artifacts; access restricted to active Moodle connection token.",
-        Evidence = "Implementation validated: only accepts pluginfile.php URLs from the active connection; token is never returned in the JSON response.",
+        Evidence = "Implementation validated: accepts only pluginfile.php URLs from the active connection, preserves the returned MIME type, and never returns the token in JSON.",
         RequiredPlatformPermission = "tool.assignments.view")]
     [McpServerTool(
         Name = "moodle_download_file",
@@ -49,7 +41,7 @@ public sealed class MoodleDownloadFileTools(
         OpenWorld = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(ToolResponse<MoodleDownloadFileResult>))]
-    [Description("Baixa um arquivo emitido pelo Moodle para diagnóstico controlado. Aceita somente pluginfile.php/webservice/pluginfile.php da conexão ativa; devolve o conteúdo como recurso MCP e nunca inclui token ou bytes no JSON.")]
+    [Description("Baixa qualquer arquivo emitido pelo Moodle para a conexão ativa. Aceita somente pluginfile.php/webservice/pluginfile.php; encaminha o conteúdo como recurso MCP e nunca inclui token ou bytes no JSON.")]
     public async Task<CallToolResult> DownloadAsync(
         [Description("URL de arquivo emitida por uma resposta da conexão Moodle ativa.")] string fileUrl,
         [Description("Nome original do arquivo.")] string filename = "arquivo",
@@ -89,11 +81,6 @@ public sealed class MoodleDownloadFileTools(
             if (download.Truncated || download.SizeBytes > maxBytes)
             {
                 throw new MoodleApiException("file_too_large", "O arquivo excede o limite configurado.");
-            }
-
-            if (!AllowedMimeTypes.Contains(download.MimeType))
-            {
-                throw new MoodleApiException("mime_not_allowed", "O tipo MIME do arquivo não é permitido para extração controlada.");
             }
 
             var result = new MoodleDownloadFileResult(
